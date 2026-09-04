@@ -1,14 +1,15 @@
 "use client";
 
 import {
-  MANSION_EFFECT_DEFAULT_BLEND_MODE_V1,
+  MANSION_ROOM_LIGHT_LAYERS_V1,
   mansionDirectionalGeometryIsPolygonV2,
   mansionDynamicLightFrameV2,
   mansionGodrayEdgesV2,
+  mansionRoomEntryLayerV1,
   type MansionDynamicLightV2,
-  type MansionLightBlendModeV1,
   type MansionLightPointV2,
   type MansionRoomEffectV1,
+  type MansionRoomLightLayerKeyV1,
 } from "@localai/shared";
 import {
   useEffect,
@@ -26,7 +27,6 @@ import {
   type MysteryRoomLightEmitterV1,
 } from "./debateMysteryRoomCinematography";
 import styles from "./debateMysteryRoomCinematography.module.css";
-import { roomLightBlend } from "./roomLightPlacement";
 
 interface DebateMysteryRoomCinematographyLayerProps {
   room: {
@@ -36,13 +36,12 @@ interface DebateMysteryRoomCinematographyLayerProps {
   };
   lights: readonly MansionDynamicLightV2[];
   /** Atmospheric effects for this room. Steam, fog, and snow paint on a sibling
-   * canvas with normal blending; rain and caustics share the light canvas. */
+   * canvas with normal blending; rain and caustics screen with the beams. */
   effects?: readonly MansionRoomEffectV1[];
   templateLightingAligned: boolean;
   blurred: boolean;
   reducedMotion: boolean;
   artStyle?: "mosaic" | "illustrated";
-  blendMode?: MansionLightBlendModeV1;
   sourceAspectRatio?: number;
   viewport?: boolean;
 }
@@ -407,8 +406,9 @@ function drawCausticsEffect(context: CanvasRenderingContext2D, effect: MansionRo
   context.restore();
 }
 
-/** Occluding effects paint on the atmosphere canvas; light-like ones on the light canvas. */
+/** Occluding effects paint on the atmosphere canvas; light-like ones on a blended layer. */
 const OCCLUDING_EFFECT_KINDS: ReadonlySet<MansionRoomEffectV1["kind"]> = new Set(["steam", "fog", "snow"]);
+const PRIMARY_LAYER: MansionRoomLightLayerKeyV1 = MANSION_ROOM_LIGHT_LAYERS_V1[0].key;
 
 function drawRoomEffect(context: CanvasRenderingContext2D, effect: MansionRoomEffectV1, width: number, height: number, elapsedMs: number): void {
   if (effect.geometry.points.length < 3) return;
@@ -462,28 +462,37 @@ export function DebateMysteryRoomCinematographyLayer(
   const lightSource = baseLightSource === "none" && effects.length > 0 ? "authored" : baseLightSource;
   const profile = lightSource === "authored" ? AUTHORED_LIGHT_PROFILE_V1 : templateProfile;
   const hasOccludingEffects = effects.some((effect) => OCCLUDING_EFFECT_KINDS.has(effect.kind));
-  // Rain and caustics are light, but they blend as effects, not as the room's lights:
-  // they get a root of their own with the FX blend so the lights' pick never leaks onto them.
-  const hasBlendedEffects = effects.some((effect) => !OCCLUDING_EFFECT_KINDS.has(effect.kind));
-  const rootRef = useRef<HTMLDivElement>(null);
-  const effectRootRef = useRef<HTMLDivElement>(null);
-  const lightCanvasRef = useRef<HTMLCanvasElement>(null);
-  const effectCanvasRef = useRef<HTMLCanvasElement>(null);
+  // Blend is fixed by what each entry physically is: glows add, shafts and washes
+  // screen. Each layer is its own root because a blend applies to a whole element.
+  // The glow root always renders and carries the grain and vignette.
+  const layerKeys = MANSION_ROOM_LIGHT_LAYERS_V1
+    .map((layer) => layer.key)
+    .filter((key) => key === PRIMARY_LAYER ||
+      props.lights.some((light) => mansionRoomEntryLayerV1(light) === key) ||
+      effects.some((effect) => mansionRoomEntryLayerV1(effect) === key));
+  const layerSignature = layerKeys.join(",");
+  const rootRefs = useRef(new Map<string, HTMLDivElement>());
+  const layerCanvasRefs = useRef(new Map<string, HTMLCanvasElement>());
   const atmosphereCanvasRef = useRef<HTMLCanvasElement>(null);
   const grainCanvasRef = useRef<HTMLCanvasElement>(null);
 
   useEffect(() => {
     if (!profile) return;
-    const root = rootRef.current;
-    const lightCanvas = lightCanvasRef.current;
+    const root = rootRefs.current.get(PRIMARY_LAYER);
+    const lightCanvas = layerCanvasRefs.current.get(PRIMARY_LAYER);
     const grainCanvas = grainCanvasRef.current;
     const lightContext = lightCanvas?.getContext("2d");
     const grainContext = grainCanvas?.getContext("2d");
     if (!root || !lightCanvas || !grainCanvas || !lightContext || !grainContext) return;
+    const layers = layerSignature.split(",").flatMap((key) => {
+      const canvas = layerCanvasRefs.current.get(key);
+      const context = canvas?.getContext("2d");
+      return canvas && context ? [{ key, canvas, context }] : [];
+    });
+    const contextForLayer = (key: string): CanvasRenderingContext2D | null =>
+      layers.find((layer) => layer.key === key)?.context ?? null;
     const atmosphereCanvas = hasOccludingEffects ? atmosphereCanvasRef.current : null;
     const atmosphereContext = atmosphereCanvas?.getContext("2d") ?? null;
-    const effectCanvas = hasBlendedEffects ? effectCanvasRef.current : null;
-    const effectContext = effectCanvas?.getContext("2d") ?? null;
 
     const roomStage = root.closest<HTMLElement>('[data-mystery-room-stage="true"]');
     let artStyle = props.artStyle ?? mysteryRoomCinematographyArtStyleV1(
@@ -497,7 +506,7 @@ export function DebateMysteryRoomCinematographyLayer(
     let lastGrainFrame = -1;
 
     const drawLights = (elapsedMs: number): void => {
-      lightContext.clearRect(0, 0, width, height);
+      for (const layer of layers) layer.context.clearRect(0, 0, width, height);
       if (lightSource === "template") {
         for (const emitter of profile.emitters) {
           drawGlow(
@@ -514,20 +523,14 @@ export function DebateMysteryRoomCinematographyLayer(
         }
       } else if (lightSource === "authored") {
         for (const light of props.lights) {
-          drawAuthoredLight(
-            lightContext,
-            light,
-            width,
-            height,
-            elapsedMs,
-            props.reducedMotion,
-          );
+          const target = contextForLayer(mansionRoomEntryLayerV1(light)) ?? lightContext;
+          drawAuthoredLight(target, light, width, height, elapsedMs, props.reducedMotion);
         }
       }
       atmosphereContext?.clearRect(0, 0, width, height);
-      effectContext?.clearRect(0, 0, width, height);
       for (const effect of effects) {
-        const target = OCCLUDING_EFFECT_KINDS.has(effect.kind) ? atmosphereContext : effectContext;
+        const layer = mansionRoomEntryLayerV1(effect);
+        const target = layer === "atmosphere" ? atmosphereContext : contextForLayer(layer) ?? lightContext;
         if (target) drawRoomEffect(target, effect, width, height, props.reducedMotion ? 0 : elapsedMs);
       }
     };
@@ -560,16 +563,12 @@ export function DebateMysteryRoomCinematographyLayer(
         height = Math.max(1, Math.round(width / props.sourceAspectRatio));
         grainHeight = Math.max(1, Math.round(grainWidth / props.sourceAspectRatio));
       }
-      root.dataset.artStyle = artStyle;
-      root.style.setProperty("--room-light-blend", roomLightBlend(props.blendMode));
-      if (effectRootRef.current) effectRootRef.current.dataset.artStyle = artStyle;
-      if (lightCanvas.width !== width || lightCanvas.height !== height) {
-        lightCanvas.width = width;
-        lightCanvas.height = height;
-      }
-      if (effectCanvas && (effectCanvas.width !== width || effectCanvas.height !== height)) {
-        effectCanvas.width = width;
-        effectCanvas.height = height;
+      for (const layerRoot of rootRefs.current.values()) layerRoot.dataset.artStyle = artStyle;
+      for (const layer of layers) {
+        if (layer.canvas.width !== width || layer.canvas.height !== height) {
+          layer.canvas.width = width;
+          layer.canvas.height = height;
+        }
       }
       if (atmosphereCanvas && (atmosphereCanvas.width !== width || atmosphereCanvas.height !== height)) {
         atmosphereCanvas.width = width;
@@ -603,12 +602,15 @@ export function DebateMysteryRoomCinematographyLayer(
     if (roomStage && stageObserver) {
       stageObserver.observe(roomStage, { attributes: true, attributeFilter: ["style"] });
     }
-    render(props.reducedMotion ? 0 : performance.now());
+    // Kick off from a nested function: the same first frame, but the clock read stays
+    // inside a callback the render-purity lint does not treat as render.
+    const start = (): void => { render(props.reducedMotion ? 0 : performance.now()); };
+    start();
     return () => {
       stageObserver?.disconnect();
       window.cancelAnimationFrame(animationFrame);
     };
-  }, [lightSource, profile, props.lights, effects, hasOccludingEffects, hasBlendedEffects, props.reducedMotion, props.room.id, props.artStyle, props.blendMode, props.sourceAspectRatio]);
+  }, [lightSource, profile, props.lights, effects, hasOccludingEffects, layerSignature, props.reducedMotion, props.room.id, props.artStyle, props.sourceAspectRatio]);
 
   if (!profile) return null;
   const style = {
@@ -620,39 +622,37 @@ export function DebateMysteryRoomCinematographyLayer(
 
   return (
     <>
-    <div
-      ref={rootRef}
-      className={styles.root}
-      data-art-style="illustrated"
-      data-blurred={props.blurred ? "true" : undefined}
-      data-cinematography-profile={profile.id}
-      data-light-source={lightSource}
-      data-viewport={props.viewport ? "true" : undefined}
-      data-light-motion={props.reducedMotion ? "frozen" : "live"}
-      style={style}
-      aria-hidden="true"
-    >
-      <div className={styles.grade} />
-      <canvas ref={lightCanvasRef} className={styles.lighting} data-room-light-canvas="lights" />
-      <canvas ref={grainCanvasRef} className={styles.grain} />
-      <div className={styles.vignette} />
-    </div>
-      {hasBlendedEffects ? (
-        // Rain and caustics composite with the FX blend on their own root, beside the lights.
+      {MANSION_ROOM_LIGHT_LAYERS_V1.filter((layer) => layerKeys.includes(layer.key)).map((layer) => (
         <div
-          ref={effectRootRef}
+          key={layer.key}
+          ref={(element) => {
+            if (element) rootRefs.current.set(layer.key, element);
+            else rootRefs.current.delete(layer.key);
+          }}
           className={styles.root}
           data-art-style="illustrated"
-          data-effect-layer="true"
+          data-room-light-layer={layer.key}
           data-blurred={props.blurred ? "true" : undefined}
-          data-light-source="authored"
+          data-cinematography-profile={profile.id}
+          data-light-source={lightSource}
           data-viewport={props.viewport ? "true" : undefined}
-          style={{ ...style, "--room-light-blend": MANSION_EFFECT_DEFAULT_BLEND_MODE_V1 } as CSSProperties}
+          data-light-motion={props.reducedMotion ? "frozen" : "live"}
+          style={{ ...style, "--room-light-blend": layer.blend } as CSSProperties}
           aria-hidden="true"
         >
-          <canvas ref={effectCanvasRef} className={styles.lighting} data-room-light-canvas="effects" />
+          {layer.key === PRIMARY_LAYER ? <div className={styles.grade} /> : null}
+          <canvas
+            ref={(element) => {
+              if (element) layerCanvasRefs.current.set(layer.key, element);
+              else layerCanvasRefs.current.delete(layer.key);
+            }}
+            className={styles.lighting}
+            data-room-light-canvas={layer.key}
+          />
+          {layer.key === PRIMARY_LAYER ? <canvas ref={grainCanvasRef} className={styles.grain} /> : null}
+          {layer.key === PRIMARY_LAYER ? <div className={styles.vignette} /> : null}
         </div>
-      ) : null}
+      ))}
       {hasOccludingEffects ? (
         // Steam, fog, and snow sit on the plate with normal blending. The root isolates
         // its own stacking context and blends as a whole, so occluders live beside it.

@@ -325,6 +325,7 @@ import {
   runWithReasoningGenerationBudget,
   shouldPrepareMessagesWithSimulatedEffort,
 } from "./model-effort-runner.ts";
+import { cleanMysteryItemDescriptionV1 } from "./debate-mystery-item-repair.ts";
 
 interface DebateBotRow {
   id: string;
@@ -4100,6 +4101,22 @@ export function getDebateSession(
   return session;
 }
 
+/** Implementation boilerplate such as "PRISM's … fallback" never reaches the
+ * player's Case File, including cases forged before it was stripped at compile. */
+function debateFormatStateForPlayer(
+  formatState: DebateSessionV1["formatState"],
+): DebateSessionV1["formatState"] {
+  if (formatState.format !== "whodunnit" || formatState.version !== 2) return formatState;
+  return {
+    ...formatState,
+    record: formatState.record.map((item) => {
+      if (item.reference.kind !== "evidence") return item;
+      const description = cleanMysteryItemDescriptionV1(item.description) || item.description;
+      return description === item.description ? item : { ...item, description };
+    }),
+  };
+}
+
 export function debateSessionForPlayer(
   session: DebateSessionV1,
   perspective: "live" | "replay" = "live",
@@ -4330,6 +4347,7 @@ export function debateSessionForPlayer(
           }));
   return {
     ...session,
+    formatState: debateFormatStateForPlayer(session.formatState),
     participantFloorBreakPreparation: session.participantFloorBreakPreparation
       ? {
           version: session.participantFloorBreakPreparation.version,
@@ -15962,6 +15980,23 @@ function flytingCleanLine(rawContent: unknown): string {
   );
 }
 
+function flytingLineIsBlank(rawContent: unknown): boolean {
+  return typeof rawContent !== "string" || rawContent.trim().length === 0;
+}
+
+/**
+ * The Jarl's vote is the side the guards go to; the ruling sentence is
+ * ceremony. A human Jarl who sends the guards without writing a line still
+ * gives the word, so the Hall Record carries the same ceremonial ruling the
+ * skipped bot verdict uses.
+ */
+function flytingDefaultJarlRuling(
+  session: DebateSessionV1,
+  sideId: DebateSideId,
+): string {
+  return `My guards go to ${flytingBotForSide(session, sideId).name}. Let their weight join the Hall's judgment.`;
+}
+
 async function generateFlytingText(
   session: DebateSessionV1,
   speaker: DebateBotSnapshotV1 | DebateJurorSnapshotV1,
@@ -16785,7 +16820,10 @@ export async function submitDebateFlytingAction(
     if (!flytingPlayerOwnsAction(session, state)) {
       throw new HttpError(409, "The Hall is not waiting for your action.");
     }
-    if (request.action !== "yield") {
+    // A blank Jarl ruling is not a missing line: the guards are the vote.
+    const blankJarlRuling =
+      request.action === "host_verdict" && flytingLineIsBlank(request.content);
+    if (request.action !== "yield" && !blankJarlRuling) {
       const boundaryError = flytingLineBoundaryError(state, request.content);
       if (boundaryError) throw new HttpError(400, boundaryError);
     }
@@ -16849,7 +16887,9 @@ export async function submitDebateFlytingAction(
         session,
         state,
         request.winnerSideId,
-        flytingCleanLine(request.content),
+        blankJarlRuling
+          ? flytingDefaultJarlRuling(session, request.winnerSideId)
+          : flytingCleanLine(request.content),
         authoredMode,
       );
     } else {

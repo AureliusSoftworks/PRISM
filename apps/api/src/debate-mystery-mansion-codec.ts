@@ -2,6 +2,8 @@ import { createHash, randomUUID } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 import {
   buildMansionAmbienceManifestV1,
+  mansionSfxLogicalIdV1,
+  parseMansionSfxLogicalIdV1,
   canonicalPortablePackageJsonV1,
   canonicalMansionLayoutV2,
   debateMysteryAcousticThemePaletteV1,
@@ -25,6 +27,7 @@ import {
   type MansionPropThemeV1,
   type DebateMysteryMansionSnapshotV2,
 } from "@localai/shared";
+import type { MansionSfxPackV1 } from "@localai/shared";
 import { unzipSync, zipSync } from "fflate";
 import { getDebateMysteryMansionBundleV2 } from "./debate-mystery-mansion-bundles.ts";
 import { decryptBytes, encryptBytes } from "./security.ts";
@@ -260,7 +263,9 @@ export function exportInternalMansionPackageFromDbV1(args: {
           (asset.logical_id === MANSION_MUSIC_CANDIDATE_LOGICAL_ID_V1 ||
             asset.logical_id === MANSION_MUSIC_PREVIOUS_LOGICAL_ID_V1 ||
             asset.logical_id === MANSION_ATMOSPHERE_CANDIDATE_LOGICAL_ID_V1 ||
-            asset.logical_id === MANSION_ATMOSPHERE_PREVIOUS_LOGICAL_ID_V1)),
+            asset.logical_id === MANSION_ATMOSPHERE_PREVIOUS_LOGICAL_ID_V1)) &&
+        // Effect previews and replaced clips never leave the authoring library.
+        !(asset.role === "sfx" && parseMansionSfxLogicalIdV1(asset.logical_id)?.lane !== "active"),
       );
   const files = new Map<string, Uint8Array>();
   const portableIdByStoredId = new Map<string, string>();
@@ -295,7 +300,7 @@ export function exportInternalMansionPackageFromDbV1(args: {
       role === "ambience" && Buffer.from(bytes.subarray(0, 4)).toString("ascii") === "OggS"
         ? "audio/ogg"
         : asset.mime_type;
-    const archivePath = `${role === "music" || role === "ambience" ? "audio" : "assets"}/${asset.sha256}.${assetExtension(effectiveMimeType)}`;
+    const archivePath = `${role === "music" || role === "ambience" || role === "sfx" ? "audio" : "assets"}/${asset.sha256}.${assetExtension(effectiveMimeType)}`;
     files.set(archivePath, bytes);
     return {
       id,
@@ -306,7 +311,7 @@ export function exportInternalMansionPackageFromDbV1(args: {
       mimeType: effectiveMimeType,
       width: asset.width ?? (role === "room" ? 1536 : role === "prop" || role === "presentation" ? 1024 : null),
       height: asset.height ?? (role === "room" ? 1024 : role === "prop" || role === "presentation" ? 1024 : null),
-      durationMs: role === "music" || role === "ambience"
+      durationMs: role === "music" || role === "ambience" || role === "sfx"
         ? (asset.duration_ms ?? (effectiveMimeType === "audio/mpeg"
             ? portableMp3DurationMsV1(bytes)
             : null))
@@ -421,6 +426,18 @@ export function exportInternalMansionPackageFromDbV1(args: {
   )
     ? activePreviewCandidateId
     : null;
+  const portableEffectCues = stored
+    .filter((asset) => asset.role === "sfx")
+    .flatMap((asset) => {
+      const parsed = parseMansionSfxLogicalIdV1(asset.logical_id);
+      const packageAssetId = portableIdByStoredId.get(asset.id);
+      return parsed?.lane === "active" && packageAssetId
+        ? [{ cueId: parsed.cueId, packageAssetId }]
+        : [];
+    });
+  const portableEffects: MansionSfxPackV1 | null = portableEffectCues.length > 0
+    ? { version: 1, cues: portableEffectCues }
+    : null;
   const manifest: MansionPackageManifestV1 = {
     schema: "prism-mansion-package-v1",
     formatVersion: { major: 1, minor: PORTABLE_MYSTERY_PACKAGE_FORMAT_MINOR_V1 },
@@ -484,6 +501,7 @@ export function exportInternalMansionPackageFromDbV1(args: {
     roomArt: CURRENT_MANSION_ROOM_ART_CONTRACT,
     ambience,
     ...(portablePropTheme ? { propTheme: portablePropTheme } : {}),
+    ...(portableEffects ? { effects: portableEffects } : {}),
   };
   return encodeInternalMansionPackageV1({ manifest, assets: files });
 }
@@ -860,6 +878,14 @@ export function importInternalMansionPackageToDbDetailedV1(args: {
         descriptor.id === decoded.manifest.investigationThemeAssetId
       ) {
         logicalId = MANSION_MUSIC_ACTIVE_LOGICAL_ID_V1;
+      } else if (descriptor.role === "sfx") {
+        const cue = decoded.manifest.effects?.cues.find(
+          (candidate) => candidate.packageAssetId === descriptor.id,
+        );
+        if (!cue) {
+          throw new DebateMysteryMansionCodecError("Mansion effect clip has no cue reference.");
+        }
+        logicalId = mansionSfxLogicalIdV1(cue.cueId);
       } else {
         logicalId = descriptor.id;
       }

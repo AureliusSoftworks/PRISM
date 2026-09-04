@@ -174,6 +174,7 @@ export function restoreFactoryDefaultsInDatabase(
           coffee_experimental_table_angle_enabled = 0,
           debate_whodunnit_reuse_synthesized_exhibits = 0,
           debate_whodunnit_text_voice_mode = 'babble',
+          debate_whodunnit_speech_type = 'english',
           psychic_mode_enabled = 0,
           comfyui_host = NULL,
           comfyui_workflows = '[]',

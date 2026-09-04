@@ -16,6 +16,7 @@ import {
   isWhodunnitPropArchetypeIdV1,
   type MansionPropThemeV1,
 } from "./whodunnitProps.ts";
+import { isWhodunnitSfxCueIdV1, type MansionSfxPackV1 } from "./whodunnitSfx.ts";
 
 export const PORTABLE_MYSTERY_PACKAGE_FORMAT_MAJOR_V1 = 1 as const;
 export const PORTABLE_MYSTERY_PACKAGE_FORMAT_MINOR_V1 = 3 as const;
@@ -34,6 +35,8 @@ export type PortableMysteryAssetRoleV1 =
   | "presentation"
   /** Overhead deck plan drawn onto a floor's footprint. */
   | "map"
+  /** Venue effects pack clip, addressed through `manifest.effects`. */
+  | "sfx"
   | "voice";
 export type PortableMysteryAssetMimeTypeV1 =
   | "image/png"
@@ -632,6 +635,8 @@ export interface MansionPackageManifestV1 {
   ambience?: MansionAmbienceManifestV1 | null;
   /** Additive complete replacement pack. Legacy anonymous room props remain separate. */
   propTheme?: MansionPropThemeV1;
+  /** Additive venue effects pack: the active clip for each cue the venue owns. */
+  effects?: MansionSfxPackV1;
 }
 
 export interface PortableMansionInstallationMetadataV1 {
@@ -843,7 +848,7 @@ function validateAsset(value: unknown, path: string): string[] {
   if (!isRecord(value)) return [`${path} is invalid.`];
   const errors: string[] = [];
   if (!isNonEmptyString(value.id)) errors.push(`${path}.id is missing.`);
-  if (!["room", "prop", "ambience", "music", "preview", "presentation", "map", "voice"].includes(String(value.role))) {
+  if (!["room", "prop", "ambience", "music", "preview", "presentation", "map", "voice", "sfx"].includes(String(value.role))) {
     errors.push(`${path}.role is unsupported.`);
   }
   if (typeof value.archivePath !== "string" || !SAFE_ARCHIVE_PATH.test(value.archivePath)) {
@@ -1002,6 +1007,28 @@ export function validateMansionPackageManifestV1(value: unknown): string[] {
   }
   const assetCollection = validateAssetCollection(value.assets, "manifest.assets");
   errors.push(...assetCollection.errors);
+  if (value.effects !== undefined) {
+    if (!isRecord(value.effects) || value.effects.version !== 1 || !Array.isArray(value.effects.cues)) {
+      errors.push("manifest.effects is invalid.");
+    } else {
+      const cueIds = new Set<string>();
+      value.effects.cues.forEach((cue, index) => {
+        const path = `manifest.effects.cues[${index}]`;
+        if (!isRecord(cue)) {
+          errors.push(`${path} is invalid.`);
+          return;
+        }
+        if (!isWhodunnitSfxCueIdV1(cue.cueId)) errors.push(`${path}.cueId is invalid.`);
+        else if (cueIds.has(cue.cueId)) errors.push(`${path}.cueId is duplicated.`);
+        else cueIds.add(cue.cueId);
+        if (!isNonEmptyString(cue.packageAssetId)) {
+          errors.push(`${path}.packageAssetId is missing.`);
+        } else if (!assetReferenceIsCompatible(
+          assetCollection.byId.get(cue.packageAssetId), ["sfx"], "audio",
+        )) errors.push(`${path}.packageAssetId does not reference a compatible effect clip.`);
+      });
+    }
+  }
   if (value.propTheme !== undefined) {
     if (!isRecord(value.formatVersion) || !isNonNegativeInteger(value.formatVersion.minor) ||
         value.formatVersion.minor < 1) {

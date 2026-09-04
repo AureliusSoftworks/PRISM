@@ -2286,8 +2286,8 @@
 .roomScene[data-parallax-enabled="true"] .roomParallaxLayer { will-change: transform; }
 
 .hotspots { position: absolute; z-index: 5; inset: 0; pointer-events: none; }
-.roomScene[data-lens-active="true"],
-.roomScene[data-lens-active="true"] .hotspots button { cursor: none; }
+/* Examine keeps the standard OS cursor: a custom lens tracked the pointer on
+   every move and competed with the scan for the main thread. */
 .hotspots button {
   position: absolute;
   inset: 0;
@@ -2296,33 +2296,43 @@
   background: transparent;
   box-shadow: none;
   transition: opacity 150ms ease;
-  cursor: inherit;
+  cursor: pointer;
   pointer-events: auto;
 }
 .hotspots button:focus-visible { outline: none; }
 .hotspots button:disabled { cursor: default; pointer-events: none; }
 .hotspots button[data-examining="true"] { opacity: 0; }
 
-.investigationLens {
+/* Examine scan: the clicked region is analysed while its observation is
+   fetched. A sweep band loops inside the exact hotspot polygon (a transform,
+   so it composites), then resolves into the observation box. */
+.examinationScan {
   position: absolute;
   z-index: 7;
-  width: 3.4rem;
-  height: 3.4rem;
+  inset: 0;
+  overflow: hidden;
   pointer-events: none;
-  opacity: 0;
-  border: 2px solid rgba(238, 252, 255, 0.96);
-  border-radius: 50%;
-  background: rgba(5, 13, 20, 0.18);
-  box-shadow: 0 0 0.34rem rgba(102, 229, 234, 0.2), inset 0 0 0.28rem rgba(169, 140, 255, 0.14);
-  transform: translate(-50%, -50%) scale(1);
-  transition: opacity 80ms ease, box-shadow 90ms linear, transform 90ms linear;
-}
-.investigationLens[data-visible="true"] { opacity: 1; }
-.investigationLens[data-targeted="true"] {
+  background:
+    repeating-linear-gradient(180deg, rgba(194, 244, 255, 0.14) 0 1px, transparent 1px 6px),
+    rgba(105, 229, 255, 0.12);
   box-shadow:
-    0 0 1.7rem rgba(102, 229, 234, 0.82),
-    inset 0 0 0.85rem rgba(169, 140, 255, 0.52);
-  transform: translate(-50%, -50%) scale(0.9);
+    inset 0 0 0 1px rgba(230, 255, 255, 0.7),
+    inset 0 0 1.4rem rgba(105, 229, 255, 0.5);
+}
+.examinationScan::before {
+  content: "";
+  position: absolute;
+  inset: -40% 0;
+  background: linear-gradient(180deg, transparent 0%, rgba(150, 242, 255, 0.05) 40%, rgba(224, 255, 255, 0.62) 50%, rgba(150, 242, 255, 0.05) 60%, transparent 100%);
+  animation: examinationScanSweep 1.2s linear infinite;
+  will-change: transform;
+}
+@keyframes examinationScanSweep { from { transform: translateY(-45%); } to { transform: translateY(45%); } }
+.examinationScan[data-phase="resolved"] { animation: examinationScanResolve 460ms ease-out both; }
+.examinationScan[data-phase="resolved"]::before { animation: none; opacity: 0; }
+@keyframes examinationScanResolve {
+  from { opacity: 1; background-color: rgba(224, 255, 255, 0.5); }
+  to { opacity: 0; }
 }
 .examinationGrid {
   position: absolute;
@@ -2364,6 +2374,8 @@
 }
 @media (prefers-reduced-motion: reduce) {
   .examinationGrid i { transition: none; }
+  .examinationScan::before { animation: none; opacity: 0.35; }
+  .examinationScan[data-phase="resolved"] { animation: none; opacity: 0; }
 }
 
 .roomComplete { position: absolute; z-index: 7; inset: 0; display: grid; align-content: center; justify-items: center; padding: 2rem; color: #f5f1ff; text-align: center; pointer-events: none; text-shadow: 0 0.25rem 1.25rem rgba(0, 0, 0, 0.94); animation: roomCompleteDissolve 600ms ease 2.8s forwards; }
@@ -2463,6 +2475,12 @@
   animation: casekeeperThinkingDots 1.15s steps(1, end) infinite;
 }
 .casekeeperThinkingDots > span { display: block; width: 3ch; }
+/* A pending line's beat fades in after a moment so quick lines never flash it. */
+.casekeeperThinkingDots[data-pending-line="true"] {
+  opacity: 0;
+  animation: casekeeperThinkingDots 1.15s steps(1, end) infinite, dialoguePendingDotsIn 1ms 320ms forwards;
+}
+@keyframes dialoguePendingDotsIn { to { opacity: 1; } }
 .dialogueBox[data-examination="true"] { cursor: pointer; }
 .dialogueContinueHint {
   display: block;
@@ -2812,6 +2830,18 @@
 .caseFileInvestigatorStage { position: fixed; z-index: 50; inset: 0.75rem calc(min(52rem, calc(100vw - 1.5rem)) + 1.5rem) 0.75rem 0.75rem; display: grid; align-content: center; justify-items: center; gap: 0.9rem; pointer-events: none; }
 .caseFileInvestigatorStage > button { filter: drop-shadow(0 1.6rem 3rem rgba(0, 0, 0, 0.55)); }
 .caseFileInvestigatorStage > small { color: #d9d3ea; font-size: 0.72rem; font-weight: 850; letter-spacing: 0.14em; text-transform: uppercase; text-shadow: 0 0.2rem 1rem rgba(0, 0, 0, 0.7); }
+/* The investigator's embodied bot, sized and plated like a room actor. */
+.caseFileInvestigatorActor { --actor-color: #a98cff; display: grid; justify-items: center; width: min(30rem, 44vw); filter: drop-shadow(0 1.6rem 3rem rgba(0, 0, 0, 0.55)); pointer-events: none; }
+.caseFileInvestigatorActor > :not(strong) { max-height: 56vh; }
+.caseFileInvestigatorActor :global([data-chat-mini-bot-avatar="true"][data-size="room"]) { --chat-mini-bot-render-size: min(30rem, 44vw, 56vh); }
+.caseFileInvestigatorActor > strong { margin-top: -0.5rem; padding: 0.45rem 0.7rem; border-bottom: 2px solid var(--actor-color); background: rgba(6, 7, 14, 0.78); color: #f3f0ff; }
+/* While the Case File is open nothing behind its blur runs: lights and effects
+   are withdrawn in the experience; the grid, scan, hotspots, and every looping
+   animation stop here. */
+.roomScene[data-suspended="true"] .examinationGrid,
+.roomScene[data-suspended="true"] .examinationScan,
+.roomScene[data-suspended="true"] .hotspots { display: none; }
+.roomScene[data-suspended="true"] * { animation-play-state: paused !important; }
 .caseFileContents { min-width: 0; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding-right: 0.2rem; }
 .caseFileContents section { display: grid; gap: 0.45rem; margin: 1.3rem 0; }
 .caseFileContents section:first-child { margin-top: 0.2rem; }
@@ -4113,9 +4143,13 @@
   .dialogueContinueHint { animation: none; }
   .dialogueBox[data-casekeeper-stage="narration"] { animation: none; }
   .casekeeperThinkingDots { width: 3ch; animation: none; }
-  .investigationLens[data-targeted="true"]::after {
-    animation: none;
-    opacity: 0.9;
-    transform: translate(-50%, -50%) scale(0.72);
-  }
 }
+
+/* Side rooms: the venue's ordinary spaces, named and doored, never entered. They wear
+ * the room tile at a quieter pitch and take no hover or selection. */
+.mansionRoom[data-side-room="true"] { cursor: default; color: color-mix(in srgb, var(--mystery-muted) 78%, var(--mystery-text)) !important; border-color: rgba(216, 197, 166, 0.22); background: linear-gradient(150deg, rgba(38, 40, 49, 0.94), rgba(17, 20, 27, 0.96)); }
+.mansionRoom[data-side-room="true"]:hover { border-color: rgba(216, 197, 166, 0.28); filter: none; }
+.mansionRoom[data-side-room="true"] > strong { font-size: 0.66rem; font-weight: 600; opacity: 0.88; }
+.mansionCanvas[data-deck-plan="true"] .mansionRoom[data-side-room="true"] { background: linear-gradient(150deg, rgba(38, 40, 49, 0.56), rgba(17, 20, 27, 0.64)); }
+.investigation[data-theme="light"] .mansionRoom[data-side-room="true"] { color: #4a5a6c !important; border-color: rgba(75, 96, 116, 0.28); background: linear-gradient(150deg, #e4e1da, #d0d7d9); }
+.investigation[data-theme="light"] .mansionRoom[data-side-room="true"]:hover { border-color: rgba(75, 96, 116, 0.34); }

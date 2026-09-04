@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  useEffect,
   useMemo,
   useRef,
   useState,
@@ -15,8 +16,14 @@ import {
   MANSION_LAYOUT_V2_MAX_LIGHTS,
   MANSION_LAYOUT_V2_MAX_NEON_POINTS,
   MANSION_LAYOUT_V2_ROWS,
+  MANSION_OVERHEAD_FRAME_V1,
+  MANSION_OVERHEAD_PLACEMENT_IDENTITY_V1,
   MANSION_PLACEMENT_RELATIONS_V2,
   addAutoCenteredMansionLayoutV2Doors,
+  fillMysteryVenueSideRoomsV1,
+  mansionLayoutV2DoorPairIsAllowed,
+  mansionLayoutV2RectsOverlap,
+  mysterySideRoomSuggestedNameV1,
   canonicalMansionLayoutV2,
   debateMysteryRoomFloorRuleV1,
   debateMysteryRoomTypeIsAllowedOnFloorV1,
@@ -57,6 +64,7 @@ import {
   whodunnitMansionRoomArtUrl,
 } from "./debateMysteryInvestigationArt";
 import WhodunnitSetupDialog from "./WhodunnitSetupDialog";
+import MapOverheadEditorDialog from "./MapOverheadEditorDialog";
 import { PrismBlockingLoader } from "./PrismBlockingLoader";
 import styles from "./debateMystery.module.css";
 
@@ -89,15 +97,43 @@ interface MansionEditorDialogProps {
     mansion: DebateMysteryMansionBundleSummaryV1,
     roomId: string,
   ) => Promise<DebateMysteryMansionBundleSummaryV1 | null>;
+  /** Pre-setup parity with Field Repair. Detection results land in the draft
+   * and save with the venue plan; the overhead plate is stored on the venue. */
+  onDetectRoomLights?: (
+    mansion: DebateMysteryMansionBundleSummaryV1,
+    roomId: string,
+  ) => Promise<import("@localai/shared").MansionDynamicLightV2[] | null>;
+  onDetectRoomAnchors?: (
+    mansion: DebateMysteryMansionBundleSummaryV1,
+    roomId: string,
+  ) => Promise<import("@localai/shared").MansionPlacementAnchorV2[] | null>;
+  onGenerateOverhead?: (
+    mansion: DebateMysteryMansionBundleSummaryV1,
+  ) => Promise<DebateMysteryMansionBundleSummaryV1 | null>;
 }
 
 interface EntityDragV2 {
+  /** The block under the pointer. */
   id: string;
+  /** Every block moving with it; a single drag lists just the one. */
+  ids: string[];
   pointerId: number;
   offsetX: number;
   offsetY: number;
+  originX: number;
+  originY: number;
   previewX: number;
   previewY: number;
+}
+
+/** A drag on empty plan that selects everything it crosses, in fractional cells. */
+interface MarqueeV2 {
+  pointerId: number;
+  startX: number;
+  startY: number;
+  x: number;
+  y: number;
+  additive: boolean;
 }
 
 interface CorridorResizeV2 {
@@ -127,6 +163,10 @@ type RoomOverlayGestureV2 = {
 
 const FLOOR_IDS = [1, 2, 3] as const;
 
+function cloneLayoutEntity(entity: MansionLayoutEntityV2): MansionLayoutEntityV2 {
+  return JSON.parse(JSON.stringify(entity)) as MansionLayoutEntityV2;
+}
+
 function cloneLayout(layout: MansionLayoutV2): MansionLayoutV2 {
   return JSON.parse(JSON.stringify(layout)) as MansionLayoutV2;
 }
@@ -153,11 +193,11 @@ function stableId(prefix: string): string {
   return `${prefix}:${crypto.randomUUID()}`;
 }
 
-/** Player-facing name for a non-room block. Ambient spaces are inaccessible
- * dressing; corridors carry traversal. */
+/** Player-facing name for a non-room block. Side rooms are named, doored, and never
+ * entered; corridors carry traversal. */
 function blockLabel(entity: MansionLayoutEntityV2): string {
   if (entity.kind === "room") return entity.name;
-  return entity.kind === "infill" ? "Ambient space" : "Corridor";
+  return entity.kind === "infill" ? entity.name?.trim() || "Side room" : "Corridor";
 }
 
 function clampNormalized(value: number): number {
@@ -238,6 +278,91 @@ function firstRoomOnFloor(layout: MansionLayoutV2, floor: number): MansionLayout
   return layout.entities.find(
     (entity): entity is MansionLayoutRoomV2 => entity.kind === "room" && entity.floor === floor,
   ) ?? null;
+}
+
+function shiftEntity(entity: MansionLayoutEntityV2, dx: number, dy: number): MansionLayoutEntityV2 {
+  return { ...entity, x: entity.x + dx, y: entity.y + dy };
+}
+
+function rectInsideEnvelope(rect: { x: number; y: number; width: number; height: number }): boolean {
+  return rect.x >= 0 && rect.y >= 0 &&
+    rect.x + rect.width <= MANSION_LAYOUT_V2_COLUMNS && rect.y + rect.height <= MANSION_LAYOUT_V2_ROWS;
+}
+
+/** A copy that is its own block: fresh id, no suspect seat, no accepted art. */
+function cloneEntity(source: MansionLayoutEntityV2, id: string, floor: number): MansionLayoutEntityV2 {
+  if (source.kind === "room") {
+    return {
+      ...source, id, floor, suspectSlotId: null, imageId: null, bundledAssetPath: null,
+      acceptedRoomAssetId: null, acceptedRoomArtAnchorSha256: null,
+    };
+  }
+  return { ...source, id, floor };
+}
+
+/** Moves a group as one piece. No reflow: every block must land inside the plan, clear of
+ * anything outside the group, side rooms still against another block, and every room
+ * still reachable. Doors re-derive from the new adjacencies. */
+function moveEntitiesTogether(
+  layout: MansionLayoutV2,
+  ids: readonly string[],
+  dx: number,
+  dy: number,
+): { layout: MansionLayoutV2; reason: null } | { layout: null; reason: string } {
+  if (!dx && !dy) return { layout, reason: null };
+  const group = new Set(ids);
+  const moved = layout.entities.map((entity) => group.has(entity.id) ? shiftEntity(entity, dx, dy) : entity);
+  const outside = moved.filter((entity) => !group.has(entity.id));
+  for (const entity of moved) {
+    if (!group.has(entity.id)) continue;
+    const rect = mansionLayoutV2EntityRect(entity);
+    if (!rectInsideEnvelope(rect)) return { layout: null, reason: "That move runs off the plan." };
+    if (outside.some((other) => other.floor === entity.floor && mansionLayoutV2RectsOverlap(rect, mansionLayoutV2EntityRect(other)))) {
+      return { layout: null, reason: "That move lands on another block." };
+    }
+  }
+  let next: MansionLayoutV2 = reconcileMansionLayoutV2Doors({ ...layout, entities: moved });
+  for (const id of ids) next = addAutoCenteredMansionLayoutV2Doors(next, id);
+  const floating = next.entities.find((entity) => group.has(entity.id) && entity.kind === "infill" &&
+    !next.entities.some((other) => other.id !== entity.id && mansionLayoutV2SharedWall(entity, other)));
+  if (floating) return { layout: null, reason: "A side room would float free; keep it against another block." };
+  if (mansionLayoutV2SemanticRoomsAreConnected(layout) && !mansionLayoutV2SemanticRoomsAreConnected(next)) {
+    return { layout: null, reason: "That move would cut a room off from the rest of the plan." };
+  }
+  return { layout: next, reason: null };
+}
+
+/** Lays copies of a group on a floor at the nearest offset where all of them fit and the
+ * group touches the plan, then gives each its doors. Null when nowhere fits. */
+function placeGroupCopies(
+  layout: MansionLayoutV2,
+  sources: readonly MansionLayoutEntityV2[],
+  floor: number,
+  idFor: (source: MansionLayoutEntityV2) => string,
+): MansionLayoutV2 | null {
+  if (!sources.length) return null;
+  const copies = sources.map((source) => cloneEntity(source, idFor(source), floor));
+  const onFloor = layout.entities.filter((entity) => entity.floor === floor);
+  const offsets: Array<[number, number]> = [];
+  for (let dy = -MANSION_LAYOUT_V2_ROWS; dy <= MANSION_LAYOUT_V2_ROWS; dy += 1) {
+    for (let dx = -MANSION_LAYOUT_V2_COLUMNS; dx <= MANSION_LAYOUT_V2_COLUMNS; dx += 1) offsets.push([dx, dy]);
+  }
+  // Nearest first; ties go right, then down, so a copy appears beside its source.
+  offsets.sort((a, b) => (Math.abs(a[0]) + Math.abs(a[1])) - (Math.abs(b[0]) + Math.abs(b[1])) || (b[0] - a[0]) || (b[1] - a[1]));
+  for (const [dx, dy] of offsets) {
+    if (dx === 0 && dy === 0) continue;
+    const shifted = copies.map((copy) => shiftEntity(copy, dx, dy));
+    const fits = shifted.every((copy) => {
+      const rect = mansionLayoutV2EntityRect(copy);
+      return rectInsideEnvelope(rect) && !onFloor.some((other) => mansionLayoutV2RectsOverlap(rect, mansionLayoutV2EntityRect(other)));
+    });
+    if (!fits) continue;
+    if (onFloor.length && !shifted.some((copy) => onFloor.some((other) => mansionLayoutV2SharedWall(copy, other)))) continue;
+    let next: MansionLayoutV2 = { ...layout, entities: [...layout.entities, ...shifted] };
+    for (const copy of shifted) next = addAutoCenteredMansionLayoutV2Doors(next, copy.id);
+    return next;
+  }
+  return null;
 }
 
 function addEntityToLayout(
@@ -557,6 +682,9 @@ export default function MansionEditorDialog({
   onAcceptRoomArt,
   onDiscardRoomArt,
   onRegenerateRoomArt,
+  onDetectRoomLights,
+  onDetectRoomAnchors,
+  onGenerateOverhead,
 }: MansionEditorDialogProps): JSX.Element {
   const [mansion, setMansion] = useState(initialMansion);
   const [layout, setLayout] = useState(() => initialLayout(initialMansion));
@@ -573,7 +701,15 @@ export default function MansionEditorDialog({
   const [regenerateConfirmationRoomId, setRegenerateConfirmationRoomId] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [roomArtNotice, setRoomArtNotice] = useState<string | null>(null);
+  const [overheadEditorOpen, setOverheadEditorOpen] = useState(false);
+  const [overheadBusy, setOverheadBusy] = useState(false);
+  const [roomToolBusy, setRoomToolBusy] = useState<"lights" | "anchors" | null>(null);
   const [drag, setDrag] = useState<EntityDragV2 | null>(null);
+  /** Multi-selection; empty means only the primary selection above is selected. */
+  const [selectedEntityIds, setSelectedEntityIds] = useState<string[]>([]);
+  const [marquee, setMarquee] = useState<MarqueeV2 | null>(null);
+  const [layoutFuture, setLayoutFuture] = useState<MansionLayoutV2[]>([]);
+  const clipboard = useRef<MansionLayoutEntityV2[] | null>(null);
   const [corridorResize, setCorridorResize] = useState<CorridorResizeV2 | null>(null);
   const [roomTool, setRoomTool] = useState<RoomPlacementToolV2 | null>(null);
   const [selectedLightId, setSelectedLightId] = useState<string | null>(null);
@@ -597,7 +733,22 @@ export default function MansionEditorDialog({
   const roomRefinementReady = !creationFlow || creationReady;
   const presentation = resolveInstalledMansionPresentationV1(mansion);
   const venueProfile = layout.venueProfile ?? null;
+  // The venue's overhead plate, drawn by PRISM from the cover. When present it is
+  // the board's backdrop; the sketched hull outline is only the fallback.
+  const overheadAsset = (mansion.assets ?? []).find(
+    (asset) => asset.role === "map" && asset.logicalId === "overhead",
+  ) ?? null;
+  const overheadUrl = overheadAsset
+    ? `/api/debates/mystery-mansions/${encodeURIComponent(mansion.id)}/assets/${encodeURIComponent(overheadAsset.id)}/file`
+    : null;
+  const overheadPlacement = layout.overheadPlacement ?? MANSION_OVERHEAD_PLACEMENT_IDENTITY_V1;
+  const cellWidthPercent = 100 / MANSION_LAYOUT_V2_COLUMNS;
+  const cellHeightPercent = 100 / MANSION_LAYOUT_V2_ROWS;
   const venueArchitectureLocked = venueProfile !== null;
+  /** The lock freezes the accepted topology: rooms and corridors. Side rooms are dressing,
+   * so they stay placeable, resizable, doorable, and removable on a validated venue. */
+  const entityLocked = (entity: MansionLayoutEntityV2 | null | undefined): boolean =>
+    venueArchitectureLocked && entity?.kind !== "infill";
   const venueMapStyle = venueProfile?.presentation?.mapStyle ?? "estate-grid-v1";
   const semanticRoomCount = mansionLayoutV2SemanticRoomCount(layout);
   const tierLabel = (floor: number): string =>
@@ -631,7 +782,8 @@ export default function MansionEditorDialog({
         requireEditorFloors: true,
       })
     : [];
-  const selectedRemovalBlockedReason = venueArchitectureLocked
+  const selectedLocked = entityLocked(selectedEntity);
+  const selectedRemovalBlockedReason = selectedLocked
     ? "The accepted venue architecture is fixed. Rename or dress rooms without changing its topology."
     : selectedRoom?.id === layout.venueProfile?.entryRoomId ||
     (!layout.venueProfile && selectedRoom?.templateId === "foyer")
@@ -649,6 +801,7 @@ export default function MansionEditorDialog({
   );
 
   const pushLayoutHistory = (snapshot: MansionLayoutV2): void => {
+    setLayoutFuture([]);
     setLayoutHistory((current) => {
       if (current.at(-1) && canonicalMansionLayoutV2(current.at(-1)!) === canonicalMansionLayoutV2(snapshot)) {
         return current;
@@ -677,7 +830,9 @@ export default function MansionEditorDialog({
     const previous = layoutHistory.at(-1);
     if (!previous) return;
     setLayoutHistory((current) => current.slice(0, -1));
+    setLayoutFuture((current) => [...current, cloneLayout(layout)].slice(-50));
     setLayout(cloneLayout(previous));
+    setSelectedEntityIds((current) => current.filter((id) => previous.entities.some((entity) => entity.id === id)));
     const retainedSelection = previous.entities.find((entity) => entity.id === selectedEntityId);
     const fallback = previous.entities.find((entity) => entity.floor === selectedFloor) ?? previous.entities[0];
     setSelectedEntityId(retainedSelection?.id ?? fallback?.id ?? "");
@@ -739,6 +894,48 @@ export default function MansionEditorDialog({
       }
     } finally {
       setRoomArtBusy(false);
+    }
+  };
+
+  const generateOverhead = async (): Promise<void> => {
+    if (!onGenerateOverhead || overheadBusy) return;
+    setOverheadBusy(true);
+    setNotice(null);
+    try {
+      const updated = await onGenerateOverhead(mansion);
+      if (updated) replaceLayoutFromMansion(updated);
+    } finally {
+      setOverheadBusy(false);
+    }
+  };
+  const detectRoomTool = async (tool: "lights" | "anchors", roomId: string): Promise<void> => {
+    if (roomToolBusy) return;
+    setRoomToolBusy(tool);
+    setRoomArtNotice(null);
+    try {
+      if (tool === "lights") {
+        const detected = onDetectRoomLights ? await onDetectRoomLights(mansion, roomId) : null;
+        if (!detected) return;
+        setLayout((current) => ({
+          ...current,
+          lights: [...current.lights.filter((light) => light.roomId !== roomId), ...detected],
+        }));
+        setSelectedLightId(null);
+        setRoomArtNotice(detected.length
+          ? `PRISM read ${detected.length} light source${detected.length === 1 ? "" : "s"} from the accepted art. Save the venue plan to keep them.`
+          : "PRISM found no lit sources in the accepted art; the room's lights were cleared. Save the venue plan to keep that.");
+      } else {
+        const detected = onDetectRoomAnchors ? await onDetectRoomAnchors(mansion, roomId) : null;
+        if (!detected) return;
+        setLayout((current) => ({
+          ...current,
+          placementAnchors: current.placementAnchors.map((anchor) =>
+            detected.find((entry) => entry.id === anchor.id) ?? anchor),
+        }));
+        setRoomArtNotice("PRISM re-read where each named anchor sits in the accepted art. Save the venue plan to keep the new positions.");
+      }
+    } finally {
+      setRoomToolBusy(null);
     }
   };
 
@@ -912,7 +1109,24 @@ export default function MansionEditorDialog({
     };
     const next = addEntityToLayout(layout, entity, selectedFloor);
     if (!next) {
-      setNotice("That floor has no legal connected space for this room footprint.");
+      // A top-floor room that cannot fit among this level's rooms takes the empty level
+      // above as the new top floor: a rooftop lounge wants the whole roof, not a corner.
+      const above = selectedFloor + 1;
+      const topFloorOnly = debateMysteryRoomFloorRuleV1(template.id) === "top-floor-only";
+      const aboveIsOpen = above <= 3 &&
+        !layout.entities.some((candidate) => candidate.kind === "room" && candidate.floor === above) &&
+        (above !== 3 || Boolean(venueProfile) || thirdFloorAccessible);
+      const lifted = topFloorOnly && aboveIsOpen ? addEntityToLayout(layout, { ...entity, floor: above }, above) : null;
+      if (!lifted) {
+        setNotice(topFloorOnly
+          ? `${template.name} takes the whole top level. Clear ${tierLabel(above)} or make room on it first.`
+          : "That floor has no legal connected space for this room footprint.");
+        return;
+      }
+      commitLayout(lifted);
+      setSelectedFloor(above);
+      setSelectedEntityId(entity.id);
+      setNotice(`${template.name} needs the whole roof, so it took ${tierLabel(above)} as the new top floor.`);
       return;
     }
     commitLayout(next);
@@ -942,31 +1156,64 @@ export default function MansionEditorDialog({
 
   const addAmbientSpace = (): void => {
     if (!layout.entities.some((candidate) => candidate.floor === selectedFloor)) {
-      setNotice("Place a room or corridor first. Ambient spaces attach to the floor plan.");
+      setNotice("Place a room or corridor first. Side rooms attach to the floor plan.");
       return;
     }
+    const id = stableId("space");
     const entity: MansionLayoutEntityV2 = {
       kind: "infill",
-      id: stableId("ambient"),
+      id,
       floor: selectedFloor,
       x: 0,
       y: 0,
       width: 2,
       height: 2,
+      name: mysterySideRoomSuggestedNameV1(layout, { width: 2, height: 2 }, id),
     };
-    const next = addEntityToLayout(layout, entity, selectedFloor);
-    if (!next) {
-      setNotice("No legal shared-edge position is available for an ambient space.");
+    const placed = addEntityToLayout(layout, entity, selectedFloor);
+    if (!placed) {
+      setNotice("No legal shared-edge position is available for a side room.");
       return;
     }
-    commitLayout(next);
+    commitLayout(addAutoCenteredMansionLayoutV2Doors(placed, entity.id));
     setSelectedEntityId(entity.id);
     setNotice(null);
   };
 
-  /** Swaps a block between corridor and ambient space. Doors follow the kind:
-   * an ambient space sheds them, a corridor gains centered ones. A swap that
-   * would strand a semantic room is refused rather than saved broken. */
+  /** Fills every open cell between this level's rooms and corridors with named side rooms. */
+  const fillSideRooms = (): void => {
+    const filled = fillMysteryVenueSideRoomsV1(layout, {
+      seed: stableId("fill"),
+      archetype: layout.venueProfile?.intent?.archetype ?? null,
+      kind: layout.venueProfile?.kind ?? null,
+    });
+    // Side rooms that predate names get one too, so a legacy estate's infill reads as rooms.
+    let next = filled;
+    for (const entity of filled.entities) {
+      if (entity.kind !== "infill" || entity.name?.trim()) continue;
+      const name = mysterySideRoomSuggestedNameV1(next, entity, `${stableId("name")}:${entity.id}`);
+      next = { ...next, entities: next.entities.map((candidate) => candidate.id === entity.id && candidate.kind !== "room" ? { ...candidate, name } : candidate) };
+    }
+    if (canonicalMansionLayoutV2(next) === canonicalMansionLayoutV2(layout)) {
+      setNotice("No open cells between rooms and corridors are left to fill.");
+      return;
+    }
+    commitLayout(next);
+    setNotice(null);
+  };
+
+  const updateBlock = (blockId: string, update: Partial<MansionLayoutBlockV2>): void => {
+    setLayout((current) => ({
+      ...current,
+      entities: current.entities.map((entity) => entity.id === blockId && entity.kind !== "room"
+        ? { ...entity, ...update }
+        : entity),
+    }));
+  };
+
+  /** Swaps a block between corridor and side room. Doors follow the kind: a side room
+   * keeps only corridor doors, a corridor gains centered ones to everything it touches.
+   * A swap that would strand a semantic room is refused rather than saved broken. */
   const convertBlockKind = (entityId: string, kind: "corridor" | "infill"): void => {
     const entity = layout.entities.find((candidate) => candidate.id === entityId);
     if (!entity || entity.kind === "room" || entity.kind === kind) return;
@@ -976,7 +1223,7 @@ export default function MansionEditorDialog({
         candidate.id === entityId && candidate.kind !== "room" ? { ...candidate, kind } : candidate),
     };
     next = reconcileMansionLayoutV2Doors(next);
-    if (kind === "corridor") next = addAutoCenteredMansionLayoutV2Doors(next, entityId);
+    next = addAutoCenteredMansionLayoutV2Doors(next, entityId);
     if (!mansionLayoutV2SemanticRoomsAreConnected(next)) {
       setNotice("That corridor is the only route to a room, so it stayed a corridor.");
       return;
@@ -1047,7 +1294,7 @@ export default function MansionEditorDialog({
     const entity = layout.entities.find((entry) => entry.id === entityId);
     const other = layout.entities.find((entry) => entry.id === otherId);
     const wall = entity && other ? mansionLayoutV2SharedWall(entity, other) : null;
-    if (!entity || !other || !wall || entity.kind === "infill" || other.kind === "infill") return;
+    if (!entity || !other || !wall || !mansionLayoutV2DoorPairIsAllowed(entity, other)) return;
     if (layout.doors.some((door) =>
       (door.aEntityId === entityId && door.bEntityId === otherId) ||
       (door.aEntityId === otherId && door.bEntityId === entityId))) return;
@@ -1065,12 +1312,111 @@ export default function MansionEditorDialog({
     setNotice(null);
   };
 
+  const redoLayout = (): void => {
+    const next = layoutFuture.at(-1);
+    if (!next) return;
+    setLayoutFuture((current) => current.slice(0, -1));
+    setLayoutHistory((current) => [...current, cloneLayout(layout)].slice(-50));
+    setLayout(cloneLayout(next));
+    setSelectedEntityIds((current) => current.filter((id) => next.entities.some((entity) => entity.id === id)));
+    setNotice("Redid the last venue layout change.");
+  };
+
+  /** Everything selected on this floor: the multi-selection, or just the primary block. */
+  const selectionIds: string[] = selectedEntityIds.length > 0
+    ? selectedEntityIds.filter((id) => layout.entities.some((entity) => entity.id === id && entity.floor === selectedFloor))
+    : selectedEntityId && layout.entities.some((entity) => entity.id === selectedEntityId) ? [selectedEntityId] : [];
+  const selectOnly = (id: string): void => { setSelectedEntityId(id); setSelectedEntityIds([]); };
+  const selectMany = (ids: string[], primary?: string): void => {
+    const unique = [...new Set(ids)];
+    setSelectedEntityIds(unique.length > 1 ? unique : []);
+    setSelectedEntityId(primary && unique.includes(primary) ? primary : unique[0] ?? "");
+  };
+  const toggleInSelection = (id: string): void => {
+    const current = selectionIds.includes(id) ? selectionIds.filter((entry) => entry !== id) : [...selectionIds, id];
+    selectMany(current, selectionIds.includes(id) ? undefined : id);
+  };
+
+  /** Copies the selection next to itself and hands the copies back selected; null when nothing fits. */
+  const cloneSelection = (ids: readonly string[]): string[] | null => {
+    const sources = layout.entities.filter((entity) => ids.includes(entity.id) && !entityLocked(entity));
+    if (!sources.length) { setNotice("Those blocks are fixed by the accepted venue architecture."); return null; }
+    if (!layout.venueProfile && sources.some((entity) => entity.kind === "room")) {
+      setNotice("Each room type appears once in a legacy estate, so rooms cannot be cloned here. Corridors and side rooms can.");
+      return null;
+    }
+    const idByPart = new Map(sources.map((source) => [source.id, stableId(source.kind === "room" ? "room" : source.kind === "infill" ? "space" : "corridor")]));
+    const next = placeGroupCopies(layout, sources, selectedFloor, (source) => idByPart.get(source.id)!);
+    if (!next) { setNotice("There is no open stretch of plan beside those blocks for a copy."); return null; }
+    commitLayout(next);
+    const cloneIds = [...idByPart.values()];
+    selectMany(cloneIds, cloneIds[0]);
+    setNotice(null);
+    return cloneIds;
+  };
+  const copySelection = (): void => {
+    const sources = layout.entities.filter((entity) => selectionIds.includes(entity.id));
+    if (!sources.length) return;
+    clipboard.current = sources.map((entity) => cloneLayoutEntity(entity));
+    setNotice(sources.length === 1 ? `Copied ${blockLabel(sources[0]!)}.` : `Copied ${sources.length} blocks.`);
+  };
+  const pasteSelection = (): void => {
+    const sources = clipboard.current;
+    if (!sources?.length) { setNotice("Copy a block first, then paste."); return; }
+    if (!layout.venueProfile && sources.some((entity) => entity.kind === "room")) {
+      setNotice("Each room type appears once in a legacy estate, so rooms cannot be pasted here. Corridors and side rooms can.");
+      return;
+    }
+    if (venueArchitectureLocked && sources.some((entity) => entity.kind !== "infill")) {
+      setNotice("Only side rooms can be pasted into a validated venue.");
+      return;
+    }
+    const idByPart = new Map(sources.map((source) => [source.id, stableId(source.kind === "room" ? "room" : source.kind === "infill" ? "space" : "corridor")]));
+    let next: MansionLayoutV2 | null;
+    if (layout.entities.some((entity) => entity.floor === selectedFloor)) {
+      next = placeGroupCopies(layout, sources, selectedFloor, (source) => idByPart.get(source.id)!);
+    } else {
+      // An empty level takes the blocks one at a time so the first one brings its connector.
+      next = layout;
+      for (const source of sources) {
+        next = next ? addEntityToLayout(next, cloneEntity(source, idByPart.get(source.id)!, selectedFloor), selectedFloor) : null;
+      }
+    }
+    if (!next) { setNotice("There is no open stretch of plan on this level for the copy."); return; }
+    commitLayout(next);
+    const pastedIds = [...idByPart.values()];
+    selectMany(pastedIds, pastedIds[0]);
+    setNotice(null);
+  };
+  /** Removes every selected block at once; refuses when any is fixed or the plan would split. */
+  const removeSelection = (): void => {
+    const targets = layout.entities.filter((entity) => selectionIds.includes(entity.id));
+    if (!targets.length) return;
+    if (targets.length === 1 && targets[0]!.id === selectedEntityId) { removeSelectedEntity(); return; }
+    const fixed = targets.find((entity) => entityLocked(entity) ||
+      (entity.kind === "room" && (entity.id === layout.venueProfile?.entryRoomId || (!layout.venueProfile && entity.templateId === "foyer"))));
+    if (fixed) { setNotice(`${blockLabel(fixed)} is required structure, so the selection stayed.`); return; }
+    let next = layout;
+    for (const target of targets) next = removeEntityFromLayout(next, target.id);
+    if (mansionLayoutV2SemanticRoomsAreConnected(layout) && !mansionLayoutV2SemanticRoomsAreConnected(next)) {
+      setNotice("Those blocks still carry circulation. Add another route before removing them.");
+      return;
+    }
+    commitLayout(next);
+    selectOnly(next.entities.find((entity) => entity.floor === selectedFloor)?.id ?? "");
+    if (roomEditorId && targets.some((target) => target.id === roomEditorId)) setRoomEditorId(null);
+    setNotice(null);
+  };
+  const cutSelection = (): void => { copySelection(); removeSelection(); };
+
   const beginDrag = (
     event: ReactPointerEvent<HTMLButtonElement>,
     entity: MansionLayoutEntityV2,
   ): void => {
-    if (venueArchitectureLocked) {
-      setSelectedEntityId(entity.id);
+    if (event.button !== 0) return;
+    if (event.shiftKey) { toggleInSelection(entity.id); return; }
+    if (entityLocked(entity)) {
+      selectOnly(entity.id);
       return;
     }
     const canvas = canvasRef.current;
@@ -1078,20 +1424,40 @@ export default function MansionEditorDialog({
     const bounds = canvas.getBoundingClientRect();
     const cellWidth = bounds.width / MANSION_LAYOUT_V2_COLUMNS;
     const cellHeight = bounds.height / MANSION_LAYOUT_V2_ROWS;
-    setSelectedEntityId(entity.id);
+    const inGroup = selectionIds.includes(entity.id) && selectionIds.length > 1;
+    let subject = entity;
+    let ids = inGroup
+      ? selectionIds.filter((id) => { const member = layout.entities.find((candidate) => candidate.id === id); return member && !entityLocked(member); })
+      : [entity.id];
+    if (event.altKey) {
+      // Option-drag carries a copy; the original stays where it is.
+      const cloneIds = cloneSelection(ids);
+      if (!cloneIds) return;
+      const index = Math.max(0, ids.indexOf(entity.id));
+      const cloneId = cloneIds[index] ?? cloneIds[0]!;
+      const placed = layout.entities.find((candidate) => candidate.id === cloneId);
+      ids = cloneIds;
+      if (placed) subject = placed;
+      // The clone was placed by commitLayout; the fresh entities live in the next render, so
+      // the drag starts from the copy's known geometry via the pending layout below.
+    }
+    if (!inGroup && !event.altKey) selectOnly(entity.id);
     setDrag({
-      id: entity.id,
+      id: subject.id,
+      ids,
       pointerId: event.pointerId,
-      offsetX: (event.clientX - bounds.left) / cellWidth - entity.x,
-      offsetY: (event.clientY - bounds.top) / cellHeight - entity.y,
-      previewX: entity.x,
-      previewY: entity.y,
+      offsetX: (event.clientX - bounds.left) / cellWidth - subject.x,
+      offsetY: (event.clientY - bounds.top) / cellHeight - subject.y,
+      originX: subject.x,
+      originY: subject.y,
+      previewX: subject.x,
+      previewY: subject.y,
     });
     event.currentTarget.setPointerCapture(event.pointerId);
   };
 
   const continueDrag = (event: ReactPointerEvent<HTMLButtonElement>): void => {
-    if (!drag || drag.id !== event.currentTarget.dataset.entityId) return;
+    if (!drag || drag.pointerId !== event.pointerId) return;
     const canvas = canvasRef.current;
     if (!canvas) return;
     const bounds = canvas.getBoundingClientRect();
@@ -1103,9 +1469,19 @@ export default function MansionEditorDialog({
   };
 
   const finishDrag = (event: ReactPointerEvent<HTMLButtonElement>): void => {
-    if (!drag || drag.id !== event.currentTarget.dataset.entityId) return;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    const dx = drag.previewX - drag.originX;
+    const dy = drag.previewY - drag.originY;
+    if (drag.ids.length > 1) {
+      const result = moveEntitiesTogether(layout, drag.ids, dx, dy);
+      if (result.layout) commitLayout(result.layout);
+      setDrag(null);
+      setNotice(result.reason);
+      return;
+    }
     const currentEntity = layout.entities.find((entity) => entity.id === drag.id);
-    const moved = currentEntity && (currentEntity.x !== drag.previewX || currentEntity.y !== drag.previewY);
+    if (!currentEntity) { setDrag(null); return; }
+    const moved = currentEntity.x !== drag.previewX || currentEntity.y !== drag.previewY;
     const next = snapMansionLayoutV2Entity(layout, drag.id, {
       x: drag.previewX,
       y: drag.previewY,
@@ -1117,12 +1493,79 @@ export default function MansionEditorDialog({
       : null);
   };
 
+  /** Dragging on empty plan draws a marquee; whatever it crosses becomes the selection. */
+  const canvasCellPoint = (event: ReactPointerEvent<HTMLElement>): { x: number; y: number } | null => {
+    const canvas = canvasRef.current;
+    if (!canvas) return null;
+    const bounds = canvas.getBoundingClientRect();
+    return {
+      x: ((event.clientX - bounds.left) / bounds.width) * MANSION_LAYOUT_V2_COLUMNS,
+      y: ((event.clientY - bounds.top) / bounds.height) * MANSION_LAYOUT_V2_ROWS,
+    };
+  };
+  const beginMarquee = (event: ReactPointerEvent<HTMLDivElement>): void => {
+    if (event.button !== 0 || drag || corridorResize) return;
+    if ((event.target as HTMLElement).closest("[data-entity-id], [role='separator'], button")) return;
+    const point = canvasCellPoint(event);
+    if (!point) return;
+    event.currentTarget.setPointerCapture(event.pointerId);
+    setMarquee({ pointerId: event.pointerId, startX: point.x, startY: point.y, x: point.x, y: point.y, additive: event.shiftKey });
+  };
+  const continueMarquee = (event: ReactPointerEvent<HTMLDivElement>): void => {
+    if (!marquee || marquee.pointerId !== event.pointerId) return;
+    const point = canvasCellPoint(event);
+    if (point) setMarquee({ ...marquee, x: point.x, y: point.y });
+  };
+  const finishMarquee = (event: ReactPointerEvent<HTMLDivElement>): void => {
+    if (!marquee || marquee.pointerId !== event.pointerId) return;
+    setMarquee(null);
+    const left = Math.min(marquee.startX, marquee.x);
+    const right = Math.max(marquee.startX, marquee.x);
+    const top = Math.min(marquee.startY, marquee.y);
+    const bottom = Math.max(marquee.startY, marquee.y);
+    if (right - left < 0.2 && bottom - top < 0.2) {
+      // A plain click on empty plan collapses the selection to the primary block.
+      if (!marquee.additive) setSelectedEntityIds([]);
+      return;
+    }
+    const crossed = layout.entities.filter((entity) => {
+      if (entity.floor !== selectedFloor) return false;
+      const rect = mansionLayoutV2EntityRect(entity);
+      return rect.x < right && rect.x + rect.width > left && rect.y < bottom && rect.y + rect.height > top;
+    }).map((entity) => entity.id);
+    selectMany(marquee.additive ? [...selectionIds, ...crossed] : crossed, crossed[0]);
+  };
+
+  useEffect(() => {
+    // Editor shortcuts at the document level: the room, light, and overhead editors are modal
+    // dialogs that stop their own key events, so these only fire for the venue plan.
+    const onKey = (event: KeyboardEvent): void => {
+      if (roomEditorId) return;
+      const target = event.target as HTMLElement | null;
+      if (target?.closest("input, textarea, select, [contenteditable='true']")) return;
+      const key = event.key.toLowerCase();
+      if ((event.metaKey || event.ctrlKey) && !event.altKey) {
+        if (key === "z") { event.preventDefault(); if (event.shiftKey) redoLayout(); else undoLayout(); }
+        else if (key === "y") { event.preventDefault(); redoLayout(); }
+        else if (key === "c") { event.preventDefault(); copySelection(); }
+        else if (key === "x") { event.preventDefault(); cutSelection(); }
+        else if (key === "v") { event.preventDefault(); pasteSelection(); }
+        else if (key === "d") { event.preventDefault(); cloneSelection(selectionIds); }
+        return;
+      }
+      if (event.key === "Delete" || event.key === "Backspace") { event.preventDefault(); removeSelection(); }
+      else if (event.key === "Escape" && selectedEntityIds.length) { setSelectedEntityIds([]); }
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  });
+
   const beginCorridorResize = (
     event: ReactPointerEvent<HTMLSpanElement>,
     entity: MansionLayoutBlockV2,
     edge: CorridorResizeV2["edge"],
   ): void => {
-    if (venueArchitectureLocked) return;
+    if (entityLocked(entity)) return;
     event.preventDefault();
     event.stopPropagation();
     setSelectedEntityId(entity.id);
@@ -1206,7 +1649,10 @@ export default function MansionEditorDialog({
     setSaving(true);
     try {
       const saved = await onSave(mansion, layout);
-      if (!saved) return;
+      if (!saved) {
+        setNotice("The venue plan was not saved. The studio behind this editor shows the reason.");
+        return;
+      }
       replaceLayoutFromMansion(saved);
       if (creationFlow) {
         const remainingLoaderTime = CREATION_VALIDATION_MINIMUM_LOADER_MS - (Date.now() - loaderStartedAt);
@@ -1220,6 +1666,8 @@ export default function MansionEditorDialog({
       } else {
         onClose();
       }
+    } catch (caught) {
+      setNotice(caught instanceof Error ? caught.message : "The venue plan could not be saved.");
     } finally {
       setSaving(false);
     }
@@ -1261,12 +1709,37 @@ export default function MansionEditorDialog({
             ))}
           </nav>
           {venueArchitectureLocked
-            ? <span className={styles.mansionEditorArchitectureLock}>Validated architecture · names and presentation remain editable</span>
+            ? <div>
+                <span className={styles.mansionEditorArchitectureLock}>Validated architecture · names, presentation, and side rooms remain editable</span>
+                <button type="button" onClick={addAmbientSpace} title="A named, doored space no case enters">+ Side room</button>
+                <button type="button" onClick={fillSideRooms} title="Fill the open cells between rooms and corridors with named side rooms">Fill side rooms</button>
+              </div>
             : <div>
                 <button type="button" onClick={() => addRoom()}>+ Room</button>
                 <button type="button" onClick={addCorridor}>+ Corridor</button>
-                <button type="button" onClick={addAmbientSpace} title="Inaccessible dressing that reads as a room on the map">+ Ambient</button>
+                <button type="button" onClick={addAmbientSpace} title="A named, doored space no case enters">+ Side room</button>
+                <button type="button" onClick={fillSideRooms} title="Fill the open cells between rooms and corridors with named side rooms">Fill side rooms</button>
               </div>}
+          <div className={styles.mansionEditorOverheadTools} data-tutorial-target="whodunnit-venue-overhead">
+            <button
+              type="button"
+              disabled={busy || overheadBusy || responseMode === "local" || !onGenerateOverhead || !persistedLayoutMatchesDraft}
+              title={responseMode === "local"
+                ? "Drawing the overhead needs ONLINE. Placement works in LOCAL."
+                : !persistedLayoutMatchesDraft
+                  ? "Save the venue plan first; the overhead is drawn from the saved structure."
+                  : overheadUrl
+                    ? "Draw a fresh overhead of this venue from its cover. The previous plate stays available to Undo in a case."
+                    : "Draw this venue from directly above, onto the board, from its cover."}
+              onClick={() => void generateOverhead()}
+            >{overheadBusy ? "Drawing overhead…" : overheadUrl ? "Redraw overhead" : "Draw overhead"}</button>
+            <button
+              type="button"
+              disabled={busy || !overheadUrl}
+              title={overheadUrl ? "Pan, rotate, and zoom the overhead plate under the rooms." : "Draw the overhead first."}
+              onClick={() => setOverheadEditorOpen(true)}
+            >Place overhead</button>
+          </div>
         </header>
 
         <div className={styles.mansionEditorCanvasShell}>
@@ -1276,8 +1749,50 @@ export default function MansionEditorDialog({
             aria-label={`${tierLabel(selectedFloor)} 16 by 12 plan`}
             data-map-style={venueMapStyle}
             data-architecture-locked={venueArchitectureLocked ? "true" : undefined}
+            data-has-overhead={overheadUrl ? "true" : undefined}
+            data-marquee={marquee ? "true" : undefined}
+            onPointerDown={beginMarquee}
+            onPointerMove={continueMarquee}
+            onPointerUp={finishMarquee}
+            onPointerCancel={() => setMarquee(null)}
           >
-            {venueMapStyle === "hull-deck-v1" ? (
+            {marquee ? (
+              <div
+                className={styles.mansionEditorMarquee}
+                aria-hidden="true"
+                style={{
+                  left: `${(Math.min(marquee.startX, marquee.x) / MANSION_LAYOUT_V2_COLUMNS) * 100}%`,
+                  top: `${(Math.min(marquee.startY, marquee.y) / MANSION_LAYOUT_V2_ROWS) * 100}%`,
+                  width: `${(Math.abs(marquee.x - marquee.startX) / MANSION_LAYOUT_V2_COLUMNS) * 100}%`,
+                  height: `${(Math.abs(marquee.y - marquee.startY) / MANSION_LAYOUT_V2_ROWS) * 100}%`,
+                }}
+              />
+            ) : null}
+            {overheadUrl ? (
+              <div className={styles.mansionEditorOverhead} aria-hidden="true">
+                <div
+                  className={styles.mansionEditorOverheadPlacement}
+                  style={{
+                    transform: `translate(${overheadPlacement.x * cellWidthPercent}%, ${overheadPlacement.y * cellHeightPercent}%) rotate(${overheadPlacement.rotation}deg) scale(${overheadPlacement.scale})`,
+                  }}
+                >
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    key={overheadAsset?.id}
+                    src={overheadUrl}
+                    alt=""
+                    draggable={false}
+                    style={{
+                      left: `${MANSION_OVERHEAD_FRAME_V1.left * cellWidthPercent}%`,
+                      top: `${MANSION_OVERHEAD_FRAME_V1.top * cellHeightPercent}%`,
+                      width: `${MANSION_OVERHEAD_FRAME_V1.columns * cellWidthPercent}%`,
+                      height: `${MANSION_OVERHEAD_FRAME_V1.rows * cellHeightPercent}%`,
+                    }}
+                  />
+                </div>
+              </div>
+            ) : null}
+            {venueMapStyle === "hull-deck-v1" && !overheadUrl ? (
               <svg className={styles.mansionEditorHullOutline} viewBox="0 0 160 120" preserveAspectRatio="none" aria-hidden="true">
                 <path d="M7 18 L126 10 Q146 18 156 60 Q146 102 126 110 L7 102 Q2 82 2 60 Q2 38 7 18 Z" />
                 <path d="M18 60 H139" />
@@ -1285,8 +1800,8 @@ export default function MansionEditorDialog({
             ) : null}
             {layout.entities.filter((entity) => entity.floor === selectedFloor).map((entity) => {
               const rect = mansionLayoutV2EntityRect(entity);
-              const preview = drag?.id === entity.id
-                ? { ...rect, x: drag.previewX, y: drag.previewY }
+              const preview = drag && drag.ids.includes(entity.id)
+                ? { ...rect, x: rect.x + (drag.previewX - drag.originX), y: rect.y + (drag.previewY - drag.originY) }
                 : rect;
               const roomArt = entity.kind === "room" && roomRefinementReady
                 ? roomAssetUrl(mansion, entity, true)
@@ -1302,23 +1817,23 @@ export default function MansionEditorDialog({
                       : styles.mansionEditorCorridorBlock}
                   data-entity-id={entity.id}
                   data-entity-kind={entity.kind}
-                  data-selected={entity.id === selectedEntityId ? "true" : undefined}
+                  data-selected={selectionIds.includes(entity.id) ? "true" : undefined}
                   style={{
                     gridColumn: `${preview.x + 1} / span ${preview.width}`,
                     gridRow: `${preview.y + 1} / span ${preview.height}`,
                     ...(roomArt ? { backgroundImage: `linear-gradient(rgb(4 8 15 / 28%), rgb(4 8 15 / 62%)), url("${roomArt}")` } : {}),
                   } as CSSProperties}
                   onDoubleClick={() => entity.kind === "room" && openRoomEditor(entity.id)}
-                  onClick={() => setSelectedEntityId(entity.id)}
+                  onClick={(event) => { if (!event.shiftKey && !event.altKey) selectOnly(entity.id); }}
                   onPointerDown={(event) => beginDrag(event, entity)}
                   onPointerMove={continueDrag}
                   onPointerUp={finishDrag}
                   onPointerCancel={() => setDrag(null)}
                 >
-                  <span aria-hidden="true">{entity.kind === "room" ? entity.emoji : entity.kind === "infill" ? "◌" : "⇄"}</span>
+                  <span aria-hidden="true">{entity.kind === "room" ? entity.emoji : entity.kind === "infill" ? "▢" : "⇄"}</span>
                   <strong>{blockLabel(entity)}</strong>
                   <small>{entity.kind === "room" ? `${rect.width}×${rect.height} · ${entity.rotation}°` : `${rect.width}×${rect.height}`}</small>
-                  {entity.kind !== "room" && !venueArchitectureLocked ? (["north", "east", "south", "west"] as const).map((edge) => (
+                  {entity.kind !== "room" && !entityLocked(entity) ? (["north", "east", "south", "west"] as const).map((edge) => (
                     <span
                       key={edge}
                       className={styles.mansionEditorCorridorResizeHandle}
@@ -1362,7 +1877,7 @@ export default function MansionEditorDialog({
             <span>{venueArchitectureLocked
               ? "The validated architecture stays fixed. Select a room to rename it or prepare its presentation."
               : roomRefinementReady
-              ? "Drag to arrange. Collisions reflow nearby blocks; only an island returns. Double-click a room to enter it."
+              ? "Drag to arrange; collisions reflow nearby blocks. Drag on empty plan to select several, Shift+click to add, and move them together. Option+drag clones. ⌘C, ⌘X, ⌘V copy, cut, paste; ⌘Z and ⇧⌘Z undo and redo; Delete removes. Double-click a room to enter it."
               : "Arrange structural placeholders, then Continue to prepare Mosaic rooms before entering them."}</span>
             <button type="button" disabled={!selectedRoom || !roomRefinementReady} onClick={() => selectedRoom && openRoomEditor(selectedRoom.id)}>Open Room Editor</button>
           </div>
@@ -1417,9 +1932,9 @@ export default function MansionEditorDialog({
         {selectedEntity ? (
           <>
             <header>
-              <span aria-hidden="true">{selectedRoom?.emoji ?? (selectedEntity.kind === "infill" ? "◌" : "⇄")}</span>
+              <span aria-hidden="true">{selectedRoom?.emoji ?? (selectedEntity.kind === "infill" ? "▢" : "⇄")}</span>
               <div>
-                <small>{selectedRoom ? "Selected room" : selectedEntity.kind === "infill" ? "Selected ambient space" : "Selected corridor"}</small>
+                <small>{selectedRoom ? "Selected room" : selectedEntity.kind === "infill" ? "Selected side room" : "Selected corridor"}</small>
                 <strong>{selectedRoom?.name ?? `${blockLabel(selectedEntity)} · ${selectedBlock?.width ?? 0}×${selectedBlock?.height ?? 0}`}</strong>
               </div>
             </header>
@@ -1468,64 +1983,82 @@ export default function MansionEditorDialog({
               </>
             ) : null}
 
+            {selectedBlock?.kind === "infill" ? (
+              <div className={styles.mansionEditorSideRoomName}>
+                <label>Side room name<input value={selectedBlock.name ?? ""} maxLength={80} placeholder="Linen Store" onChange={(event) => updateBlock(selectedBlock.id, { name: event.currentTarget.value })} /></label>
+                <button
+                  type="button"
+                  title="Reroll: another space this setting would have, sized to this block and not already on the map"
+                  onClick={() => {
+                    // A plain reroll from the setting's catalog: no model, no prompt, just a different fitting name.
+                    const name = mysterySideRoomSuggestedNameV1(layout, selectedBlock, stableId("reroll"));
+                    commitLayout({
+                      ...layout,
+                      entities: layout.entities.map((entity) => entity.id === selectedBlock.id && entity.kind !== "room" ? { ...entity, name } : entity),
+                    });
+                  }}
+                >Reroll</button>
+              </div>
+            ) : null}
             <fieldset className={styles.mansionEditorGeometry}>
               <legend>{selectedRoom ? "Fixed silhouette" : "Block geometry"}</legend>
-              <div><span>Horizontal</span><button type="button" disabled={venueArchitectureLocked} onClick={() => commitLayout(snapMansionLayoutV2Entity(layout, selectedEntity.id, { x: selectedEntity.x - 1, y: selectedEntity.y }))}>←</button><output>{selectedEntity.x + 1}</output><button type="button" disabled={venueArchitectureLocked} onClick={() => commitLayout(snapMansionLayoutV2Entity(layout, selectedEntity.id, { x: selectedEntity.x + 1, y: selectedEntity.y }))}>→</button></div>
-              <div><span>Vertical</span><button type="button" disabled={venueArchitectureLocked} onClick={() => commitLayout(snapMansionLayoutV2Entity(layout, selectedEntity.id, { x: selectedEntity.x, y: selectedEntity.y - 1 }))}>↑</button><output>{selectedEntity.y + 1}</output><button type="button" disabled={venueArchitectureLocked} onClick={() => commitLayout(snapMansionLayoutV2Entity(layout, selectedEntity.id, { x: selectedEntity.x, y: selectedEntity.y + 1 }))}>↓</button></div>
-              <p>{venueArchitectureLocked
+              <div><span>Horizontal</span><button type="button" disabled={selectedLocked} onClick={() => commitLayout(snapMansionLayoutV2Entity(layout, selectedEntity.id, { x: selectedEntity.x - 1, y: selectedEntity.y }))}>←</button><output>{selectedEntity.x + 1}</output><button type="button" disabled={selectedLocked} onClick={() => commitLayout(snapMansionLayoutV2Entity(layout, selectedEntity.id, { x: selectedEntity.x + 1, y: selectedEntity.y }))}>→</button></div>
+              <div><span>Vertical</span><button type="button" disabled={selectedLocked} onClick={() => commitLayout(snapMansionLayoutV2Entity(layout, selectedEntity.id, { x: selectedEntity.x, y: selectedEntity.y - 1 }))}>↑</button><output>{selectedEntity.y + 1}</output><button type="button" disabled={selectedLocked} onClick={() => commitLayout(snapMansionLayoutV2Entity(layout, selectedEntity.id, { x: selectedEntity.x, y: selectedEntity.y + 1 }))}>↓</button></div>
+              <p>{selectedLocked
                 ? "Position frozen by the accepted venue architecture"
                 : selectedRoom
                   ? "Fixed room silhouette"
                   : selectedEntity.kind === "infill"
-                    ? `${selectedBlock?.width ?? 0}×${selectedBlock?.height ?? 0} ambient space · drag an edge to resize`
+                    ? `${selectedBlock?.width ?? 0}×${selectedBlock?.height ?? 0} side room · drag an edge to resize`
                     : `${selectedBlock?.width ?? 0}×${selectedBlock?.height ?? 0} corridor · drag an edge to resize`}</p>
             </fieldset>
 
             {selectedBlock && !venueArchitectureLocked ? (
               <fieldset className={styles.mansionEditorBlockRole}>
                 <legend>Block role</legend>
-                <button type="button" aria-pressed={selectedBlock.kind === "corridor"} onClick={() => convertBlockKind(selectedBlock.id, "corridor")}>
-                  <span aria-hidden="true">⇄</span><strong>Corridor</strong><small>Carries traversal between rooms</small>
-                </button>
-                <button type="button" aria-pressed={selectedBlock.kind === "infill"} onClick={() => convertBlockKind(selectedBlock.id, "infill")}>
-                  <span aria-hidden="true">◌</span><strong>Ambient space</strong><small>Reads as a room, stays inaccessible</small>
-                </button>
+                <div className={styles.mansionEditorBlockRoleOptions}>
+                  <button type="button" aria-pressed={selectedBlock.kind === "corridor"} onClick={() => convertBlockKind(selectedBlock.id, "corridor")}>
+                    <span aria-hidden="true">⇄</span><strong>Corridor</strong><small>Carries traversal between rooms</small>
+                  </button>
+                  <button type="button" aria-pressed={selectedBlock.kind === "infill"} onClick={() => convertBlockKind(selectedBlock.id, "infill")}>
+                    <span aria-hidden="true">▢</span><strong>Side room</strong><small>Named and doored, never entered</small>
+                  </button>
+                </div>
               </fieldset>
             ) : null}
 
-            {selectedEntity.kind === "infill" ? (
-              <fieldset className={styles.mansionEditorConnections}>
-                <legend>Doors</legend>
-                <p>Ambient spaces never carry doors. They dress the map like rooms and stay out of every route.</p>
-              </fieldset>
-            ) : <fieldset className={styles.mansionEditorConnections}>
-              <legend>Geometry-derived doors</legend>
+            <fieldset className={styles.mansionEditorConnections}>
+              <legend>{selectedEntity.kind === "infill" ? "Corridor doors" : "Geometry-derived doors"}</legend>
+              <div className={styles.mansionEditorConnectionsList}>
               {layout.doors.filter((door) => door.aEntityId === selectedEntity.id || door.bEntityId === selectedEntity.id).map((door) => {
                 const otherId = door.aEntityId === selectedEntity.id ? door.bEntityId : door.aEntityId;
                 const other = layout.entities.find((entity) => entity.id === otherId);
                 return (
                   <div key={door.id} className={styles.mansionEditorDoorControl}>
                     <span><strong>{other ? blockLabel(other) : "Route"}</strong><small>Shared-wall door</small></span>
-                    <input disabled={venueArchitectureLocked} aria-label={`Door position toward ${otherId}`} type="range" min="0" max="1" step="0.01" value={door.position} onChange={(event) => commitLayout(slideMansionLayoutV2Door(layout, door.id, Number(event.currentTarget.value)))} />
-                    <button type="button" disabled={venueArchitectureLocked} onClick={() => commitLayout(removeMansionLayoutV2Door(layout, door.id))}>Remove</button>
+                    <input disabled={selectedLocked} aria-label={`Door position toward ${otherId}`} type="range" min="0" max="1" step="0.01" value={door.position} onChange={(event) => commitLayout(slideMansionLayoutV2Door(layout, door.id, Number(event.currentTarget.value)))} />
+                    <button type="button" disabled={selectedLocked} onClick={() => commitLayout(removeMansionLayoutV2Door(layout, door.id))}>Remove</button>
                   </div>
                 );
               })}
               {layout.doors.every((door) => door.aEntityId !== selectedEntity.id && door.bEntityId !== selectedEntity.id)
-                ? <p>No wall doors. Save will reject an inaccessible semantic room.</p>
+                ? <p>{selectedEntity.kind === "infill"
+                    ? "No wall doors. A side room shows a door to any corridor it touches; it never carries a route."
+                    : "No wall doors. Save will reject an inaccessible semantic room."}</p>
                 : null}
-              {!venueArchitectureLocked ? layout.entities.filter((other) => {
-                if (other.id === selectedEntity.id || selectedEntity.kind === "infill" || other.kind === "infill") return false;
+              {!selectedLocked ? layout.entities.filter((other) => {
+                if (!mansionLayoutV2DoorPairIsAllowed(selectedEntity, other)) return false;
                 if (!mansionLayoutV2SharedWall(selectedEntity, other)) return false;
                 return !layout.doors.some((door) =>
                   (door.aEntityId === selectedEntity.id && door.bEntityId === other.id) ||
                   (door.aEntityId === other.id && door.bEntityId === selectedEntity.id));
               }).map((other) => (
                 <button key={other.id} type="button" onClick={() => addDoorBetween(selectedEntity.id, other.id)}>
-                  Add centered door to {other.kind === "room" ? other.name : "corridor"}
+                  Add centered door to {other.kind === "corridor" ? "corridor" : blockLabel(other)}
                 </button>
               )) : null}
-            </fieldset>}
+              </div>
+            </fieldset>
 
             {layout.verticalConnectors.filter((connector) => connector.lowerEntityId === selectedEntity.id || connector.upperEntityId === selectedEntity.id).map((connector) => (
               <div key={connector.id} className={styles.mansionEditorVerticalConnector}>
@@ -1677,6 +2210,19 @@ export default function MansionEditorDialog({
             aria-pressed={roomTool === "anchor"}
             onClick={() => setRoomTool((current) => current === "anchor" ? null : "anchor")}
           >{roomTool === "anchor" ? "Cancel anchor" : "+ Place anchor"}</button>
+          <button
+            type="button"
+            className={styles.mansionRoomEditorReadArt}
+            disabled={busy || roomArtBusy || roomToolBusy !== null || responseMode === "local" || !onDetectRoomAnchors || !roomEditorRoom.acceptedRoomAssetId || !persistedLayoutMatchesDraft || !layout.placementAnchors.some((anchor) => anchor.roomId === roomEditorRoom.id)}
+            title={responseMode === "local"
+              ? "Re-reading anchors needs ONLINE."
+              : !roomEditorRoom.acceptedRoomAssetId
+                ? "Accept a Mosaic for this room first."
+                : !persistedLayoutMatchesDraft
+                  ? "Save the venue plan first so PRISM reads the anchors you named."
+                  : "PRISM finds where each named anchor actually sits in the accepted art."}
+            onClick={() => void detectRoomTool("anchors", roomEditorRoom.id)}
+          >{roomToolBusy === "anchors" ? "Reading art…" : "Re-read anchors from art"}</button>
           <div className={styles.mansionRoomEditorList}>
             {layout.placementAnchors.filter((anchor) => anchor.roomId === roomEditorRoom.id).map((anchor) => (
               <div key={anchor.id} className={styles.mansionRoomAnchorEditor}>
@@ -1714,6 +2260,19 @@ export default function MansionEditorDialog({
               <button key={kind} type="button" aria-pressed={roomTool === kind} disabled={roomEditorLights.length >= MANSION_LAYOUT_V2_MAX_LIGHTS} onClick={() => setRoomTool((current) => current === kind ? null : kind)}>{roomTool === kind ? "Cancel" : `+ Place ${kind}`}</button>
             ))}
           </div>
+          <button
+            type="button"
+            className={styles.mansionRoomEditorReadArt}
+            disabled={busy || roomArtBusy || roomToolBusy !== null || responseMode === "local" || !onDetectRoomLights || !roomEditorRoom.acceptedRoomAssetId || !persistedLayoutMatchesDraft}
+            title={responseMode === "local"
+              ? "Reading lights from art needs ONLINE. Hand placement works in LOCAL."
+              : !roomEditorRoom.acceptedRoomAssetId
+                ? "Accept a Mosaic for this room first."
+                : !persistedLayoutMatchesDraft
+                  ? "Save the venue plan first; detection continues from the saved lights."
+                  : "PRISM reads the accepted art for fires, lamps, windows, and neon and places lights on them, replacing this room's lights in the draft."}
+            onClick={() => void detectRoomTool("lights", roomEditorRoom.id)}
+          >{roomToolBusy === "lights" ? "Reading art…" : "Auto-place lights from art"}</button>
           <div className={styles.mansionRoomEditorList}>
             {roomEditorLights.map((light) => (
               <div key={light.id} className={styles.mansionRoomLightEditor} data-light-kind={light.kind} data-selected={light.id === selectedLightId ? "true" : undefined} onClick={() => setSelectedLightId(light.id)}>
@@ -1831,6 +2390,46 @@ export default function MansionEditorDialog({
       >
         {roomEditor ?? planner}
       </WhodunnitSetupDialog>
+      {overheadEditorOpen ? <MapOverheadEditorDialog
+        key={`${mansion.id}:overhead:${selectedFloor}`}
+        placeNoun={venueProfile?.placeNoun ?? "venue"}
+        levelLabel={tierLabel(selectedFloor)}
+        imageUrl={overheadUrl}
+        frame={{
+          left: MANSION_OVERHEAD_FRAME_V1.left * cellWidthPercent,
+          top: MANSION_OVERHEAD_FRAME_V1.top * cellHeightPercent,
+          width: MANSION_OVERHEAD_FRAME_V1.columns * cellWidthPercent,
+          height: MANSION_OVERHEAD_FRAME_V1.rows * cellHeightPercent,
+        }}
+        cell={{ width: cellWidthPercent, height: cellHeightPercent }}
+        tiles={layout.entities.filter((entity) => entity.floor === selectedFloor).map((entity) => {
+          const rect = mansionLayoutV2EntityRect(entity);
+          return {
+            id: entity.id,
+            label: "name" in entity && typeof entity.name === "string" ? entity.name : "",
+            kind: entity.kind === "room" ? "room" as const : entity.kind === "corridor" ? "corridor" as const : entity.kind === "infill" ? "side" as const : "ambient" as const,
+            left: rect.x * cellWidthPercent,
+            top: rect.y * cellHeightPercent,
+            width: rect.width * cellWidthPercent,
+            height: rect.height * cellHeightPercent,
+          };
+        })}
+        placement={layout.overheadPlacement ?? null}
+        theme={theme}
+        online={responseMode === "online"}
+        onClose={() => setOverheadEditorOpen(false)}
+        onSave={(placement) => {
+          setLayout((current) => {
+            const next = { ...current };
+            if (placement) next.overheadPlacement = placement;
+            else delete next.overheadPlacement;
+            return next;
+          });
+          setOverheadEditorOpen(false);
+          setNotice("Overhead placement is in the draft. Save the venue plan to keep it.");
+        }}
+        onGenerate={generateOverhead}
+      /> : null}
       <PrismBlockingLoader
         open={saving && creationFlow}
         operation="preparation"
@@ -1842,6 +2441,30 @@ export default function MansionEditorDialog({
         stepLabel="Preparing the venue map"
         progress={0.72}
         footer="LOCAL stays local. No case truth or venue art leaves this device."
+      />
+      {/* Every synthesis or art read in the editor waits behind the same loader
+          the rest of PRISM uses; these requests finish on their own. */}
+      <PrismBlockingLoader
+        open={!saving && (roomArtBusy || overheadBusy || roomToolBusy !== null)}
+        operation="preparation"
+        placement="fullscreen"
+        theme={theme}
+        eyebrow="PRISM / Venue Editor"
+        title={overheadBusy
+          ? "Drawing the overhead plate"
+          : roomToolBusy === "lights"
+            ? "Reading light sources from the art"
+            : roomToolBusy === "anchors"
+              ? "Re-reading anchors from the art"
+              : "Refracting room art"}
+        detail={overheadBusy
+          ? "One deck plan for the venue's floors, drawn from the exterior and the room plan. Place it on the board when it lands."
+          : roomToolBusy
+            ? "PRISM reads the accepted art. The result lands in the draft; save the venue plan to keep it."
+            : "A room plate preview. Accept it or discard it before saving the venue plan."}
+        stepLabel={overheadBusy ? "Painting the plate" : roomToolBusy ? "Reading the art" : "Painting the room"}
+        progress={null}
+        footer={roomToolBusy ? "LOCAL stays local. No art leaves this device." : "This finishes on its own; nothing is saved until you save the venue plan."}
       />
     </>
   );

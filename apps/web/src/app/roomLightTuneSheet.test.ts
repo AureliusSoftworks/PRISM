@@ -32,12 +32,12 @@ describe("room light tune sheet", () => {
     assert.equal(roomLightTuneCandidateTitleV1({ label: "B", blend: "soft-light" }), "B · Soft Light");
   });
 
-  it("draws the plate first, then lights under the candidate blend, effects under the FX blend, occluders normal", () => {
+  it("draws the plate first, then each fixed layer under its own blend, occluders normal", () => {
     const source = readFileSync(new URL("./roomLightTuneSheet.ts", import.meta.url), "utf8");
-    assert.match(source, /canvas\[data-room-light-canvas="lights"\]/u);
-    assert.match(source, /drawImage\(args\.plate, origin\.x, origin\.y, width, height\);[\s\S]*?roomLightTuneCanvasBlendOpV1\(candidate\.blend\)/u);
-    assert.match(source, /roomLightTuneCanvasBlendOpV1\(MANSION_EFFECT_DEFAULT_BLEND_MODE_V1\)/u);
-    assert.match(source, /canvases\.atmosphere[\s\S]*?"source-over"/u);
+    assert.match(source, /MANSION_ROOM_LIGHT_LAYERS_V1\.map\(\(layer\) => \(\{/u);
+    assert.match(source, /canvas\[data-room-light-canvas="\$\{layer\.key\}"\]/u);
+    assert.match(source, /drawImage\(args\.plate, origin\.x, origin\.y, width, height\);[\s\S]*?roomLightTuneCanvasBlendOpV1\(layer\.blend\)/u);
+    assert.match(source, /atmosphere[\s\S]*?"source-over"/u);
     assert.match(source, /mansionDynamicLightCenterV2\(light\)/u);
   });
 });

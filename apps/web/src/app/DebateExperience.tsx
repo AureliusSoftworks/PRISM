@@ -110,6 +110,7 @@ import {
   type DebateMysteryMansionBundleSummaryV1,
   type DebateMysteryProductionCategoryV1,
   type DebateMysteryProductionCapabilitiesV1,
+  resolveDebateMysteryVenueProductionV1,
   type PortableCaseLibrarySummaryV1,
   type MansionLayoutV2,
   type MysteryVenueProposalV1,
@@ -5459,8 +5460,6 @@ export function DebateExperience(
     useState(false);
   const [mysteryIllustratedRoomSynthesis, setMysteryIllustratedRoomSynthesis] =
     useState(false);
-  const [mysteryMusicAssetSynthesis, setMysteryMusicAssetSynthesis] =
-    useState(false);
   const [mysteryAmbienceAssetSynthesis, setMysteryAmbienceAssetSynthesis] =
     useState(false);
   const [mysterySkipInvestigation, setMysterySkipInvestigation] = useState(false);
@@ -5500,7 +5499,7 @@ export function DebateExperience(
   const [mansionPackageInspection, setMansionPackageInspection] =
     useState<MansionPackageInspectionV1 | null>(null);
   const [mansionPackageState, setMansionPackageState] = useState<
-    "idle" | "inspecting" | "installing" | "exporting" | "removing" | "updating" | "generating-music" | "generating-atmosphere" | "generating-props"
+    "idle" | "inspecting" | "installing" | "exporting" | "removing" | "updating" | "generating-music" | "generating-atmosphere" | "generating-props" | "generating-sfx"
   >("idle");
   const [mansionExportPassword, setMansionExportPassword] = useState("");
   const mansionPackageInputRef = useRef<HTMLInputElement | null>(null);
@@ -7341,8 +7340,8 @@ export function DebateExperience(
           const target = result.mansions.find((mansion) => mansion.id === mansionId);
           if (
             !target ||
-            target.propThemeProgress?.complete ||
-            target.propThemeProgress?.pendingCount === 0
+            ((target.propThemeProgress?.complete || target.propThemeProgress?.pendingCount === 0) &&
+              (target.propThemeProgress?.candidatePendingCount ?? 0) === 0)
           ) return;
         }
       } catch {
@@ -7639,10 +7638,10 @@ export function DebateExperience(
       chooseInstalledMansion(result.mansion.id, result.mansion);
       return result.mansion;
     } catch (caught) {
-      if (mountedRef.current) {
-        setError(caught instanceof Error ? caught.message : "That venue plan could not be saved.");
-      }
-      return null;
+      const message = caught instanceof Error ? caught.message : "That venue plan could not be saved.";
+      if (mountedRef.current) setError(message);
+      // The venue editor sits above the studio, so it needs the reason too.
+      throw caught instanceof Error ? caught : new Error(message);
     } finally {
       if (mountedRef.current) setMansionPackageState("idle");
     }
@@ -7680,6 +7679,38 @@ export function DebateExperience(
     }
   }, [props.responseMode, request]);
 
+  /** Pre-setup parity with Field Repair: one saved-venue tool call. A reply that
+   * carries the venue replaces it in the library; other replies pass through. */
+  const requestSavedMansionTool = useCallback(async <T extends Record<string, unknown>>(
+    mansion: DebateMysteryMansionBundleSummaryV1,
+    tool: string,
+    body: Record<string, unknown> = {},
+  ): Promise<T | null> => {
+    setMansionPackageState("updating");
+    setError(null);
+    try {
+      const result = await request<T>(
+        `/api/debates/mystery-mansions/${encodeURIComponent(mansion.id)}/${tool}`,
+        { ...requestBody(body), method: "POST" },
+      );
+      if (!mountedRef.current) return null;
+      const updated = (result as { mansion?: DebateMysteryMansionBundleSummaryV1 }).mansion;
+      if (updated) {
+        setMysteryMansionBundles((current) => current.map((candidate) =>
+          candidate.id === updated.id ? updated : candidate,
+        ));
+      }
+      return result;
+    } catch (caught) {
+      if (mountedRef.current) {
+        setError(caught instanceof Error ? caught.message : "That venue tool could not run.");
+      }
+      return null;
+    } finally {
+      if (mountedRef.current) setMansionPackageState("idle");
+    }
+  }, [request]);
+
   const mutateSavedMansionAtmosphere = useCallback(async (
     mansion: DebateMysteryMansionBundleSummaryV1,
     action: "generate" | "accept" | "discard" | "undo",
@@ -7704,6 +7735,37 @@ export function DebateExperience(
       if (mountedRef.current) {
         setError(message);
       }
+      return { ok: false, error: message };
+    } finally {
+      if (mountedRef.current) setMansionPackageState("idle");
+    }
+  }, [props.responseMode, request]);
+
+  // Venue effects pack: one cue per call so the Library can show which clip is
+  // in flight and stop a batch between clips.
+  const mutateSavedMansionSfx = useCallback(async (
+    mansion: DebateMysteryMansionBundleSummaryV1,
+    cueId: import("@localai/shared").WhodunnitSfxCueIdV1,
+    action: "generate" | "accept" | "discard" | "undo",
+  ): Promise<{ ok: boolean; error: string | null }> => {
+    setMansionPackageState(action === "generate" ? "generating-sfx" : "updating");
+    setError(null);
+    try {
+      const result = await request<{ mansion: DebateMysteryMansionBundleSummaryV1 }>(
+        `/api/debates/mystery-mansions/${encodeURIComponent(mansion.id)}/sfx/${encodeURIComponent(cueId)}/${action}`,
+        {
+          ...requestBody(action === "generate" ? { responseMode: props.responseMode } : {}),
+          method: "POST",
+        },
+      );
+      if (!mountedRef.current) return { ok: false, error: null };
+      setMysteryMansionBundles((current) => current.map((candidate) =>
+        candidate.id === result.mansion.id ? result.mansion : candidate,
+      ));
+      return { ok: true, error: null };
+    } catch (caught) {
+      const message = caught instanceof Error ? caught.message : "That venue effect could not be updated.";
+      if (mountedRef.current) setError(message);
       return { ok: false, error: message };
     } finally {
       if (mountedRef.current) setMansionPackageState("idle");
@@ -7790,12 +7852,14 @@ export function DebateExperience(
   const mutateSavedMansionPropTheme = useCallback(async (
     mansion: DebateMysteryMansionBundleSummaryV1,
     archetypeId?: string,
+    action: "retry" | "regenerate" | "accept-candidate" | "discard-candidate" = "retry",
   ): Promise<{ ok: boolean; error: string | null }> => {
-    setMansionPackageState("generating-props");
+    const generates = !archetypeId || action === "retry" || action === "regenerate";
+    setMansionPackageState(generates ? "generating-props" : "updating");
     setError(null);
     try {
       const suffix = archetypeId
-        ? `/${encodeURIComponent(archetypeId)}/retry`
+        ? `/${encodeURIComponent(archetypeId)}/${action}`
         : "/generate";
       const result = await request<{ mansion: DebateMysteryMansionBundleSummaryV1 }>(
         `/api/debates/mystery-mansions/${encodeURIComponent(mansion.id)}/prop-theme${suffix}`,
@@ -7808,7 +7872,7 @@ export function DebateExperience(
       setMysteryMansionBundles((current) => current.map((candidate) =>
         candidate.id === result.mansion.id ? result.mansion : candidate,
       ));
-      pollMansionPropTheme(mansion.id);
+      if (generates) pollMansionPropTheme(mansion.id);
       return { ok: true, error: null };
     } catch (caught) {
       const message = caught instanceof Error
@@ -7820,6 +7884,61 @@ export function DebateExperience(
       if (mountedRef.current) setMansionPackageState("idle");
     }
   }, [pollMansionPropTheme, props.responseMode, request]);
+
+  /** Refracts one themed prop's model-authored name and description on the
+   * current routing; LOCAL stays local like every written repair. The result
+   * is a draft the library holds until the author saves. */
+  const refractSavedMansionPropIdentity = useCallback(async (
+    mansion: DebateMysteryMansionBundleSummaryV1,
+    archetypeId: string,
+  ): Promise<{ ok: boolean; error: string | null; identity?: { displayName: string; appearanceDescription: string } }> => {
+    setError(null);
+    try {
+      const result = await request<{ identity: { displayName: string; appearanceDescription: string } }>(
+        `/api/debates/mystery-mansions/${encodeURIComponent(mansion.id)}/prop-theme/${encodeURIComponent(archetypeId)}/refract-identity`,
+        {
+          ...requestBody({
+            responseMode: props.responseMode,
+            preferredProvider: props.preferredProvider,
+            modelOverride: props.modelOverride ?? null,
+            reasoningEffort: props.reasoningEffort,
+            turbo: props.turbo,
+          }),
+          method: "POST",
+        },
+      );
+      if (!mountedRef.current) return { ok: false, error: null };
+      return { ok: true, error: null, identity: result.identity };
+    } catch (caught) {
+      const message = caught instanceof Error ? caught.message : "That prop's identity could not be refracted.";
+      if (mountedRef.current) setError(message);
+      return { ok: false, error: message };
+    }
+  }, [props.modelOverride, props.preferredProvider, props.reasoningEffort, props.responseMode, props.turbo, request]);
+
+  /** Save writes a refracted identity the library held as a draft. */
+  const saveSavedMansionPropIdentity = useCallback(async (
+    mansion: DebateMysteryMansionBundleSummaryV1,
+    archetypeId: string,
+    identity: { displayName: string; appearanceDescription: string },
+  ): Promise<{ ok: boolean; error: string | null }> => {
+    setError(null);
+    try {
+      const result = await request<{ mansion: DebateMysteryMansionBundleSummaryV1 }>(
+        `/api/debates/mystery-mansions/${encodeURIComponent(mansion.id)}/prop-theme/${encodeURIComponent(archetypeId)}`,
+        { ...requestBody(identity), method: "PATCH" },
+      );
+      if (!mountedRef.current) return { ok: false, error: null };
+      setMysteryMansionBundles((current) => current.map((candidate) =>
+        candidate.id === result.mansion.id ? result.mansion : candidate,
+      ));
+      return { ok: true, error: null };
+    } catch (caught) {
+      const message = caught instanceof Error ? caught.message : "That prop's identity could not be saved.";
+      if (mountedRef.current) setError(message);
+      return { ok: false, error: message };
+    }
+  }, [request]);
 
   const removeSavedMansion = useCallback(async (mansion: DebateMysteryMansionBundleSummaryV1): Promise<void> => {
     setMansionPackageState("removing");
@@ -9025,6 +9144,12 @@ export function DebateExperience(
   const selectedMysteryMansionBundle = mysteryMansionBundles.find(
     (bundle) => bundle.id === mysteryMansionBundleId,
   ) ?? null;
+  // What the chosen venue already brings to Case production. It decides which
+  // requests the Production page offers and which it lists as reused, and it
+  // keeps the create request from asking for art the venue already has.
+  const mysteryVenueProduction = resolveDebateMysteryVenueProductionV1(
+    selectedMysteryMansionBundle,
+  );
   const selectedMysteryCasePackage = mysteryCasePackages.find(
     (caseFile) => caseFile.id === mysteryCasePackageId,
   ) ?? null;
@@ -9148,21 +9273,27 @@ export function DebateExperience(
         props.responseMode === "online",
       evidence:
         mysteryEvidenceAssetSynthesis && props.responseMode !== "local",
+      // A venue whose rooms all carry authored art is reused as-is; asking for
+      // Mosaic could only come back from Production Readiness as reuse.
       rooms:
         mysteryRoomAssetSynthesis &&
+        !mysteryVenueProduction.roomArt.complete &&
         !mysterySkipInvestigation &&
         props.responseMode !== "local",
+      // Upgraded (HD) rooms need a complete Mosaic pack: requested here, or
+      // already provided by the venue.
       illustratedRooms:
-        mysteryRoomAssetSynthesis &&
         mysteryIllustratedRoomSynthesis &&
+        (mysteryRoomAssetSynthesis || mysteryVenueProduction.roomArt.complete) &&
         !mysterySkipInvestigation &&
         props.responseMode !== "local",
-      music:
-        mysteryMusicAssetSynthesis &&
-        !mysterySkipInvestigation &&
-        props.responseMode === "online",
+      // Case Forge never composes music. A venue soundtrack is reused
+      // automatically, so a request could only trigger a readiness pause.
+      music: false,
+      // A venue with its own atmosphere is reused as-is.
       ambience:
         mysteryAmbienceAssetSynthesis &&
+        !mysteryVenueProduction.atmosphere &&
         !mysterySkipInvestigation,
       voices: mysteryVoiceAssetSynthesis,
     },
@@ -9692,7 +9823,6 @@ export function DebateExperience(
     setMysteryEvidenceAssetSynthesis(false);
     setMysteryRoomAssetSynthesis(false);
     setMysteryIllustratedRoomSynthesis(false);
-    setMysteryMusicAssetSynthesis(false);
     setMysteryAmbienceAssetSynthesis(false);
     setMysterySkipInvestigation(false);
     setMysteryMansionBundleId("");
@@ -18309,6 +18439,41 @@ export function DebateExperience(
       if (cancelled || pauseInFlightRef.current) return;
       const session = activeSessionRef.current;
       if (!session || !debateSessionNeedsReturnPause(session)) return;
+      if (session.format === "flyting") {
+        // The Mead Hall runs no clock. A Hall waiting for the player's boast,
+        // answer, or the Jarl's ruling stays open while they are away; only a
+        // live bout recesses, and it does so quietly instead of through the
+        // Forum recess ceremony, which would announce through the Jarl.
+        if (session.status !== "live") return;
+        pauseInFlightRef.current = true;
+        void props
+          .request<{ session: DebateSessionV1 }>(
+            `/api/debates/${encodeURIComponent(session.id)}/pause`,
+            requestBody({
+              expectedRevision: session.revision,
+              idempotencyKey: nextMutationKey("flyting-away-recess"),
+              presentationEventId: session.events.at(-1)?.id ?? null,
+              quietSave: true,
+              recessIntent: "recovery",
+            }),
+          )
+          .then((result) => {
+            if (
+              !mountedRef.current ||
+              activeSessionIdRef.current !== result.session.id
+            ) {
+              return;
+            }
+            activeSessionRef.current = result.session;
+            setActiveSession(result.session);
+            void loadSessions();
+          })
+          .catch(() => undefined)
+          .finally(() => {
+            pauseInFlightRef.current = false;
+          });
+        return;
+      }
       // Without a living-session claim (or under companion system pause), leaving
       // must recess even during the short Pause cooldown — otherwise background
       // timers can silent-skip the remaining floor. Live sits claim
@@ -18324,7 +18489,14 @@ export function DebateExperience(
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [appAwayFromUser, earlyEndOpen, view]);
+  }, [
+    appAwayFromUser,
+    earlyEndOpen,
+    loadSessions,
+    nextMutationKey,
+    props.request,
+    view,
+  ]);
 
   useEffect(() => {
     if (pauseCooldownUntilMs <= Date.now()) return;
@@ -21049,11 +21221,27 @@ export function DebateExperience(
       category: DebateMysteryProductionCategoryV1,
     ): string => productionCapability(category)?.publicReason ??
       "Checking this production capability…";
+    const venueName = selectedMysteryMansionBundle?.name?.trim() || "this venue";
+    const venueProvides = mysteryVenueProduction;
+    const venueProvidedItems: string[] = selectedMysteryMansionBundle
+      ? [
+          ...(venueProvides.roomArt.complete
+            ? [`Art for all ${venueProvides.roomArt.totalRooms} rooms`]
+            : []),
+          ...(venueProvides.music ? ["Soundtrack"] : []),
+          ...(venueProvides.atmosphere ? ["Atmosphere"] : []),
+          ...(venueProvides.propTheme?.complete ? ["Prop pack"] : []),
+        ]
+      : [];
+    const upgradedRoomsPossible =
+      mysteryRoomAssetSynthesis || venueProvides.roomArt.complete;
     const pageCopy: Record<WhodunnitSetupPage, string> = {
       mansion: "Choose where this mystery happens. Reuse a Mystery Venue or describe a fresh setting for PRISM to structure.",
       story: "Forge a fresh sealed case, or pair an installed .case with this venue and skip case synthesis.",
       experience: "Choose the courtroom tone and whether you want to investigate the venue before trial.",
-      production: "Choose optional clue visuals and music. Accepted venue art or PRISM’s neutral presentation always keeps the case playable.",
+      production: selectedMysteryMansionBundle
+        ? `Choose what PRISM should make for this case. ${selectedMysteryMansionBundle.name} keeps everything it already has; nothing here changes the venue.`
+        : "Choose what PRISM should draw and prepare for this case. Anything you skip uses PRISM's packaged art and sound.",
     };
     const mansionStepReady = Boolean(mysteryMansionBundleId);
     const mansionPageIndex = WHODUNNIT_SETUP_PAGES.findIndex(
@@ -21162,6 +21350,9 @@ export function DebateExperience(
                   onAcceptRoomArt={(mansion, roomId) => mutateSavedMansionRoomArt(mansion, roomId, "accept")}
                   onDiscardRoomArt={(mansion, roomId) => mutateSavedMansionRoomArt(mansion, roomId, "discard")}
                   onRegenerateRoomArt={(mansion, roomId) => mutateSavedMansionRoomArt(mansion, roomId, "regenerate")}
+                  onDetectRoomLights={(mansion, roomId) => requestSavedMansionTool<{ lights: import("@localai/shared").MansionDynamicLightV2[] }>(mansion, `room-art/${encodeURIComponent(roomId)}/detect-lights`).then((result) => result?.lights ?? null)}
+                  onDetectRoomAnchors={(mansion, roomId) => requestSavedMansionTool<{ placementAnchors: import("@localai/shared").MansionPlacementAnchorV2[] }>(mansion, `room-art/${encodeURIComponent(roomId)}/detect-anchors`).then((result) => result?.placementAnchors ?? null)}
+                  onGenerateOverhead={(mansion) => requestSavedMansionTool<{ mansion: DebateMysteryMansionBundleSummaryV1 }>(mansion, "overhead/generate", { responseMode: props.responseMode }).then((result) => result?.mansion ?? null)}
                   onExport={(mansion) => void exportSavedMansion(mansion)}
                   onGenerateTheme={(mansion) => mutateSavedMansionTheme(mansion, "generate")}
                   onAcceptTheme={(mansion) => mutateSavedMansionTheme(mansion, "accept")}
@@ -21171,8 +21362,18 @@ export function DebateExperience(
                   onAcceptAtmosphere={(mansion) => mutateSavedMansionAtmosphere(mansion, "accept")}
                   onDiscardAtmosphere={(mansion) => mutateSavedMansionAtmosphere(mansion, "discard")}
                   onUndoAtmosphere={(mansion) => mutateSavedMansionAtmosphere(mansion, "undo")}
+                  onGenerateSfx={(mansion, cueId) => mutateSavedMansionSfx(mansion, cueId, "generate")}
+                  onAcceptSfx={(mansion, cueId) => mutateSavedMansionSfx(mansion, cueId, "accept")}
+                  onDiscardSfx={(mansion, cueId) => mutateSavedMansionSfx(mansion, cueId, "discard")}
+                  onUndoSfx={(mansion, cueId) => mutateSavedMansionSfx(mansion, cueId, "undo")}
+                  activity={mansionPackageState.startsWith("generating-") ? mansionPackageState as "generating-music" | "generating-atmosphere" | "generating-props" | "generating-sfx" : null}
                   onGenerateProps={(mansion) => mutateSavedMansionPropTheme(mansion)}
                   onRetryProp={(mansion, archetypeId) => mutateSavedMansionPropTheme(mansion, archetypeId)}
+                  onRegenerateProp={(mansion, archetypeId) => mutateSavedMansionPropTheme(mansion, archetypeId, "regenerate")}
+                  onRefractPropIdentity={refractSavedMansionPropIdentity}
+                  onSavePropIdentity={saveSavedMansionPropIdentity}
+                  onAcceptPropCandidate={(mansion, archetypeId) => mutateSavedMansionPropTheme(mansion, archetypeId, "accept-candidate")}
+                  onDiscardPropCandidate={(mansion, archetypeId) => mutateSavedMansionPropTheme(mansion, archetypeId, "discard-candidate")}
                   onRemove={(mansion) => void removeSavedMansion(mansion)}
                 />
                 <div className={mysteryStyles.guidedSecondaryAction} data-tutorial-target="whodunnit-mansion-library">
@@ -21352,7 +21553,7 @@ export function DebateExperience(
             <label className={mysteryStyles.caseModeChoice} data-selected={mysterySkipInvestigation ? "true" : undefined} data-tutorial-target="whodunnit-v2-skip-investigation">
               <input type="checkbox" checked={mysterySkipInvestigation} onChange={(event) => {
                 setMysterySkipInvestigation(event.currentTarget.checked);
-                if (event.currentTarget.checked) { setMysteryRoomAssetSynthesis(false); setMysteryIllustratedRoomSynthesis(false); setMysteryMusicAssetSynthesis(false); setMysteryAmbienceAssetSynthesis(false); }
+                if (event.currentTarget.checked) { setMysteryRoomAssetSynthesis(false); setMysteryIllustratedRoomSynthesis(false); setMysteryAmbienceAssetSynthesis(false); }
                 setMysteryNonce(nextMysteryRecipeNonce());
               }} />
               <span><strong>{playerRole === "spectator" ? "Start directly in court" : "Skip investigation"}</strong><small>{playerRole === "spectator" ? "Bypass conclusion review and begin the watch-only trial after the title card." : "Prepare only the second act and enter court directly after the title card."}</small></span>
@@ -21363,46 +21564,65 @@ export function DebateExperience(
         {mysterySetupPage === "production" ? (
           <div className={mysteryStyles.caseDial} data-tutorial-target="whodunnit-production">
             {!selectedMysteryMansionBundle ? <label className={mysteryStyles.setupField}>Room art <select value={mysteryArtMode} onChange={(event) => { setMysteryArtMode(event.currentTarget.value as DebateMysteryArtMode); setMysteryNonce(nextMysteryRecipeNonce()); }}><option value="bundled">Bundled PRISM rooms</option><option value="generated" disabled={!inspectedMysterySeed}>Generated reskins · Legacy Case Seed</option></select><small>V2 uses aligned bundled rooms; imported V1 Case Seeds retain their generated-reskin option.</small></label> : null}
-            <fieldset className={mysteryStyles.assetForgeChoices} data-tutorial-target="whodunnit-v2-assets">
+            <fieldset className={mysteryStyles.assetForgeChoices} data-tutorial-target="whodunnit-v2-assets" data-venue-production={selectedMysteryMansionBundle ? "true" : undefined}>
               <legend>Case production</legend>
-              <p className={mysteryStyles.assetForgeModeNote}><strong>Requested generation is verified before the case opens.</strong> If any requested category is reused, unavailable, or falls back, Case Forge pauses at Production Readiness so you can retry it or explicitly continue. Case-scoped work never overwrites the reusable venue.</p>
-              <label data-enabled={mysteryExteriorAssetSynthesis && productionAvailable("exterior") ? "true" : undefined} aria-disabled={mysterySkipInvestigation || !productionAvailable("exterior")}>
+              <p className={mysteryStyles.assetForgeModeNote}><strong>PRISM checks everything you ask for before the case opens.</strong> If something had to be reused or swapped, Case Forge pauses at Production Readiness so you can retry it or continue anyway. {selectedMysteryMansionBundle ? `${venueName} itself is never changed; anything made here belongs to this case.` : "Anything made here belongs to this case."}</p>
+              {venueProvidedItems.length > 0 ? (
+                <div className={mysteryStyles.assetForgeProvided} data-venue-provided="true">
+                  <strong>Already part of {venueName}</strong>
+                  <ul>{venueProvidedItems.map((item) => <li key={item}>{item}</li>)}</ul>
+                  <small>Reused exactly as they are, so they are not offered below. PRISM only offers what the venue lacks.</small>
+                </div>
+              ) : null}
+              <div className={mysteryStyles.assetForgeGroup} aria-hidden="true"><span>Pictures</span></div>
+              <label data-enabled={mysteryExteriorAssetSynthesis && productionAvailable("exterior") && !mysterySkipInvestigation ? "true" : undefined} aria-disabled={mysterySkipInvestigation || !productionAvailable("exterior")}>
                 <input type="checkbox" checked={mysteryExteriorAssetSynthesis && productionAvailable("exterior") && !mysterySkipInvestigation} disabled={mysterySkipInvestigation || !productionAvailable("exterior")} onChange={(event) => { setMysteryExteriorAssetSynthesis(event.currentTarget.checked); setMysteryNonce(nextMysteryRecipeNonce()); }} />
-                <span><strong>Exterior</strong><small>{mysterySkipInvestigation ? "Unavailable · court-only cases do not open at the venue." : productionReason("exterior")}</small></span>
+                <span><strong>Exterior</strong><small>{mysterySkipInvestigation ? "Unavailable · court-only cases do not open at the venue." : productionAvailable("exterior") ? `A unique establishing shot of ${venueName} for the title card. Without it, PRISM picks a matching cover from its collection.` : productionReason("exterior")}</small></span>
               </label>
-              <label data-enabled={mysteryUseRelevantAssetLibraryProps ? "true" : undefined} data-tutorial-target="whodunnit-v2-personal-props">
-                <input type="checkbox" checked={mysteryUseRelevantAssetLibraryProps} onChange={(event) => { setMysteryUseRelevantAssetLibraryProps(event.currentTarget.checked); setMysteryNonce(nextMysteryRecipeNonce()); }} />
-                <span><strong>Use props from my Asset Library</strong><small>Optional · PRISM can weave up to two compatible Items or Debate exhibits into matching clues. This does not change your venue; their identity is frozen before the case is written.</small></span>
+              {!venueProvides.roomArt.complete ? (
+                <label data-enabled={mysteryRoomAssetSynthesis && productionAvailable("mosaic_rooms") && !mysterySkipInvestigation ? "true" : undefined} aria-disabled={mysterySkipInvestigation || !productionAvailable("mosaic_rooms")}>
+                  <input type="checkbox" checked={mysteryRoomAssetSynthesis && productionAvailable("mosaic_rooms") && !mysterySkipInvestigation} disabled={mysterySkipInvestigation || !productionAvailable("mosaic_rooms")} onChange={(event) => { const enabled = event.currentTarget.checked; setMysteryRoomAssetSynthesis(enabled); if (!enabled) setMysteryIllustratedRoomSynthesis(false); setMysteryNonce(nextMysteryRecipeNonce()); }} />
+                  <span><strong>{venueProvides.roomArt.authoredRooms > 0 ? "Draw the missing room art" : "Every room in Mosaic"}</strong><small>{mysterySkipInvestigation ? "Unavailable · court-only cases exclude room scenes." : !productionAvailable("mosaic_rooms") ? productionReason("mosaic_rooms") : venueProvides.roomArt.authoredRooms > 0 ? `${venueName} has art for ${venueProvides.roomArt.authoredRooms} of ${venueProvides.roomArt.totalRooms} rooms. PRISM draws the rest in Mosaic, keeps the existing rooms, then pauses so you can confirm the mix.` : "Draws every room in PRISM's Mosaic style. Without it, rooms use PRISM's packaged art."}</small></span>
+                </label>
+              ) : null}
+              <label data-child-option={!venueProvides.roomArt.complete ? "true" : undefined} data-enabled={mysteryIllustratedRoomSynthesis && upgradedRoomsPossible && productionAvailable("realistic_rooms") && !mysterySkipInvestigation ? "true" : undefined} aria-disabled={!upgradedRoomsPossible || mysterySkipInvestigation || !productionAvailable("realistic_rooms")}>
+                <input type="checkbox" checked={mysteryIllustratedRoomSynthesis && upgradedRoomsPossible && productionAvailable("realistic_rooms") && !mysterySkipInvestigation} disabled={!upgradedRoomsPossible || mysterySkipInvestigation || !productionAvailable("realistic_rooms")} onChange={(event) => { setMysteryIllustratedRoomSynthesis(event.currentTarget.checked); setMysteryNonce(nextMysteryRecipeNonce()); }} />
+                <span><strong>Upgraded rooms (HD)</strong><small>{mysterySkipInvestigation ? "Unavailable · court-only cases have no room pack." : !productionAvailable("realistic_rooms") ? productionReason("realistic_rooms") : !upgradedRoomsPossible ? "Choose Every room in Mosaic first, or pick a venue whose rooms already have art." : `A high-detail version of each ${venueProvides.roomArt.complete ? `${venueName} room` : "Mosaic room"}, prepared before play. You can switch between Mosaic and Upgraded while you investigate.`}</small></span>
               </label>
               <label data-enabled={mysteryEvidenceAssetSynthesis && productionAvailable("clue_props") ? "true" : undefined} aria-disabled={!productionAvailable("clue_props")}>
                 <input type="checkbox" checked={mysteryEvidenceAssetSynthesis && productionAvailable("clue_props")} disabled={!productionAvailable("clue_props")} onChange={(event) => { setMysteryEvidenceAssetSynthesis(event.currentTarget.checked); setMysteryNonce(nextMysteryRecipeNonce()); }} />
-                <span><strong>Setting-matched clue props</strong><small>{productionReason("clue_props")}</small></span>
+                <span><strong>Setting-matched clue props</strong><small>{!productionAvailable("clue_props") ? productionReason("clue_props") : venueProvides.propTheme ? `Pictures of the clues, drawn to match ${venueName}. Its prop pack is used first; PRISM draws only what the pack lacks.` : "Pictures of the clues, drawn to match the setting. Without them, clues use PRISM's standard clue cards."}</small></span>
               </label>
-              <label data-enabled={mysteryRoomAssetSynthesis && productionAvailable("mosaic_rooms") && !mysterySkipInvestigation ? "true" : undefined} aria-disabled={mysterySkipInvestigation || !productionAvailable("mosaic_rooms")}>
-                <input type="checkbox" checked={mysteryRoomAssetSynthesis && productionAvailable("mosaic_rooms") && !mysterySkipInvestigation} disabled={mysterySkipInvestigation || !productionAvailable("mosaic_rooms")} onChange={(event) => { const enabled = event.currentTarget.checked; setMysteryRoomAssetSynthesis(enabled); if (!enabled) setMysteryIllustratedRoomSynthesis(false); setMysteryNonce(nextMysteryRecipeNonce()); }} />
-                <span><strong>Every room in Mosaic</strong><small>{mysterySkipInvestigation ? "Unavailable · court-only cases exclude room scenes." : productionReason("mosaic_rooms")}</small></span>
+              <label data-enabled={mysteryUseRelevantAssetLibraryProps ? "true" : undefined} data-tutorial-target="whodunnit-v2-personal-props">
+                <input type="checkbox" checked={mysteryUseRelevantAssetLibraryProps} onChange={(event) => { setMysteryUseRelevantAssetLibraryProps(event.currentTarget.checked); setMysteryNonce(nextMysteryRecipeNonce()); }} />
+                <span><strong>Use props from my Asset Library</strong><small>Optional. PRISM may weave up to two of your compatible Items or Debate exhibits into matching clues. The venue is untouched, and each prop's identity is frozen before the case is written.</small></span>
               </label>
-              <label data-enabled={mysteryIllustratedRoomSynthesis && mysteryRoomAssetSynthesis && productionAvailable("realistic_rooms") && !mysterySkipInvestigation ? "true" : undefined} aria-disabled={!mysteryRoomAssetSynthesis || mysterySkipInvestigation || !productionAvailable("realistic_rooms")}>
-                <input type="checkbox" checked={mysteryIllustratedRoomSynthesis && mysteryRoomAssetSynthesis && productionAvailable("realistic_rooms") && !mysterySkipInvestigation} disabled={!mysteryRoomAssetSynthesis || mysterySkipInvestigation || !productionAvailable("realistic_rooms")} onChange={(event) => { setMysteryIllustratedRoomSynthesis(event.currentTarget.checked); setMysteryNonce(nextMysteryRecipeNonce()); }} />
-                <span><strong>Upgraded</strong><small>{!mysteryRoomAssetSynthesis ? "Choose Every room in Mosaic first." : mysterySkipInvestigation ? "Unavailable · court-only cases have no room pack." : `Creates an HD interpretation of each room's Mosaic while preserving its composition and geometry. ${productionReason("realistic_rooms")}`}</small></span>
-              </label>
-              <label data-enabled={mysteryMusicAssetSynthesis && productionAvailable("music") && !mysterySkipInvestigation ? "true" : undefined} aria-disabled={mysterySkipInvestigation || !productionAvailable("music")}>
-                <input type="checkbox" checked={mysteryMusicAssetSynthesis && productionAvailable("music") && !mysterySkipInvestigation} disabled={mysterySkipInvestigation || !productionAvailable("music")} onChange={(event) => { setMysteryMusicAssetSynthesis(event.currentTarget.checked); setMysteryNonce(nextMysteryRecipeNonce()); }} />
-                <span><strong>Music</strong><small>{mysterySkipInvestigation ? "Unavailable · court-only cases exclude investigation music." : productionReason("music")}</small></span>
-              </label>
-              <label data-enabled={mysteryAmbienceAssetSynthesis && productionAvailable("ambience") && !mysterySkipInvestigation ? "true" : undefined} aria-disabled={mysterySkipInvestigation || !productionAvailable("ambience")} data-tutorial-target="whodunnit-v2-ambience-synthesis">
-                <input type="checkbox" checked={mysteryAmbienceAssetSynthesis && productionAvailable("ambience") && !mysterySkipInvestigation} disabled={mysterySkipInvestigation || !productionAvailable("ambience")} onChange={(event) => { setMysteryAmbienceAssetSynthesis(event.currentTarget.checked); setMysteryNonce(nextMysteryRecipeNonce()); }} />
-                <span><strong>Ambience</strong><small>{mysterySkipInvestigation ? "Unavailable · court-only cases exclude venue ambience." : productionReason("ambience")}</small></span>
-              </label>
+              <div className={mysteryStyles.assetForgeGroup} aria-hidden="true"><span>Sound</span></div>
+              <div className={mysteryStyles.assetForgeStatusRow} data-production-status="music" data-venue-provided={venueProvides.music ? "true" : undefined}>
+                <i aria-hidden="true">{venueProvides.music ? "✓" : "♪"}</i>
+                <span><strong>Music</strong><small>{mysterySkipInvestigation ? "Court-only cases skip the investigation, so no investigation music plays." : venueProvides.music ? `${venueName}'s soundtrack plays during the investigation.` : "PRISM's investigation music plays. To give this venue its own soundtrack, compose one in the Venue Library."}</small></span>
+              </div>
+              {venueProvides.atmosphere ? (
+                <div className={mysteryStyles.assetForgeStatusRow} data-production-status="ambience" data-venue-provided="true" data-tutorial-target="whodunnit-v2-ambience-synthesis">
+                  <i aria-hidden="true">✓</i>
+                  <span><strong>Ambience</strong><small>{`${venueName}'s own atmosphere plays in every room, so there is nothing to add.`}</small></span>
+                </div>
+              ) : (
+                <label data-enabled={mysteryAmbienceAssetSynthesis && productionAvailable("ambience") && !mysterySkipInvestigation ? "true" : undefined} aria-disabled={mysterySkipInvestigation || !productionAvailable("ambience")} data-tutorial-target="whodunnit-v2-ambience-synthesis">
+                  <input type="checkbox" checked={mysteryAmbienceAssetSynthesis && productionAvailable("ambience") && !mysterySkipInvestigation} disabled={mysterySkipInvestigation || !productionAvailable("ambience")} onChange={(event) => { setMysteryAmbienceAssetSynthesis(event.currentTarget.checked); setMysteryNonce(nextMysteryRecipeNonce()); }} />
+                  <span><strong>Ambience</strong><small>{mysterySkipInvestigation ? "Unavailable · court-only cases exclude venue ambience." : productionAvailable("ambience") ? `Personalize local ambience: PRISM tunes each room's acoustics to ${venueName}. Works in LOCAL; no audio is generated.` : productionReason("ambience")}</small></span>
+                </label>
+              )}
+              <div className={mysteryStyles.assetForgeGroup} aria-hidden="true"><span>Voices</span></div>
               <label data-enabled={mysteryVoiceAssetSynthesis && productionAvailable("voices") ? "true" : undefined} aria-disabled={!productionAvailable("voices")}>
                 <input type="checkbox" checked={mysteryVoiceAssetSynthesis && productionAvailable("voices")} disabled={!productionAvailable("voices")} onChange={(event) => { setMysteryVoiceAssetSynthesis(event.currentTarget.checked); setMysteryNonce(nextMysteryRecipeNonce()); }} />
-                <span><strong>Performance voices</strong><small>{productionReason("voices")}</small></span>
+                <span><strong>Performance voices</strong><small>{productionAvailable("voices") ? "Prepares the frozen cast's spoken performances before the case opens, after a short local voice check." : productionReason("voices")}</small></span>
               </label>
-              <p>Generated case art stays attached to its case. Saving production work back into a reusable venue is a separate Library action.</p>
+              <p>Everything made here stays attached to this case. To keep production work for future cases, save it into a reusable venue from the Venue Library.</p>
             </fieldset>
-            <button type="button" className={mysteryStyles.seedButton} onClick={() => setMysteryNonce(nextMysteryRecipeNonce())}><span>Recipe Seed</span><code>{mysteryRecipeSeed}</code><small>Change the recipe</small></button>
+            <button type="button" className={mysteryStyles.seedButton} onClick={() => setMysteryNonce(nextMysteryRecipeNonce())}><span>Recipe Seed</span><code>{mysteryRecipeSeed}</code><small>The fingerprint of this exact setup. It changes with every edit; tap to reshuffle the hidden recipe.</small></button>
             <div className={mysteryStyles.guidedSecondaryAction}>
-              <div><strong>Legacy Case Seed</strong><small>Only needed to restore an older shared case.</small></div>
+              <div><strong>Restore an older case</strong><small>Paste a Legacy Case Seed from a version of Whodunnit before Mystery Venues. New cases never need this.</small></div>
               <button type="button" data-tutorial-target="whodunnit-seed-import" onClick={() => setLegacySeedImportOpen(true)}>Import legacy seed</button>
             </div>
           </div>
@@ -33530,6 +33750,9 @@ export function DebateExperience(
           onAcceptRoomArt={(mansion, roomId) => mutateSavedMansionRoomArt(mansion, roomId, "accept")}
           onDiscardRoomArt={(mansion, roomId) => mutateSavedMansionRoomArt(mansion, roomId, "discard")}
           onRegenerateRoomArt={(mansion, roomId) => mutateSavedMansionRoomArt(mansion, roomId, "regenerate")}
+          onDetectRoomLights={(mansion, roomId) => requestSavedMansionTool<{ lights: import("@localai/shared").MansionDynamicLightV2[] }>(mansion, `room-art/${encodeURIComponent(roomId)}/detect-lights`).then((result) => result?.lights ?? null)}
+          onDetectRoomAnchors={(mansion, roomId) => requestSavedMansionTool<{ placementAnchors: import("@localai/shared").MansionPlacementAnchorV2[] }>(mansion, `room-art/${encodeURIComponent(roomId)}/detect-anchors`).then((result) => result?.placementAnchors ?? null)}
+          onGenerateOverhead={(mansion) => requestSavedMansionTool<{ mansion: DebateMysteryMansionBundleSummaryV1 }>(mansion, "overhead/generate", { responseMode: props.responseMode }).then((result) => result?.mansion ?? null)}
         />
       ) : null}
       {renderStageAlignmentModal(activeSession)}

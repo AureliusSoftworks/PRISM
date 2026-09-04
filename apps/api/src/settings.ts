@@ -4,6 +4,7 @@ import type {
   EnglishVoiceEngine,
   VoiceMode,
   WhodunnitTextVoiceMode,
+  WhodunnitSpeechType,
 } from "@localai/shared";
 import {
   DEFAULT_PRISM_MOOD_SENSITIVITY,
@@ -20,6 +21,7 @@ import {
   normalizeEnglishVoiceEngine,
   normalizeSpeechTypeVoiceMode,
   normalizeWhodunnitTextVoiceMode,
+  normalizeWhodunnitSpeechType,
   parseStoredAutoFallbackChain,
   parseStoredBotAudioVoiceProfileV1,
   normalizeAutoFallbackChain,
@@ -200,6 +202,7 @@ export interface CurrentSettings {
   coffeeExperimentalTableAngleEnabled: number;
   debateWhodunnitReuseSynthesizedExhibits: number;
   debateWhodunnitTextVoiceMode: string | null;
+  debateWhodunnitSpeechType: string | null;
   psychicModeEnabled: number;
   /** @deprecated Import/backup compatibility only; runtime routing ignores it. */
   autoSwitchModel: number;
@@ -289,6 +292,7 @@ export interface NextSettings {
   coffeeExperimentalTableAngleEnabled: number;
   debateWhodunnitReuseSynthesizedExhibits: number;
   debateWhodunnitTextVoiceMode: WhodunnitTextVoiceMode;
+  debateWhodunnitSpeechType: WhodunnitSpeechType;
   psychicModeEnabled: number;
   autoSwitchModel: number;
   autoFallbackChain: string | null;
@@ -1054,6 +1058,10 @@ export function resolveNextSettings(
     body.debateWhodunnitTextVoiceMode,
     normalizeWhodunnitTextVoiceMode(current.debateWhodunnitTextVoiceMode),
   );
+  const debateWhodunnitSpeechType = normalizeWhodunnitSpeechType(
+    body.debateWhodunnitSpeechType,
+    normalizeWhodunnitSpeechType(current.debateWhodunnitSpeechType),
+  );
   const psychicModeEnabled =
     typeof body.psychicModeEnabled === "boolean"
       ? Number(body.psychicModeEnabled)
@@ -1491,6 +1499,7 @@ export function resolveNextSettings(
     coffeeExperimentalTableAngleEnabled,
     debateWhodunnitReuseSynthesizedExhibits,
     debateWhodunnitTextVoiceMode,
+    debateWhodunnitSpeechType,
     psychicModeEnabled,
     autoSwitchModel,
     autoFallbackChain,

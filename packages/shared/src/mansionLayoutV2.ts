@@ -149,9 +149,42 @@ export type MansionLightBlendModeV1 = typeof MANSION_LIGHT_BLEND_MODES_V1[number
 /** A room's blend is one pick for all of its lights. New rooms start on Hard Light,
  * which reads well for most sources once their intensity is brought down. */
 export const MANSION_LIGHT_DEFAULT_BLEND_MODE_V1: MansionLightBlendModeV1 = "hard-light";
-/** Light-like effects (rain, caustics) composite on their own layer with this
- * blend; occluders (steam, fog, snow) stay normal so they can veil the plate. */
-export const MANSION_EFFECT_DEFAULT_BLEND_MODE_V1: MansionLightBlendModeV1 = "overlay";
+/**
+ * How each kind of light or effect composites, fixed by what it physically is:
+ * glows and bloom add light, volumetric shafts and reflected washes screen it,
+ * fog and steam are alpha and veil the plate instead of lighting it. Blend is
+ * not a per-room or per-light choice; intensity is the knob an author turns.
+ */
+export const MANSION_ROOM_LIGHT_LAYERS_V1 = Object.freeze([
+  { key: "glow", blend: "plus-lighter" },
+  { key: "shaft", blend: "screen" },
+] as const);
+export type MansionRoomLightLayerKeyV1 = typeof MANSION_ROOM_LIGHT_LAYERS_V1[number]["key"];
+/** Lamps, fire, and neon are glows; window beams are volumetric shafts. */
+export const MANSION_LIGHT_KIND_LAYER_V1 = Object.freeze({
+  omni: "glow",
+  fire: "glow",
+  neon: "glow",
+  directional: "shaft",
+}) as Readonly<Record<"omni" | "fire" | "directional" | "neon", MansionRoomLightLayerKeyV1>>;
+/** Rain and caustics are reflected light washes; steam, fog, and snow are alpha. */
+export const MANSION_EFFECT_KIND_LAYER_V1 = Object.freeze({
+  rain: "shaft",
+  caustics: "shaft",
+  steam: "atmosphere",
+  fog: "atmosphere",
+  snow: "atmosphere",
+}) as Readonly<Record<"steam" | "fog" | "rain" | "snow" | "caustics", MansionRoomLightLayerKeyV1 | "atmosphere">>;
+/** The layer one light or effect paints on. Unknown kinds fall back to glow so nothing vanishes. */
+export function mansionRoomEntryLayerV1(entry: { kind: string }): MansionRoomLightLayerKeyV1 | "atmosphere" {
+  return (MANSION_LIGHT_KIND_LAYER_V1 as Record<string, MansionRoomLightLayerKeyV1 | undefined>)[entry.kind]
+    ?? (MANSION_EFFECT_KIND_LAYER_V1 as Record<string, MansionRoomLightLayerKeyV1 | "atmosphere" | undefined>)[entry.kind]
+    ?? "glow";
+}
+/** CSS blend for a layer key; the atmosphere canvas composites normally. */
+export function mansionRoomLightLayerBlendV1(key: MansionRoomLightLayerKeyV1 | "atmosphere"): MansionLightBlendModeV1 {
+  return MANSION_ROOM_LIGHT_LAYERS_V1.find((layer) => layer.key === key)?.blend ?? "normal";
+}
 /** Intensity a freshly spawned light gets, by kind. Lamps start at half so Hard
  * Light does not blow them out; the author then tunes each light individually. */
 export const MANSION_LIGHT_DEFAULT_INTENSITY_V1 = Object.freeze({
@@ -192,6 +225,8 @@ export interface MansionLayoutBlockV2 {
   y: number;
   width: number;
   height: number;
+  /** Infill only: the side room's player-facing name, such as "Linen Store". */
+  name?: string;
 }
 
 export type MansionLayoutEntityV2 = MansionLayoutRoomV2 | MansionLayoutBlockV2;
@@ -458,6 +493,14 @@ function isFiniteNormalized(value: number): boolean {
 
 function entityIsTraversable(entity: MansionLayoutEntityV2): boolean {
   return entity.kind === "room" || entity.kind === "corridor";
+}
+
+/** A door joins two traversable blocks, or a side room (infill) to a corridor. The side
+ * room shows its door on the map but never carries traversal. */
+export function mansionLayoutV2DoorPairIsAllowed(a: MansionLayoutEntityV2, b: MansionLayoutEntityV2): boolean {
+  if (a.id === b.id) return false;
+  if (entityIsTraversable(a) && entityIsTraversable(b)) return true;
+  return (a.kind === "infill" && b.kind === "corridor") || (a.kind === "corridor" && b.kind === "infill");
 }
 
 export function mansionLayoutV2RoomFootprint(
@@ -780,7 +823,7 @@ export function reconcileMansionLayoutV2Doors(
     doors: layout.doors.filter((door) => {
       const a = byId.get(door.aEntityId);
       const b = byId.get(door.bEntityId);
-      const wall = a && b && entityIsTraversable(a) && entityIsTraversable(b)
+      const wall = a && b && mansionLayoutV2DoorPairIsAllowed(a, b)
         ? mansionLayoutV2SharedWall(a, b)
         : null;
       return Boolean(
@@ -798,12 +841,12 @@ export function addAutoCenteredMansionLayoutV2Doors(
 ): MansionLayoutV2 {
   const reconciled = reconcileMansionLayoutV2Doors(layout);
   const entity = reconciled.entities.find((candidate) => candidate.id === entityId);
-  if (!entity || !entityIsTraversable(entity)) return reconciled;
+  if (!entity) return reconciled;
   const paired = new Set(reconciled.doors.map((door) => pairKey(door.aEntityId, door.bEntityId)));
   const usedIds = new Set(reconciled.doors.map((door) => door.id));
   const doors = [...reconciled.doors];
   for (const other of reconciled.entities) {
-    if (other.id === entity.id || !entityIsTraversable(other)) continue;
+    if (!mansionLayoutV2DoorPairIsAllowed(entity, other)) continue;
     const wall = mansionLayoutV2SharedWall(entity, other);
     if (!wall || paired.has(pairKey(entity.id, other.id))) continue;
     doors.push({
@@ -1786,6 +1829,9 @@ export function validateMansionLayoutV2(
     const attached = layout.entities.some((other) =>
       other.id !== entity.id && mansionLayoutV2SharedWall(entity, other) !== null);
     if (!attached) errors.push(`${entity.id} is floating decorative infill; attach it to the floor plan.`);
+    if (entity.name !== undefined && (typeof entity.name !== "string" || entity.name.length > 80)) {
+      errors.push(`${entity.id} has an invalid side room name.`);
+    }
   }
 
   const floors = new Set(rooms.map((room) => room.floor));
@@ -1853,7 +1899,7 @@ export function validateMansionLayoutV2(
     doorIds.add(door.id);
     const a = entityById.get(door.aEntityId);
     const b = entityById.get(door.bEntityId);
-    if (!a || !b || !entityIsTraversable(a) || !entityIsTraversable(b) || a.id === b.id) {
+    if (!a || !b || !mansionLayoutV2DoorPairIsAllowed(a, b)) {
       errors.push(`${door.id || "A door"} references an invalid traversal block.`);
       continue;
     }

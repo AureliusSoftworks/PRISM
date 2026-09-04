@@ -772,6 +772,7 @@ export {
   resolveBotPronunciationMapPointV1,
   normalizeVoiceMode,
   normalizeWhodunnitTextVoiceMode,
+  normalizeWhodunnitSpeechType,
   normalizeVoiceDeliveryMood,
   elevenLabsVoiceDirectionForMood,
   expectedVoicePlaybackDurationMs,
@@ -845,6 +846,8 @@ export {
   type VoiceMode,
   type WhodunnitTextVoiceMode,
   DEFAULT_WHODUNNIT_TEXT_VOICE_MODE,
+  type WhodunnitSpeechType,
+  DEFAULT_WHODUNNIT_SPEECH_TYPE,
 } from "./audioVoice.js";
 
 export {
@@ -3918,9 +3921,11 @@ export * from "./mysteryIncidentPlan.js";
 export * from "./portableMysteryPackage.js";
 export * from "./portableMysteryCase.js";
 export * from "./whodunnitProps.js";
+export * from "./whodunnitSfx.js";
 export * from "./mansionLayoutV2.js";
 export * from "./roomLightTune.js";
 export * from "./mysteryVenue.js";
+export * from "./mysterySideRooms.js";
 export * from "./mansionAutoDecorationV2.js";
 export * from "./mansionMusic.js";
 export * from "./audioAssets.js";

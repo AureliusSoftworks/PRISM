@@ -46,6 +46,20 @@ describe("Whodunnit Casekeeper room narration", () => {
     assert.match(narration, /spiky-haired attorney/iu);
   });
 
+  it("never puts the article on a stranded predicate after the name is removed", () => {
+    const narration = debateMysteryRoomNarrationTextV2({
+      personaName: "Mr. Dawkins",
+      appearance: {
+        description: "Mr. Dawkins is a tall, bespectacled man with a calm and confident demeanor",
+        presence: "authoritative",
+      },
+      fixtureLabels: ["closed door"],
+    });
+
+    assert.match(narration, /^A tall, bespectacled man/u);
+    assert.doesNotMatch(narration, /\bAn is\b|\bA is\b|Dawkins/u);
+  });
+
   it("removes short identity tokens as strictly as full names", () => {
     const narration = debateMysteryRoomNarrationTextV2({
       personaName: "Al Li",

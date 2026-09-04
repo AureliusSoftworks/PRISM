@@ -5,7 +5,7 @@ import { DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1 } from "@localai/shared";
 import { playWhodunnitPremiumVoice, type WhodunnitPremiumSelection } from "./debateMysteryPremiumVoice.ts";
 
 const selected: WhodunnitPremiumSelection = {
-  voiceMode: "english", englishVoiceEngine: "elevenlabs", audioEnabled: true,
+  voiceMode: "english", whodunnitSpeechType: "premium", audioEnabled: true,
   volume: 0.7, localOnly: false, hasKey: true,
 };
 const performance = {
@@ -37,8 +37,7 @@ test("Premium plays only the requested visible performance through the supplied 
 test("muted, LOCAL, missing-key, local English, Babble and Bottish never request Premium", async () => {
   for (const override of [
     { audioEnabled: false }, { volume: 0 }, { voiceMode: "mute" },
-    { localOnly: true }, { hasKey: false }, { englishVoiceEngine: "builtin" },
-    { englishVoiceEngine: "system" }, { voiceMode: "babble" }, { voiceMode: "bottish" },
+    { localOnly: true }, { hasKey: false }, { whodunnitSpeechType: "english" as const },
   ]) {
     let reads = 0;
     assert.equal(await playWhodunnitPremiumVoice({
@@ -73,7 +72,7 @@ test("a selection change or cancellation during the read cannot start stale Prem
       signal: controller.signal, lifecycle: {}, selection: () => selection,
       read: async () => {
         if (cancel) controller.abort();
-        else selection = { ...selected, voiceMode: "babble" };
+        else selection = { ...selected, whodunnitSpeechType: "english" };
         return { performance };
       },
       play: async () => { played = true; return true; }, stop: () => {},

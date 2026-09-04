@@ -4,7 +4,7 @@ import { useEffect, useRef, useState, type CSSProperties, type KeyboardEvent, ty
 import { createPortal } from "react-dom";
 import { PrismBlockingLoader } from "./PrismBlockingLoader";
 import { composeRoomLightTuneSheet, type RoomLightTuneSheetV1 } from "./roomLightTuneSheet";
-import { MANSION_LAYOUT_V2_MAX_EFFECTS, MANSION_LAYOUT_V2_MAX_LIGHTS, MANSION_LIGHT_BLEND_MODES_V1, MANSION_LIGHT_DEFAULT_BLEND_MODE_V1, ROOM_LIGHT_TUNE_BLEND_SHORTLIST_V1, mansionGodrayEdgesV2, mansionNaturalLightTintV2, type MansionDynamicLightV2, type MansionLightBlendModeV1, type MansionRoomEffectKindV1, type MansionRoomEffectV1 } from "@localai/shared";
+import { MANSION_LAYOUT_V2_MAX_EFFECTS, MANSION_LAYOUT_V2_MAX_LIGHTS, MANSION_LIGHT_DEFAULT_BLEND_MODE_V1, mansionGodrayEdgesV2, mansionNaturalLightTintV2, type MansionDynamicLightV2, type MansionLightBlendModeV1, type MansionRoomEffectKindV1, type MansionRoomEffectV1 } from "@localai/shared";
 import { DebateMysteryRoomCinematographyLayer } from "./debateMysteryRoomCinematographyLayer";
 import {
   ROOM_EFFECT_KINDS,
@@ -59,10 +59,6 @@ const KINDS = [
   { kind: "directional", name: "Beam + dust", detail: "A window godray that lands on the floor", icon: "▱" },
   { kind: "neon", name: "Neon", detail: "A glowing line with movable ends", icon: "⌁" },
 ] as const;
-const BLEND_LABELS: Record<MansionLightBlendModeV1, string> = {
-  auto: "Automatic (Hard Light)", screen: "Screen", "plus-lighter": "Add", overlay: "Overlay", "soft-light": "Soft light",
-  "hard-light": "Hard light", normal: "Normal", multiply: "Multiply",
-};
 const CONTEXT_MENU_WIDTH_PX = 210;
 const EMPTY_CONTEXT_MENU_HEIGHT_PX = 185;
 const LIGHT_CONTEXT_MENU_HEIGHT_PX = 245;
@@ -183,14 +179,15 @@ export default function RoomLightEditorDialog(props: Props): React.JSX.Element |
     setEffects((current) => current.filter((effect) => effect.id !== id));
     setSelectedId(null); setMenu(null);
   };
-  const duplicateLight = (id: string) => {
+  const duplicateLight = (id: string): RoomStageEntry | null => {
     const source = entries.find((entry) => entry.id === id);
-    if (!source || capReached(source)) return;
+    if (!source || capReached(source)) return null;
     const light = cloneRoomLight(source, `light:${crypto.randomUUID()}`);
     record("clone");
     addEntry(light);
     setSelectedId(light.id);
     setMenu(null);
+    return light;
   };
   const copyLight = (id: string) => {
     const light = entries.find((entry) => entry.id === id);
@@ -310,8 +307,11 @@ export default function RoomLightEditorDialog(props: Props): React.JSX.Element |
   );
   const beginDrag = (event: PointerEvent<HTMLButtonElement>, light: RoomStageEntry, endpoint?: number) => {
     if (event.button !== 0 || busy || picker) return;
-    event.preventDefault(); event.stopPropagation(); setMenu(null); setSelectedId(light.id);
-    gesture.current = { id: event.pointerId, light, start: pointFor(event), endpoint };
+    event.preventDefault(); event.stopPropagation(); setMenu(null);
+    // Option-drag on a marker carries a copy; the original stays put.
+    const subject = event.altKey && endpoint === undefined ? duplicateLight(light.id) ?? light : light;
+    setSelectedId(subject.id);
+    gesture.current = { id: event.pointerId, light: subject, start: pointFor(event), endpoint };
     event.currentTarget.setPointerCapture(event.pointerId);
     setDragging(true);
   };
@@ -371,9 +371,6 @@ export default function RoomLightEditorDialog(props: Props): React.JSX.Element |
       <div className={styles.content} inert={Boolean(picker) || busy}>
         <header className={styles.toolbar}>
           <div><small>{props.room.name}</small><h2 id="room-light-editor-title">Lights &amp; FX</h2></div>
-          <label>Room blend<select value={blendMode} onChange={(event) => { record("blend"); setBlendMode(event.currentTarget.value as MansionLightBlendModeV1); }}>
-            {MANSION_LIGHT_BLEND_MODES_V1.map((mode) => <option key={mode} value={mode}>{BLEND_LABELS[mode]}</option>)}
-          </select></label>
           <button type="button" aria-pressed={preview} onClick={() => { setPreview(!preview); setMenu(null); setLightsVisible(true); }}>{preview ? "Edit lights" : "Preview"}</button>
           {preview ? <label className={styles.switch}><input type="checkbox" checked={lightsVisible} onChange={(event) => setLightsVisible(event.currentTarget.checked)} />Lights on</label> : null}
           <button type="button" onClick={() => void copyLightData()} title="Copy every light's data and the last auto-place trace for review">Copy light data</button>
@@ -405,7 +402,7 @@ export default function RoomLightEditorDialog(props: Props): React.JSX.Element |
               {props.imageUrl ? <img ref={roomImageRef} src={props.imageUrl} alt={`${props.room.name} lighting preview`} draggable={false}
                 onLoad={(event) => setAspect(event.currentTarget.naturalWidth / event.currentTarget.naturalHeight)} /> : <p>Room art is unavailable.</p>}
               {lightsVisible ? <DebateMysteryRoomCinematographyLayer room={props.room} lights={lights} effects={effects}
-                blendMode={blendMode} artStyle={props.artStyle} sourceAspectRatio={aspect}
+                artStyle={props.artStyle} sourceAspectRatio={aspect}
                 templateLightingAligned={false} reducedMotion={reducedMotion} blurred={false} /> : null}
               {!preview ? entries.map((light, index) => {
                 const point = roomLightCenter(light);
@@ -541,9 +538,9 @@ export default function RoomLightEditorDialog(props: Props): React.JSX.Element |
                 <button type="button" className={styles.place} disabled={!props.imageUrl || lights.length === 0} onClick={() => void run("tune", async (cancelled) => {
                   const plate = roomImageRef.current; const stage = stageRef.current;
                   if (!plate || !stage || !plate.naturalWidth) throw new Error("The room art has not finished loading.");
-                  // Pass 1: every shortlisted blend on one sheet; the judge picks one and reads each light.
+                  // Pass 1: the room as it renders, blends fixed by kind; the judge reads each light.
                   const first = await props.onTune!({ draft: { lights, effects, blendMode }, pass: 1, sheet: composeRoomLightTuneSheet({
-                    plate, stage, lights, candidates: ROOM_LIGHT_TUNE_BLEND_SHORTLIST_V1.map((blend, index) => ({ label: "ABCD"[index]!, blend })),
+                    plate, stage, lights, candidates: [{ label: "A", blend: blendMode }],
                   }) });
                   if (cancelled()) return;
                   record("tune");
@@ -559,7 +556,7 @@ export default function RoomLightEditorDialog(props: Props): React.JSX.Element |
                   setAutoPlaceTrace(second.tune ?? first.tune ?? null);
                   setLights(second.lights); setBlendMode(second.blendMode);
                 })}>Tune with PRISM</button>
-                <small>Place the geometry, then let PRISM study the lit room and set each light's color and intensity plus the room blend. Markers never move; every value stays editable.</small>
+                <small>Place the geometry, then let PRISM study the lit room and set each light's color and intensity. Blends are fixed by what each light is; markers never move; every value stays editable.</small>
               </> : null}
             </section> : null}
           </aside> : null}
@@ -568,7 +565,6 @@ export default function RoomLightEditorDialog(props: Props): React.JSX.Element |
       {menu ? <div className={styles.contextMenu} role="menu" style={{ left: menu.x, top: menu.y }}>
         {menu.lightId ? <>
           <button type="button" role="menuitem" autoFocus onClick={() => resampleLightColor(menu.lightId!)}>Resample color</button>
-          <button type="button" role="menuitem" disabled={(() => { const target = entries.find((entry) => entry.id === menu.lightId); return !target || capReached(target); })()} onClick={() => duplicateLight(menu.lightId!)}>Clone light</button>
           <button type="button" role="menuitem" onClick={() => copyLight(menu.lightId!)}>Copy <small>{modifier}C</small></button>
           <button type="button" role="menuitem" onClick={() => cutLight(menu.lightId!)}>Cut <small>{modifier}X</small></button>
           <button type="button" role="menuitem" onClick={() => remove(menu.lightId!)}>Delete</button>
@@ -602,11 +598,11 @@ export default function RoomLightEditorDialog(props: Props): React.JSX.Element |
         detail={work?.kind === "auto-place"
           ? "PRISM is studying the room art for lit fireplaces, lamps, windows with light coming in, and neon, then placing lights to match."
           : work?.kind === "tune"
-            ? "PRISM is comparing blends and checking each light against the room, then setting color, intensity, and the room blend. Your markers stay exactly where you placed them."
+            ? "PRISM is checking each light against the lit room, then setting its color and intensity. Your markers stay exactly where you placed them."
             : `PRISM is writing this lighting into ${props.room.name}.`}
         stepLabel={work?.kind === "auto-place" ? "Detecting light sources" : work?.kind === "tune" ? "Judging the composite" : "Saving lights"}
         startedAt={work?.startedAt ?? null}
-        footer={work?.kind === "auto-place" ? "Your current lights stay until the new set arrives." : work?.kind === "tune" ? "Only color, intensity, and blend change. Undo reverts the whole pass." : "Keep this window open for a moment."}
+        footer={work?.kind === "auto-place" ? "Your current lights stay until the new set arrives." : work?.kind === "tune" ? "Only color and intensity change. Undo reverts the whole pass." : "Keep this window open for a moment."}
       />
       {error ? <p className={styles.error} role="alert">{error}</p> : null}
       {!error && (shortcutNotice ?? samplingNotice) ? <p className={styles.notice} role="status">{shortcutNotice ?? samplingNotice}</p> : null}

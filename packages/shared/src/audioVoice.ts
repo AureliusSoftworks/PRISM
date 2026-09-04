@@ -20,6 +20,13 @@ export type WhodunnitTextVoiceMode = "off" | "babble" | "bottish";
 export const DEFAULT_WHODUNNIT_TEXT_VOICE_MODE: WhodunnitTextVoiceMode =
   "babble";
 
+/** Whodunnit spoken dialogue engine, chosen from the applet's navbar. English
+ * is the built-in local voice; Premium is the ElevenLabs voice frozen with the
+ * case, and it needs ONLINE and a key. Scoped to Whodunnit so the account-wide
+ * Speech Type and English engine stay untouched. */
+export type WhodunnitSpeechType = "english" | "premium";
+export const DEFAULT_WHODUNNIT_SPEECH_TYPE: WhodunnitSpeechType = "english";
+
 export const VOICE_EFFECTS = [
   "clean",
   "radio",
@@ -1821,6 +1828,13 @@ export function normalizeWhodunnitTextVoiceMode(
   return value === "off" || value === "babble" || value === "bottish"
     ? value
     : fallback;
+}
+
+export function normalizeWhodunnitSpeechType(
+  value: unknown,
+  fallback: WhodunnitSpeechType = DEFAULT_WHODUNNIT_SPEECH_TYPE,
+): WhodunnitSpeechType {
+  return value === "english" || value === "premium" ? value : fallback;
 }
 
 /** Account Speech Type is always audible; `mute` remains valid only for

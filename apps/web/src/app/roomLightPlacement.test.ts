@@ -185,7 +185,9 @@ describe("Whodunnit room light placement", () => {
 
     assert.match(editor, /Tune with PRISM/u);
     assert.match(editor, /run\("tune", async \(cancelled\) => \{/u);
-    assert.match(editor, /ROOM_LIGHT_TUNE_BLEND_SHORTLIST_V1\.map\(\(blend, index\) => \(\{ label: "ABCD"\[index\]!, blend \}\)\)/u);
+    assert.match(editor, /candidates: \[\{ label: "A", blend: blendMode \}\]/u);
+    // Blend is fixed by kind now, so the editor offers no room blend pick at all.
+    assert.doesNotMatch(editor, /Room blend<select/u);
     assert.match(editor, /pass: 1, sheet: composeRoomLightTuneSheet\(/u);
     assert.match(editor, /pass: 2, sheet: composeRoomLightTuneSheet\(/u);
     assert.match(editor, /record\("tune"\);/u);

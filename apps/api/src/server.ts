@@ -376,6 +376,8 @@ import {
   replaceDebateMysteryRoomLightsV1,
   cleanDebateMysteryCaseFileV1,
   rerollDebateMysteryItemDescriptionV1,
+  renameDebateMysteryItemFromDescriptionV1,
+  refractDebateMysteryMansionPropIdentityV1,
   setDebateMysteryEvidenceEmojiV1,
   type DebateMysteryRoomAssetPreparationV2,
 } from "./debate-mystery-v2.ts";
@@ -450,6 +452,10 @@ import {
   failDebateMysteryMansionPropVariantAttemptV1,
   getDebateMysteryMansionPropThemeStateV1,
   retryDebateMysteryMansionPropVariantV1,
+  regenerateDebateMysteryMansionPropVariantV1,
+  updateDebateMysteryMansionPropVariantIdentityV1,
+  acceptDebateMysteryMansionPropCandidateV1,
+  discardDebateMysteryMansionPropCandidateV1,
   saveReadyDebateMysteryMansionPropVariantV1,
 } from "./debate-mystery-mansion-prop-variants.ts";
 import {
@@ -500,6 +506,12 @@ import {
   undoDebateMysteryMansionAtmosphereFieldRepairV1,
 } from "./debate-mystery-mansion-atmosphere.ts";
 import {
+  acceptDebateMysteryMansionSfxCueV1,
+  discardDebateMysteryMansionSfxCueV1,
+  stageDebateMysteryMansionSfxCueV1,
+  undoDebateMysteryMansionSfxCueV1,
+} from "./debate-mystery-mansion-sfx.ts";
+import {
   acceptMansionRoomArtCandidateV2,
   discardMansionRoomArtCandidateV2,
   regenerateMansionRoomAssetV2,
@@ -517,6 +529,7 @@ import {
   PORTABLE_WHODUNNIT_PACKAGE_MIME_V1,
   WHODUNNIT_PROP_ARCHETYPE_IDS_V1,
   WHODUNNIT_PROP_ARCHETYPES_V1,
+  isWhodunnitSfxCueIdV1,
   createMysteryVenueProposalV1,
   deriveMysteryVenueIntentV1,
   parseMysteryVenueCreativeDraftV1,
@@ -1295,6 +1308,7 @@ import {
   normalizeEnglishVoiceEngine,
   normalizeSpeechTypeVoiceMode,
   normalizeWhodunnitTextVoiceMode,
+  normalizeWhodunnitSpeechType,
   applyBotNamePronunciations,
   applyPlayerNamePronunciation,
   expandSpeechText,
@@ -3427,6 +3441,7 @@ interface UserDbRow {
   coffee_experimental_table_angle_enabled: number;
   debate_whodunnit_reuse_synthesized_exhibits: number;
   debate_whodunnit_text_voice_mode: string | null;
+  debate_whodunnit_speech_type: string | null;
   psychic_mode_enabled: number;
   comfyui_host: string | null;
   preferred_local_image_model: string | null;
@@ -3830,6 +3845,7 @@ function getOrCreateLocalOwnerUser(): string {
       initialPrivateValues: {
         theme: "system",
         debate_whodunnit_text_voice_mode: "babble",
+        debate_whodunnit_speech_type: "english",
         preferred_provider: "local",
         auto_memory: 1,
         prism_default_bot_face_mouth_coffee_pucker:
@@ -3883,7 +3899,7 @@ function liveBakePlannedSynthesisEngineForUser(
 function getUserRow(userId: string): UserDbRow {
   const row = db
     .prepare(
-      "SELECT id, email, display_name, password_hash, password_salt, wrapped_user_key, wrapped_user_key_iv, wrapped_user_key_tag, theme, atmosphere_style, hub_atmosphere_enabled, hub_atmosphere_image_id, hub_atmosphere_image_style, startup_preference, preferred_provider, ephemeral_chat_provider_preferences, preferred_image_provider, provider_locked, auto_memory, memory_learn_about_player, memory_learn_about_bots, memory_acquisition_sensitivity, memory_short_term_days, memory_long_term_threshold, memory_inferred_min_evidence, memory_inferred_threshold, composer_writing_assist, experimental_dual_ollama_enabled, experimental_all_model_effort_enabled, coffee_experimental_table_angle_enabled, debate_whodunnit_reuse_synthesized_exhibits, debate_whodunnit_text_voice_mode, psychic_mode_enabled, auto_switch_model, auto_fallback_chain, online_auto_provider_bias, hidden_bot_model_ids, hidden_global_picker_model_ids, hidden_comfyui_workflow_ids, model_visibility_defaults_version, preferred_local_model, preferred_online_model, lenient_local_fallback_model, lenient_local_image_fallback_model, secondary_ollama_host, comfyui_host, comfyui_workflows, preferred_local_image_model, preferred_openai_image_model, preferred_zen_wallpaper_local_image_model, preferred_zen_wallpaper_openai_image_model, preferred_home_atmosphere_image_model, preferred_home_atmosphere_image_provider, zen_wallpaper_opacity, zen_wallpaper_text_mask_enabled, zen_wallpaper_grayscale_enabled, zen_wallpaper_blurred_edges_enabled, zen_wallpaper_style_notes, zen_session_idle_gap_ms, zen_fresh_start_gap_ms, zen_recent_context_messages, zen_wallpaper_regen_message_interval, zen_mood_sensitivity, zen_canvas_typing_speed, zen_message_font_min_px, zen_message_font_max_px, zen_ask_question_patience_enabled, zen_ask_question_patience_ms, zen_autonomy_enabled, zen_persona_transition_choice, prism_default_bot_name, prism_default_bot_system_prompt, prism_default_bot_color, prism_default_bot_glyph, prism_default_bot_face_eyes_font, prism_default_bot_face_eye_character, prism_default_bot_face_eye_animation, prism_default_bot_face_mouth_font, prism_default_bot_face_mouth_character, prism_default_bot_face_mouth_animation, prism_default_bot_face_mouth_coffee_pucker, prism_default_bot_face_font_weight, prism_default_bot_face_eye_scale, prism_default_bot_face_eye_offset_x, prism_default_bot_face_eye_offset_y, prism_default_bot_face_eye_rotation_deg, prism_default_bot_face_eye_count, prism_default_bot_face_mouth_scale, prism_default_bot_face_mouth_offset_x, prism_default_bot_face_mouth_offset_y, prism_default_bot_face_mouth_rotation_deg, prism_default_bot_face_blink_bar, prism_default_bot_face_blink_count, prism_default_bot_face_blink_scale, prism_default_bot_face_blink_offset_x, prism_default_bot_face_blink_offset_y, prism_default_bot_face_blink_rotation_deg, prism_default_bot_face_thinking_frames, prism_default_bot_face_thinking_scale, prism_default_bot_face_thinking_offset_x, prism_default_bot_face_thinking_offset_y, prism_default_bot_audio_voice_profile, prism_default_bot_temperature, prism_default_bot_max_tokens, prism_default_bot_top_p, prism_default_bot_top_k, prism_default_bot_repetition_penalty, prism_default_llm_model, prism_image_tool_llm_model, prism_refract_local_model, prism_refract_online_model, dev_memories_enabled, dev_memories_text, openai_key_ciphertext, openai_key_iv, openai_key_tag, anthropic_key_ciphertext, anthropic_key_iv, anthropic_key_tag, ollama_cloud_key_ciphertext, ollama_cloud_key_iv, ollama_cloud_key_tag, elevenlabs_key_ciphertext, elevenlabs_key_iv, elevenlabs_key_tag, brave_search_key_ciphertext, brave_search_key_iv, brave_search_key_tag, voice_mode, voice_effects_enabled, voice_volume, operating_system_voices_enabled, english_voice_engine, default_system_voice_name, default_elevenlabs_voice_id, elevenlabs_voice_bank, elevenlabs_voice_model, elevenlabs_voice_collection_id, zen_player_voice_enabled, player_audio_voice_profile, player_name_pronunciation, created_at, last_active_at FROM users WHERE id = ?",
+      "SELECT id, email, display_name, password_hash, password_salt, wrapped_user_key, wrapped_user_key_iv, wrapped_user_key_tag, theme, atmosphere_style, hub_atmosphere_enabled, hub_atmosphere_image_id, hub_atmosphere_image_style, startup_preference, preferred_provider, ephemeral_chat_provider_preferences, preferred_image_provider, provider_locked, auto_memory, memory_learn_about_player, memory_learn_about_bots, memory_acquisition_sensitivity, memory_short_term_days, memory_long_term_threshold, memory_inferred_min_evidence, memory_inferred_threshold, composer_writing_assist, experimental_dual_ollama_enabled, experimental_all_model_effort_enabled, coffee_experimental_table_angle_enabled, debate_whodunnit_reuse_synthesized_exhibits, debate_whodunnit_text_voice_mode, debate_whodunnit_speech_type, psychic_mode_enabled, auto_switch_model, auto_fallback_chain, online_auto_provider_bias, hidden_bot_model_ids, hidden_global_picker_model_ids, hidden_comfyui_workflow_ids, model_visibility_defaults_version, preferred_local_model, preferred_online_model, lenient_local_fallback_model, lenient_local_image_fallback_model, secondary_ollama_host, comfyui_host, comfyui_workflows, preferred_local_image_model, preferred_openai_image_model, preferred_zen_wallpaper_local_image_model, preferred_zen_wallpaper_openai_image_model, preferred_home_atmosphere_image_model, preferred_home_atmosphere_image_provider, zen_wallpaper_opacity, zen_wallpaper_text_mask_enabled, zen_wallpaper_grayscale_enabled, zen_wallpaper_blurred_edges_enabled, zen_wallpaper_style_notes, zen_session_idle_gap_ms, zen_fresh_start_gap_ms, zen_recent_context_messages, zen_wallpaper_regen_message_interval, zen_mood_sensitivity, zen_canvas_typing_speed, zen_message_font_min_px, zen_message_font_max_px, zen_ask_question_patience_enabled, zen_ask_question_patience_ms, zen_autonomy_enabled, zen_persona_transition_choice, prism_default_bot_name, prism_default_bot_system_prompt, prism_default_bot_color, prism_default_bot_glyph, prism_default_bot_face_eyes_font, prism_default_bot_face_eye_character, prism_default_bot_face_eye_animation, prism_default_bot_face_mouth_font, prism_default_bot_face_mouth_character, prism_default_bot_face_mouth_animation, prism_default_bot_face_mouth_coffee_pucker, prism_default_bot_face_font_weight, prism_default_bot_face_eye_scale, prism_default_bot_face_eye_offset_x, prism_default_bot_face_eye_offset_y, prism_default_bot_face_eye_rotation_deg, prism_default_bot_face_eye_count, prism_default_bot_face_mouth_scale, prism_default_bot_face_mouth_offset_x, prism_default_bot_face_mouth_offset_y, prism_default_bot_face_mouth_rotation_deg, prism_default_bot_face_blink_bar, prism_default_bot_face_blink_count, prism_default_bot_face_blink_scale, prism_default_bot_face_blink_offset_x, prism_default_bot_face_blink_offset_y, prism_default_bot_face_blink_rotation_deg, prism_default_bot_face_thinking_frames, prism_default_bot_face_thinking_scale, prism_default_bot_face_thinking_offset_x, prism_default_bot_face_thinking_offset_y, prism_default_bot_audio_voice_profile, prism_default_bot_temperature, prism_default_bot_max_tokens, prism_default_bot_top_p, prism_default_bot_top_k, prism_default_bot_repetition_penalty, prism_default_llm_model, prism_image_tool_llm_model, prism_refract_local_model, prism_refract_online_model, dev_memories_enabled, dev_memories_text, openai_key_ciphertext, openai_key_iv, openai_key_tag, anthropic_key_ciphertext, anthropic_key_iv, anthropic_key_tag, ollama_cloud_key_ciphertext, ollama_cloud_key_iv, ollama_cloud_key_tag, elevenlabs_key_ciphertext, elevenlabs_key_iv, elevenlabs_key_tag, brave_search_key_ciphertext, brave_search_key_iv, brave_search_key_tag, voice_mode, voice_effects_enabled, voice_volume, operating_system_voices_enabled, english_voice_engine, default_system_voice_name, default_elevenlabs_voice_id, elevenlabs_voice_bank, elevenlabs_voice_model, elevenlabs_voice_collection_id, zen_player_voice_enabled, player_audio_voice_profile, player_name_pronunciation, created_at, last_active_at FROM users WHERE id = ?",
     )
     .get(userId) as UserDbRow | undefined;
   if (!row) {
@@ -11803,6 +11819,7 @@ const DEBATE_MYSTERY_SCENE_REPAIR_ACTIONS_V1 = new Set<import("@localai/shared")
   "repair_evidence_description",
   "set_evidence_emoji",
   "reroll_evidence_description",
+  "rename_evidence_from_description",
   "clean_case_file",
   "reduce_evidence_magenta",
   "generate_map_plan",
@@ -11840,7 +11857,7 @@ async function repairDebateMysterySceneV1(args: {
       subjectId: args.subjectId, emoji: args.emoji, expectedRevision: args.expectedRevision,
     });
   }
-  if (args.action === "reroll_evidence_description" || args.action === "clean_case_file") {
+  if (args.action === "reroll_evidence_description" || args.action === "rename_evidence_from_description" || args.action === "clean_case_file") {
     // Text-only rewrites run on the session's selected lane and stay LOCAL in LOCAL.
     const runtime = await debateAiRuntimeForUser(
       args.userId, session.provider, frozenDebateModelOverride(session), session.responseMode,
@@ -11850,6 +11867,11 @@ async function repairDebateMysterySceneV1(args: {
       return cleanDebateMysteryCaseFileV1(db, args.userId, args.sessionId, { expectedRevision: args.expectedRevision }, runtime);
     }
     if (!args.subjectId) throw new HttpError(404, "Only a found Case File item can receive a text repair.");
+    if (args.action === "rename_evidence_from_description") {
+      return renameDebateMysteryItemFromDescriptionV1(db, args.userId, args.sessionId, {
+        subjectId: args.subjectId, expectedRevision: args.expectedRevision,
+      }, runtime);
+    }
     return rerollDebateMysteryItemDescriptionV1(db, args.userId, args.sessionId, {
       subjectId: args.subjectId, expectedRevision: args.expectedRevision,
     }, runtime);
@@ -12557,7 +12579,11 @@ function queueDebateMysteryMansionPropThemeV1(args: {
         args.userId,
         args.bundleId,
       ).progress.variants.find((variant) => variant.archetypeId === archetypeId);
-      if (!current || current.status !== "pending") continue;
+      // A missing sprite draws on the primary lane; a redraw of a ready one
+      // draws on the candidate lane and waits for the author to save.
+      const lane: import("./debate-mystery-mansion-prop-variants.ts").MansionPropVariantLaneV1 | null =
+        current?.status === "pending" ? "primary" : current?.candidateStatus === "pending" ? "candidate" : null;
+      if (!current || !lane) continue;
       const definition = WHODUNNIT_PROP_ARCHETYPES_V1[archetypeId];
       while (!controller.signal.aborted) {
         const before = getDebateMysteryMansionPropThemeStateV1(
@@ -12565,16 +12591,38 @@ function queueDebateMysteryMansionPropThemeV1(args: {
           args.userId,
           args.bundleId,
         ).progress.variants.find((variant) => variant.archetypeId === archetypeId);
-        if (!before || before.status !== "pending" || before.attemptCount >= 2) break;
+        if (!before) break;
+        if (lane === "primary"
+          ? before.status !== "pending" || before.attemptCount >= 2
+          : before.candidateStatus !== "pending" || (before.candidateAttemptCount ?? 0) >= 2) break;
         const attempt = beginDebateMysteryMansionPropVariantAttemptV1(
           db,
           args.userId,
           args.bundleId,
           archetypeId,
+          lane,
         );
         try {
-          const displayName = `${mansion.name} ${definition.label}`;
-          const appearanceDescription = [
+          // The role's identity is model-authored: reuse a refracted one, else
+          // refract it now so the sprite is drawn to a real object. The
+          // venue-plus-role stamp is only the last resort when that fails.
+          let authoredName = before.displayName?.trim() ?? "";
+          let authoredAppearance = before.appearanceDescription?.trim() ?? "";
+          if (!authoredName || !authoredAppearance) {
+            try {
+              const runtime = await debateAiRuntimeForUser(args.userId, user.preferred_provider);
+              const identity = await refractDebateMysteryMansionPropIdentityV1(
+                db, args.userId, args.bundleId, archetypeId, runtime,
+              );
+              authoredName = identity.displayName;
+              authoredAppearance = identity.appearanceDescription;
+            } catch {
+              authoredName = "";
+              authoredAppearance = "";
+            }
+          }
+          const displayName = authoredName || `${mansion.name} ${definition.label}`;
+          const appearanceDescription = authoredAppearance || [
             `A mansion-themed ${definition.label.toLowerCase()} built for ${definition.purpose.toLowerCase()}`,
             mansion.houseStyle.label,
           ].filter(Boolean).join(" · ");
@@ -12584,6 +12632,7 @@ function queueDebateMysteryMansionPropThemeV1(args: {
             prompt: [
               `Create one isolated evidence-prop sprite: ${displayName}.`,
               `Functional role: ${definition.purpose}`,
+              ...(authoredAppearance ? [`Visible appearance, exactly as the author describes it: ${authoredAppearance}`] : []),
               mansion.houseStyle.promptContract,
               "Translate the mansion's era, lighting, material palette, wear, and craftsmanship into this object while keeping its function unmistakable.",
               "Show exactly one complete object with an unbroken silhouette, centered at a consistent three-quarter view and occupying roughly 70 percent of the square.",
@@ -12621,6 +12670,7 @@ function queueDebateMysteryMansionPropThemeV1(args: {
               mimeType: "image/webp",
               provider: "openai",
               model: generated.model,
+              lane,
             },
           );
           break;
@@ -12632,6 +12682,7 @@ function queueDebateMysteryMansionPropThemeV1(args: {
             args.bundleId,
             archetypeId,
             `attempt_${attempt}:${spoilerSafeMysteryAssetFailure(error)}`,
+            lane,
           );
         }
       }
@@ -13589,6 +13640,7 @@ function buildRoutes(
           initialPrivateValues: {
             theme: requestedTheme,
             debate_whodunnit_text_voice_mode: "babble",
+            debate_whodunnit_speech_type: "english",
             preferred_provider: "local",
             auto_memory: 1,
             prism_default_bot_face_mouth_coffee_pucker:
@@ -22015,7 +22067,7 @@ function buildRoutes(
           routingContext: {
             surface: "whodunnit",
             inputText: description || "Surprise me with an original mystery setting.",
-            outputTokens: 1_800,
+            outputTokens: 2_200,
             structuredOutput: true,
           },
         });
@@ -22039,6 +22091,7 @@ function buildRoutes(
               "Give the setting its own concrete geography and vocabulary; never force a non-estate into mansion, foyer, umbrella, or upstairs language.",
               "Rooms must be ordinary believable spaces in that setting. Include a semantic entry first and at least five rooms total.",
               "Each room needs: templateId, name, one emoji, role (entry, circulation, social, private, operations, service, technical, observation, or other), and 2-4 concrete fixture anchors.",
+              "Also return sideRooms: 8 to 14 ordinary non-case service, storage, or utility spaces for this exact setting, each as {name, size} with size tiny, small, medium, or large. They dress the map beside the rooms and are never entered, so keep them specific to the setting and sized honestly: a closet is tiny, a mess or hall is large.",
               "Also return title, archetype, era, physicalScaleClass, kind, kindLabel, placeNoun, topology, tierNoun, exteriorMode (grounds, docked, contained, in-transit, or other), environmentSummary, atmosphere, connectorLabel, and rooms.",
             ].join("\n"),
           },
@@ -22067,7 +22120,7 @@ function buildRoutes(
           reasoningEffort: runtime.reasoningEffort,
           turbo: runtime.turbo,
           temperature: 0.82,
-          maxTokens: 1_800,
+          maxTokens: 2_200,
           jsonMode: true,
           usagePurpose: "chat_reply",
           allowFinalLocalFallback: false,
@@ -22183,6 +22236,98 @@ function buildRoutes(
         ctx.params.id,
         archetypeId,
       );
+      queueDebateMysteryMansionPropThemeV1({
+        userId,
+        bundleId: ctx.params.id,
+      });
+      json(ctx.res, 202, {
+        ok: true,
+        mansion: getDebateMysteryMansionBundleV2(db, userId, ctx.params.id),
+      });
+    }),
+    // A prop's name and description are authored by the model, never typed:
+    // Refract writes a fresh identity from the venue's style on the selected
+    // lane, and stays LOCAL in LOCAL like every other written repair.
+    route("POST", "/api/debates/mystery-mansions/:id/prop-theme/:archetypeId/refract-identity", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = (ctx.body ?? {}) as Record<string, unknown>;
+      if (Object.keys(body).some((key) => !["responseMode", "preferredProvider", "modelOverride", "reasoningEffort", "turbo"].includes(key))) {
+        throw new HttpError(400, "Refracting a prop identity accepts only the current routing.");
+      }
+      const archetypeId = WHODUNNIT_PROP_ARCHETYPE_IDS_V1.find(
+        (candidate) => candidate === ctx.params.archetypeId,
+      );
+      if (!archetypeId) throw new HttpError(404, "That Whodunnit prop role is not supported.");
+      const user = getUserRow(userId);
+      const local = userBlocksOnlineCapabilities(user) || body.responseMode === "local";
+      const runtime = await debateAiRuntimeForUser(
+        userId,
+        local ? "local" : readProvider(body.preferredProvider) ?? user.preferred_provider,
+        local ? undefined : body.modelOverride,
+        local ? "local" : "online",
+      );
+      const identity = await refractDebateMysteryMansionPropIdentityV1(
+        db, userId, ctx.params.id, archetypeId, runtime, { persist: false },
+      );
+      json(ctx.res, 200, { ok: true, identity });
+    }),
+    // Save writes a refracted identity; the client never composes one itself.
+    route("PATCH", "/api/debates/mystery-mansions/:id/prop-theme/:archetypeId", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = (ctx.body ?? {}) as Record<string, unknown>;
+      if (Object.keys(body).some((key) => key !== "displayName" && key !== "appearanceDescription")) {
+        throw new HttpError(400, "A themed prop accepts only a name and a description.");
+      }
+      const archetypeId = WHODUNNIT_PROP_ARCHETYPE_IDS_V1.find(
+        (candidate) => candidate === ctx.params.archetypeId,
+      );
+      if (!archetypeId) throw new HttpError(404, "That Whodunnit prop role is not supported.");
+      updateDebateMysteryMansionPropVariantIdentityV1(db, userId, ctx.params.id, archetypeId, body);
+      json(ctx.res, 200, {
+        ok: true,
+        mansion: getDebateMysteryMansionBundleV2(db, userId, ctx.params.id),
+      });
+    }),
+    route("POST", "/api/debates/mystery-mansions/:id/prop-theme/:archetypeId/accept-candidate", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = (ctx.body ?? {}) as Record<string, unknown>;
+      if (Object.keys(body).length > 0) throw new HttpError(400, "Using a redraw does not take client-authored fields.");
+      const archetypeId = WHODUNNIT_PROP_ARCHETYPE_IDS_V1.find(
+        (candidate) => candidate === ctx.params.archetypeId,
+      );
+      if (!archetypeId) throw new HttpError(404, "That Whodunnit prop role is not supported.");
+      acceptDebateMysteryMansionPropCandidateV1(db, userId, ctx.params.id, archetypeId);
+      json(ctx.res, 200, {
+        ok: true,
+        mansion: getDebateMysteryMansionBundleV2(db, userId, ctx.params.id),
+      });
+    }),
+    route("POST", "/api/debates/mystery-mansions/:id/prop-theme/:archetypeId/discard-candidate", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = (ctx.body ?? {}) as Record<string, unknown>;
+      if (Object.keys(body).length > 0) throw new HttpError(400, "Discarding a redraw does not take client-authored fields.");
+      const archetypeId = WHODUNNIT_PROP_ARCHETYPE_IDS_V1.find(
+        (candidate) => candidate === ctx.params.archetypeId,
+      );
+      if (!archetypeId) throw new HttpError(404, "That Whodunnit prop role is not supported.");
+      discardDebateMysteryMansionPropCandidateV1(db, userId, ctx.params.id, archetypeId);
+      json(ctx.res, 200, {
+        ok: true,
+        mansion: getDebateMysteryMansionBundleV2(db, userId, ctx.params.id),
+      });
+    }),
+    route("POST", "/api/debates/mystery-mansions/:id/prop-theme/:archetypeId/regenerate", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const user = getUserRow(userId);
+      const body = (ctx.body ?? {}) as Record<string, unknown>;
+      if (body.responseMode !== "online" || userBlocksOnlineCapabilities(user)) {
+        throw new HttpError(409, "Mansion prop synthesis is ONLINE only. LOCAL keeps the current sprite or fallback.");
+      }
+      const archetypeId = WHODUNNIT_PROP_ARCHETYPE_IDS_V1.find(
+        (candidate) => candidate === ctx.params.archetypeId,
+      );
+      if (!archetypeId) throw new HttpError(404, "That Whodunnit prop role is not supported.");
+      regenerateDebateMysteryMansionPropVariantV1(db, userId, ctx.params.id, archetypeId);
       queueDebateMysteryMansionPropThemeV1({
         userId,
         bundleId: ctx.params.id,
@@ -22472,6 +22617,108 @@ function buildRoutes(
         mansion: getDebateMysteryMansionBundleV2(db, userId, ctx.params.id),
       });
     }),
+    // Pre-setup parity with Field Repair: the same vision passes that read a
+    // room's accepted art mid-case run here against the saved venue, so an
+    // author never has to enter a case to get what the field tools offer.
+    // Results are draft-only: the Venue Editor saves them with the venue plan.
+    route("POST", "/api/debates/mystery-mansions/:id/room-art/:roomId/detect-lights", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = (ctx.body ?? {}) as Record<string, unknown>;
+      if (Object.keys(body).length > 0) {
+        throw new HttpError(400, "Light detection does not take client-authored fields.");
+      }
+      const user = getUserRow(userId);
+      const userKey = decryptUserKey(userId);
+      const apiKey = getOpenAiApiKeyForUser(userId, userKey) ?? config.openAiApiKey;
+      if (userBlocksOnlineCapabilities(user) || !apiKey) {
+        throw new HttpError(409, "Reading lights from room art needs ONLINE and an OpenAI key. Hand placement works in LOCAL.");
+      }
+      const layout = getDebateMysteryMansionBundleV2(db, userId, ctx.params.id).layoutV2;
+      const room = layout?.entities.find((entity) => entity.kind === "room" && entity.id === ctx.params.roomId);
+      if (!layout || room?.kind !== "room") throw new HttpError(404, "That venue room was not found.");
+      if (!room.acceptedRoomAssetId) {
+        throw new HttpError(409, "Accept a Mosaic for this room first; PRISM reads lights from the accepted art.");
+      }
+      const plate = getDebateMysteryMansionAssetFileV1(db, userKey, userId, ctx.params.id, room.acceptedRoomAssetId);
+      const lights = await detectDebateMysteryRoomLightsV1({
+        apiKey,
+        bytes: plate.bytes,
+        roomId: room.id,
+        roomName: room.name,
+        layout,
+        existingLights: layout.lights.filter((light) => light.roomId === room.id),
+      });
+      json(ctx.res, 200, { ok: true, lights });
+    }),
+    route("POST", "/api/debates/mystery-mansions/:id/room-art/:roomId/detect-anchors", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = (ctx.body ?? {}) as Record<string, unknown>;
+      if (Object.keys(body).length > 0) {
+        throw new HttpError(400, "Anchor detection does not take client-authored fields.");
+      }
+      const user = getUserRow(userId);
+      const userKey = decryptUserKey(userId);
+      const apiKey = getOpenAiApiKeyForUser(userId, userKey) ?? config.openAiApiKey;
+      if (userBlocksOnlineCapabilities(user) || !apiKey) {
+        throw new HttpError(409, "Re-reading anchors from room art needs ONLINE and an OpenAI key.");
+      }
+      const layout = getDebateMysteryMansionBundleV2(db, userId, ctx.params.id).layoutV2;
+      const room = layout?.entities.find((entity) => entity.kind === "room" && entity.id === ctx.params.roomId);
+      if (!layout || room?.kind !== "room") throw new HttpError(404, "That venue room was not found.");
+      if (!room.acceptedRoomAssetId) {
+        throw new HttpError(409, "Accept a Mosaic for this room first; PRISM re-reads anchors from the accepted art.");
+      }
+      if (!layout.placementAnchors.some((anchor) => anchor.roomId === room.id)) {
+        throw new HttpError(409, "Place at least one anchor first. PRISM re-reads where the named anchors sit in the accepted art.");
+      }
+      const plate = getDebateMysteryMansionAssetFileV1(db, userKey, userId, ctx.params.id, room.acceptedRoomAssetId);
+      // The saved venue has no case hotspots yet; the reader only needs the
+      // room's identity and its named anchors.
+      const observed = await observeDebateMysteryRoomGeometryV1({
+        apiKey,
+        bytes: plate.bytes,
+        room: { id: room.id, name: room.name, hotspots: [] } as unknown as import("@localai/shared").DebateMysteryRoomV2,
+        layout,
+        anchors: true,
+        lights: false,
+      });
+      json(ctx.res, 200, { ok: true, placementAnchors: observed.placementAnchors ?? [] });
+    }),
+    route("POST", "/api/debates/mystery-mansions/:id/overhead/generate", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = (ctx.body ?? {}) as Record<string, unknown>;
+      if (Object.keys(body).some((key) => key !== "responseMode")) {
+        throw new HttpError(400, "Drawing the overhead plate accepts only the current response mode.");
+      }
+      const user = getUserRow(userId);
+      const userKey = decryptUserKey(userId);
+      const apiKey = getOpenAiApiKeyForUser(userId, userKey) ?? config.openAiApiKey;
+      if (userBlocksOnlineCapabilities(user) || body.responseMode === "local" || !apiKey) {
+        throw new HttpError(409, "Drawing the overhead plate needs ONLINE and an OpenAI image key.");
+      }
+      const mansion = getDebateMysteryMansionBundleV2(db, userId, ctx.params.id);
+      const layout = mansion.layoutV2;
+      if (!layout) throw new HttpError(409, "This venue has no layout to draw from.");
+      // The overhead is this venue seen from above: the library cover is the
+      // establishing shot, else PRISM describes the structure from its style.
+      let exteriorBytes: Buffer | null = null;
+      const thumbnailAssetId = mansion.library?.overrides.thumbnailAssetId ?? mansion.library?.defaults.thumbnailAssetId ?? null;
+      if (thumbnailAssetId) {
+        try {
+          exteriorBytes = getDebateMysteryMansionAssetFileV1(db, userKey, userId, ctx.params.id, thumbnailAssetId).bytes;
+        } catch {
+          exteriorBytes = null;
+        }
+      }
+      await generateDebateMysteryDeckPlanV1({
+        db, userKey, userId, bundleId: ctx.params.id, layout, exteriorBytes, apiKey,
+        model: user.preferred_openai_image_model,
+      });
+      json(ctx.res, 201, {
+        ok: true,
+        mansion: getDebateMysteryMansionBundleV2(db, userId, ctx.params.id),
+      });
+    }),
     route("PATCH", "/api/debates/mystery-mansions/:id", async (ctx) => {
       const userId = requireAuth(ctx);
       const body = (ctx.body ?? {}) as Record<string, unknown>;
@@ -22608,6 +22855,50 @@ function buildRoutes(
     route("POST", "/api/debates/mystery-mansions/:id/atmosphere/undo", async (ctx) => {
       const userId = requireAuth(ctx);
       undoDebateMysteryMansionAtmosphereV1(db, userId, ctx.params.id);
+      json(ctx.res, 200, { ok: true, mansion: getDebateMysteryMansionBundleV2(db, userId, ctx.params.id) });
+    }),
+    // Venue effects pack: one short clip per Whodunnit cue. Synthesis lands as
+    // a candidate; accept, discard, and undo mirror music and atmosphere.
+    route("POST", "/api/debates/mystery-mansions/:id/sfx/:cueId/generate", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = (ctx.body ?? {}) as Record<string, unknown>;
+      if (Object.keys(body).some((key) => key !== "responseMode")) {
+        throw new HttpError(400, "Venue effect synthesis accepts only the current response mode.");
+      }
+      if (!isWhodunnitSfxCueIdV1(ctx.params.cueId)) throw new HttpError(404, "That effect cue does not exist.");
+      const responseMode = body.responseMode === "online" ? "online" : "local";
+      const userKey = decryptUserKey(userId);
+      const effect = await stageDebateMysteryMansionSfxCueV1({
+        db,
+        userKey,
+        userId,
+        bundleId: ctx.params.id,
+        cueId: ctx.params.cueId,
+        responseMode,
+        apiKey: getElevenLabsApiKeyForUser(userId, userKey) ?? config.elevenLabsApiKey ?? null,
+      });
+      json(ctx.res, 201, {
+        ok: true,
+        effect,
+        mansion: getDebateMysteryMansionBundleV2(db, userId, ctx.params.id),
+      });
+    }),
+    route("POST", "/api/debates/mystery-mansions/:id/sfx/:cueId/accept", async (ctx) => {
+      const userId = requireAuth(ctx);
+      if (!isWhodunnitSfxCueIdV1(ctx.params.cueId)) throw new HttpError(404, "That effect cue does not exist.");
+      acceptDebateMysteryMansionSfxCueV1(db, userId, ctx.params.id, ctx.params.cueId);
+      json(ctx.res, 200, { ok: true, mansion: getDebateMysteryMansionBundleV2(db, userId, ctx.params.id) });
+    }),
+    route("POST", "/api/debates/mystery-mansions/:id/sfx/:cueId/discard", async (ctx) => {
+      const userId = requireAuth(ctx);
+      if (!isWhodunnitSfxCueIdV1(ctx.params.cueId)) throw new HttpError(404, "That effect cue does not exist.");
+      discardDebateMysteryMansionSfxCueV1(db, userId, ctx.params.id, ctx.params.cueId);
+      json(ctx.res, 200, { ok: true, mansion: getDebateMysteryMansionBundleV2(db, userId, ctx.params.id) });
+    }),
+    route("POST", "/api/debates/mystery-mansions/:id/sfx/:cueId/undo", async (ctx) => {
+      const userId = requireAuth(ctx);
+      if (!isWhodunnitSfxCueIdV1(ctx.params.cueId)) throw new HttpError(404, "That effect cue does not exist.");
+      undoDebateMysteryMansionSfxCueV1(db, userId, ctx.params.id, ctx.params.cueId);
       json(ctx.res, 200, { ok: true, mansion: getDebateMysteryMansionBundleV2(db, userId, ctx.params.id) });
     }),
     route("GET", "/api/debates/:id/mystery-mansion/atmosphere", async (ctx) => {
@@ -27493,7 +27784,8 @@ function buildRoutes(
         const body = (ctx.body ?? {}) as Record<string, unknown>;
         if (
           typeof body.messageId !== "string" ||
-          body.reason !== "progress_stalled"
+          (body.reason !== "progress_stalled" &&
+            body.reason !== "stream_stalled")
         ) {
           throw new HttpError(
             400,
@@ -35129,6 +35421,9 @@ function buildRoutes(
           debateWhodunnitTextVoiceMode: normalizeWhodunnitTextVoiceMode(
             user.debate_whodunnit_text_voice_mode,
           ),
+          debateWhodunnitSpeechType: normalizeWhodunnitSpeechType(
+            user.debate_whodunnit_speech_type,
+          ),
           psychicModeEnabled: user.psychic_mode_enabled === 1,
           autoModeEnabled: user.auto_switch_model === 1,
           autoFallbackChain: parseStoredAutoFallbackChain(
@@ -35874,6 +36169,9 @@ function buildRoutes(
             debateWhodunnitTextVoiceMode: normalizeWhodunnitTextVoiceMode(
               committedUser.debate_whodunnit_text_voice_mode,
             ),
+            debateWhodunnitSpeechType: normalizeWhodunnitSpeechType(
+              committedUser.debate_whodunnit_speech_type,
+            ),
             hasOpenAiApiKey: Boolean(committedUser.openai_key_ciphertext),
             hasAnthropicApiKey: Boolean(committedUser.anthropic_key_ciphertext),
             hasOllamaCloudApiKey: Boolean(
@@ -35955,6 +36253,8 @@ function buildRoutes(
           user.debate_whodunnit_reuse_synthesized_exhibits,
         debateWhodunnitTextVoiceMode:
           user.debate_whodunnit_text_voice_mode,
+        debateWhodunnitSpeechType:
+          user.debate_whodunnit_speech_type,
         psychicModeEnabled: user.psychic_mode_enabled,
         autoSwitchModel: user.auto_switch_model,
         autoFallbackChain: user.auto_fallback_chain,
@@ -36110,7 +36410,7 @@ function buildRoutes(
         `
         UPDATE users
         SET display_name = ?, theme = ?, graphics_quality = ?, crt_focus = ?, typography_scale = ?, atmosphere_style = ?, hub_atmosphere_enabled = ?, startup_preference = ?, preferred_provider = ?, ephemeral_chat_provider_preferences = ?, preferred_image_provider = ?, provider_locked = ?, auto_memory = ?, composer_writing_assist = ?, hidden_bot_model_ids = ?, hidden_global_picker_model_ids = ?, hidden_comfyui_workflow_ids = ?, model_visibility_defaults_version = ?,
-            experimental_dual_ollama_enabled = ?, experimental_all_model_effort_enabled = ?, coffee_experimental_table_angle_enabled = ?, debate_whodunnit_reuse_synthesized_exhibits = ?, debate_whodunnit_text_voice_mode = ?, psychic_mode_enabled = ?, auto_switch_model = ?, auto_fallback_chain = ?, online_auto_provider_bias = ?, online_auto_provider_weights = ?, online_auto_quality_posture = ?, preferred_local_model = ?, preferred_online_model = ?, lenient_local_image_fallback_model = ?, secondary_ollama_host = ?, comfyui_host = ?,
+            experimental_dual_ollama_enabled = ?, experimental_all_model_effort_enabled = ?, coffee_experimental_table_angle_enabled = ?, debate_whodunnit_reuse_synthesized_exhibits = ?, debate_whodunnit_text_voice_mode = ?, debate_whodunnit_speech_type = ?, psychic_mode_enabled = ?, auto_switch_model = ?, auto_fallback_chain = ?, online_auto_provider_bias = ?, online_auto_provider_weights = ?, online_auto_quality_posture = ?, preferred_local_model = ?, preferred_online_model = ?, lenient_local_image_fallback_model = ?, secondary_ollama_host = ?, comfyui_host = ?,
             preferred_local_image_model = ?, preferred_openai_image_model = ?, preferred_zen_wallpaper_local_image_model = ?, preferred_zen_wallpaper_openai_image_model = ?, preferred_home_atmosphere_image_model = ?, preferred_home_atmosphere_image_provider = ?, zen_wallpaper_opacity = ?, zen_wallpaper_text_mask_enabled = ?, zen_wallpaper_grayscale_enabled = ?, zen_wallpaper_blurred_edges_enabled = ?, zen_wallpaper_style_notes = ?,
             zen_session_idle_gap_ms = ?, zen_fresh_start_gap_ms = ?, zen_recent_context_messages = ?, zen_wallpaper_regen_message_interval = ?, zen_mood_sensitivity = ?, zen_canvas_typing_speed = ?, zen_message_font_min_px = ?, zen_message_font_max_px = ?, zen_ask_question_patience_enabled = ?, zen_ask_question_patience_ms = ?, zen_autonomy_enabled = ?, zen_persona_transition_choice = ?,
             comfyui_workflows = ?, prism_default_llm_model = ?, prism_cloud_llm_model = ?, prism_image_tool_llm_model = ?, text_model_display_names = ?,
@@ -36147,6 +36447,7 @@ function buildRoutes(
         next.coffeeExperimentalTableAngleEnabled,
         next.debateWhodunnitReuseSynthesizedExhibits,
         next.debateWhodunnitTextVoiceMode,
+        next.debateWhodunnitSpeechType,
         next.psychicModeEnabled,
         next.autoSwitchModel,
         next.autoFallbackChain,
@@ -36248,6 +36549,7 @@ function buildRoutes(
           debateWhodunnitReuseSynthesizedExhibits:
             next.debateWhodunnitReuseSynthesizedExhibits === 1,
           debateWhodunnitTextVoiceMode: next.debateWhodunnitTextVoiceMode,
+          debateWhodunnitSpeechType: next.debateWhodunnitSpeechType,
           psychicModeEnabled: next.psychicModeEnabled === 1,
           autoModeEnabled: next.autoSwitchModel === 1,
           autoFallbackChain: parseStoredAutoFallbackChain(

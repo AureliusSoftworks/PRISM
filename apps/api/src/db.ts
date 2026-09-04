@@ -309,6 +309,7 @@ export function initializeDatabase(
       coffee_experimental_table_angle_enabled INTEGER NOT NULL DEFAULT 0,
       debate_whodunnit_reuse_synthesized_exhibits INTEGER NOT NULL DEFAULT 0,
       debate_whodunnit_text_voice_mode TEXT NOT NULL DEFAULT 'babble',
+      debate_whodunnit_speech_type TEXT NOT NULL DEFAULT 'english',
       psychic_mode_enabled INTEGER NOT NULL DEFAULT 0,
       comfyui_host TEXT,
       comfyui_workflows TEXT NOT NULL DEFAULT '[]',
@@ -2576,7 +2577,7 @@ export function initializeDatabase(
       bundle_id TEXT NOT NULL,
       user_id TEXT NOT NULL,
       asset_id TEXT NOT NULL,
-      role TEXT NOT NULL CHECK(role IN ('room', 'prop', 'music', 'presentation', 'map')),
+      role TEXT NOT NULL CHECK(role IN ('room', 'prop', 'music', 'presentation', 'map', 'sfx')),
       logical_id TEXT NOT NULL,
       created_at TEXT NOT NULL,
       PRIMARY KEY(bundle_id, role, logical_id),
@@ -2601,6 +2602,10 @@ export function initializeDatabase(
       asset_id TEXT,
       attempt_count INTEGER NOT NULL DEFAULT 0 CHECK(attempt_count BETWEEN 0 AND 2),
       failure_code TEXT,
+      candidate_status TEXT CHECK(candidate_status IS NULL OR candidate_status IN ('pending', 'ready', 'failed')),
+      candidate_asset_id TEXT REFERENCES debate_mystery_mansion_assets(id) ON DELETE RESTRICT,
+      candidate_attempt_count INTEGER NOT NULL DEFAULT 0 CHECK(candidate_attempt_count BETWEEN 0 AND 2),
+      candidate_failure_code TEXT,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
       PRIMARY KEY(user_id, bundle_id, registry_version, archetype_id),
@@ -3076,14 +3081,16 @@ export function initializeDatabase(
       COMMIT;
     `);
   }
-  // Deck plans introduced the 'map' asset role. SQLite cannot widen a CHECK in
-  // place, so an older refs table is rebuilt once with every row carried over.
+  // Deck plans introduced the 'map' asset role and venue effects packs the
+  // 'sfx' role. SQLite cannot widen a CHECK in place, so an older refs table is
+  // rebuilt once with every row carried over.
   const mansionAssetRefsTable = db
     .prepare(
       "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'debate_mystery_mansion_asset_refs'",
     )
     .get() as { sql?: string } | undefined;
-  if (mansionAssetRefsTable?.sql && !mansionAssetRefsTable.sql.includes("'map'")) {
+  if (mansionAssetRefsTable?.sql &&
+    (!mansionAssetRefsTable.sql.includes("'map'") || !mansionAssetRefsTable.sql.includes("'sfx'"))) {
     // RENAME makes SQLite reparse every persistent trigger in main, which fails
     // while Core Vault's TEMP views shadow their physical tables. Suspend the
     // views for the rebuild exactly as the image proxy migration does.
@@ -3099,7 +3106,7 @@ export function initializeDatabase(
         bundle_id TEXT NOT NULL,
         user_id TEXT NOT NULL,
         asset_id TEXT NOT NULL,
-        role TEXT NOT NULL CHECK(role IN ('room', 'prop', 'music', 'presentation', 'map')),
+        role TEXT NOT NULL CHECK(role IN ('room', 'prop', 'music', 'presentation', 'map', 'sfx')),
         logical_id TEXT NOT NULL,
         created_at TEXT NOT NULL,
         PRIMARY KEY(bundle_id, role, logical_id),
@@ -3835,6 +3842,12 @@ export function initializeDatabase(
   );
   if (!hasDebateWhodunnitTextVoiceMode) {
     addPrivateUserColumn("debate_whodunnit_text_voice_mode", "TEXT NOT NULL DEFAULT 'babble'");
+  }
+  const hasDebateWhodunnitSpeechType = userColumns.some(
+    (column) => column.name === "debate_whodunnit_speech_type",
+  );
+  if (!hasDebateWhodunnitSpeechType) {
+    addPrivateUserColumn("debate_whodunnit_speech_type", "TEXT NOT NULL DEFAULT 'english'");
   }
   const hasPsychicModeEnabled = userColumns.some(
     (column) => column.name === "psychic_mode_enabled",
@@ -4921,6 +4934,23 @@ export function initializeDatabase(
     if (!mansionAssetColumns.some((entry) => entry.name === column)) {
       db.exec(`ALTER TABLE debate_mystery_mansion_assets ADD COLUMN ${column} INTEGER;`);
     }
+  }
+  // A redrawn themed prop lands as a candidate beside the ready sprite and only
+  // replaces it when the author saves the venue details.
+  const propVariantColumns = db.prepare(
+    "PRAGMA table_info(debate_mystery_mansion_prop_variants)",
+  ).all() as Array<{ name: string }>;
+  if (!propVariantColumns.some((column) => column.name === "candidate_status")) {
+    db.exec("ALTER TABLE debate_mystery_mansion_prop_variants ADD COLUMN candidate_status TEXT CHECK(candidate_status IS NULL OR candidate_status IN ('pending', 'ready', 'failed'));");
+  }
+  if (!propVariantColumns.some((column) => column.name === "candidate_asset_id")) {
+    db.exec("ALTER TABLE debate_mystery_mansion_prop_variants ADD COLUMN candidate_asset_id TEXT REFERENCES debate_mystery_mansion_assets(id) ON DELETE RESTRICT;");
+  }
+  if (!propVariantColumns.some((column) => column.name === "candidate_attempt_count")) {
+    db.exec("ALTER TABLE debate_mystery_mansion_prop_variants ADD COLUMN candidate_attempt_count INTEGER NOT NULL DEFAULT 0;");
+  }
+  if (!propVariantColumns.some((column) => column.name === "candidate_failure_code")) {
+    db.exec("ALTER TABLE debate_mystery_mansion_prop_variants ADD COLUMN candidate_failure_code TEXT;");
   }
   db.exec(`
     CREATE UNIQUE INDEX IF NOT EXISTS idx_debate_mystery_mansion_bundles_portable_payload

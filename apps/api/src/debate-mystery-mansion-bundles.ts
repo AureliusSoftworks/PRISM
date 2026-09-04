@@ -9,6 +9,8 @@ import {
   MANSION_ATMOSPHERE_ACTIVE_LOGICAL_ID_V1,
   MANSION_ATMOSPHERE_CANDIDATE_LOGICAL_ID_V1,
   MANSION_ATMOSPHERE_PREVIOUS_LOGICAL_ID_V1,
+  mansionSfxPackStateFromAssetsV1,
+  parseMansionSfxLogicalIdV1,
   autoDecorateMansionLayoutV2,
   canonicalMansionLayoutV2,
   canonicalPortablePackageJsonV1,
@@ -487,6 +489,7 @@ function summary(
     },
     propTheme: propThemeState.propTheme,
     propThemeProgress: propThemeState.progress,
+    sfxPack: mansionSfxPackStateFromAssetsV1(assets),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -559,6 +562,11 @@ export function freezeDebateMysteryMansionSnapshotV2(
     ...(mansion.music?.previous ? [mansion.music.previous.assetId] : []),
     ...(mansion.atmosphere?.candidate ? [mansion.atmosphere.candidate.assetId] : []),
     ...(mansion.atmosphere?.previous ? [mansion.atmosphere.previous.assetId] : []),
+    // Effect previews and replaced clips are authoring state; only active cues freeze.
+    ...(mansion.assets ?? []).flatMap((asset) =>
+      asset.role === "sfx" && parseMansionSfxLogicalIdV1(asset.logicalId)?.lane !== "active"
+        ? [asset.id]
+        : []),
   ]);
   const acceptedThemeAssetIds = new Set(
     mansion.propTheme?.variants.map((variant) => variant.packageAssetId) ?? [],
@@ -1220,13 +1228,11 @@ function normalizeMansionEditorLayoutV2(
 ): MansionLayoutV2 {
   let source: MansionLayoutV2;
   try {
+    // Side rooms (infill) are validated as what they are. Turning them into corridors
+    // here made every doorless side room a disconnected corridor, so any venue with
+    // ambient blocks failed to save, and one that passed would have been stored with
+    // its side rooms carrying traversal.
     source = JSON.parse(JSON.stringify(input)) as MansionLayoutV2;
-    source = {
-      ...source,
-      entities: source.entities.map((entity) => entity.kind === "infill"
-        ? { ...entity, kind: "corridor" as const }
-        : entity),
-    };
     const errors = validateMansionLayoutV2(source, {
       suspectCount,
       requireEditorFloors: true,

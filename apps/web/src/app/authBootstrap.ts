@@ -67,3 +67,29 @@ export function decideAuthBootstrapFailure<User>(
     detail,
   };
 }
+
+/** Watchdog budgets for the auth bootstrap request. A young document is still
+ * parsing and hydrating on the same thread that must service the response, so
+ * a tight deadline there mostly measures the page's own busyness: the abort
+ * fires, reads as "server offline", and the reconnect card flashes on every
+ * cold start. The first attempt therefore gets the wide deadline while the
+ * document is young, and an established page keeps the tight one. Retry
+ * attempts are always wide — they run only after a watchdog abort, and their
+ * job is to separate "the page was busy" from "the server is gone". Genuine
+ * refusals (the API proxy answering unavailable) are not aborts and surface
+ * immediately regardless of these budgets. */
+export const AUTH_BOOTSTRAP_TIMEOUT_MS = 3_000;
+export const AUTH_BOOTSTRAP_WIDE_TIMEOUT_MS = 12_000;
+export const AUTH_BOOTSTRAP_YOUNG_DOCUMENT_MS = 15_000;
+
+export function authBootstrapAttemptTimeoutMs(args: {
+  /** 1 for the first try; anything above it is the silent retry. */
+  attempt: number;
+  /** Milliseconds since navigation start, i.e. performance.now(). */
+  documentAgeMs: number;
+}): number {
+  if (args.attempt > 1) return AUTH_BOOTSTRAP_WIDE_TIMEOUT_MS;
+  return args.documentAgeMs < AUTH_BOOTSTRAP_YOUNG_DOCUMENT_MS
+    ? AUTH_BOOTSTRAP_WIDE_TIMEOUT_MS
+    : AUTH_BOOTSTRAP_TIMEOUT_MS;
+}

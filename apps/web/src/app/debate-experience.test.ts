@@ -235,6 +235,12 @@ it("opens executable Flyting beside the available Debate formats", () => {
     /\[\s*"against",\s*props\.session\.againstAdvocate,\s*againstColor,\s*"Con",?\s*\]/u,
   );
   assert.match(flytingSource, /PRISM fills the gallery/u);
+  // The Jarl's vote is the side the guards go to; the ruling line is optional.
+  assert.match(
+    flytingSource,
+    /\(state\.expectedAction !== "host_verdict" &&\s*!draft\.trim\(\)\)/u,
+  );
+  assert.match(flytingSource, /A ruling line is optional\./u);
   assert.doesNotMatch(flytingSource, /Four Hall members/u);
   assert.doesNotMatch(flytingSource, /const \[jurorBotIds, setJurorBotIds\]/u);
   assert.doesNotMatch(flytingSource, /jurorBotIds,/u);
@@ -3474,6 +3480,12 @@ describe("Debate experience", () => {
     assert.match(source, /debateRecessResumeFiller/u);
     assert.match(source, /debateExitPresentationEventId/u);
     assert.match(source, /debateSessionNeedsReturnPause\(session\)/u);
+    // The Mead Hall has no clock: a Hall waiting for the player never
+    // recesses when the app is away, and a live bout recesses quietly.
+    assert.match(
+      source,
+      /if \(session\.format === "flyting"\) \{[\s\S]{0,400}if \(session\.status !== "live"\) return;[\s\S]{0,700}nextMutationKey\("flyting-away-recess"\)[\s\S]{0,200}quietSave: true/u,
+    );
     assert.match(source, /nextMutationKey\("return-recess"\)/u);
     assert.match(source, /nextMutationKey\("bake-lift-recess"\)/u);
     assert.match(source, /nextMutationKey\("bake-restore-recess"\)/u);

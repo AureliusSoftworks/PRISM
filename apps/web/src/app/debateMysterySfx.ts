@@ -1,5 +1,6 @@
 import {
   DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
+  WHODUNNIT_SFX_CUES_V1,
   type BotAudioVoiceProfileV1,
   type WhodunnitTextVoiceMode,
 } from "@localai/shared";
@@ -382,9 +383,39 @@ export const DEBATE_MYSTERY_SFX_COOLDOWN_MS = {
 
 const lastPlaybackAt = new Map<DebateMysterySfxCue, number>();
 
+/**
+ * The venue's own effects pack for the case on screen. The experience installs
+ * it from the case's frozen venue snapshot and clears it on unmount; while a
+ * cue has a venue clip that clip plays at the cue's tuned gain in place of the
+ * bundled voice. Null keeps the bundled palette, so nothing here changes when
+ * a venue owns no effects.
+ */
+let venueSfxUrls: Partial<Record<DebateMysterySfxCue, string>> | null = null;
+
+export function setDebateMysteryVenueSfxV1(
+  next: Partial<Record<DebateMysterySfxCue, string>> | null,
+): void {
+  venueSfxUrls = next && Object.keys(next).length > 0 ? { ...next } : null;
+}
+
+export function debateMysteryVenueSfxUrlV1(cue: DebateMysterySfxCue): string | null {
+  return venueSfxUrls?.[cue] ?? null;
+}
+
+/** The bundled PRISM clip a cue falls back to; the Library auditions it beside venue clips. */
+export function debateMysteryBundledSfxUrlV1(cue: DebateMysterySfxCue): string {
+  return cue === "evidence"
+    ? DEBATE_MYSTERY_EVIDENCE_CHIME[0]!.url
+    : SINGLE_VOICE_CUES[cue].url;
+}
+
 export function debateMysterySfxVoices(
   cue: DebateMysterySfxCue,
 ): readonly DebateMysterySfxVoice[] {
+  const venueUrl = venueSfxUrls?.[cue];
+  if (venueUrl) {
+    return [{ delayMs: 0, gain: WHODUNNIT_SFX_CUES_V1[cue].gain, playbackRate: 1, url: venueUrl }];
+  }
   return cue === "evidence"
     ? DEBATE_MYSTERY_EVIDENCE_CHIME
     : [SINGLE_VOICE_CUES[cue]];

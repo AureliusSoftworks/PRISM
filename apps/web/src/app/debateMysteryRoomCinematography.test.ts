@@ -108,9 +108,13 @@ describe("Whodunnit investigation room cinematography", () => {
     assert.match(experience, /const currentRoomImageUrl = currentRoomArtStyle === "illustrated"[\s\S]*currentRoomUpgradeAssetUrl \?\? currentRoomAcceptedUpgradeUrl \?\? currentRoomMosaicUrl/u);
     assert.match(component, /mansionDynamicLightFrameV2\(light, elapsedMs, reducedMotion\)/u);
     assert.match(component, /data-light-source=\{lightSource\}/u);
-    // Lights composite with the room pick; rain and caustics with the FX default on their own root.
-    assert.match(component, /roomLightBlend\(props\.blendMode\)/u);
-    assert.match(component, /data-effect-layer="true"[\s\S]{0,400}"--room-light-blend": MANSION_EFFECT_DEFAULT_BLEND_MODE_V1/u);
+    // Blend is fixed by kind: glows add on one root, shafts and washes screen on another, fog stays alpha.
+    assert.match(component, /MANSION_ROOM_LIGHT_LAYERS_V1\.filter\(\(layer\) => layerKeys\.includes\(layer\.key\)\)\.map/u);
+    assert.match(component, /"--room-light-blend": layer\.blend/u);
+    assert.match(component, /data-room-light-canvas=\{layer\.key\}/u);
+    assert.match(component, /contextForLayer\(mansionRoomEntryLayerV1\(light\)\)/u);
+    assert.match(component, /layer === "atmosphere" \? atmosphereContext/u);
+    assert.doesNotMatch(component, /props\.blendMode/u);
     assert.match(component, /window\.cancelAnimationFrame\(animationFrame\)/u);
     assert.match(component, /stageObserver\?\.disconnect\(\)/u);
     assert.match(component, /data-light-motion=\{props\.reducedMotion \? "frozen" : "live"\}/u);

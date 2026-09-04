@@ -70,6 +70,7 @@ function baseline(overrides: Partial<CurrentSettings> = {}): CurrentSettings {
     coffeeExperimentalTableAngleEnabled: 0,
     debateWhodunnitReuseSynthesizedExhibits: 0,
     debateWhodunnitTextVoiceMode: "bottish",
+    debateWhodunnitSpeechType: "english",
     psychicModeEnabled: 0,
     autoSwitchModel: 0,
     autoFallbackChain: null,
@@ -782,6 +783,38 @@ describe("resolveNextSettings — debateWhodunnitReuseSynthesizedExhibits", () =
         current,
       ).debateWhodunnitReuseSynthesizedExhibits,
       1,
+    );
+  });
+});
+
+describe("resolveNextSettings — debateWhodunnitSpeechType", () => {
+  it("persists English and Premium while defaulting anything else to English", () => {
+    assert.equal(
+      resolveNextSettings(
+        { debateWhodunnitSpeechType: "premium" },
+        baseline(),
+      ).debateWhodunnitSpeechType,
+      "premium",
+    );
+    assert.equal(
+      resolveNextSettings(
+        { debateWhodunnitSpeechType: "english" },
+        baseline({ debateWhodunnitSpeechType: "premium" }),
+      ).debateWhodunnitSpeechType,
+      "english",
+    );
+    assert.equal(
+      resolveNextSettings(
+        { debateWhodunnitSpeechType: "elevenlabs" },
+        baseline({ debateWhodunnitSpeechType: null }),
+      ).debateWhodunnitSpeechType,
+      "english",
+    );
+    assert.equal(
+      resolveNextSettings({}, baseline({ debateWhodunnitSpeechType: "premium" }))
+        .debateWhodunnitSpeechType,
+      "premium",
+      "an absent key keeps the saved choice",
     );
   });
 });

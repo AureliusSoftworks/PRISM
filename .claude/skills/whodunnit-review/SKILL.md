@@ -49,9 +49,11 @@ diagnostic export whitelisted by `formatDebateMysteryV2PublicReview`; see
 - On name, identity, or asset collisions, preserve the existing library entry and report the imported result's resolved identity. Never overwrite an installed mansion or partially install a package.
 - A source fix does not update an already-running request or an older packaged app. Distinguish current source, running API, desktop bundle, and installed build before asking the user to retry.
 - Prefer validators, typed failure causes, bounded fallback, orchestration, serialization, and recovery UI fixes over model-specific prompt hacks, manual database edits, or rewriting a saved mystery.
+- Production Readiness pauses on any requested category that came back reused, swapped, or unavailable, so a setup that requests what the selected venue already provides can only pause. Case Forge never composes music (a venue soundtrack is reused automatically), and Ambience is a deterministic local acoustic mix, not generated audio. Judge "why did it pause" complaints against those contracts before suspecting a provider.
 
 ## Key Surfaces
 
+- Case Forge setup pages (Experience, Mystery Venue, Story, Production) and the create request: `apps/web/src/app/DebateExperience.tsx` under `mysterySetupPage`, not the play experience. Option copy comes from `resolveDebateMysteryProductionCapabilitiesV1` and venue provision from `resolveDebateMysteryVenueProductionV1` in `packages/shared/src/debateMysteryV2.ts`
 - Case orchestration and persistence: `apps/api/src/debate-mystery-v2.ts`
 - API regressions: `apps/api/src/__tests__/debate-mystery-v2.test.ts`
 - Shared public contracts: `packages/shared/src/debateMysteryV2.ts`

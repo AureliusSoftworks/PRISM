@@ -93,7 +93,11 @@ import {
   shouldRedirectToLoginForApiFailure,
   type AuthReauthRequiredDetail,
 } from "./authReauth";
-import { decideAuthBootstrapFailure, isAbortLikeError } from "./authBootstrap";
+import {
+  authBootstrapAttemptTimeoutMs,
+  decideAuthBootstrapFailure,
+  isAbortLikeError,
+} from "./authBootstrap";
 import { purgeLegacyBrowserBearerCredentials } from "./browserBearerCredentialCleanup";
 import {
   deleteAllBrowserOwnerStateV1,
@@ -1553,6 +1557,7 @@ import {
   normalizeVoiceEffect,
   normalizeVoiceMode,
   normalizeWhodunnitTextVoiceMode,
+  normalizeWhodunnitSpeechType,
   voiceDeliveryRateForMood,
   voicePerformanceTextFromActionCues,
   voicePerformancePlanFromText,
@@ -1622,6 +1627,7 @@ import {
   type SlateHandoffPreview,
   type VoiceMode,
   type WhodunnitTextVoiceMode,
+  type WhodunnitSpeechType,
   type AutoFallbackChainV1,
   type AutoFallbackModelRef,
   type AutoRecoveryTraceV1,
@@ -10621,6 +10627,7 @@ interface UserSettings {
   experimentalAllModelEffortEnabled: boolean;
   debateWhodunnitReuseSynthesizedExhibits: boolean;
   debateWhodunnitTextVoiceMode: WhodunnitTextVoiceMode;
+  debateWhodunnitSpeechType: WhodunnitSpeechType;
   modelEffortPreferences: ModelReasoningEffortPreferenceV1[];
   modelTurboPreferences: ModelTurboPreferenceV1[];
   psychicModeEnabled: boolean;
@@ -80077,13 +80084,47 @@ function HomeContent(): React.JSX.Element {
   const bootstrap = useCallback(async (): Promise<SessionUser | null> => {
     const requestGeneration = authBootstrapRequestGenerationRef.current + 1;
     authBootstrapRequestGenerationRef.current = requestGeneration;
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 3000);
+    type AuthBootstrapPayload = {
+      user: SessionUser | null;
+      hasAnyAccounts?: boolean;
+    };
+    const attemptAuthMe = async (
+      attempt: 1 | 2,
+    ): Promise<AuthBootstrapPayload> => {
+      const controller = new AbortController();
+      const timeout = setTimeout(
+        () => controller.abort(),
+        authBootstrapAttemptTimeoutMs({
+          attempt,
+          documentAgeMs: performance.now(),
+        }),
+      );
+      try {
+        return await requestApiWithLoopbackFallback<AuthBootstrapPayload>(
+          "/api/auth/me",
+          { signal: controller.signal },
+        );
+      } finally {
+        clearTimeout(timeout);
+      }
+    };
     try {
-      const d = await requestApiWithLoopbackFallback<{
-        user: SessionUser | null;
-        hasAnyAccounts?: boolean;
-      }>("/api/auth/me", { signal: controller.signal });
+      let d: AuthBootstrapPayload;
+      try {
+        d = await attemptAuthMe(1);
+      } catch (err) {
+        // A watchdog abort on a busy fresh document usually means hydration
+        // starved the response, not that the server is gone. Retry once,
+        // quietly, and only surface the reconnect card if the wider deadline
+        // fails too.
+        if (
+          !isAbortLikeError(err) ||
+          authBootstrapRequestGenerationRef.current !== requestGeneration
+        ) {
+          throw err;
+        }
+        d = await attemptAuthMe(2);
+      }
       if (authBootstrapRequestGenerationRef.current !== requestGeneration) {
         return userRef.current;
       }
@@ -80128,8 +80169,6 @@ function HomeContent(): React.JSX.Element {
       });
       setUser(null);
       return null;
-    } finally {
-      clearTimeout(timeout);
     }
   }, [
     appendAccountWorkspaceStartupLog,
@@ -82685,6 +82724,9 @@ function HomeContent(): React.JSX.Element {
         d.settings.debateWhodunnitReuseSynthesizedExhibits === true,
       debateWhodunnitTextVoiceMode: normalizeWhodunnitTextVoiceMode(
         d.settings.debateWhodunnitTextVoiceMode,
+      ),
+      debateWhodunnitSpeechType: normalizeWhodunnitSpeechType(
+        d.settings.debateWhodunnitSpeechType,
       ),
       modelEffortPreferences: Array.isArray(d.settings.modelEffortPreferences)
         ? d.settings.modelEffortPreferences
@@ -95504,6 +95546,42 @@ function HomeContent(): React.JSX.Element {
     }
   }
 
+  async function persistDebateWhodunnitSpeechType(
+    debateWhodunnitSpeechType: WhodunnitSpeechType,
+  ) {
+    if (!settings || busy) return;
+    const ownerGeneration = captureAccountOwnerGeneration();
+    if (!ownerGeneration) return;
+    const previous = settings;
+    setSettings({ ...settings, debateWhodunnitSpeechType });
+    setBusy(true);
+    setPanelError(null);
+    setPanelNotice(null);
+    try {
+      const saveResult = await runForAccountOwner(ownerGeneration, () =>
+        api("/api/settings", {
+          method: "PATCH",
+          body: JSON.stringify({ debateWhodunnitSpeechType }),
+        }),
+      );
+      if (saveResult.status === "stale") return;
+      setPanelNotice(
+        debateWhodunnitSpeechType === "premium"
+          ? "Whodunnit dialogue now speaks with each character's Premium voice."
+          : "Whodunnit dialogue now speaks with the built-in English voice.",
+      );
+    } catch (err) {
+      if (!isCurrentAccountOwnerGeneration(ownerGeneration)) return;
+      setSettings(previous);
+      setPanelError(
+        err instanceof Error
+          ? err.message
+          : "Could not update the Whodunnit speech type.",
+      );
+    } finally {
+      if (isCurrentAccountOwnerGeneration(ownerGeneration)) setBusy(false);
+    }
+  }
   async function persistDebateWhodunnitTextVoiceMode(
     debateWhodunnitTextVoiceMode: WhodunnitTextVoiceMode,
   ) {
@@ -149025,6 +149103,53 @@ function HomeContent(): React.JSX.Element {
                     </button>
                   ))}
                 </div>
+                {/* Whodunnit speech: English is the built-in voice, Premium the
+                    ElevenLabs voice frozen with the case. Premium needs ONLINE
+                    and a key; the account-wide Speech Type is untouched. Only
+                    the live-session header shows it: the lobby navbar already
+                    carries the Speech Type dropdown, and the live header drops
+                    that dropdown, leaving this pill as the one speech control. */}
+                {debateLiveSessionActive ? (
+                  <div
+                    className={`${styles.modeControl} ${styles.autoModeControl} ${styles.chatHeaderModeToggle}`}
+                    data-tutorial-target="whodunnit-speech-type"
+                    data-speech-type={settings?.debateWhodunnitSpeechType ?? "english"}
+                    role="group"
+                    aria-label="Whodunnit speech"
+                  >
+                    {(["english", "premium"] as const).map((speechType) => {
+                      const premiumBlocked = speechType === "premium" && (
+                        blocksOnlineCapabilities(debateResponseMode) ||
+                        !(settings && settings.elevenLabsApiKeySource !== "none")
+                      );
+                      const active = (settings?.debateWhodunnitSpeechType ?? "english") === speechType;
+                      return (
+                        <button
+                          key={speechType}
+                          type="button"
+                          className={`${styles.autoModeOption} ${active ? styles.autoModeOptionActive : ""}`}
+                          disabled={!settings || premiumBlocked}
+                          aria-pressed={active}
+                          title={
+                            speechType === "premium"
+                              ? blocksOnlineCapabilities(debateResponseMode)
+                                ? "Premium voices need ONLINE. LOCAL keeps every voice on this machine."
+                                : !(settings && settings.elevenLabsApiKeySource !== "none")
+                                  ? "Add an ElevenLabs key in Settings → Connections to use Premium voices."
+                                  : "Speak Whodunnit dialogue with each character's Premium (ElevenLabs) voice."
+                              : "Speak Whodunnit dialogue with the built-in English voice."
+                          }
+                          onClick={() => {
+                            if (!settings || active || premiumBlocked) return;
+                            void persistDebateWhodunnitSpeechType(speechType);
+                          }}
+                        >
+                          {speechType === "premium" ? "Premium" : "English"}
+                        </button>
+                      );
+                    })}
+                  </div>
+                ) : null}
                 <ComposerModelPicker
                   value={debateNavbarModelChoice}
                   onChange={(nextChoice) => {
@@ -149835,6 +149960,7 @@ function HomeContent(): React.JSX.Element {
                 ...voiceRequest,
                 selection: () => ({
                   ...voicePlaybackSelectionRef.current,
+                  whodunnitSpeechType: settings?.debateWhodunnitSpeechType ?? "english",
                   audioEnabled: debateVoiceSurfaceActiveRef.current && !prismPresentationSuspendedRef.current,
                   volume: settings?.voiceVolume ?? 0,
                   localOnly: debateResponseMode === "local" ||

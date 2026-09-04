@@ -7,6 +7,8 @@ import {
   canonicalMansionLayoutV2,
   createBlankMansionLayoutV2,
   mansionDynamicLightFrameV2,
+  mansionRoomEntryLayerV1,
+  mansionRoomLightLayerBlendV1,
   mansionLayoutV2EditorDerivativeFromLegacyRooms,
   mansionLayoutV2CompatibilityNeighborIds,
   mansionLayoutV2EntityRect,
@@ -106,6 +108,20 @@ describe("MansionLayoutV2 geometry", () => {
     assert.equal(layout.verticalConnectors.length, 1);
     assert.equal(mansionLayoutV2SemanticRoomsAreConnected(layout), true);
     assert.deepEqual(validateMansionLayoutV2(layout, { suspectCount: 4 }), []);
+  });
+
+  it("fixes each light and effect kind to a physical blend layer", () => {
+    assert.equal(mansionRoomEntryLayerV1({ kind: "omni" }), "glow");
+    assert.equal(mansionRoomEntryLayerV1({ kind: "fire" }), "glow");
+    assert.equal(mansionRoomEntryLayerV1({ kind: "neon" }), "glow");
+    assert.equal(mansionRoomEntryLayerV1({ kind: "directional" }), "shaft");
+    assert.equal(mansionRoomEntryLayerV1({ kind: "rain" }), "shaft");
+    assert.equal(mansionRoomEntryLayerV1({ kind: "caustics" }), "shaft");
+    for (const kind of ["steam", "fog", "snow"]) assert.equal(mansionRoomEntryLayerV1({ kind }), "atmosphere");
+    assert.equal(mansionRoomEntryLayerV1({ kind: "something-new" }), "glow");
+    assert.equal(mansionRoomLightLayerBlendV1("glow"), "plus-lighter");
+    assert.equal(mansionRoomLightLayerBlendV1("shaft"), "screen");
+    assert.equal(mansionRoomLightLayerBlendV1("atmosphere"), "normal");
   });
 
   it("moves a legacy one-floor source into a connected two-floor derivative without adding rooms", () => {

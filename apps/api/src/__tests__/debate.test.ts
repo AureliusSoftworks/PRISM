@@ -15622,4 +15622,70 @@ describe("Flyting V1", () => {
       db.close();
     }
   });
+
+  it("lets a human Jarl send the guards without writing a ruling line", async () => {
+    const db = createTestDb();
+    try {
+      const { session: created, debateRuntime } =
+        await createFlytingTestSession(db, "judge");
+      let session = created;
+      for (let index = 0; index < 32 && session.status !== "waiting_for_player"; index += 1) {
+        session = await submitDebateFlytingAction(
+          db,
+          "user-1",
+          session.id,
+          {
+            action: "advance",
+            expectedRevision: session.revision,
+            idempotencyKey: `flyting:jarl-blank:${index}`,
+          },
+          debateRuntime,
+        );
+      }
+      assert.equal(session.formatState.format, "flyting");
+      assert.equal(session.formatState.expectedAction, "host_verdict");
+      // A recess while the Hall waits for the Jarl restores the same turn.
+      const paused = pauseDebateSession(db, "user-1", session.id, {
+        expectedRevision: session.revision,
+        idempotencyKey: "flyting:jarl-blank:pause",
+        quietSave: true,
+      });
+      assert.equal(paused.status, "paused");
+      session = resumeDebateSession(db, "user-1", session.id, {
+        expectedRevision: paused.revision,
+        idempotencyKey: "flyting:jarl-blank:resume",
+        quietSave: true,
+      });
+      assert.equal(session.status, "waiting_for_player");
+      assert.equal(session.formatState.expectedAction, "host_verdict");
+      session = await submitDebateFlytingAction(
+        db,
+        "user-1",
+        session.id,
+        {
+          action: "host_verdict",
+          winnerSideId: "for",
+          content: "",
+          authoredMode: "custom",
+          expectedRevision: session.revision,
+          idempotencyKey: "flyting:jarl-blank:verdict",
+        },
+        debateRuntime,
+      );
+      assert.equal(session.status, "completed");
+      assert.equal(session.playerVerdict, "for");
+      assert.equal(session.formatState.format, "flyting");
+      assert.ok(session.formatState.jarlGuards.every((guard) => guard.sideId === "for"));
+      assert.equal(session.formatState.hostVerdict?.authoredMode, "custom");
+      assert.match(
+        session.formatState.hostVerdict?.ruling ?? "",
+        /^My guards go to Santa Claus\./u,
+      );
+      const verdictEvent = session.events.find((event) => event.kind === "verdict");
+      assert.equal(verdictEvent?.speakerKind, "player");
+      assert.match(verdictEvent?.content ?? "", /^My guards go to Santa Claus\./u);
+    } finally {
+      db.close();
+    }
+  });
 });

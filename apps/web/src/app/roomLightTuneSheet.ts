@@ -1,5 +1,5 @@
 import {
-  MANSION_EFFECT_DEFAULT_BLEND_MODE_V1,
+  MANSION_ROOM_LIGHT_LAYERS_V1,
   mansionDynamicLightCenterV2,
   type MansionDynamicLightV2,
   type MansionLightBlendModeV1,
@@ -7,14 +7,16 @@ import {
 import { roomLightBlend } from "./roomLightPlacement.ts";
 
 /**
- * A contact sheet of the lit room, one tile per candidate blend, for a model to
- * judge. The plate and the layer's canvases are composited here on the client,
- * which already owns the renderer, so the server never has to draw a light.
+ * A contact sheet of the lit room for a model to judge. The plate and the
+ * layer's canvases are composited here on the client, which already owns the
+ * renderer, so the server never has to draw a light. Blends are fixed per
+ * layer (glows add, shafts screen), exactly as the room renders them.
  */
 
 export interface RoomLightTuneCandidateV1 {
   /** Single letter the judge answers with. */
   label: string;
+  /** Kept for the sheet contract; rendering uses the fixed per-layer blends. */
   blend: MansionLightBlendModeV1;
 }
 
@@ -83,11 +85,11 @@ export function composeRoomLightTuneSheet(args: {
     ? args.plate.naturalWidth / args.plate.naturalHeight
     : 16 / 9;
   const layout = roomLightTuneSheetLayoutV1({ count: args.candidates.length, aspect, tileWidth: args.tileWidth });
-  const canvases = {
-    lights: args.stage.querySelector<HTMLCanvasElement>('canvas[data-room-light-canvas="lights"]'),
-    effects: args.stage.querySelector<HTMLCanvasElement>('canvas[data-room-light-canvas="effects"]'),
-    atmosphere: args.stage.querySelector<HTMLCanvasElement>('canvas[data-room-light-canvas="atmosphere"]'),
-  };
+  const layerCanvases = MANSION_ROOM_LIGHT_LAYERS_V1.map((layer) => ({
+    blend: layer.blend,
+    canvas: args.stage.querySelector<HTMLCanvasElement>(`canvas[data-room-light-canvas="${layer.key}"]`),
+  }));
+  const atmosphere = args.stage.querySelector<HTMLCanvasElement>('canvas[data-room-light-canvas="atmosphere"]');
   const sheet = document.createElement("canvas");
   sheet.width = layout.width;
   sheet.height = layout.height;
@@ -104,17 +106,14 @@ export function composeRoomLightTuneSheet(args: {
     context.clip();
     context.globalCompositeOperation = "source-over";
     context.drawImage(args.plate, origin.x, origin.y, width, height);
-    if (canvases.lights) {
-      context.globalCompositeOperation = roomLightTuneCanvasBlendOpV1(candidate.blend);
-      context.drawImage(canvases.lights, origin.x, origin.y, width, height);
+    for (const layer of layerCanvases) {
+      if (!layer.canvas) continue;
+      context.globalCompositeOperation = roomLightTuneCanvasBlendOpV1(layer.blend);
+      context.drawImage(layer.canvas, origin.x, origin.y, width, height);
     }
-    if (canvases.effects) {
-      context.globalCompositeOperation = roomLightTuneCanvasBlendOpV1(MANSION_EFFECT_DEFAULT_BLEND_MODE_V1);
-      context.drawImage(canvases.effects, origin.x, origin.y, width, height);
-    }
-    if (canvases.atmosphere) {
+    if (atmosphere) {
       context.globalCompositeOperation = "source-over";
-      context.drawImage(canvases.atmosphere, origin.x, origin.y, width, height);
+      context.drawImage(atmosphere, origin.x, origin.y, width, height);
     }
     context.globalCompositeOperation = "source-over";
     // Numbered markers on every tile, in the detector's magenta so the judge reads them the same way.

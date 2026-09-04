@@ -66,6 +66,7 @@ import {
   resolveDebateMysteryRoomPresentationV1,
   resolveDebateMysteryConfigV2,
   resolveDebateMysteryMansionExteriorScaleClassV1,
+  resolveDebateMysteryVenueProductionV1,
   canonicalMansionLayoutV2,
   canonicalPortablePackageJsonV1,
   validateDebateMysteryAudioManifestV1,
@@ -137,6 +138,8 @@ import { AutoFallbackExhaustedError } from "./auto-fallback.ts";
 import type { PrismGenerationWorkReceipt } from "./generation-work.ts";
 import { PRISM_INSTANT_VOICE_MODEL_ID, pcmWaveDurationMs } from "./local-voice-engine.ts";
 import { resolveAbsoluteUnderDataRoot } from "./image-storage.ts";
+import { updateDebateMysteryMansionPropVariantIdentityV1 } from "./debate-mystery-mansion-prop-variants.ts";
+import { WHODUNNIT_PROP_ARCHETYPES_V1, type WhodunnitPropArchetypeIdV1 } from "@localai/shared";
 import {
   freezeDebateMysteryMansionSnapshotV2,
   getDebateMysteryMansionBundleV2,
@@ -2078,17 +2081,20 @@ function productionReadinessFromCheckpointV1(args: {
             : "The case is using PRISM's compatible investigation music.",
         }
       : undefined,
+    // A personalized ambience request is fulfilled by the deterministic
+    // venue-keyed acoustic mix, so it counts as prepared rather than as a
+    // fallback. Only reuse of a venue's own atmosphere needs disclosure.
     ambience: ambienceRequested
       ? {
           requestedCount: 1,
-          generatedCount: 0,
+          generatedCount: ambienceReused ? 0 : 1,
           reusedCount: ambienceReused ? 1 : 0,
-          fallbackCount: ambienceReused ? 0 : 1,
+          fallbackCount: 0,
           unavailableCount: 0,
-          sourceCode: ambienceReused ? "reused_venue_asset" : "bundled_compatible",
+          sourceCode: ambienceReused ? "reused_venue_asset" : "generated",
           publicReason: ambienceReused
-            ? "The case is using the frozen venue ambience; the reusable venue record was not changed."
-            : "The case is using a compatible authored acoustic palette.",
+            ? "The case is using the venue's own atmosphere; the reusable venue record was not changed."
+            : "A personalized acoustic mix keyed to this venue was prepared for the case.",
         }
       : undefined,
     voices: voicesRequested
@@ -2282,7 +2288,15 @@ export function setDebateMysteryEvidenceEmojiV1(
   });
 }
 
-interface MysteryPresentationRewriteEntryV1 { id: string; kind: "evidence" | "case_kit" | "observation"; label: string; text: string }
+interface MysteryPresentationRewriteEntryV1 {
+  id: string;
+  kind: "evidence" | "case_kit" | "observation";
+  label: string;
+  /** Deterministically cleaned text: boilerplate and exact repeats already removed. */
+  text: string;
+  /** The stored text as the player currently sees it. */
+  original: string;
+}
 
 /** Lowercase comparison key for one word. Trailing punctuation and a possessive
  * suffix are dropped so "Jr.", "Purser's", and "purser" all compare equal. */
@@ -2332,6 +2346,57 @@ const MYSTERY_REWRITE_FORBIDDEN = /\b(?:guilty|culprit|murderer|killer|the accus
 function mysteryRewriteAddsForbiddenV1(text: string, sources: readonly string[]): boolean {
   const present = new Set(Array.from(sources.join(" ").matchAll(MYSTERY_REWRITE_FORBIDDEN), (match) => match[0].toLocaleLowerCase()));
   return Array.from(text.matchAll(MYSTERY_REWRITE_FORBIDDEN), (match) => match[0].toLocaleLowerCase()).some((word) => !present.has(word));
+}
+
+/** Ordinary function words that carry no fact of their own. Domain nouns such
+ * as "record", "entry", or "page" are deliberately absent: those are facts. */
+const MYSTERY_REWRITE_FUNCTION_WORDS: ReadonlySet<string> = new Set([
+  "that", "this", "these", "those", "with", "from", "were", "was", "had", "has", "have", "been", "into", "onto",
+  "than", "then", "them", "they", "their", "there", "which", "while", "when", "where", "what", "about", "after",
+  "before", "during", "without", "within", "also", "only", "just", "very", "more", "most", "some", "such", "each",
+  "every", "other", "another", "being", "would", "could", "should", "might", "must", "will", "shall", "because",
+  "since", "until", "though", "although", "whether", "either", "neither", "both", "between", "among", "along",
+  "across", "around", "through", "toward", "towards", "upon", "over", "under", "above", "below", "against", "near",
+  "beside", "behind", "beyond", "inside", "outside", "itself", "here", "again", "still", "never", "always", "often",
+  "already", "enough", "same", "much", "many", "less", "least", "later", "earlier", "once",
+]);
+
+function mysteryRewriteWordsV1(text: string): string[] {
+  return Array.from(text.matchAll(/[\p{L}\p{N}][\p{L}\p{N}'’.:-]*/gu), (match) => match[0]);
+}
+
+/** Distinct sentences of a Case File entry, exact repeats removed. */
+function mysteryRewriteSentencesV1(text: string): string[] {
+  const seen = new Set<string>();
+  return text.replace(/\s+/gu, " ").trim().split(/(?<=[.!?])\s+/u).map((part) => part.trim()).filter((part) => {
+    const key = part.replace(/[.!?]+$/u, "").toLocaleLowerCase();
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+/** The first source fact a rewrite lost, or null when everything survived.
+ * Names, places, times, and numbers must survive exactly; every other distinct
+ * sentence must keep at least half of its content words. A tidier entry may
+ * never be a poorer one. */
+function mysteryRewriteDroppedFactV1(source: string, text: string): string | null {
+  const outputKeys = new Set(mysteryRewriteWordsV1(text).map(mysteryRewriteWordKeyV1));
+  for (const sentence of mysteryRewriteSentencesV1(source)) {
+    const words = mysteryRewriteWordsV1(sentence);
+    const anchors = words.filter((word, index) =>
+      /\p{N}/u.test(word) ||
+      (/^\p{Lu}/u.test(word) && !(index === 0 && MYSTERY_REWRITE_SENTENCE_OPENERS.has(mysteryRewriteWordKeyV1(word)))));
+    const lostAnchor = anchors.find((word) => !outputKeys.has(mysteryRewriteWordKeyV1(word)));
+    if (lostAnchor) return `"${sentence}" lost ${lostAnchor}`;
+    const content = words.map(mysteryRewriteWordKeyV1).filter((key) =>
+      key.length >= 4 && !/\p{N}/u.test(key) &&
+      !MYSTERY_REWRITE_FUNCTION_WORDS.has(key) && !MYSTERY_REWRITE_SENTENCE_OPENERS.has(key));
+    if (content.length < 2) continue;
+    const kept = content.filter((key) => outputKeys.has(key)).length;
+    if (kept * 2 < content.length) return `"${sentence}"`;
+  }
+  return null;
 }
 
 /** A rewrite that fails review is retried this many times before the player
@@ -2424,16 +2489,19 @@ export async function rerollDebateMysteryItemDescriptionV1(
   const { privateCase } = getDebateMysteryCaseV2(db, userId, sessionId);
   const canonical = privateCase.recordItems.find((entry) =>
     entry.reference.kind === "evidence" && entry.reference.id === args.subjectId);
-  const sources = [item.title, item.description, canonical?.description ?? ""];
+  // Boilerplate and exact repeats go deterministically first; the model only
+  // ever sees, and must preserve, the facts that remain.
+  const currentDescription = cleanMysteryItemDescriptionV1(item.description) || item.description;
+  const sources = [item.title, currentDescription, canonical?.description ?? ""];
   const allowed = mysteryRewriteAllowedNamesV1([...sources, ...session.formatState.rooms.map((room) => room.name),
     ...session.formatState.suspects.map((suspect) => suspect.name), session.formatState.victim?.name ?? ""]);
-  const maxLength = Math.min(600, Math.max(160, Math.round(Math.max(item.description.length, canonical?.description.length ?? 0) * 1.1)));
+  const maxLength = Math.min(600, Math.max(160, Math.round(Math.max(currentDescription.length, canonical?.description.length ?? 0) * 1.1)));
   let description: string;
   try {
     description = await runMysteryPresentationRewriteV1(db, userId, runtime, {
       operation: "reroll_evidence_description",
-      system: "Rewrite the description of one found item for a detective's Case File. Use only facts present in the supplied texts. Remove repetition, filler, and any sentence about PRISM, fallbacks, or artwork. Keep every distinct observation once, in plain past-tense prose, two to four sentences. Never add ownership, use, location, significance, or any person. Return only JSON: {\"description\": string}.",
-      payload: { item: { title: item.title, currentDescription: item.description, authoredDescription: canonical?.description ?? item.description }, maxCharacters: maxLength },
+      system: "Rewrite the description of one found item for a detective's Case File. Use only facts present in the supplied texts. Remove repetition, filler, and any sentence about PRISM, fallbacks, or artwork. Keep every distinct observation once, in plain past-tense prose, two to four sentences. Every name, place, time, and number must survive exactly. Never add ownership, use, location, significance, or any person. Return only JSON: {\"description\": string}.",
+      payload: { item: { title: item.title, currentDescription, authoredDescription: canonical?.description ?? currentDescription }, maxCharacters: maxLength },
       maxTokens: 700,
       validate: (raw) => {
         const text = cleanRewriteText(parseRewriteJson(raw).description, maxLength);
@@ -2441,17 +2509,147 @@ export async function rerollDebateMysteryItemDescriptionV1(
         if (mysteryRewriteIntroducesNamesV1(text, allowed) || mysteryRewriteAddsForbiddenV1(text, sources) || /\bPRISM\b/u.test(text)) {
           throw new Error("The rewritten description added something not in the record.");
         }
+        const dropped = mysteryRewriteDroppedFactV1(currentDescription, text);
+        if (dropped) throw new Error(`The rewritten description dropped a fact: ${dropped}.`);
         return text;
       },
     }) as string;
   } catch {
-    throw new HttpError(409, "The rewrite did not pass review. The previous description is unchanged.");
+    // The model could not tidy without losing something. The deterministic
+    // clean still stands: it removes only boilerplate and exact repeats.
+    if (currentDescription === item.description) {
+      throw new HttpError(409, "The rewrite did not pass review. The previous description is unchanged.");
+    }
+    description = currentDescription;
   }
   if (description === item.description) throw new HttpError(409, "The description is already as clean as PRISM can make it.");
   return commitDebateMysterySceneRepairV1(db, userId, sessionId, {
     action: "reroll_evidence_description", subjectId: args.subjectId, expectedRevision: session.revision,
     evidencePresentation: { description },
   });
+}
+
+/** Renames one found item after the physical object its description actually
+ * describes. The description is the source of truth: the new name may use only
+ * words already in it, never a person, place, or verdict, so nothing new can
+ * enter the record. */
+export async function renameDebateMysteryItemFromDescriptionV1(
+  db: DatabaseSync,
+  userId: string,
+  sessionId: string,
+  args: { subjectId: string; expectedRevision?: number },
+  runtime: DebateAiRuntime,
+): Promise<DebateSessionV1> {
+  assertRefractionActive();
+  const session = getDebateSession(db, userId, sessionId);
+  if (session.formatState.format !== "whodunnit" || session.formatState.version !== 2 ||
+    session.status === "cancelled" || ["case_forge", "trial", "verdict"].includes(session.formatState.playPhase)) {
+    throw new HttpError(409, "This case is not open for item repair.");
+  }
+  if (args.expectedRevision !== undefined && args.expectedRevision !== session.revision) {
+    throw new HttpError(409, "This case changed. Refresh before renaming the item.");
+  }
+  const item = session.formatState.record.find((entry) => entry.admitted &&
+    entry.reference.kind === "evidence" && entry.reference.id === args.subjectId);
+  if (!item) throw new HttpError(404, "Only a found Case File item can be renamed.");
+  const description = cleanMysteryItemDescriptionV1(item.description) || item.description;
+  const descriptionKeys = new Set(mysteryRewriteWordsV1(description).map(mysteryRewriteWordKeyV1));
+  const castKeys = new Set([
+    ...session.formatState.suspects.map((suspect) => suspect.name),
+    session.formatState.victim?.name ?? "",
+    ...session.formatState.rooms.map((room) => room.name),
+  ].flatMap((name) => mysteryRewriteWordsV1(name).map(mysteryRewriteWordKeyV1)).filter((key) => key.length > 2));
+  const titleGlue = new Set(["a", "an", "the", "of", "and", "with"]);
+  let title: string;
+  try {
+    title = await runMysteryPresentationRewriteV1(db, userId, runtime, {
+      operation: "rename_evidence_from_description",
+      system: "Name the physical object that one Case File description is about, for the detective's record. Use one to four words taken only from the description itself: the concrete thing the entry describes, never a person, place, time, verdict, or what the object means for the case. If the description names no physical object, return the current title unchanged. Return only JSON: {\"title\": string}.",
+      payload: { item: { currentTitle: item.title, description } },
+      maxTokens: 120,
+      validate: (raw) => {
+        const text = cleanRewriteText(parseRewriteJson(raw).title, 60);
+        if (!text || text.length < 2) throw new Error("The new name was empty or too long.");
+        const words = mysteryRewriteWordsV1(text);
+        if (words.length === 0 || words.length > 4) throw new Error("The new name must be one to four words.");
+        const stray = words.find((word) => {
+          const key = mysteryRewriteWordKeyV1(word);
+          return !descriptionKeys.has(key) && !titleGlue.has(key);
+        });
+        if (stray) throw new Error(`The new name used "${stray}", which is not in the description.`);
+        if (words.some((word) => castKeys.has(mysteryRewriteWordKeyV1(word)))) {
+          throw new Error("The new name must be an object, not a person or place.");
+        }
+        if (mysteryRewriteAddsForbiddenV1(text, [description])) throw new Error("The new name is a verdict word.");
+        return words.map((word) => word[0]!.toLocaleUpperCase() + word.slice(1)).join(" ");
+      },
+    }) as string;
+  } catch {
+    throw new HttpError(409, "The rename did not pass review. The previous name is unchanged.");
+  }
+  if (title.toLocaleLowerCase() === item.title.toLocaleLowerCase()) {
+    throw new HttpError(409, "The item is already named after its description.");
+  }
+  return commitDebateMysterySceneRepairV1(db, userId, sessionId, {
+    action: "rename_evidence_from_description", subjectId: args.subjectId, expectedRevision: session.revision,
+    evidencePresentation: { title },
+  });
+}
+
+/** Authors one themed prop's name and description from the venue's own style,
+ * the way Refract authors its sprite. Nobody types these: Case Forge reads them
+ * verbatim and the sprite worker draws to them. Runs on the selected lane and
+ * stays LOCAL in LOCAL. */
+export async function refractDebateMysteryMansionPropIdentityV1(
+  db: DatabaseSync,
+  userId: string,
+  bundleId: string,
+  archetypeId: WhodunnitPropArchetypeIdV1,
+  runtime: DebateAiRuntime,
+  options: { persist?: boolean } = {},
+): Promise<{ displayName: string; appearanceDescription: string }> {
+  assertRefractionActive();
+  const mansion = getDebateMysteryMansionBundleV2(db, userId, bundleId);
+  const definition = WHODUNNIT_PROP_ARCHETYPES_V1[archetypeId];
+  const style = mansion.houseStyle;
+  const roomKeys = new Set(mansion.rooms.flatMap((room) =>
+    mysteryRewriteWordsV1(room.name).map(mysteryRewriteWordKeyV1)).filter((key) => key.length > 3));
+  const identity = await runMysteryPresentationRewriteV1(db, userId, runtime, {
+    operation: "refract_prop_identity",
+    system: "Name and describe one physical evidence prop for a mystery venue. The name is two to five words for the concrete object as it would exist in this venue. The description is one to three sentences of visible appearance only: materials, wear, markings, size. Never name a person, a room, a crime, a culprit, or what the object means for any case. Return only JSON: {\"displayName\": string, \"appearanceDescription\": string}.",
+    payload: {
+      venue: { name: mansion.name, style: style.label, world: style.atmosphere.exteriorSetting, promptContract: style.promptContract },
+      role: { label: definition.label, purpose: definition.purpose, fallbackName: definition.prismFallback.displayName },
+    },
+    maxTokens: 260,
+    validate: (raw) => {
+      const parsed = parseRewriteJson(raw);
+      const displayName = cleanRewriteText(parsed.displayName, 80);
+      const appearanceDescription = cleanRewriteText(parsed.appearanceDescription, 600);
+      if (!displayName || displayName.length < 3 || mysteryRewriteWordsV1(displayName).length > 6) {
+        throw new Error("The prop name must be two to five words.");
+      }
+      if (!appearanceDescription || appearanceDescription.length < 24) {
+        throw new Error("The prop description was empty or too short.");
+      }
+      if (/\bPRISM\b/u.test(displayName) || /\bPRISM\b/u.test(appearanceDescription)) {
+        throw new Error("The prop identity mentioned PRISM.");
+      }
+      if (mysteryRewriteAddsForbiddenV1(`${displayName} ${appearanceDescription}`, [])) {
+        throw new Error("The prop identity used a verdict word.");
+      }
+      if (mysteryRewriteWordsV1(displayName).some((word) => roomKeys.has(mysteryRewriteWordKeyV1(word)))) {
+        throw new Error("The prop name must be an object, not a room.");
+      }
+      return { displayName, appearanceDescription };
+    },
+  }) as { displayName: string; appearanceDescription: string };
+  // The library holds a refracted identity as a draft until the author saves;
+  // only the sprite worker persists straight away, since it draws to it.
+  if (options.persist !== false) {
+    updateDebateMysteryMansionPropVariantIdentityV1(db, userId, bundleId, archetypeId, identity);
+  }
+  return identity;
 }
 
 /** Cleans the whole Case File in one pass: found items, Case Kit items, and
@@ -2477,19 +2675,22 @@ export async function cleanDebateMysteryCaseFileV1(
   const roomsByLongestId = [...state.rooms].sort((left, right) => right.id.length - left.id.length);
   const observationOverrides = state.caseFilePresentationOverrides?.observations ?? {};
   const kitOverrides = state.caseFilePresentationOverrides?.caseKit ?? {};
+  const rewriteEntry = (
+    id: string, kind: MysteryPresentationRewriteEntryV1["kind"], label: string, original: string,
+  ): MysteryPresentationRewriteEntryV1 => ({
+    id, kind, label, original, text: cleanMysteryItemDescriptionV1(original) || original,
+  });
   const entries: MysteryPresentationRewriteEntryV1[] = [
-    ...state.record.filter((item) => item.admitted && item.reference.kind === "evidence").map((item) => ({
-      id: item.reference.id, kind: "evidence" as const, label: item.title, text: item.description,
-    })),
-    ...(state.caseKit ?? []).map((item) => ({
-      id: item.id, kind: "case_kit" as const, label: item.title, text: kitOverrides[item.id]?.description ?? item.description,
-    })),
+    ...state.record.filter((item) => item.admitted && item.reference.kind === "evidence").map((item) =>
+      rewriteEntry(item.reference.id, "evidence", item.title, item.description)),
+    ...(state.caseKit ?? []).map((item) =>
+      rewriteEntry(item.id, "case_kit", item.title, kitOverrides[item.id]?.description ?? item.description)),
     ...state.dialogueHistory.flatMap((entry) => {
       if (!entry.nodeId.startsWith("examine-") || !entry.caseFileRelevant) return [];
       const room = roomsByLongestId.find((candidate) => entry.nodeId.startsWith(`examine-${candidate.id}-`));
       const id = `${entry.nodeId}:${entry.occurredAt}`;
       const text = (observationOverrides[id]?.text ?? entry.visibleText).replace(/\s+/gu, " ").trim();
-      return room && text ? [{ id, kind: "observation" as const, label: room.name, text }] : [];
+      return room && text ? [rewriteEntry(id, "observation", room.name, text)] : [];
     }),
   ];
   if (entries.length === 0) throw new HttpError(409, "The Case File has nothing to clean up yet.");
@@ -2504,10 +2705,11 @@ export async function cleanDebateMysteryCaseFileV1(
   const promptEntries = entries.map((entry, index) => ({ promptId: String(index + 1), entry }));
   const entriesByPromptId = new Map(promptEntries.map(({ promptId, entry }) => [promptId, entry]));
   let rewritten: Record<string, string>;
+  let reviewFailed = false;
   try {
     rewritten = await runMysteryPresentationRewriteV1(db, userId, runtime, {
       operation: "clean_case_file",
-      system: "Tidy a detective's Case File. For every entry return a cleaner version of its text: remove repeated sentences, filler, and any sentence about PRISM, fallbacks, or artwork; keep every distinct fact once; write plain past-tense prose that is easy to scan. Observations open with where the thing was seen. Never merge entries, add ownership, use, location, significance, or any person, and never mention a suspect that the entry does not already name. Return only JSON: {\"entries\": [{\"id\": string, \"text\": string}]} with exactly the supplied ids.",
+      system: "Tidy a detective's Case File. For every entry return a cleaner version of its text: remove repeated sentences, filler, and any sentence about PRISM, fallbacks, or artwork; keep every distinct fact once; write plain past-tense prose that is easy to scan. Every name, place, time, and number in an entry must survive exactly, and a sentence that states a distinct fact may be shortened but never dropped. Observations open with where the thing was seen. Never merge entries, add ownership, use, location, significance, or any person, and never mention a suspect that the entry does not already name. Return only JSON: {\"entries\": [{\"id\": string, \"text\": string}]} with exactly the supplied ids.",
       payload: {
         entries: promptEntries.map(({ promptId, entry }) => ({ id: promptId, kind: entry.kind, label: entry.label, text: entry.text, maxCharacters: limitFor(entry) })),
       },
@@ -2527,6 +2729,8 @@ export async function cleanDebateMysteryCaseFileV1(
           if (mysteryRewriteIntroducesNamesV1(text, allowed) || mysteryRewriteAddsForbiddenV1(text, [entry.label, entry.text]) || /\bPRISM\b/u.test(text)) {
             throw new Error(`Entry ${entry.label} added something not in the record.`);
           }
+          const dropped = mysteryRewriteDroppedFactV1(entry.text, text);
+          if (dropped) throw new Error(`Entry ${entry.label} dropped a fact: ${dropped}.`);
           byId.set(entry.id, text);
         }
         if (byId.size !== entries.length) throw new Error("The clean-up dropped an entry.");
@@ -2534,7 +2738,10 @@ export async function cleanDebateMysteryCaseFileV1(
       },
     }) as Record<string, string>;
   } catch {
-    throw new HttpError(409, "The clean-up did not pass review. The Case File is unchanged.");
+    // The model could not tidy without losing something. Keep the
+    // deterministic clean, which only removes boilerplate and exact repeats.
+    reviewFailed = true;
+    rewritten = Object.fromEntries(entries.map((entry) => [entry.id, entry.text]));
   }
   const evidence: Record<string, { description?: string }> = {};
   const caseKit: Record<string, { description?: string }> = {};
@@ -2542,13 +2749,17 @@ export async function cleanDebateMysteryCaseFileV1(
   let changed = 0;
   for (const entry of entries) {
     const text = rewritten[entry.id];
-    if (!text || text === entry.text) continue;
+    if (!text || text === entry.original) continue;
     changed += 1;
     if (entry.kind === "evidence") evidence[entry.id] = { description: text };
     else if (entry.kind === "case_kit") caseKit[entry.id] = { description: text };
     else observations[entry.id] = { text };
   }
-  if (changed === 0) throw new HttpError(409, "The Case File is already as clean as PRISM can make it.");
+  if (changed === 0) {
+    throw new HttpError(409, reviewFailed
+      ? "The clean-up did not pass review. The Case File is unchanged."
+      : "The Case File is already as clean as PRISM can make it.");
+  }
   return commitDebateMysterySceneRepairV1(db, userId, sessionId, {
     action: "clean_case_file", expectedRevision: session.revision,
     caseFilePresentation: { evidence, caseKit, observations },
@@ -3460,7 +3671,7 @@ export async function createDebateMysterySessionV2(
     };
   }
   if (
-    config.assetSynthesis.rooms &&
+    (config.assetSynthesis.rooms || config.assetSynthesis.illustratedRooms) &&
     (runtime.responseMode === "local" ||
       (runtime.responseMode === undefined && runtime.preferredProvider === "local"))
   ) {
@@ -3468,6 +3679,19 @@ export async function createDebateMysterySessionV2(
       400,
       "Room synthesis is available in ONLINE or Auto mode. LOCAL uses bundled rooms.",
       "MYSTERY_ROOM_SYNTHESIS_REQUIRES_ONLINE",
+    );
+  }
+  // Upgraded (HD) rooms derive from a complete Mosaic pack. Without a venue,
+  // that pack can only come from a Mosaic request in the same case.
+  if (
+    config.assetSynthesis.illustratedRooms &&
+    !config.assetSynthesis.rooms &&
+    !config.mansionBundleId
+  ) {
+    throw new HttpError(
+      400,
+      "Upgraded rooms need Mosaic art for every room. Request Every room in Mosaic, or choose a Mystery Venue whose rooms already have art.",
+      "MYSTERY_UPGRADED_ROOMS_REQUIRE_MOSAIC",
     );
   }
   if (config.mansionBundleId) {
@@ -3483,6 +3707,17 @@ export async function createDebateMysterySessionV2(
       throw new HttpError(
         400,
         `This saved mansion requires exactly ${mansion.suspectCount} suspects.`,
+      );
+    }
+    if (
+      config.assetSynthesis.illustratedRooms &&
+      !config.assetSynthesis.rooms &&
+      !resolveDebateMysteryVenueProductionV1(mansion).roomArt.complete
+    ) {
+      throw new HttpError(
+        400,
+        "Upgraded rooms need Mosaic art for every room. This Mystery Venue still has rooms without authored art, so request Every room in Mosaic as well.",
+        "MYSTERY_UPGRADED_ROOMS_REQUIRE_MOSAIC",
       );
     }
     const mansionSnapshot = freezeDebateMysteryMansionSnapshotV2(mansion);
@@ -8078,7 +8313,7 @@ function buildMysteryV2Graph(args: {
       .map((evidence) => ({
         reference: { kind: "evidence" as const, id: evidence.id },
         title: evidence.title,
-        description: evidence.description,
+        description: cleanMysteryItemDescriptionV1(evidence.description) || evidence.description,
         emoji: evidence.emoji,
         admitted: true,
         updatedAt: new Date().toISOString(),
@@ -8121,7 +8356,7 @@ function buildMysteryV2Graph(args: {
         publicRecord.push({
           reference: { kind: "evidence", id: evidence.id },
           title: evidence.title,
-          description: evidence.description,
+          description: cleanMysteryItemDescriptionV1(evidence.description) || evidence.description,
           emoji: evidence.emoji,
           admitted: true,
           updatedAt: new Date().toISOString(),
@@ -13657,7 +13892,7 @@ function applyDebateMysteryPresentationGatesV2(args: {
           existing.admitted = true;
           existing.updatedAt = now;
           if (target.kind === "record_description") {
-            existing.description = target.description;
+            existing.description = cleanMysteryItemDescriptionV1(target.description) || target.description;
             // A newly admitted fact supersedes the old description but retains
             // the accepted cleanup. Never hide a later discovery behind repair.
             const override = args.state.evidencePresentationOverrides?.[target.record.id];
@@ -13671,7 +13906,9 @@ function applyDebateMysteryPresentationGatesV2(args: {
         } else {
           records.push({
             ...frozen,
-            description: target.kind === "record_description" ? target.description : frozen.description,
+            description: cleanMysteryItemDescriptionV1(
+              target.kind === "record_description" ? target.description : frozen.description,
+            ) || (target.kind === "record_description" ? target.description : frozen.description),
             admitted: true,
             updatedAt: now,
           });
@@ -14965,16 +15202,35 @@ function persistMysteryRoomIntroductionPersonaV2(args: {
  * lines that have actually entered dialogueHistory are synthesized. Failure
  * never rewrites or rolls back the accepted text; the deterministic transcript
  * remains playable without audio and can fill the same cache on a later turn. */
+/** Spoken lines that entered the transcript at or after `startedAt`. Entries
+ * are stamped by the same process clock, so an ISO comparison is exact. */
+function mysteryV2SpokenLineIdsSince(
+  session: DebateSessionV1,
+  startedAt: string,
+): string[] {
+  if (session.formatState.format !== "whodunnit" || session.formatState.version !== 2) return [];
+  return [...new Set(session.formatState.dialogueHistory.flatMap((entry) =>
+    entry.lineId && entry.delivery !== "text_only" && entry.occurredAt >= startedAt
+      ? [entry.lineId]
+      : []))];
+}
+
 async function prepareLazyMysteryTranscriptAudioV2(args: {
   db: DatabaseSync;
   userId: string;
   session: DebateSessionV1;
   generateWave?: typeof generateBuiltinEnglishWave;
+  /** When given, only these lines are verified and synthesized. Verifying the
+   * whole transcript re-reads and re-hashes every cached clip, a cost that
+   * grows with the session and lands on every action, including a text-only
+   * Examine that adds no speech at all. */
+  lineIds?: readonly string[];
 }): Promise<void> {
   if (
     args.session.formatState.format !== "whodunnit" ||
     args.session.formatState.version !== 2 ||
-    !args.session.formatState.voicesEnabled
+    !args.session.formatState.voicesEnabled ||
+    (args.lineIds !== undefined && args.lineIds.length === 0)
   ) return;
   const { privateCase, graph } = getDebateMysteryCaseV2(
     args.db,
@@ -14989,10 +15245,12 @@ async function prepareLazyMysteryTranscriptAudioV2(args: {
   );
   if (!manifest || manifest.preparationMode !== "lazy-on-demand-v1") return;
   const lineById = new Map(graph.lines.map((line) => [line.id, line]));
-  const spokenLineIds = [...new Set(
-    args.session.formatState.dialogueHistory.flatMap((entry) =>
-      entry.lineId && entry.delivery !== "text_only" ? [entry.lineId] : []),
-  )];
+  const spokenLineIds = args.lineIds
+    ? [...new Set(args.lineIds)]
+    : [...new Set(
+      args.session.formatState.dialogueHistory.flatMap((entry) =>
+        entry.lineId && entry.delivery !== "text_only" ? [entry.lineId] : []),
+    )];
   const botIds = [...new Set(graph.lines.flatMap((line) =>
     line.speakerBotId ? [line.speakerBotId] : []))];
   const botById = new Map(
@@ -15103,6 +15361,9 @@ export async function applyDebateMysteryActionWithPersonaV2(
       });
       return replay;
     }
+    // Only the lines this action adds need audio; an Examine adds none and
+    // returns as soon as its frozen observation is recorded.
+    const startedAt = new Date().toISOString();
     if (request.action !== "advance_room_introduction") {
       const applied = applyDebateMysteryActionV2(db, userId, sessionId, request);
       await prepareLazyMysteryTranscriptAudioV2({
@@ -15110,6 +15371,7 @@ export async function applyDebateMysteryActionWithPersonaV2(
         userId,
         session: applied,
         generateWave: options.generateWave,
+        lineIds: mysteryV2SpokenLineIdsSince(applied, startedAt),
       });
       return applied;
     }
@@ -15121,6 +15383,7 @@ export async function applyDebateMysteryActionWithPersonaV2(
         userId,
         session: applied,
         generateWave: options.generateWave,
+        lineIds: mysteryV2SpokenLineIdsSince(applied, startedAt),
       });
       return applied;
     }
@@ -15144,6 +15407,7 @@ export async function applyDebateMysteryActionWithPersonaV2(
       userId,
       session: applied,
       generateWave: options.generateWave,
+      lineIds: mysteryV2SpokenLineIdsSince(applied, startedAt),
     });
     return applied;
   });

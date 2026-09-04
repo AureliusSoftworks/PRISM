@@ -1,4 +1,4 @@
-import type { BotAudioVoiceProfileV1 } from "@localai/shared";
+import type { BotAudioVoiceProfileV1, WhodunnitSpeechType } from "@localai/shared";
 import { normalizeBotAudioVoiceProfileV1 } from "@localai/shared";
 import type { DebateUtterance } from "./DebateExperience";
 import type { RoomAcousticsSend } from "./roomAcoustics";
@@ -22,16 +22,20 @@ export interface WhodunnitSpokenPerformance {
 
 export interface WhodunnitPremiumSelection {
   voiceMode: string;
-  englishVoiceEngine: string;
+  /** The Whodunnit navbar's Speech picker: English (built-in) or Premium (ElevenLabs). */
+  whodunnitSpeechType: WhodunnitSpeechType;
   audioEnabled: boolean;
   volume: number;
   localOnly: boolean;
   hasKey: boolean;
 }
 
+/** Premium is the applet's own choice, independent of the account-wide English
+ * engine: Whodunnit dialogue is always English, so only Mute, LOCAL, a missing
+ * key, or the picker itself can keep the frozen ElevenLabs voice off the stage. */
 export function whodunnitPremiumVoiceSelected(selection: WhodunnitPremiumSelection): boolean {
   return selection.audioEnabled && selection.volume > 0 && !selection.localOnly &&
-    selection.hasKey && selection.voiceMode === "english" && selection.englishVoiceEngine === "elevenlabs";
+    selection.hasKey && selection.voiceMode !== "mute" && selection.whodunnitSpeechType === "premium";
 }
 
 /** Invoked for one visible line only. False leaves the prepared local clip in

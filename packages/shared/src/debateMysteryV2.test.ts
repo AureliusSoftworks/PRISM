@@ -23,6 +23,8 @@ import {
   validateDebateMysteryStageCuePerformanceV1,
   resolveDebateMysteryAssetSynthesisV2,
   resolveDebateMysteryConfigV2,
+  resolveDebateMysteryProductionCapabilitiesV1,
+  resolveDebateMysteryVenueProductionV1,
   resolveDebateMysteryMansionExteriorScaleClassV1,
   splitDebateMysteryStageActionTextV2,
   type DebateMysteryAudioManifestV1,
@@ -849,6 +851,23 @@ test("Theme, asset synthesis, and reusable mansion eligibility freeze determinis
   });
   assert.equal(explicitRealisticUpgrade.rooms, true);
   assert.equal(explicitRealisticUpgrade.illustratedRooms, true);
+  // A venue whose rooms already carry authored art takes HD derivatives
+  // without a Mosaic request; Case Forge validates the venue side itself.
+  const venueUpgradeOnly = resolveDebateMysteryAssetSynthesisV2({
+    investigationMode: "full",
+    mansionBundleId: "mansion-1",
+    assetSynthesis: { rooms: false, illustratedRooms: true },
+  });
+  assert.equal(venueUpgradeOnly.rooms, false);
+  assert.equal(venueUpgradeOnly.illustratedRooms, true);
+  assert.equal(
+    resolveDebateMysteryAssetSynthesisV2({
+      investigationMode: "court_only",
+      mansionBundleId: "mansion-1",
+      assetSynthesis: { rooms: false, illustratedRooms: true },
+    }).illustratedRooms,
+    false,
+  );
 
   const resolved = resolveDebateMysteryConfigV2({
     version: 2,
@@ -949,4 +968,85 @@ test("Spectator setup is preserved and its partner record selects only required 
     { kind: "evidence", id: "opening" },
     { kind: "evidence", id: "evidence-seat-1" },
   ]);
+});
+
+test("venue production reports what an installed Mystery Venue already provides", () => {
+  const room = (id: string, art: Partial<{ imageId: string | null; acceptedRoomAssetId: string | null }> = {}) => ({
+    kind: "room" as const,
+    id,
+    templateId: "study",
+    name: id,
+    floor: 1,
+    x: 0,
+    y: 0,
+    rotation: 0 as never,
+    suspectSlotId: null,
+    emoji: "📚",
+    imageId: null,
+    bundledAssetPath: "bundled/study.png",
+    acceptedRoomAssetId: null,
+    ...art,
+  });
+  const complete = resolveDebateMysteryVenueProductionV1({
+    name: " Blackwood House ",
+    rooms: [],
+    layoutV2: {
+      entities: [
+        room("foyer", { acceptedRoomAssetId: "asset-foyer" }),
+        room("study", { imageId: "image-study" }),
+        { kind: "corridor" as const, id: "hall", floor: 1, x: 0, y: 1, width: 2, height: 1 },
+      ],
+    } as never,
+    assets: [],
+    music: { version: 1, identity: {} as never, active: { id: "track" } as never, candidate: null, previous: null },
+    atmosphere: { version: 1, active: null, candidate: null, previous: null },
+    propTheme: null,
+    propThemeProgress: { version: 1, registryVersion: 1 as never, totalCount: 16, readyCount: 9, pendingCount: 7, failedCount: 0, complete: false, variants: [] },
+  });
+  assert.equal(complete.venueName, "Blackwood House");
+  assert.deepEqual(complete.roomArt, { totalRooms: 2, authoredRooms: 2, complete: true });
+  assert.equal(complete.music, true, "an active soundtrack is reused, never requested");
+  assert.equal(complete.atmosphere, false);
+  assert.deepEqual(complete.propTheme, { readyCount: 9, totalCount: 16, complete: false });
+
+  const partial = resolveDebateMysteryVenueProductionV1({
+    name: "Half Manor",
+    rooms: [
+      { id: "a", imageId: "image-a" } as never,
+      { id: "b", imageId: null } as never,
+      { id: "c", imageId: null } as never,
+    ],
+    layoutV2: null,
+    assets: [{ id: "m", role: "music", logicalId: "theme", mimeType: "audio/mpeg", sha256: "x", byteLength: 1 }],
+    atmosphere: { version: 1, active: { id: "bed" } as never, candidate: null, previous: null },
+    propTheme: { version: 1, registryVersion: 1 as never, variants: [{ id: "v" } as never] },
+  });
+  assert.deepEqual(partial.roomArt, { totalRooms: 3, authoredRooms: 1, complete: false });
+  assert.equal(partial.music, true, "a bundled music asset counts as a venue soundtrack");
+  assert.equal(partial.atmosphere, true);
+  assert.deepEqual(partial.propTheme, { readyCount: 1, totalCount: 1, complete: true });
+
+  const none = resolveDebateMysteryVenueProductionV1(null);
+  assert.equal(none.venueName, null);
+  assert.deepEqual(none.roomArt, { totalRooms: 0, authoredRooms: 0, complete: false });
+  assert.equal(none.music, false);
+  assert.equal(none.propTheme, null);
+});
+
+test("production capabilities speak plainly and keep ambience local while music is never forged", () => {
+  const local = resolveDebateMysteryProductionCapabilitiesV1({ responseMode: "local", localVoiceAvailable: true });
+  const byCategory = (mode: typeof local, category: string) =>
+    mode.capabilities.find((capability) => capability.category === category)!;
+  assert.equal(byCategory(local, "ambience").available, true, "the personalized mix is deterministic and local");
+  assert.equal(byCategory(local, "music").available, false, "Case Forge does not compose music");
+  assert.equal(byCategory(local, "mosaic_rooms").available, false);
+  assert.match(byCategory(local, "mosaic_rooms").publicReason, /Needs ONLINE mode/u);
+  const online = resolveDebateMysteryProductionCapabilitiesV1({ responseMode: "online", localVoiceAvailable: false });
+  assert.equal(byCategory(online, "exterior").available, true);
+  assert.match(byCategory(online, "exterior").publicReason, /this case only/u);
+  assert.equal(byCategory(online, "voices").available, false);
+  assert.match(byCategory(online, "voices").publicReason, /voice service is not running/u);
+  for (const capability of [...local.capabilities, ...online.capabilities]) {
+    assert.doesNotMatch(capability.publicReason, /case-scoped production asset|audited at Production Readiness/u);
+  }
 });

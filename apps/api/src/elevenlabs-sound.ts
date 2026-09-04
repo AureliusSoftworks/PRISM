@@ -369,6 +369,80 @@ export async function requestActionSfxPackClip(args: {
   };
 }
 
+/** One Whodunnit venue effect: a short dry one-shot cue drawn to the venue's
+ * style. Same provider path as the action packs, with a slightly longer
+ * ceiling so a discovery chime or room flourish can finish. */
+export async function requestWhodunnitVenueSfxClip(args: {
+  apiKey: string;
+  prompt: string;
+  durationSeconds: number;
+  signal?: AbortSignal;
+  fetchImpl?: typeof fetch;
+}): Promise<{
+  audioBytes: Buffer;
+  contentType: string;
+  requestId: string | null;
+}> {
+  const fetchImpl = args.fetchImpl ?? fetch;
+  const prompt = boundSignalAtmosphereText(
+    args.prompt,
+    SOUND_FX_BENCH_PROMPT_MAX_CHARACTERS,
+  );
+  const durationSeconds = Math.min(
+    3,
+    Math.max(0.5, Number(args.durationSeconds) || 1),
+  );
+  const response = await fetchImpl(
+    "https://api.elevenlabs.io/v1/sound-generation?output_format=mp3_44100_128",
+    {
+      method: "POST",
+      signal: args.signal,
+      headers: {
+        "content-type": "application/json",
+        "xi-api-key": args.apiKey,
+      },
+      body: JSON.stringify({
+        text: prompt,
+        duration_seconds: durationSeconds,
+        prompt_influence: 0.45,
+        loop: false,
+        model_id: "eleven_text_to_sound_v2",
+      }),
+    },
+  );
+  if (!response.ok) {
+    throw await soundError(
+      response,
+      "ElevenLabs could not create this venue effect.",
+    );
+  }
+  const audioBytes = Buffer.from(await response.arrayBuffer());
+  if (
+    audioBytes.length === 0 ||
+    audioBytes.length > SOUND_FX_BENCH_AUDIO_MAX_BYTES
+  ) {
+    throw new ElevenLabsSoundError(
+      502,
+      "ElevenLabs returned unusable venue effect audio.",
+    );
+  }
+  const contentType = response.headers
+    .get("content-type")
+    ?.split(";")[0]
+    ?.trim();
+  if (!contentType?.startsWith("audio/")) {
+    throw new ElevenLabsSoundError(
+      502,
+      "ElevenLabs returned an invalid venue effect audio format.",
+    );
+  }
+  return {
+    audioBytes,
+    contentType,
+    requestId: response.headers.get("request-id"),
+  };
+}
+
 export async function requestCoffeeElevenLabsActionSfx(args: {
   apiKey: string;
   kind: CoffeeElevenLabsActionSfxKind;

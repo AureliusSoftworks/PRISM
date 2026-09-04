@@ -342,6 +342,16 @@ export interface MansionPropVariantProgressV1 {
   status: MansionPropVariantGenerationStatusV1;
   attemptCount: number;
   failureCode: string | null;
+  /** The authored identity: the library shows and edits it before any image
+   * exists, the worker draws to it, and Case Forge reads it verbatim. */
+  displayName?: string;
+  appearanceDescription?: string;
+  /** The current sprite, when one has been accepted. */
+  assetId?: string | null;
+  /** A redraw waiting beside the ready sprite; it replaces it only on Save. */
+  candidateStatus?: MansionPropVariantGenerationStatusV1 | null;
+  candidateAssetId?: string | null;
+  candidateAttemptCount?: number;
 }
 
 /** Mutable authoring progress; unlike a complete propTheme, this is never frozen into a case. */
@@ -353,6 +363,8 @@ export interface MansionPropThemeProgressV1 {
   pendingCount: number;
   failedCount: number;
   complete: boolean;
+  /** Redraws still drawing beside ready sprites; the library keeps polling for them. */
+  candidatePendingCount?: number;
   variants: MansionPropVariantProgressV1[];
 }
 

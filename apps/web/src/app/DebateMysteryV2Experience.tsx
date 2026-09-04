@@ -99,8 +99,10 @@ import {
   debateMysteryTextVoiceShouldStop,
   playDebateMysterySfx,
   playDebateMysteryTextVoice,
+  setDebateMysteryVenueSfxV1,
   type DebateMysterySfxCue,
 } from "./debateMysterySfx";
+import { mysteryVenueSfxUrlsV1 } from "./debateMysteryVenueSfx";
 import { teardownBottishVoiceImmediately } from "./bottishVoice";
 import { cancelWhodunnitDialogueAudioImmediately } from "./debateMysteryDialogueAudio";
 import { mysteryMapOccupantPosition } from "./debateMysteryRoomWalk";
@@ -217,6 +219,9 @@ import styles from "./debateMysteryV2.module.css";
 import { holdWhodunnitDialogueModal } from "./whodunnitDialogueModal";
 
 type WhodunnitPresentDragState = { active: boolean; overSuspect: boolean };
+
+/** How long the "..." entry beat lingers before the Casekeeper tableau reveals itself. */
+const WHODUNNIT_ROOM_ENTRY_BEAT_MS = 900;
 
 /** Present as a drawer of physical items: click one to read its blurb, or pick
  * it up and drop it on the suspect to ask about it. A drop resolves to the
@@ -988,6 +993,12 @@ const MYSTERY_SCENE_REPAIR_COPY: Record<
     loader: "Rewriting the item description",
     detail: "PRISM is rewriting the description from the item's own authored text: repeated wording goes, every distinct observation stays, nothing new is added.",
   },
+  rename_evidence_from_description: {
+    issue: "An item is not named properly",
+    action: "Rename a found item after its description",
+    loader: "Renaming the item",
+    detail: "The description is the source of truth. PRISM names the physical object it actually describes, using only words already in it. Regenerate the item's asset afterwards if the picture no longer fits.",
+  },
   generate_map_plan: {
     issue: "I want to see the venue from above",
     action: "Draw the structure's roof or top deck and its surroundings onto the footprint",
@@ -1008,9 +1019,12 @@ const MYSTERY_SCENE_REPAIR_COPY: Record<
   },
 };
 
-const CASE_FILE_REPAIR_ACTIONS: readonly DebateMysterySceneRepairActionV1[] = ["set_evidence_emoji", "reroll_evidence_description", "clean_case_file"];
+const CASE_FILE_REPAIR_ACTIONS: readonly DebateMysterySceneRepairActionV1[] = [
+  "set_evidence_emoji", "reroll_evidence_description", "rename_evidence_from_description", "clean_case_file",
+];
 const LOCAL_TEXT_REPAIR_ACTIONS: readonly DebateMysterySceneRepairActionV1[] = [
-  "repair_evidence_name", "repair_evidence_description", "set_evidence_emoji", "reroll_evidence_description", "clean_case_file",
+  "repair_evidence_name", "repair_evidence_description", "set_evidence_emoji", "reroll_evidence_description",
+  "rename_evidence_from_description", "clean_case_file",
 ];
 
 interface MansionRoomPlacement {
@@ -1964,6 +1978,14 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
   const [command, setCommand] = useState<"move" | "examine" | "talk" | "present" | null>(null);
   const suspectActorRef = useRef<HTMLDivElement | null>(null);
   const [presentDrag, setPresentDrag] = useState<WhodunnitPresentDragState>({ active: false, overSuspect: false });
+  // The occupant's opening exchange is prepared while the player reads the
+  // Casekeeper tableau and adopted only by the gesture that dismisses it.
+  const [pendingRoomIntroduction, setPendingRoomIntroduction] = useState<{
+    roomId: string;
+    deferred: DeferredMysteryActionResultV1 | null;
+    adoptOnArrival: boolean;
+    failed: boolean;
+  } | null>(null);
   const [caseFileOpen, setCaseFileOpen] = useState(false);
   const [caseFileUpdate, setCaseFileUpdate] = useState<DebateMysteryCaseFileUpdateV2 | null>(null);
   const [theoryOpen, setTheoryOpen] = useState(state.playPhase === "theory");
@@ -2013,7 +2035,7 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
   >(null);
   const roomUpgradeSynthesisJobIdRef = useRef<string | null>(null);
   const [sceneRepairOpen, setSceneRepairOpen] = useState<"exterior" | string | null>(null);
-  const [sceneRepairItemPick, setSceneRepairItemPick] = useState<{ action: "set_evidence_emoji" | "reroll_evidence_description"; subjectId: string | null } | null>(null);
+  const [sceneRepairItemPick, setSceneRepairItemPick] = useState<{ action: "set_evidence_emoji" | "reroll_evidence_description" | "rename_evidence_from_description"; subjectId: string | null } | null>(null);
   const [sceneRepairEmojiQuery, setSceneRepairEmojiQuery] = useState("");
   const [lightEditorRoomId, setLightEditorRoomId] = useState<string | null>(null);
   const [dismissedSceneRepairUndoId, setDismissedSceneRepairUndoId] = useState<string | null>(null);
@@ -2506,11 +2528,11 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
   });
   const roomDialogueBot = presentMysteryBot(botForDialogue(props, state, roomDisplayedDialogue));
   const roomProsecutorActive = roomDisplayedDialogue?.speakerBotId === state.config.prosecutorBotId;
-  // Talk and Present stage a two-shot: the suspect yields the centre and steps
-  // right while the player's investigator slides in from the left, and both
-  // stay on stage for the whole exchange.
+  // Talk, Present, and a room's opening exchange stage a two-shot: the
+  // suspect yields the centre and steps right while the player's investigator
+  // slides in from the left, and both stay on stage for the whole exchange.
   const interrogationStagingActive = Boolean(
-    currentSuspect && prosecutorBot && !roomIntroductionActive && (
+    currentSuspect && prosecutorBot && (
       command === "talk" || command === "present" || interrogationPhase !== null
     ),
   );
@@ -2532,6 +2554,13 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
       roomDisplayedDialogue.nodeId.startsWith("examine-"),
   );
   const roomIntroductionAwaitingContinue = roomIntroductionPhase === "casekeeper";
+  const roomIntroductionBringingForward = Boolean(
+    roomIntroductionAwaitingContinue && roomCasekeeperNarrationVisible && (
+      pendingRoomIntroduction && pendingRoomIntroduction.roomId === currentRoom?.id
+        ? pendingRoomIntroduction.adoptOnArrival && !pendingRoomIntroduction.deferred
+        : busy
+    ),
+  );
   const roomCasekeeperNarrationText = currentRoom
     ? debateMysteryRoomCasekeeperNarrationTextV2({
         appearance: currentBot?.roomNarrationAppearance,
@@ -3351,16 +3380,22 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
       .map((corridor) => ({ corridor, ...mansionLayoutV2EntityRect(corridor) })) ?? [],
     [mansionFloor, mansionLayout],
   );
+  // Side rooms: authored infill blocks, drawn as inert room tiles with their names and doors.
+  const mansionSideRooms = useMemo(
+    () => mansionLayout?.entities
+      .filter((entity): entity is MansionLayoutBlockV2 => entity.kind === "infill" && entity.floor === mansionFloor)
+      .map((block) => ({ block, ...mansionLayoutV2EntityRect(block) })) ?? [],
+    [mansionFloor, mansionLayout],
+  );
   const mansionAmbientSpaces = useMemo(
     () => mysteryAmbientRooms({
       floor: mansionFloor,
+      // Side rooms render on their own, so authored infill never becomes massing; a legacy
+      // estate that authored infill and has no projection gets no massing at all.
       spaces: state.spatialProjection?.ambientSpaces.filter(
         (space) => space.floor === mansionFloor,
-      ) ?? (mansionLayout?.venueProfile ? [] : null),
-      // Profiled venues keep their case-scoped projection, including promotions.
-      authoredInfill: mansionLayout?.venueProfile ? [] : mansionLayout?.entities.filter(
-        (entity): entity is MansionLayoutBlockV2 => entity.kind === "infill",
-      ),
+      ) ?? (mansionLayout?.venueProfile || mansionLayout?.entities.some((entity) => entity.kind === "infill") ? [] : null),
+      authoredInfill: [],
       occupied: mansionLayout
         ? mansionLayout.entities.filter((entity) => entity.floor === mansionFloor).map(mansionLayoutV2EntityRect)
         : [...mansionPlacements, ...mansionCorridors],
@@ -3430,7 +3465,7 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
   // Ambient blocks outside the room cluster only dress the structure; once a real exterior
   // is on the board they go, while blocks between rooms stay.
   const mansionClusterBounds = (() => {
-    const blocks = [...mansionPlacements, ...mansionCorridors];
+    const blocks = [...mansionPlacements, ...mansionCorridors, ...mansionSideRooms];
     if (!blocks.length) return null;
     return {
       minX: Math.min(...blocks.map((block) => block.x)),
@@ -3580,6 +3615,16 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
   const dialogueTextVoiceExpected = props.audioEnabled && props.audioVolume > 0 &&
     (props.whodunnitTextVoiceMode ?? "babble") !== "off" &&
     dialogueSfxDelivery === "text_only" && dialogueSfxStreaming === true && dialogueSfxAudible !== true;
+  // The venue's own effects pack, frozen with the case: cues the venue owns
+  // replace the bundled palette while this case is on screen.
+  const venueSfxUrls = useMemo(
+    () => mysteryVenueSfxUrlsV1(state.config.mansionSnapshot),
+    [state.config.mansionSnapshot],
+  );
+  useEffect(() => {
+    setDebateMysteryVenueSfxV1(venueSfxUrls);
+    return () => setDebateMysteryVenueSfxV1(null);
+  }, [venueSfxUrls]);
   const mansionAmbienceAsset = mysteryMansionAmbienceAssetV1(
     state.config.houseStyle,
     state.config.mansionBundleId,
@@ -3741,7 +3786,11 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
     .map((hotspot) => `${hotspot.id}:${hotspot.unlocked ? 1 : 0}:${hotspot.examined ? 1 : 0}`)
     .join("|") ?? "";
   const roomComplete = currentRoom !== null && debateMysteryV2RoomComplete(currentRoom.hotspots);
-  const targetedHotspotId = debateMysteryV2LensClickTarget(investigationLens);
+  // The region being analysed: from the click until its observation has
+  // finished streaming, so the scan can resolve into the dialogue box.
+  const examiningHotspot = examiningHotspotId && currentRoom
+    ? currentRoom.hotspots.find((hotspot) => hotspot.id === examiningHotspotId) ?? null
+    : null;
   const examinationStreaming = Boolean(
     dialoguePerformanceActive && roomDialogueIsTextOnly && roomDisplayedDialogue,
   );
@@ -4909,17 +4958,19 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
   const playerThinking = interrogationStagingActive && busy && !dialoguePerformanceActive;
   const suspectThinking = interrogationStagingActive && interrogationPhase === "handoff";
   const roomBackdropBlurred = roomActorVisible || roomProsecutorVisible;
+  // While the Case File is open nothing behind its blur runs: lights and
+  // effects are withdrawn so the treatment draws nothing and stops its clock.
   const currentRoomLights = useMemo<readonly MansionDynamicLightV2[]>(
-    () => currentRoom && mansionLayout
+    () => currentRoom && mansionLayout && !caseFileOpen
       ? mansionLayout.lights.filter((light) => light.roomId === currentRoom.id)
       : [],
-    [currentRoom, mansionLayout],
+    [caseFileOpen, currentRoom, mansionLayout],
   );
   const currentRoomEffects = useMemo<readonly MansionRoomEffectV1[]>(
-    () => currentRoom && mansionLayout?.effects
+    () => currentRoom && mansionLayout?.effects && !caseFileOpen
       ? mansionLayout.effects.filter((effect) => effect.roomId === currentRoom.id)
       : [],
-    [currentRoom, mansionLayout],
+    [caseFileOpen, currentRoom, mansionLayout],
   );
   const currentRoomUsesTemplateLightGeometry = currentRoom
     ? mysteryRoomUsesTemplateLightGeometryV1({
@@ -5054,6 +5105,43 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
     const completed = await sendAction({ action: "examine", roomId: currentRoom.id, hotspotId });
     if (completed && completesRoom) setCompletionCueRoomId(currentRoom.id);
   };
+  // The "..." beat is presentation: reveal the tableau on its own after a
+  // moment (a gesture still skips ahead) instead of asking for a click.
+  useEffect(() => {
+    if (roomIntroductionPhase !== "casekeeper" || roomCasekeeperNarrationVisible || !roomCasekeeperNarrationKey) return;
+    const key = roomCasekeeperNarrationKey;
+    const timer = window.setTimeout(
+      () => setRevealedCasekeeperNarrationKey(key),
+      reducedMotion ? 0 : WHODUNNIT_ROOM_ENTRY_BEAT_MS,
+    );
+    return () => window.clearTimeout(timer);
+  }, [reducedMotion, roomCasekeeperNarrationKey, roomCasekeeperNarrationVisible, roomIntroductionPhase]);
+  // Prepare the occupant's opening exchange while the tableau is being read.
+  // The result is held, not shown: the tableau stays until the player
+  // dismisses it, and that gesture plays the exchange the moment it exists.
+  useEffect(() => {
+    if (roomIntroductionPhase !== "casekeeper" || !roomCasekeeperNarrationVisible || !currentRoom) return;
+    if (busy || pendingRoomIntroduction?.roomId === currentRoom.id) return;
+    const roomId = currentRoom.id;
+    setPendingRoomIntroduction({ roomId, deferred: null, adoptOnArrival: false, failed: false });
+    void requestDeferredAction({ action: "advance_room_introduction", roomId }).then((deferred) => {
+      setPendingRoomIntroduction((current) => current?.roomId === roomId
+        ? deferred ? { ...current, deferred } : { ...current, failed: true }
+        : current);
+    });
+  }, [busy, currentRoom, pendingRoomIntroduction, requestDeferredAction, roomCasekeeperNarrationVisible, roomIntroductionPhase]);
+  useEffect(() => {
+    const pending = pendingRoomIntroduction;
+    if (!pending) return;
+    if (roomIntroductionPhase !== "casekeeper" || pending.roomId !== currentRoom?.id) {
+      setPendingRoomIntroduction(null);
+      return;
+    }
+    if (pending.adoptOnArrival && pending.deferred) {
+      setPendingRoomIntroduction(null);
+      finishDeferredAction(pending.deferred);
+    }
+  }, [currentRoom?.id, finishDeferredAction, pendingRoomIntroduction, roomIntroductionPhase]);
   const advanceVisibleRoomDialogue = (): void => {
     const roomIntroductionGesture = debateMysteryRoomIntroductionGestureV2({
       casekeeperNarrationVisible: roomCasekeeperNarrationVisible,
@@ -5067,6 +5155,17 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
       return;
     }
     if (roomIntroductionGesture === "advance_to_persona" && currentRoom) {
+      const pending = pendingRoomIntroduction?.roomId === currentRoom.id ? pendingRoomIntroduction : null;
+      if (pending?.deferred) {
+        setPendingRoomIntroduction(null);
+        finishDeferredAction(pending.deferred);
+        return;
+      }
+      if (pending && !pending.failed) {
+        // Still preparing: play it the moment it lands.
+        setPendingRoomIntroduction({ ...pending, adoptOnArrival: true });
+        return;
+      }
       void sendAction({ action: "advance_room_introduction", roomId: currentRoom.id });
       return;
     }
@@ -5314,6 +5413,7 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
         ? [
             "repair_evidence_name",
             "repair_evidence_description",
+            "rename_evidence_from_description",
             "regenerate_evidence_asset",
             ...(item?.sealedAsset?.status === "ready" && item.sealedAsset.revealed
               ? ["reduce_evidence_magenta" as const]
@@ -5433,9 +5533,9 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
                   <small>{MYSTERY_SCENE_REPAIR_COPY[sceneRepairItemPick.action].action}. Which item?</small>
                   {foundItems.map((entry) => (
                     <button key={entry.reference.id} type="button" disabled={Boolean(sceneRepairJob)} onClick={() => {
-                      if (sceneRepairItemPick.action === "reroll_evidence_description") {
+                      if (sceneRepairItemPick.action === "reroll_evidence_description" || sceneRepairItemPick.action === "rename_evidence_from_description") {
                         setSceneRepairItemPick(null);
-                        void repairScene("reroll_evidence_description", null, entry);
+                        void repairScene(sceneRepairItemPick.action, null, entry);
                       } else {
                         setSceneRepairEmojiQuery("");
                         setSceneRepairItemPick({ ...sceneRepairItemPick, subjectId: entry.reference.id });
@@ -5501,7 +5601,7 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
                         } else if (action === "generate_map_plan") {
                           setSceneRepairOpen(null);
                           setOverheadEditorOpen(true);
-                        } else if (context === "casefile" && (action === "set_evidence_emoji" || action === "reroll_evidence_description")) {
+                        } else if (context === "casefile" && (action === "set_evidence_emoji" || action === "reroll_evidence_description" || action === "rename_evidence_from_description")) {
                           setSceneRepairItemPick({ action, subjectId: null });
                         } else void repairScene(action, room, item);
                       }}
@@ -6539,6 +6639,29 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
                   }}
                 />
               ))}
+              {mansionSideRooms.map(({ block, x, y, width, height }) => {
+                const name = block.name?.trim() ?? "";
+                return (
+                  <button
+                    key={block.id}
+                    type="button"
+                    className={styles.mansionRoom}
+                    data-side-room="true"
+                    aria-disabled="true"
+                    title={`${name || "Side room"} · not part of this case`}
+                    aria-label={`${name || "Side room"}, not part of this case`}
+                    onClick={(event) => event.preventDefault()}
+                    style={{
+                      left: `${mansionX(x)}%`,
+                      top: `${mansionY(y)}%`,
+                      width: `${mansionWidth(width)}%`,
+                      height: `${mansionHeight(height)}%`,
+                    }}
+                  >
+                    {name ? <strong>{name}</strong> : null}
+                  </button>
+                );
+              })}
               {mansionCorridors.map((placement) => (
                 <i
                   key={placement.corridor.id}
@@ -6756,6 +6879,7 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
           data-parallax-enabled={roomParallaxEnabled ? "true" : undefined}
           data-lens-active={lensActive ? "true" : undefined}
           data-room-introduction={roomIntroductionActive ? roomIntroductionPhase : undefined}
+          data-suspended={caseFileOpen ? "true" : undefined}
           onPointerMove={handleRoomPointerMove}
           onPointerLeave={handleRoomPointerLeave}
           onClick={handleRoomInvestigationClick}
@@ -6803,12 +6927,11 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
               lights={currentRoomLights}
               effects={currentRoomEffects}
               artStyle={currentRoomArtStyle}
-              blendMode={currentRoomLayoutEntity?.kind === "room" ? currentRoomLayoutEntity.lightBlendMode : undefined}
               viewport
               sourceAspectRatio={currentRoomArtAspect}
               templateLightingAligned={currentRoomUsesTemplateLightGeometry && !(currentRoomLayoutEntity?.kind === "room" && currentRoomLayoutEntity.lightBlendMode !== undefined)}
               blurred={roomBackdropBlurred}
-              reducedMotion={reducedMotion}
+              reducedMotion={reducedMotion || caseFileOpen}
             />
           <div className={styles.roomParallaxLayer}>
             {command === "examine" && !roomComplete ? <div className={styles.hotspots} aria-label="Examination points">{currentRoomUnexaminedHotspots.map((hotspot) => {
@@ -6843,11 +6966,11 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
               height: `${100 / DEBATE_MYSTERY_V2_EXAMINE_GRID_ROWS}%`,
             }} />;
           })}</div> : null}
-          {command === "examine" && !roomComplete ? <i className={styles.investigationLens} aria-hidden="true" data-visible={lensActive ? "true" : undefined} data-targeted={targetedHotspotId ? "true" : undefined} style={{ left: `${investigationLens.x}%`, top: `${investigationLens.y}%`, "--lens-proximity": investigationLens.proximity } as CSSProperties} /> : null}
+          {command === "examine" && !roomComplete && examiningHotspot ? <i className={styles.examinationScan} aria-hidden="true" data-phase={busy ? "scanning" : "resolved"} style={hotspotSpotStyle(examiningHotspot.polygon)} /> : null}
           {roomIntroductionPhase !== "casekeeper" ? <div className={styles.roomShade} /> : null}
           {!roomIntroductionActive ? <div className={styles.roomTitle}><small>{venueTierLabel(currentRoom.floor)}</small><h1>{currentRoom.name}</h1></div> : null}
-          {roomActorVisible && currentBot ? <div ref={suspectActorRef} className={styles.roomActor} data-art-style={currentRoomArtStyle} data-interrogation-phase={interrogationPhase ?? undefined} data-staging={interrogationStagingActive ? "two-shot" : undefined} data-thinking={suspectThinking ? "true" : undefined} data-drop-target={presentDrag.active ? (presentDrag.overSuspect ? "hover" : "armed") : undefined} style={{ "--actor-color": currentBot.color ?? "#a98cff" } as CSSProperties}><div className={styles.roomActorDrift} style={mysteryRoomActorDriftStyle(`${props.session.id}:${currentBot.id}:suspect`)}>{props.renderMysteryBotAvatar(currentBot, investigationAvatarPresentation, { demeanor: "suspect", thinking: suspectThinking, talking: audioMouthActive && roomDisplayedDialogue?.speakerSeatId === currentSuspect?.seatId, speechTiming: audioMouthActive && roomDisplayedDialogue?.speakerSeatId === currentSuspect?.seatId ? speechTiming : null, blinkEnabled: true, facing: "left", speechInkVisible: roomSpeechInkVisible })}<strong>{currentBot.name}</strong>{roomSuspectStageActionText && roomActionPresentation ? <SignalVoiceActionText key={`suspect:${roomDisplayedDialogue?.nodeId ?? ""}:${roomDisplayedDialogue?.occurredAt ?? ""}`} {...roomActionPresentation} accent={currentBot.color} /> : null}</div></div> : null}
-          {roomProsecutorVisible && prosecutorBot ? <aside className={`${styles.roomActor} ${styles.roomProsecutorActor}`} data-art-style={currentRoomArtStyle} data-prosecutor-speaking="true" data-staging={interrogationStagingActive ? "two-shot" : undefined} data-thinking={playerThinking ? "true" : undefined} data-interrogation-phase={interrogationPhase ?? undefined} style={{ "--actor-color": prosecutorBot.color ?? "#72d7ff" } as CSSProperties}>
+          {roomActorVisible && currentBot && !caseFileOpen ? <div ref={suspectActorRef} className={styles.roomActor} data-art-style={currentRoomArtStyle} data-interrogation-phase={interrogationPhase ?? undefined} data-staging={interrogationStagingActive ? "two-shot" : undefined} data-thinking={suspectThinking ? "true" : undefined} data-drop-target={presentDrag.active ? (presentDrag.overSuspect ? "hover" : "armed") : undefined} style={{ "--actor-color": currentBot.color ?? "#a98cff" } as CSSProperties}><div className={styles.roomActorDrift} style={mysteryRoomActorDriftStyle(`${props.session.id}:${currentBot.id}:suspect`)}>{props.renderMysteryBotAvatar(currentBot, investigationAvatarPresentation, { demeanor: "suspect", thinking: suspectThinking, talking: audioMouthActive && roomDisplayedDialogue?.speakerSeatId === currentSuspect?.seatId, speechTiming: audioMouthActive && roomDisplayedDialogue?.speakerSeatId === currentSuspect?.seatId ? speechTiming : null, blinkEnabled: true, facing: "left", speechInkVisible: roomSpeechInkVisible })}<strong>{currentBot.name}</strong>{roomSuspectStageActionText && roomActionPresentation ? <SignalVoiceActionText key={`suspect:${roomDisplayedDialogue?.nodeId ?? ""}:${roomDisplayedDialogue?.occurredAt ?? ""}`} {...roomActionPresentation} accent={currentBot.color} /> : null}</div></div> : null}
+          {roomProsecutorVisible && prosecutorBot && !caseFileOpen ? <aside className={`${styles.roomActor} ${styles.roomProsecutorActor}`} data-art-style={currentRoomArtStyle} data-prosecutor-speaking="true" data-staging={interrogationStagingActive ? "two-shot" : undefined} data-thinking={playerThinking ? "true" : undefined} data-interrogation-phase={interrogationPhase ?? undefined} style={{ "--actor-color": prosecutorBot.color ?? "#72d7ff" } as CSSProperties}>
             <div className={styles.roomActorDrift} style={mysteryRoomActorDriftStyle(`${props.session.id}:${prosecutorBot.id}:prosecutor`)}>
               {roomProsecutorStageActionText && roomActionPresentation ? <SignalVoiceActionText key={`room-prosecutor:${roomDisplayedDialogue?.nodeId ?? ""}:${roomDisplayedDialogue?.occurredAt ?? ""}`} {...roomActionPresentation} accent={prosecutorBot.color} /> : null}
               {props.renderMysteryBotAvatar(prosecutorBot, investigationAvatarPresentation, { demeanor: "partner", thinking: playerThinking, talking: audioMouthActive && !heldDialogue && roomProsecutorActive, speechTiming: audioMouthActive && !heldDialogue && roomProsecutorActive ? speechTiming : null, blinkEnabled: true, facing: "right", speechInkVisible: roomSpeechInkVisible })}
@@ -6870,7 +6993,7 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
               role="button"
               tabIndex={0}
               aria-live="polite"
-              aria-busy={roomIntroductionAwaitingContinue && roomCasekeeperNarrationVisible && busy}
+              aria-busy={roomIntroductionBringingForward}
               onKeyDown={(event) => {
                 if (event.key === "Enter" || event.key === " ") {
                   event.preventDefault();
@@ -6928,7 +7051,15 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
                           {revealedSpeechText(
                             whodunnitCaptionSpeechText(roomDialogueDelivery.spokenText),
                             captionSpeechTiming,
-                          )}
+                          ) || (roomDialogueSettled
+                            ? ""
+                            : (
+                                // A line whose voice or caption clock has not
+                                // started yet shows a beat, never an empty box.
+                                <span className={styles.casekeeperThinkingDots} data-pending-line="true" aria-label="Waiting for the line">
+                                  <span aria-hidden="true">...</span>
+                                </span>
+                              ))}
                         </span>
                       </>
                     )}
@@ -6938,9 +7069,9 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
               <span
                 className={styles.dialogueContinueHint}
                 role="status"
-                data-pending={roomObservationAwaitingContinue || roomIntroductionActive || roomDialogueSettled ? undefined : "true"}
+                data-pending={roomObservationAwaitingContinue || roomDialogueSettled || (roomIntroductionAwaitingContinue && roomCasekeeperNarrationVisible) ? undefined : "true"}
               >
-                {busy && roomIntroductionAwaitingContinue && roomCasekeeperNarrationVisible
+                {roomIntroductionBringingForward
                   ? "Bringing the occupant forward…"
                   : "Click to continue"}
               </span>
@@ -7221,6 +7352,10 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
             left: mansionX(entry.x), top: mansionY(entry.y),
             width: mansionWidth(entry.width), height: mansionHeight(entry.height),
           })),
+          ...mansionSideRooms.map(({ block, x, y, width, height }) => ({
+            id: block.id, label: block.name?.trim() ?? "", kind: "side" as const,
+            left: mansionX(x), top: mansionY(y), width: mansionWidth(width), height: mansionHeight(height),
+          })),
           ...mansionAmbientSpaces.filter((space) => !mansionAmbientIsExterior(space)).map((space) => ({
             id: space.id, label: "", kind: "ambient" as const,
             left: mansionX(space.x), top: mansionY(space.y),
@@ -7340,19 +7475,30 @@ function CaseFile(props: {
   return (
     <>
       <div className={styles.caseFileBackdrop} aria-hidden="true" />
-      {/* The investigator stands in the blurred room outside the file, drawn as a selected bot tile. */}
+      {/* The investigator stands in the blurred room outside the file as their
+          embodied bot, exactly as they appear on the room stage. A player with
+          no bot keeps the selected-tile stand-in. */}
       <div className={styles.caseFileInvestigatorStage} aria-label={`${props.playerName}, Investigator`} role="img">
-        <BotPickerTile
-          item={{ id: props.playerBot?.id ?? "investigator", name: props.playerName, color: props.playerColor, glyph: props.playerBot?.glyph ?? props.playerGlyph }}
-          selected
-          forceName
-          forceGlyph
-          accentColor={props.playerColor}
-          geometry={{ tileSize: 192, glyphSize: 96, glyphStroke: 1.6 }}
-          renderGlyph={props.renderBotGlyph}
-          style={{ "--tile-size": "192px" } as CSSProperties}
-          buttonProps={{ tabIndex: -1, "aria-hidden": "true" }}
-        />
+        {props.playerBot
+          ? (
+              <div className={styles.caseFileInvestigatorActor} style={{ "--actor-color": props.playerColor } as CSSProperties}>
+                {props.renderMysteryBotAvatar(props.playerBot, "full", { demeanor: "partner", blinkEnabled: true, facing: "right" })}
+                <strong>{props.playerName}</strong>
+              </div>
+            )
+          : (
+              <BotPickerTile
+                item={{ id: "investigator", name: props.playerName, color: props.playerColor, glyph: props.playerGlyph }}
+                selected
+                forceName
+                forceGlyph
+                accentColor={props.playerColor}
+                geometry={{ tileSize: 192, glyphSize: 96, glyphStroke: 1.6 }}
+                renderGlyph={props.renderBotGlyph}
+                style={{ "--tile-size": "192px" } as CSSProperties}
+                buttonProps={{ tabIndex: -1, "aria-hidden": "true" }}
+              />
+            )}
         <small>Investigator</small>
       </div>
       <aside className={styles.caseFile} role="dialog" aria-modal="true" aria-labelledby="mystery-v2-case-file-title">

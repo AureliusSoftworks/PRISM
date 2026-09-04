@@ -300,7 +300,60 @@ stages do not block the standalone preview.
   typed box that holds a set size from its first frame and is heard: Babble
   falls back to the account's Prism default voice as the investigator's
   stand-in, plays at broadcast volume, and ducks the room bed like spoken
-  lines. Talk and Present stage a two-shot (suspect right,
+  lines. Field Repair gains "An item is not named properly", which renames a
+  found item after the physical object its description describes. Description
+  rewrites and Case File clean-ups now fail review if any name, place, time,
+  number, or distinct sentence is lost, and fall back to a deterministic clean
+  that only removes boilerplate and exact repeats. Implementation boilerplate
+  such as "PRISM's … fallback" never enters a public description. Examine
+  shows a scan sweeping the chosen region while its observation loads and
+  resolves into the observation box; the pointer-tracked lens cursor is
+  retired for the standard cursor. Each action now prepares audio only for
+  the lines it added, so a text-only Examine no longer re-verifies every
+  cached clip in the transcript before it answers. Room entry needs fewer
+  gestures: the Casekeeper tableau reveals itself after a beat, the
+  occupant's opening exchange is prepared while it is read and plays on the
+  gesture that dismisses it, the exchange stages both investigator and
+  occupant, and a line whose voice has not started shows a beat instead of
+  an empty box. The tableau no longer strands an article on a verb after the
+  occupant's name is removed. While the
+  Case File is open the room behind its blur is suspended (no lights, effects,
+  actors, grid, or looping animation) and the investigator stands beside the
+  file as their embodied bot rather than a library tile. The Whodunnit navbar
+  gains a Speech control beside LOCAL / ONLINE: English (built-in) or Premium
+  (each character's frozen ElevenLabs voice) for spoken dialogue, saved per
+  account and independent of the account-wide Speech Type. Premium needs
+  ONLINE and a key. The venue details editor is a rail of focused views
+  (Details, Cover, Props, Sound, Sharing) with one Save bar; Remove sits in a
+  separated danger row. Pre-setup parity with Field Repair: the Venue Editor
+  can draw and hand-place the overhead plate, and the Room Editor can read the
+  accepted art to auto-place lights and re-read anchor positions; results land
+  in the draft and save with the venue plan. When a plate exists it is the
+  board's backdrop and the sketched hull outline (a fixed graphic, never
+  user-drawn) retires to a fallback. The Props view is a roster of all sixteen
+  roles: each shows its sprite or PRISM fallback and a model-authored name
+  and description that Case Forge reads verbatim and the worker draws to.
+  Nothing is typed: Refract identity writes a fresh identity from the venue's
+  style (LOCAL stays local), and Synthesize, Retry, or Resynthesize draws the
+  sprite to it. A role without an identity is refracted before it is drawn.
+  The editor writes nothing until Save changes: a refracted identity, a
+  chosen exterior, a Resynthesize redraw (which waits beside the ready
+  sprite), and music or atmosphere choices are staged as drafts, the rail
+  marks each view Unsaved, one Save applies them in order and keeps the
+  editor open on the saved venue, and closing with unsaved work asks before
+  discarding. Venues now own their sound effects:
+  the Sound view's Effects tab lists every interaction cue (map, navigate,
+  enter, return, dialogue dismiss, theory, evidence, case-file paper and
+  desk handling, folder, clip, pencil, room complete) with its purpose and an
+  audition player. Synthesize draws one short ElevenLabs clip to the venue's
+  materials and era (ONLINE only; LOCAL keeps the bundled palette), one cue or
+  the whole pack in sequence; clips are previews until Save, with Discard and
+  Undo per cue. Active clips freeze into the case's venue snapshot, travel in
+  the portable package under `manifest.effects`, and play in place of the
+  bundled voice during Investigation. Every venue synthesis (exterior,
+  identity, music, atmosphere, effects, room art, overhead, art reads) now
+  waits behind the refract loader, and background prop drawing shows the
+  docked soft loader. Talk and Present stage a two-shot (suspect right,
   investigator sliding in left) with the investigator thinking while a
   question is prepared and the suspect thinking on the handoff beat. Present
   is a drawer of physical items: click one for its blurb, drag it onto the

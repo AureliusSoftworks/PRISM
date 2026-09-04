@@ -15,6 +15,12 @@ import {
   type MysteryVenueRoomRoleV1,
   type MysteryVenueTopologyV1,
 } from "./mansionLayoutV2.ts";
+import {
+  MYSTERY_SIDE_ROOM_SIZES_V1,
+  fillMysteryVenueSideRoomsV1,
+  type MysterySideRoomNameV1,
+  type MysterySideRoomSizeV1,
+} from "./mysterySideRooms.ts";
 
 export type MysteryVenueLengthIdV1 = "quick" | "standard" | "grand" | "custom";
 
@@ -45,6 +51,10 @@ export interface MysteryVenueProposalV1 {
   topologySilhouette: Array<{ tierLabel: string; roomNames: string[] }>;
 }
 
+/** A believable non-case space the model proposes for this setting; the fill pass
+ * gives it a footprint that matches its size class. */
+export type MysteryVenueCreativeSideRoomDraftV1 = MysterySideRoomNameV1;
+
 export interface MysteryVenueCreativeRoomDraftV1 {
   templateId: string;
   name: string;
@@ -69,6 +79,8 @@ export interface MysteryVenueCreativeDraftV1 {
   atmosphere: string;
   connectorLabel: string;
   rooms: MysteryVenueCreativeRoomDraftV1[];
+  /** Optional: named side rooms the fill pass prefers over the catalog. */
+  sideRooms?: MysteryVenueCreativeSideRoomDraftV1[];
 }
 
 interface VenueSeedRoom {
@@ -137,6 +149,13 @@ export function parseMysteryVenueCreativeDraftV1(value: unknown): MysteryVenueCr
       anchors,
     }];
   });
+  const sideRooms = (Array.isArray(draft.sideRooms) ? draft.sideRooms : []).flatMap((entry): MysteryVenueCreativeSideRoomDraftV1[] => {
+    if (!entry || typeof entry !== "object") return [];
+    const candidate = entry as Record<string, unknown>;
+    const name = compactDraftText(candidate.name, 60);
+    const size = compactDraftText(candidate.size, 12) as MysterySideRoomSizeV1;
+    return name && (MYSTERY_SIDE_ROOM_SIZES_V1 as readonly string[]).includes(size) ? [{ name, size }] : [];
+  }).slice(0, 24);
   const result: MysteryVenueCreativeDraftV1 = {
     title: compactDraftText(draft.title, 120),
     ...(VENUE_ARCHETYPES.has(compactDraftText(draft.archetype, 40) as MysteryVenueArchetypeV1)
@@ -158,6 +177,7 @@ export function parseMysteryVenueCreativeDraftV1(value: unknown): MysteryVenueCr
     atmosphere: compactDraftText(draft.atmosphere, 500),
     connectorLabel: compactDraftText(draft.connectorLabel, 80),
     rooms,
+    ...(sideRooms.length ? { sideRooms } : {}),
   };
   return result.title && VENUE_KINDS.has(result.kind) && result.kindLabel && result.placeNoun &&
     VENUE_TOPOLOGIES.has(result.topology) && result.tierNoun &&
@@ -936,6 +956,14 @@ export function createMysteryVenueProposalV1(args: {
       : undefined,
   };
   for (const entity of entities) layout = addAutoCenteredMansionLayoutV2Doors(layout, entity.id);
+  // The gaps between case rooms become named side rooms with corridor doors; the venue's
+  // own suggestions name them first, the setting's catalog fills in.
+  layout = fillMysteryVenueSideRoomsV1(layout, {
+    seed: `${args.id}:${args.nonce ?? "0"}`,
+    archetype: seed.archetype,
+    kind: seed.kind,
+    names: acceptedDraft?.sideRooms ?? null,
+  });
   return {
     version: 1,
     id: args.id,

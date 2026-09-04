@@ -1090,7 +1090,11 @@ describe("mode tutorials", () => {
     assert.match(copy, /Powers never make a bot ineligible for a role/u);
     assert.match(copy, /Pro on the left/u);
     assert.match(copy, /Con on the right/u);
-    assert.match(copy, /fifteen generic PRISM spectators plus three Jarl guards/u);
+    assert.match(copy, /casts fifteen Library spectators/u);
+    assert.match(
+      copy,
+      /fills any shortage with generic PRISM spectators, and adds three Jarl guards/u,
+    );
     assert.match(copy, /allegiance persists in saves and replay/u);
     assert.match(copy, /complete Pro, Jarl, and Con avatars/u);
     assert.match(copy, /Auto, Left, Jarl, Right, and Wide court cameras/u);

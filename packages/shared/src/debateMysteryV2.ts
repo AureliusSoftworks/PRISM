@@ -34,6 +34,7 @@ import type {
   MansionPropThemeV1,
   MansionPropThemeProgressV1,
 } from "./whodunnitProps.js";
+import type { MansionSfxPackLibraryStateV1 } from "./whodunnitSfx.js";
 import {
   MYSTERY_INCIDENT_KINDS_V1,
   resolveMysteryCaseTitleV1,
@@ -495,6 +496,8 @@ export type DebateMysteryMansionAssetRoleV1 =
   | "music"
   /** Overhead deck plan illustration; logical id `deck:<floor>`. */
   | "map"
+  /** Venue effects pack clip; logical id `cue:<cueId>[:candidate|:previous]`. */
+  | "sfx"
   | "presentation";
 
 /** Protected aggregate-owned bytes. `logicalId` is presentation-only: prop
@@ -558,6 +561,8 @@ export interface DebateMysteryMansionBundleSummaryV1 {
   propTheme?: MansionPropThemeV1 | null;
   /** Mutable generation status; not copied into case snapshots or portable exports. */
   propThemeProgress?: MansionPropThemeProgressV1;
+  /** Venue effects pack: per-cue active, candidate, and previous clips. */
+  sfxPack?: MansionSfxPackLibraryStateV1;
   createdAt: string;
   updatedAt: string;
 }
@@ -1223,6 +1228,7 @@ export type DebateMysterySceneRepairActionV1 =
   | "repair_evidence_description"
   | "set_evidence_emoji"
   | "reroll_evidence_description"
+  | "rename_evidence_from_description"
   | "clean_case_file"
   | "reduce_evidence_magenta"
   | "generate_map_plan"
@@ -1350,9 +1356,14 @@ function cleanMysteryNarrationFragmentV2(
   }
   text = text
     .replace(/\s+([,.;:!?])/gu, "$1")
-    .replace(/^(?:has|had|wears?|wore)\s+/iu, "")
-    .replace(/^(?:is|was)\s+(?:an?\s+)?/iu, "")
     .replace(/\s+/gu, " ")
+    .replace(/^[\s,;:]+/u, "")
+    // Normalise before stripping the predicate: removing "Mr. Dawkins" from
+    // "Mr. Dawkins is a tall man" leaves a leading space that would otherwise
+    // hide "is a" from the strip and put the article on the verb.
+    .replace(/^(?:he|she|they|it)\s+(?:is|are|was|were)\s+(?:an?\s+)?/iu, "")
+    .replace(/^(?:has|had|wears?|wore)\s+/iu, "")
+    .replace(/^(?:is|was|are|were)\s+(?:an?\s+)?/iu, "")
     .trim();
   return text
     .slice(0, maxLength)
@@ -2739,9 +2750,12 @@ export function resolveDebateMysteryAssetSynthesisV2(input: {
     rooms:
       includesInvestigation &&
       input.assetSynthesis?.rooms === true,
+    // Upgraded (HD) rooms derive from a complete Mosaic pack: either this case
+    // requests Mosaic for every room, or the selected venue already provides
+    // authored art for every room. Case Forge validates the venue half at
+    // creation, so a stored request survives reload unchanged.
     illustratedRooms:
       includesInvestigation &&
-      input.assetSynthesis?.rooms === true &&
       input.assetSynthesis?.illustratedRooms === true,
     music:
       includesInvestigation &&
@@ -2768,27 +2782,117 @@ export function resolveDebateMysteryProductionCapabilitiesV1(args: {
           category,
           available: args.localVoiceAvailable,
           publicReason: args.localVoiceAvailable
-            ? "A short local calibration will verify the frozen cast before Case Forge."
-            : "The local performance voice service is unavailable; continue text-only or return to Production.",
+            ? "PRISM runs a short local voice check for the frozen cast before Case Forge."
+            : "The local voice service is not running. Continue text-only, or come back to Production once it is.",
         };
       }
-      if (category === "music" || category === "ambience") {
+      if (category === "music") {
+        // Case Forge never composes music. A venue soundtrack is reused when
+        // the venue has one; otherwise PRISM's investigation music plays.
         return {
           category,
-          available: online,
-          publicReason: online
-            ? "This request is audited at Production Readiness; any venue audio reuse or compatible fallback is disclosed before Start."
-            : "This category needs ONLINE generation; LOCAL keeps only compatible packaged fallbacks.",
+          available: false,
+          publicReason:
+            "Case Forge does not compose music. A venue soundtrack plays when the venue has one; otherwise PRISM's investigation music plays.",
+        };
+      }
+      if (category === "ambience") {
+        // The personalized mix is deterministic and local: no audio is
+        // generated or sent anywhere, so it is available in every mode.
+        return {
+          category,
+          available: true,
+          publicReason:
+            "PRISM tunes room acoustics to this venue with a deterministic local mix. No audio is generated or sent anywhere.",
         };
       }
       return {
         category,
         available: online,
         publicReason: online
-          ? "Available as a case-scoped production asset."
-          : "This category needs ONLINE generation; LOCAL keeps only compatible packaged fallbacks.",
+          ? "Drawn for this case only. The venue itself is never changed."
+          : "Needs ONLINE mode. In LOCAL, PRISM uses its packaged art instead.",
       };
     }),
+  };
+}
+
+/** What an installed Mystery Venue already provides for Case production.
+ * Derived from the same bundle fields Case Forge freezes into the snapshot, so
+ * the setup panel can offer only what the venue lacks instead of requesting
+ * generation that Production Readiness would merely report as reused. */
+export interface DebateMysteryVenueProductionV1 {
+  version: 1;
+  venueName: string | null;
+  roomArt: {
+    totalRooms: number;
+    /** Rooms with accepted or authored art, not PRISM's bundled placeholders. */
+    authoredRooms: number;
+    complete: boolean;
+  };
+  /** The venue has an active soundtrack that the case reuses automatically. */
+  music: boolean;
+  /** The venue has its own active atmosphere world bed. */
+  atmosphere: boolean;
+  /** Themed prop pack progress, or null when the venue has none. */
+  propTheme: { readyCount: number; totalCount: number; complete: boolean } | null;
+}
+
+export function resolveDebateMysteryVenueProductionV1(
+  bundle:
+    | Pick<
+        DebateMysteryMansionBundleSummaryV1,
+        "name" | "rooms" | "layoutV2" | "assets" | "music" | "atmosphere" | "propTheme" | "propThemeProgress"
+      >
+    | null
+    | undefined,
+): DebateMysteryVenueProductionV1 {
+  if (!bundle) {
+    return {
+      version: 1,
+      venueName: null,
+      roomArt: { totalRooms: 0, authoredRooms: 0, complete: false },
+      music: false,
+      atmosphere: false,
+      propTheme: null,
+    };
+  }
+  const layoutRooms = (bundle.layoutV2?.entities ?? []).filter(
+    (entity) => entity.kind === "room",
+  );
+  const roomSources: ReadonlyArray<{ imageId: string | null; acceptedRoomAssetId?: string | null }> =
+    layoutRooms.length > 0 ? layoutRooms : (bundle.rooms ?? []);
+  const totalRooms = roomSources.length;
+  const authoredRooms = roomSources.filter(
+    (room) => Boolean(room.acceptedRoomAssetId) || Boolean(room.imageId),
+  ).length;
+  const propThemeProgress = bundle.propThemeProgress ?? null;
+  const propTheme = bundle.propTheme
+    ? {
+        readyCount: bundle.propTheme.variants.length,
+        totalCount: bundle.propTheme.variants.length,
+        complete: true,
+      }
+    : propThemeProgress
+      ? {
+          readyCount: propThemeProgress.readyCount,
+          totalCount: propThemeProgress.totalCount,
+          complete: propThemeProgress.complete,
+        }
+      : null;
+  return {
+    version: 1,
+    venueName: bundle.name?.trim() || null,
+    roomArt: {
+      totalRooms,
+      authoredRooms,
+      complete: totalRooms > 0 && authoredRooms === totalRooms,
+    },
+    music:
+      Boolean(bundle.music?.active) ||
+      (bundle.assets ?? []).some((asset) => asset.role === "music"),
+    atmosphere: Boolean(bundle.atmosphere?.active),
+    propTheme,
   };
 }
 

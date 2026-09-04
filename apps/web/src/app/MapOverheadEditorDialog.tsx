@@ -15,7 +15,7 @@ import styles from "./mapOverheadEditor.module.css";
 export interface MapOverheadBoardTileV1 {
   id: string;
   label: string;
-  kind: "room" | "corridor" | "ambient";
+  kind: "room" | "corridor" | "ambient" | "side";
   left: number;
   top: number;
   width: number;
@@ -331,7 +331,7 @@ export default function MapOverheadEditorDialog(props: Props): React.JSX.Element
                     {props.tiles.map((tile) => (
                       <span key={tile.id} className={styles.tile} data-kind={tile.kind} data-current={tile.current ? "true" : undefined}
                         style={{ left: `${tile.left}%`, top: `${tile.top}%`, width: `${tile.width}%`, height: `${tile.height}%` }}>
-                        {tile.kind === "room" ? tile.label : null}
+                        {tile.kind === "room" || tile.kind === "side" ? tile.label : null}
                       </span>
                     ))}
                   </div>

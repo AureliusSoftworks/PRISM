@@ -160,12 +160,17 @@ export async function tuneDebateMysteryRoomLightingV1(args: {
     const light = args.lights.find((entry) => entry.id === marker.id);
     return `${marker.label}: ${light?.kind ?? "light"} at intensity ${light ? Math.round(light.intensity * 100) : "?"}% color ${light?.color ?? "?"}`;
   }).join("; ");
+  const singleTile = sheet.candidates.length === 1;
   const prompt = sheet.pass === 1
     ? [
-        `This contact sheet shows the ${args.roomName} room rendered ${sheet.candidates.length} times in a ${sheet.columns}-column grid, each tile titled with a letter and the blend mode used to composite the same set of lights over the same art: ${tiles}.`,
-        "Choose the single tile whose lighting reads most naturally: sources glow where they should, nothing is blown to white, nothing important is lost in darkness, and colors match the room. Answer with its letter as candidate.",
-        `Magenta numbered markers sit on each light source in every tile: ${markerList}.`,
-        "For each marker, judged on the tile you chose, say whether it reads ok, blown_out, too_dim, or off_color. When it is not ok, suggest a new intensity from 0 to 1 and, only if its color clashes with the room, a hex color close to what surrounds it. Leave intensity and color null when the light already reads well. Never suggest moving a light.",
+        singleTile
+          ? `This image shows the ${args.roomName} room as it renders with its placed lights. Glows add light and window beams screen it, so judge visibility, not blend.`
+          : `This contact sheet shows the ${args.roomName} room rendered ${sheet.candidates.length} times in a ${sheet.columns}-column grid, each tile titled with a letter and the blend mode used to composite the same set of lights over the same art: ${tiles}.`,
+        singleTile
+          ? "Set candidate to null."
+          : "Choose the single tile whose lighting reads most naturally: sources glow where they should, nothing is blown to white, nothing important is lost in darkness, and colors match the room. Answer with its letter as candidate.",
+        `Magenta numbered markers sit on each light source: ${markerList}.`,
+        "For each marker, say whether it reads ok, blown_out, too_dim, or off_color. A light must stay clearly visible as a source: prefer too_dim over ok when its glow barely shows, and only call it blown_out when it erases detail around it. When it is not ok, suggest a new intensity from 0 to 1 and, only if its color clashes with the room, a hex color close to what surrounds it. Leave intensity and color null when the light already reads well. Never suggest moving a light.",
         "Write a one-sentence summary of the room's lighting.",
       ]
     : [

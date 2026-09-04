@@ -15,6 +15,10 @@ import {
   type BackendUnavailableEventDetail,
 } from "./backendUnavailable.ts";
 import {
+  AUTH_BOOTSTRAP_TIMEOUT_MS,
+  AUTH_BOOTSTRAP_WIDE_TIMEOUT_MS,
+  AUTH_BOOTSTRAP_YOUNG_DOCUMENT_MS,
+  authBootstrapAttemptTimeoutMs,
   backendUnavailableDetailFromError,
   decideAuthBootstrapFailure,
   isAbortLikeError,
@@ -212,5 +216,33 @@ describe("backend unavailable helpers", () => {
     );
 
     assert.deepEqual(decision, { kind: "signed-out" });
+  });
+
+  it("widens the bootstrap watchdog while the document is young", () => {
+    assert.equal(
+      authBootstrapAttemptTimeoutMs({ attempt: 1, documentAgeMs: 0 }),
+      AUTH_BOOTSTRAP_WIDE_TIMEOUT_MS
+    );
+    assert.equal(
+      authBootstrapAttemptTimeoutMs({
+        attempt: 1,
+        documentAgeMs: AUTH_BOOTSTRAP_YOUNG_DOCUMENT_MS - 1,
+      }),
+      AUTH_BOOTSTRAP_WIDE_TIMEOUT_MS
+    );
+    assert.equal(
+      authBootstrapAttemptTimeoutMs({
+        attempt: 1,
+        documentAgeMs: AUTH_BOOTSTRAP_YOUNG_DOCUMENT_MS,
+      }),
+      AUTH_BOOTSTRAP_TIMEOUT_MS
+    );
+  });
+
+  it("always widens the silent bootstrap retry, even on an established page", () => {
+    assert.equal(
+      authBootstrapAttemptTimeoutMs({ attempt: 2, documentAgeMs: 600_000 }),
+      AUTH_BOOTSTRAP_WIDE_TIMEOUT_MS
+    );
   });
 });
