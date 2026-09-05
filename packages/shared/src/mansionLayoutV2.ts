@@ -495,12 +495,13 @@ function entityIsTraversable(entity: MansionLayoutEntityV2): boolean {
   return entity.kind === "room" || entity.kind === "corridor";
 }
 
-/** A door joins two traversable blocks, or a side room (infill) to a corridor. The side
- * room shows its door on the map but never carries traversal. */
+/** A door joins two traversable blocks, or a side room (infill) to whatever room or
+ * corridor it backs onto, so it reads as part of the floor instead of a floating block.
+ * A side room's door is cosmetic: traversal only ever runs between traversable blocks.
+ * Two side rooms share no door, since nobody passes between them. */
 export function mansionLayoutV2DoorPairIsAllowed(a: MansionLayoutEntityV2, b: MansionLayoutEntityV2): boolean {
   if (a.id === b.id) return false;
-  if (entityIsTraversable(a) && entityIsTraversable(b)) return true;
-  return (a.kind === "infill" && b.kind === "corridor") || (a.kind === "corridor" && b.kind === "infill");
+  return !(a.kind === "infill" && b.kind === "infill");
 }
 
 export function mansionLayoutV2RoomFootprint(
@@ -976,6 +977,79 @@ export function placeMansionLayoutV2Entity(
 
 /** Applies a grid snap, clamping to the buildable envelope and reflowing any
  * collision. Only a disconnected/island result returns to the old position. */
+/** Places one block exactly where it was put: clamped to the envelope, but never reflowing
+ * a neighbour and never refused for overlapping or disconnecting the plan. Doors re-derive
+ * from whatever adjacency results, and pairs left deliberately doorless stay that way. An
+ * editor uses this to let the player park a block anywhere and mark what is still wrong. */
+export function placeMansionLayoutV2EntityFreelyV1(
+  layout: MansionLayoutV2,
+  entityId: string,
+  requested: MansionLayoutEntityV2,
+): MansionLayoutV2 {
+  const current = layout.entities.find((entity) => entity.id === entityId);
+  if (!current || requested.id !== entityId ||
+    requested.floor < 1 || requested.floor > MANSION_LAYOUT_V2_MAX_FLOORS) return layout;
+  const existingDoorPairs = new Set(layout.doors.map((door) => pairKey(door.aEntityId, door.bEntityId)));
+  const deliberatelyDoorlessPairs = new Set<string>();
+  for (let leftIndex = 0; leftIndex < layout.entities.length; leftIndex += 1) {
+    const left = layout.entities[leftIndex]!;
+    for (const right of layout.entities.slice(leftIndex + 1)) {
+      if (!mansionLayoutV2DoorPairIsAllowed(left, right) || !mansionLayoutV2SharedWall(left, right)) continue;
+      const key = pairKey(left.id, right.id);
+      if (!existingDoorPairs.has(key)) deliberatelyDoorlessPairs.add(key);
+    }
+  }
+  const candidate = clampMansionLayoutV2Entity(requested);
+  if (JSON.stringify(candidate) === JSON.stringify(current)) return layout;
+  let next: MansionLayoutV2 = {
+    ...layout,
+    entities: layout.entities.map((entity) => entity.id === entityId ? candidate : entity),
+  };
+  next = reconcileMansionLayoutV2Doors(next);
+  next = addAutoCenteredMansionLayoutV2Doors(next, entityId);
+  return {
+    ...next,
+    doors: next.doors.filter((door) => !deliberatelyDoorlessPairs.has(pairKey(door.aEntityId, door.bEntityId))),
+  };
+}
+
+/** Blocks that currently break a rule: overlapping another block on their floor, a side
+ * room touching nothing, or a room the entry cannot reach. Free placement paints these
+ * instead of refusing the move, and the plan cannot be saved while any remain. */
+export function mansionLayoutV2InvalidEntityIdsV1(layout: MansionLayoutV2): Set<string> {
+  const invalid = new Set<string>();
+  for (let leftIndex = 0; leftIndex < layout.entities.length; leftIndex += 1) {
+    const left = layout.entities[leftIndex]!;
+    for (const right of layout.entities.slice(leftIndex + 1)) {
+      if (left.floor !== right.floor) continue;
+      if (!mansionLayoutV2RectsOverlap(mansionLayoutV2EntityRect(left), mansionLayoutV2EntityRect(right))) continue;
+      invalid.add(left.id);
+      invalid.add(right.id);
+    }
+  }
+  for (const entity of layout.entities) {
+    if (entity.kind !== "infill") continue;
+    const attached = layout.entities.some((other) =>
+      other.id !== entity.id && mansionLayoutV2SharedWall(entity, other) !== null);
+    if (!attached) invalid.add(entity.id);
+  }
+  const rooms = layout.entities.filter((entity): entity is MansionLayoutRoomV2 => entity.kind === "room");
+  if (rooms.length > 1) {
+    const root = rooms.find((room) => room.floor === 1 && room.templateId === "foyer") ?? rooms[0]!;
+    const adjacency = traversableAdjacency(layout);
+    const visited = new Set<string>();
+    const queue = [root.id];
+    while (queue.length > 0) {
+      const id = queue.shift()!;
+      if (visited.has(id)) continue;
+      visited.add(id);
+      for (const neighborId of adjacency.get(id) ?? []) queue.push(neighborId);
+    }
+    for (const room of rooms) if (!visited.has(room.id)) invalid.add(room.id);
+  }
+  return invalid;
+}
+
 export function snapMansionLayoutV2Entity(
   layout: MansionLayoutV2,
   entityId: string,

@@ -33,7 +33,7 @@ ship as `0.5.2` while Coffee is `v0.7`.
 | Zen     | v1.52   | Active             | Calm one-to-one continuity with bounded player-facing Troll pestering, timed unaware Mute delivery, Accent Map-keyed Mumbling dialects, draggable six-tier embodiment, direct human access, session-sticky Shapeshifter persona/visual embodiment with holder-owned voice and target Accent Map overlay and quoted borrowed name, Surname Drift last names, phosphor-hue prejudice, and masked Cursed Tongue delivery.                                                                                                        |
 | Coffee  | v2.76   | Active             | Two-to-five-bot tables with participant-scoped Context Spark continuity, mood-gated rare ordinary cut-ins, bounded Troll interruptions and public bait, cast-aware avatar effects, Power-projected reaction speech, masked Cursed Tongue delivery, timed Mute dead air, reactions, and floor breaks with a terse six-dot public mark, replay-safe Identity Crisis presentation as The real target with name/eye/mouth/Ink/glyph overlays that keep persona/voice while copying eligible public Powers, Shapeshifter persona/visual copying with holder-owned voice and target Accent Map overlay but no Power transfer, quoted borrowed names, occasional observer voice-mismatch notice, session last names, replay-safe form changes, phosphor-hue prejudice among seated bots, local-only café Jazz beds, and faithful replay that seats Default Prism for the player.                   |
 | Signal  | v1.98   | Active             | Interview studio with a faded, breathing studio entrance, guest-introduction cutaways and optional greetings, quiet bot-only visual identity status, bounded Troll interruptions and public bait, masked Cursed Tongue delivery with an electronic censor beep, ready-but-paused spectator buffering, audible-clock mouth animation, a paint-contained live stage, premium host-and-premise show identities with cohesive character, concept, and broadcast cues, performance-colored audience ratings, quiet replay-provenanced listener backchannels, private-safe Mumbling interruptions and reaction speech, timed Mute dead air with a terse six-dot public mark, guaranteed awkward-duration reactions, and hard cuts, replay-safe Identity Crisis presentation as The real target with name/eye/mouth/Ink/glyph overlays that keep persona/voice while copying eligible public Powers, and Confusion Collin's one-time booked-guest impostor curtain reveal as The real guest with soft episode tension plus a protected substantive interview exchange when Copycat echoes it, Shapeshifter persona/visual copying with holder-owned voice and target Accent Map overlay but no Power transfer, quoted borrowed names and occasional observer voice-mismatch notice, session last names, replay-safe form changes, exact on-air producer quotes, Power-permissive encounters, and phosphor-hue prejudice between host and guest. |
-| Debate  | v0.60   | Preview            | Forum, Turnabout, Whodunnit, and Flyting proceedings share frozen routing, consent, Powers, durability, Archive, and terse six-dot timed Mute presentation. Identity Crisis presents the holder as The real target while retaining persona/voice and copying eligible public Powers; Shapeshifter retains holder voice identity and never copies target Powers. LOCAL remains a hard offline boundary. |
+| Debate  | v0.61   | Preview            | Forum, Turnabout, Whodunnit, and Flyting proceedings share frozen routing, consent, Powers, durability, Archive, and terse six-dot timed Mute presentation. Whodunnit plays from a Prosecution or Defense stance chosen in Case Forge setup. Identity Crisis presents the holder as The real target while retaining persona/voice and copying eligible public Powers; Shapeshifter retains holder voice identity and never copies target Powers. LOCAL remains a hard offline boundary. |
 | Polling | v0.0    | Planned            | AI-powered polling across bot groups.                                                                                                                                                                                                                                                                       |
 | Feed    | v0.0    | Planned            | BotBook-style social feed.                                                                                                                                                                                                                                                                                  |
 | Games   | v0.0    | Planned            | Boardgame-like bot matches.                                                                                                                                                                                                                                                                                 |
@@ -293,6 +293,58 @@ stages do not block the standalone preview.
 
 ### 2026-09-03
 
+- Whodunnit investigations now play in first person by default, and the
+  investigator never performs a Talk question or Present prompt in either
+  perspective: the button the player chose is their line, the witness answers
+  directly, and no persona rewrite or clip is made for the question. First
+  person keeps the investigator off stage until Court; Settings → Debate →
+  Investigation perspective offers Embodied, which stages the investigator
+  beside each witness while they answer. A Premium take still preparing when
+  its line is requested is waited for rather than missed. Written
+  investigation dialogue is Bottish all the way to Court: Babble is no longer
+  offered, a saved Babble choice reads as Bottish, and Off remains. Every
+  Start and Resume begins outside the venue. The title and cover cards are
+  unchanged; Start opens a loading screen while an arrival line is prepared
+  (a small persona-coloured aside about the trip or the break, then on a
+  return where the case stands from public facts only) and spoken in the
+  investigator's own voice, English or Premium per the account's Speech Type.
+  The investigator then speaks it alone before the blurred exterior; one
+  click fills the line, the next clears the venue to its entrance. The same
+  load records a vocal bank: eight short cues ("Hm.", "Mm-hm.", "Huh?") in
+  every cast voice, English through the local engine or Premium through the
+  take storage, cached by voice so a bot shared between cases records once.
+  A lead-in in the investigator's own voice precedes each Bottish
+  observation, and whoever listens on stage (the witness during an
+  observation, the embodied investigator during an answer) reacts once per
+  line with their mouth moving. Suspects keep their full English or Premium
+  lines. A room's investigation now ends as soon as every examination point
+  that carries a case outcome (a discovery, a lead, an admitted record, or a
+  Case Kit item) is examined: the server marks the room cleared, the
+  completion cue fires on that examination, and the remaining points and
+  points of interest stay examinable but are never required. A room with no
+  clue-bearing points clears after one look. Cases compiled before the flag
+  learn it on their next action.
+- Advanced `Debate` to `v0.61`. Whodunnit gains a Defense stance, chosen as
+  "Your side" on the Case Forge Experience page. Case Forge pins one innocent
+  suspect as the player's client off its own seeded stream, freezes the
+  red-herring record that the surface case leans on plus two alibi-support
+  examinations, and the title card names the client with the opposing
+  Prosecutor's spoiler-safe summary of the case against them. The player
+  embodies the Defense Attorney: room openings, Talk questions, and court
+  responses are authored in that role, the Theory Board pins the client and
+  asks who is really responsible, and filing the client is refused. Court
+  mechanics are unchanged; established contradictions acquit the client and
+  exhausted credibility convicts them. Two verdict outcomes join the record,
+  `just_acquittal` and `acquittal_without_truth`, while a Defense conviction
+  is a `wrongful_conviction`. The stored counsel seats stay player-relative,
+  so every archived case, replay, and portable package loads unchanged as a
+  prosecution case with an unchanged play-contract hash. Case Forge no longer
+  pauses on the Production Readiness review: a requested category that came
+  back reused, fallback, or unavailable is accepted automatically, the exact
+  counts and acknowledgment still persist with the case and its Archive, and
+  the title card opens directly. The venue arrival loader is bounded, so a
+  slow local voice or model engine opens the door without an arrival line
+  instead of stranding the player behind a spinner.
 - Advanced `Debate` to `v0.60`. Whodunnit dialogue follows one gesture
   contract for every speaker: a click on streaming text fills it, the next
   click dismisses it, and a Talk or Present exchange never moves to the next
@@ -316,7 +368,15 @@ stages do not block the standalone preview.
   gesture that dismisses it, the exchange stages both investigator and
   occupant, and a line whose voice has not started shows a beat instead of
   an empty box. The tableau no longer strands an article on a verb after the
-  occupant's name is removed. While the
+  occupant's name is removed. A spoken line whose local clip is missing is
+  synthesized the moment it is requested instead of falling silent. The Case
+  Forge Voices option now defaults on, and a case forged as a text case can be
+  given voices from its Case File; lines synthesize as they are heard. Rooms
+  now expose points of interest: broad fixtures with no case outcome (an
+  aquarium, a window, a desk) are clickable in Examine and answer with a
+  persona-voiced aside generated on first look, spoiler-safe and never part of
+  the Case File. Placement-only placeholders and blank floor are never
+  targets. While the
   Case File is open the room behind its blur is suspended (no lights, effects,
   actors, grid, or looping animation) and the investigator stands beside the
   file as their embodied bot rather than a library tile. The Whodunnit navbar
@@ -353,9 +413,60 @@ stages do not block the standalone preview.
   bundled voice during Investigation. Every venue synthesis (exterior,
   identity, music, atmosphere, effects, room art, overhead, art reads) now
   waits behind the refract loader, and background prop drawing shows the
-  docked soft loader. Talk and Present stage a two-shot (suspect right,
-  investigator sliding in left) with the investigator thinking while a
-  question is prepared and the suspect thinking on the handoff beat. Present
+  docked soft loader. The Investigation room stage now takes the room art's
+  own shape (page-wide, or viewport-tall and centered), so the room view and
+  Examine never letterbox or pillarbox the art in black bars; the page shows
+  beneath or beside the stage instead, and the Case Desk settles into that
+  margin on tall windows. Talk and Present stage a two-shot (suspect right,
+  investigator sliding in left): each speaker thinks from the request until
+  their voice actually sounds (the question being prepared, the entrance
+  beat, then the Premium take or the prepared local clip loading), a click
+  during that wait is ignored instead of cutting the line into silent text,
+  and a take that never starts releases the caption after fifteen seconds.
+  Whodunnit's Premium picker now always asks ElevenLabs, whatever the
+  account's English engine, and a Premium miss plays the prepared local clip
+  rather than synthesizing a second local take. A speaker label leaked into a
+  line ("Peter Griffin: …") is stripped from the caption, and from new
+  synthesis, when it names the speaker. The Speech picker now decides the
+  take prepared while the speaker thinks: Premium synthesizes the ElevenLabs
+  take on the server during the action, stores it with its alignment beside
+  the local clips, and the line plays it as-is with no second request (the
+  local clip is synthesized only if the take cannot play); English keeps the
+  local clip. Talk questions and Present prompts are performed once in the
+  chosen Prosecutor's own voice and idiom as they are asked: a sealed stage
+  cue keeps the canonical subject, names, and intent, forbids case
+  disclosures, and falls back to the frozen line, and the performed line is
+  written into the case so replays and audio agree. Case File clean-up now
+  reviews entry by entry in small batches: an entry the model cannot tidy
+  without losing a fact keeps its deterministic clean while the rest improve,
+  a rejected entry gets one solo retry told why, and only a file where nothing
+  could change reports failure; a title word echoed as its own adjective
+  ("stained Stained Glass Fragment") is collapsed everywhere descriptions are
+  cleaned. The Present drawer marks items already shown to the suspect at hand
+  with a check and offers Ask again. Court now opens like a Forum: on the wide
+  shot the public gallery (the jury, then every suspect not on the stand or in
+  the dock) walks in from alternating aisles under a "Public gallery ·
+  Gathering" chrome, the console, testimony, and credibility wait, and only
+  once the house has settled does the judge call order and the witness stand
+  go live; each new witness chapter assembles the Court again. Objections use
+  the same item drawer as the room, dragged onto the witness on the stand,
+  with items already put to that statement marked; the witness thinks while
+  Press or an objection is answered and the Prosecutor thinks after Think,
+  whose line now reads as private reasoning (italic, "thinking") rather than
+  an address to the Court. A contradiction statement an author left as the
+  contract phrase ("The assigned record's exact claim is false.") is sworn in
+  plain words at compile and repaired on load, and a Prosecutor's private
+  reasoning drops an authored self-address ("Okay, Peter, …"). Press is now
+  Turnabout's beat: the player's counsel challenges the statement aloud before
+  the witness answers. The press question is a new spoken line added to the
+  frozen graph the first time a statement version is pressed, performed in the
+  chosen counsel's own voice and idiom through the same sealed stage cue as a
+  Talk question (the quoted words anchor it, it must stay a question, and case
+  disclosures are forbidden), spoken from its deterministic wording ("You said,
+  … Is that the whole of it?") when no model is at hand, prepared in the engine
+  the Speech picker selects before the reply goes out, and replayed on later
+  presses of the same version. The counsel thinks until it sounds, then the
+  witness thinks until their answer does. Present
   is a drawer of physical items: click one for its blurb, drag it onto the
   suspect or use Ask to present it.
 

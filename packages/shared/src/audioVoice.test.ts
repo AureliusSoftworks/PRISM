@@ -347,6 +347,7 @@ describe("audio voice normalization", () => {
       accentMode: "prefer-genuine",
       speechprintInfluence: "none",
       ttsPronunciationEnabled: false,
+      premiumLaughEnabled: false,
       premiumPronunciationEnabled: false,
       speechprintStrength: "balanced",
       speechprintVariationSeed: "natural-v1",

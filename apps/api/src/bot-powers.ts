@@ -15,6 +15,7 @@ import {
   botPowerSourceHashV1,
   botPowerAntiTruthSelfRuleV1,
   botPowerAntiTruthInvertPromptV1,
+  botPowerDefinitionIsEndlessTangentV1,
   botPowerDefinitionIsTrollV1,
   botPowerTrollAuthoringCueV1,
   botPowerCredulitySelfRuleV1,
@@ -1173,6 +1174,59 @@ function deterministicInterruptionPower(
   };
 }
 
+/**
+ * Endless Tangent is the floor-domination primitive. Verbosity alone only made
+ * turns longer; peers still got their turn as soon as the speaker stopped. The
+ * point of this Power is that the speaker never stops, so it pairs an expansive
+ * budget with the unconditional interruption contract: every eligible bot
+ * opening is taken. Human-controlled speech and protected closings are never
+ * targets, and peers keep every ordinary way to push back.
+ */
+function deterministicEndlessTangentPower(
+  source: BotPowerV1,
+  botName: string,
+): CompiledBotPowerV1 | null {
+  if (!botPowerDefinitionIsEndlessTangentV1(source.name, source.intent)) {
+    return null;
+  }
+  const subject = compact(botName, 100) || "This bot";
+  return {
+    version: BOT_POWER_VERSION,
+    sourceHash: botPowerSourceHashV1(source.name, source.intent),
+    selfCue:
+      "Never land on a stopping point. Answer, then open the next relevant aside before anyone can take the floor, and cut into every eligible bot speaker's live turn. Never interrupt protected closings, boundaries, or human-controlled speech.",
+    observerCue:
+      `${subject} talks straight through every eligible bot turn, so peers rarely finish a thought; each of them still keeps every ordinary way to object, cut back, or leave.`,
+    effects: [
+      {
+        type: "interruption",
+        frequency: "frequent",
+        strength: "large",
+        targets: [{ kind: "all" }],
+        certainty: "always",
+      },
+      {
+        type: "action_bias",
+        cue: "Resume the tangent the instant another bot pauses.",
+        frequency: "frequent",
+      },
+      { type: "turn_gravity", direction: "more", strength: "large" },
+      {
+        type: "response_bond",
+        direction: "toward",
+        strength: "large",
+        targets: [{ kind: "all" }],
+      },
+      { type: "response_budget", mode: "expansive", enforcement: "soft" },
+    ],
+    ruleLabels: [
+      "Always interrupts eligible bot turns",
+      "Expansive turns that never resolve",
+      "Peers keep every right to object",
+    ],
+  };
+}
+
 function deterministicTrollPower(
   source: BotPowerV1,
   botName: string,
@@ -1909,6 +1963,7 @@ function deterministicPower(
     deterministicMutePower(source, botName) ??
     deterministicBreathlessPower(source, botName) ??
     deterministicTrollPower(source, botName) ??
+    deterministicEndlessTangentPower(source, botName) ??
     deterministicInterruptionPower(source, botName) ??
     deterministicAddressedInsultPower(source, botName) ??
     deterministicAddressedFandomPower(source, botName) ??
@@ -2099,6 +2154,11 @@ function compiledEntrySatisfiesIntent(
       compiled.effects.some(
         (effect) => effect.type === "interruption" && effect.certainty === "always",
       );
+  }
+  if (deterministicEndlessTangentPower(source, "")) {
+    return compiled.effects.some(
+      (effect) => effect.type === "interruption" && effect.certainty === "always",
+    );
   }
   if (deterministicInterruptionPower(source, "")) {
     return compiled.effects.some((effect) => effect.type === "interruption");

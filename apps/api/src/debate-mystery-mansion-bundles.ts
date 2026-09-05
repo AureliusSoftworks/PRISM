@@ -32,6 +32,7 @@ import {
   type DebateMysteryMansionAssetV1,
   type DebateMysteryMansionLibraryPresentationV1,
   type DebateMysteryMansionDerivationV1,
+  type DebateMysteryMansionArchiveHoldV1,
   type DebateMysteryMansionBundleRoomV1,
   type DebateMysteryMansionBundleSummaryV1,
   type DebateMysteryMansionSnapshotV2,
@@ -56,6 +57,10 @@ import {
 } from "./debate-mystery-mansion-prop-variants.ts";
 import { applyCuratedImportedMansionDecorationV1 } from "./debate-mystery-mansion-curated-decoration.ts";
 import { roomAnchorContractSha256 } from "./debate-mystery-mansion-room-art.ts";
+import {
+  assertDebateMysteryMansionNotHeldByOngoingCaseV1,
+  listDebateMysteryMansionArchiveHoldsV1,
+} from "./debate-mystery-mansion-archive-hold.ts";
 
 interface MansionBundleRow {
   id: string;
@@ -403,6 +408,7 @@ function mansionLibraryPresentation(
 function summary(
   db: DatabaseSync,
   row: MansionBundleRow,
+  archiveHold: DebateMysteryMansionArchiveHoldV1 | null = null,
 ): DebateMysteryMansionBundleSummaryV1 {
   const houseStyle = parseStyle(row.style_json);
   const assets = aggregateAssets(db, row.user_id, row.id);
@@ -490,6 +496,7 @@ function summary(
     propTheme: propThemeState.propTheme,
     propThemeProgress: propThemeState.progress,
     sfxPack: mansionSfxPackStateFromAssetsV1(assets),
+    archiveHold,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -659,7 +666,8 @@ export function getDebateMysteryMansionBundleV2(
   userId: string,
   bundleId: string,
 ): DebateMysteryMansionBundleSummaryV1 {
-  return summary(db, bundleRow(db, userId, bundleId));
+  const holds = listDebateMysteryMansionArchiveHoldsV1(db, userId);
+  return summary(db, bundleRow(db, userId, bundleId), holds.get(bundleId) ?? null);
 }
 
 export function listDebateMysteryMansionBundlesV2(
@@ -675,7 +683,8 @@ export function listDebateMysteryMansionBundlesV2(
       WHERE user_id = ?
       ORDER BY updated_at DESC, id`,
   ).all(userId) as unknown as MansionBundleRow[];
-  return rows.map((row) => summary(db, row));
+  const holds = listDebateMysteryMansionArchiveHoldsV1(db, userId);
+  return rows.map((row) => summary(db, row, holds.get(row.id) ?? null));
 }
 
 function normalizedMansionLibraryText(
@@ -742,6 +751,7 @@ export async function updateDebateMysteryMansionLibraryV1(
   input: UpdateDebateMysteryMansionLibraryInputV1,
 ): Promise<DebateMysteryMansionBundleSummaryV1> {
   const row = bundleRow(db, userId, bundleId);
+  assertDebateMysteryMansionNotHeldByOngoingCaseV1(db, userId, bundleId);
   if (
     input.title === undefined &&
     input.description === undefined &&
@@ -1325,6 +1335,7 @@ export function updateDebateMysteryMansionTopologyV1(
   input: UpdateDebateMysteryMansionTopologyInputV1,
 ): DebateMysteryMansionBundleSummaryV1 {
   const row = bundleRow(db, userId, bundleId);
+  assertDebateMysteryMansionNotHeldByOngoingCaseV1(db, userId, bundleId);
   if (!parseDerivationMetadata(row.derivation_metadata_json)) {
     throw new HttpError(409, "Duplicate this mansion before editing its plan.");
   }
@@ -1735,7 +1746,9 @@ function bundleRoomsFromState(
 
 /**
  * Saves layout, room assets, and house style as one tenant-owned aggregate.
- * Re-saving the same source refreshes that aggregate atomically.
+ * A case that started from an installed venue overwrites that venue. Otherwise
+ * the first save from this case creates a library venue, and later saves from
+ * the same case refresh it.
  */
 export function saveDebateMysteryMansionBundleV2(
   db: DatabaseSync,
@@ -1796,14 +1809,30 @@ export function saveDebateMysteryMansionBundleV2(
       throw new HttpError(409, "One or more mansion room assets are unavailable.");
     }
   }
-  const existing = db.prepare(
-    `SELECT id, created_at FROM debate_mystery_mansion_bundles
+  const sourceBundleId = state.config.mansionSnapshot?.sourceBundleId?.trim() || null;
+  const sourceBundle = sourceBundleId
+    ? db.prepare(
+        `SELECT id, created_at, name, source_session_id
+           FROM debate_mystery_mansion_bundles
+          WHERE user_id = ? AND id = ?`,
+      ).get(userId, sourceBundleId) as
+        | { id: string; created_at: string; name: string; source_session_id: string | null }
+        | undefined
+    : undefined;
+  const existingBySession = db.prepare(
+    `SELECT id, created_at, name, source_session_id
+       FROM debate_mystery_mansion_bundles
       WHERE user_id = ? AND source_session_id = ?`,
-  ).get(userId, sessionId) as { id: string; created_at: string } | undefined;
+  ).get(userId, sessionId) as
+    | { id: string; created_at: string; name: string; source_session_id: string | null }
+    | undefined;
+  const existing = sourceBundle ?? existingBySession;
   const id = existing?.id ?? randomUUID();
   const now = new Date().toISOString();
   const createdAt = existing?.created_at ?? now;
-  const name = `${state.config.houseStyle.label.trim() || "Whodunnit"} mansion`.slice(0, 180);
+  const name = existing?.name
+    ?? `${state.config.houseStyle.label.trim() || "Whodunnit"} mansion`.slice(0, 180);
+  const sourceSessionId = existing?.source_session_id ?? sessionId;
   const floors = Math.max(...rooms.map((room) => room.floor), 1);
   db.exec("BEGIN IMMEDIATE");
   try {
@@ -1813,7 +1842,6 @@ export function saveDebateMysteryMansionBundleV2(
           suspect_count, style_json, layout_json, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET
-         name = excluded.name,
          floors = excluded.floors,
          total_rooms = excluded.total_rooms,
          suspect_count = excluded.suspect_count,
@@ -1824,7 +1852,7 @@ export function saveDebateMysteryMansionBundleV2(
     ).run(
       id,
       userId,
-      sessionId,
+      sourceSessionId,
       name,
       floors,
       rooms.length,

@@ -328,7 +328,9 @@ describe("resolveAutoModel", () => {
     assert.equal(route("claude-opus-4-8", false).autoRoute?.reasoningEffort, "high");
     assert.equal(route("claude-opus-4-8", true).autoRoute?.reasoningEffort, "xhigh");
     assert.equal(route("claude-opus-4-5", true).autoRoute?.reasoningEffort, "high");
-    assert.equal(route("claude-sonnet-4-6", true).autoRoute?.reasoningEffort, "xhigh");
+    // Sonnet 4.6 has no native xhigh: Auto clamps to its real top rung.
+    assert.equal(route("claude-sonnet-4-6", true).autoRoute?.reasoningEffort, "high");
+    assert.equal(route("claude-sonnet-5", true).autoRoute?.reasoningEffort, "xhigh");
   });
 
   it("accepts serialized Auto XHigh decisions", () => {

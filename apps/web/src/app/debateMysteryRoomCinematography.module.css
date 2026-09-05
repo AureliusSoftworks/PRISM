@@ -14,20 +14,19 @@
 .root[data-light-source="authored"] { mix-blend-mode: var(--room-light-blend, overlay); }
 .root[data-light-source="authored"] .lighting { mix-blend-mode: normal; }
 .root[data-light-source="authored"] .grade { display: none; }
-.root[data-viewport="true"] { width: 100vw; height: 100dvh; }
+.root[data-viewport="true"] { width: 100%; height: 100%; }
 
 /* Occluding effects (steam, fog, snow) paint here with normal blending, beside the
  * blended light root, and follow the plate's blur and scale while actors are on stage. */
-.atmosphere { position: absolute; z-index: 2; inset: 0; display: block; width: 100%; height: 100%; object-fit: cover; pointer-events: none; transform: none; filter: blur(0); transition: filter 220ms ease, transform 220ms ease; }
-.atmosphere[data-viewport="true"] { width: 100vw; height: 100dvh; }
-.atmosphere[data-blurred="true"] { filter: blur(12px); transform: scale(1.04); }
+.atmosphere { position: absolute; z-index: 2; inset: 0; display: block; width: 100%; height: 100%; object-fit: fill; pointer-events: none; transform: none; filter: blur(0); transition: filter 220ms ease; }
+.atmosphere[data-viewport="true"] { width: 100%; height: 100%; }
+.atmosphere[data-blurred="true"] { filter: blur(12px); }
 
 /* Both art styles blur and scale with the room plate (.roomBackdropImage[data-blurred])
  * while actors are on stage, so lights soften into the background with everything else
  * and stay on their practical sources. */
 .root[data-blurred="true"] {
   filter: blur(12px);
-  transform: scale(1.04);
 }
 
 .grade,
@@ -57,7 +56,7 @@
 .lighting,
 .grain {
   display: block;
-  object-fit: cover;
+  object-fit: fill;
 }
 
 .lighting {

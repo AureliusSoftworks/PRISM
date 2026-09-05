@@ -24,6 +24,7 @@ import {
   getDebateMysteryMansionBundleV2,
   retainDebateMysteryMansionSnapshotAssetsV2,
 } from "./debate-mystery-mansion-bundles.ts";
+import { assertDebateMysteryMansionNotHeldByOngoingCaseV1 } from "./debate-mystery-mansion-archive-hold.ts";
 import {
   inspectPortableMysteryEnvelopeHeaderV1,
   openPortableMysteryEnvelopeV1,
@@ -32,6 +33,11 @@ import {
 import { preflightPortableMysteryArchiveV1 } from "./debate-mystery-package-safety.ts";
 import { decryptBytes, encryptBytes } from "./security.ts";
 import { HttpError } from "./utils.http.ts";
+import {
+  remapMysteryPersonaPairContextBotIdsV1,
+  validateMysteryPersonaPairContextMapV1,
+  type MysteryPersonaPairContextMapV1,
+} from "./debate-mystery-persona-relationship.ts";
 
 const MANIFEST_PATH = "manifest.json";
 const MAX_CASE_ARCHIVE_BYTES = 32 * 1024 * 1024;
@@ -46,6 +52,7 @@ const FORBIDDEN_PUBLIC_KEYS = new Set([
   "evidenceRoomIdById",
   "presentNodeIdBySuspectRecord",
   "prosecutorInternalReasoning",
+  "personaPairContext",
 ]);
 const FORBIDDEN_PACKAGE_KEYS = new Set([
   "userId",
@@ -249,6 +256,34 @@ function deepForbiddenKeys(
   ]);
 }
 
+function portablePrivateCaseCastBotIdsV1(
+  privateCase: Record<string, PortablePackageJsonValueV1>,
+): Set<string> {
+  const config = privateCase.config &&
+      typeof privateCase.config === "object" &&
+      !Array.isArray(privateCase.config)
+    ? privateCase.config
+    : null;
+  if (!config) return new Set();
+  const singleIds = [
+    config.prosecutorBotId,
+    config.rivalDefenseBotId,
+    config.judgeBotId,
+  ];
+  const listIds = [
+    config.suspectBotIds,
+    config.jurorBotIds,
+  ];
+  return new Set([
+    ...singleIds.filter((value): value is string => typeof value === "string"),
+    ...listIds.flatMap((value) =>
+      Array.isArray(value)
+        ? value.filter((entry): entry is string => typeof entry === "string")
+        : []
+    ),
+  ]);
+}
+
 function validateCaseManifest(manifest: PortableCasePackageManifestV1): void {
   const errors = validatePortableCasePackageManifestV1(manifest);
   if (!portableMysteryPackageMajorIsSupportedV1(manifest.compatibility)) {
@@ -268,6 +303,16 @@ function validateCaseManifest(manifest: PortableCasePackageManifestV1): void {
       !Array.isArray(privateCase.config)
     ? privateCase.config as Record<string, unknown>
     : undefined;
+  if (privateCase.personaPairContext) {
+    try {
+      validateMysteryPersonaPairContextMapV1(
+        privateCase.personaPairContext,
+        portablePrivateCaseCastBotIdsV1(privateCase),
+      );
+    } catch {
+      errors.push("Private persona pair context is invalid.");
+    }
+  }
   const graphValidation = validateDebateMysteryDialogueGraphV2({
     graph: manifest.dialogueGraph as unknown as Parameters<typeof validateDebateMysteryDialogueGraphV2>[0]["graph"],
     suspectSeatIds: actorAccounts.flatMap((entry) =>
@@ -280,6 +325,7 @@ function validateCaseManifest(manifest: PortableCasePackageManifestV1): void {
     prosecutorBotId: typeof config?.prosecutorBotId === "string"
       ? config.prosecutorBotId
       : null,
+    directRecipientContractVersion: privateCase.personaPairContext ? 1 : null,
     rivalDefenseBotId: typeof config?.rivalDefenseBotId === "string"
       ? config.rivalDefenseBotId
       : null,
@@ -299,6 +345,7 @@ function validateCaseManifest(manifest: PortableCasePackageManifestV1): void {
           (entry): entry is string => typeof entry === "string",
         )
       : [],
+    defenseFrame: portableDefenseFrameValidationV1(privateCase, config),
   });
   if (!graphValidation.valid) errors.push("Case dialogue graph is not playable.");
   const privateCanonical = canonicalPortablePackageJsonV1(asJson(manifest.privateCase));
@@ -402,10 +449,33 @@ function proofContract(
   const keys = [
     "sealedCulpritSeatId", "sealedAccompliceSeatId", "sealedResponsibleSeatIds",
     "motive", "method", "eyewitnessSeatId", "eyewitnessResolution",
-    "accusedAlibiSupportDiscoveryIds", "contradictionSemanticContractVersion",
+    "accusedAlibiSupportDiscoveryIds", "defenseFrame", "contradictionSemanticContractVersion",
     "graphValidation",
   ];
   return Object.fromEntries(keys.filter((key) => key in privateCase).map((key) => [key, privateCase[key]!]));
+}
+
+/** Defense-stance validator input from a portable private case; null for prosecution cases. */
+function portableDefenseFrameValidationV1(
+  privateCase: Record<string, PortablePackageJsonValueV1>,
+  config: Record<string, unknown> | undefined,
+): Parameters<typeof validateDebateMysteryDialogueGraphV2>[0]["defenseFrame"] {
+  const frame = privateCase.defenseFrame;
+  if (!frame || typeof frame !== "object" || Array.isArray(frame)) return null;
+  const record = frame as Record<string, unknown>;
+  const defendantSeatId =
+    typeof record.defendantSeatId === "string" ? record.defendantSeatId.trim() : "";
+  if (!defendantSeatId) return null;
+  return {
+    defendantSeatId,
+    frameEvidenceId: typeof record.frameEvidenceId === "string" ? record.frameEvidenceId : null,
+    alibiSupportDiscoveryIds: Array.isArray(record.alibiSupportDiscoveryIds)
+      ? record.alibiSupportDiscoveryIds.filter(
+          (entry): entry is string => typeof entry === "string",
+        )
+      : [],
+    investigation: config?.investigationMode !== "court_only",
+  };
 }
 
 function evidenceAssignments(
@@ -444,6 +514,8 @@ function resetPublicCase(
     playPhase: "title_card",
     config: {
       ...config,
+      // Packages written before the stance flag are prosecution cases.
+      playerStance: config.playerStance === "defense" ? "defense" : "prosecution",
       mansionBundleId: null,
       mansionSnapshot: null,
       assetSynthesis: {
@@ -574,6 +646,9 @@ export function portableCaseManifestFromSessionV1(args: {
         fallbackRooms[0]?.["id"] ?? null),
   }), "Reusable public state");
   const sourcePrivate = asRecord(JSON.parse(row.private_case_json), "Private case");
+  const sourcePersonaPairContext = sourcePrivate.personaPairContext
+    ? validateMysteryPersonaPairContextMapV1(sourcePrivate.personaPairContext)
+    : null;
   const sourceGraph = asRecord(JSON.parse(row.dialogue_graph_json), "Dialogue graph");
   const sourceRooms = Array.isArray(sourcePublic.rooms)
     ? sourcePublic.rooms.map((value) => asRecord(value, "Compiled room"))
@@ -606,6 +681,14 @@ export function portableCaseManifestFromSessionV1(args: {
     replaceStrings(asJson(sourcePrivate), roomReplacements),
     "Portable private case",
   );
+  if (sourcePersonaPairContext) {
+    normalizedPrivate.personaPairContext = asJson(
+      remapMysteryPersonaPairContextBotIdsV1(
+        sourcePersonaPairContext,
+        roomReplacements,
+      ),
+    );
+  }
   const normalizedGraph = asRecord(
     replaceStrings(asJson(sourceGraph), roomReplacements),
     "Portable dialogue graph",
@@ -664,6 +747,9 @@ export function portableCaseManifestFromSessionV1(args: {
     prosecutorBotId: typeof normalizedConfig?.prosecutorBotId === "string"
       ? normalizedConfig.prosecutorBotId
       : null,
+    directRecipientContractVersion: normalizedPrivate.personaPairContext
+      ? 1
+      : null,
     rivalDefenseBotId: typeof normalizedConfig?.rivalDefenseBotId === "string"
       ? normalizedConfig.rivalDefenseBotId
       : null,
@@ -683,6 +769,7 @@ export function portableCaseManifestFromSessionV1(args: {
           (entry): entry is string => typeof entry === "string",
         )
       : [],
+    defenseFrame: portableDefenseFrameValidationV1(normalizedPrivate, normalizedConfig),
   });
   if (!graphValidation.valid) {
     throw new PortableCasePackageError("The certified case dialogue graph is not reusable.");
@@ -1035,6 +1122,7 @@ export function assemblePortableCasePackageV1(args: {
 
   const manifest = portableCaseManifestForLibraryIdV1(args);
   const mansion = getDebateMysteryMansionBundleV2(args.db, args.userId, args.mansionBundleId);
+  assertDebateMysteryMansionNotHeldByOngoingCaseV1(args.db, args.userId, args.mansionBundleId);
   const requirements = manifest.mansionRequirements;
   if (mansion.suspectCount !== requirements.suspectCount) {
     throw new HttpError(409, `This case needs exactly ${requirements.suspectCount} suspect rooms.`);
@@ -1098,6 +1186,16 @@ export function assemblePortableCasePackageV1(args: {
     replaceStrings(asJson(manifest.privateCase), replacements),
     "Assembled private case",
   );
+  if (manifest.privateCase.personaPairContext) {
+    finalPrivate.personaPairContext = asJson(
+      remapMysteryPersonaPairContextBotIdsV1(
+        validateMysteryPersonaPairContextMapV1(
+          manifest.privateCase.personaPairContext,
+        ),
+        replacements,
+      ),
+    );
+  }
   const finalGraph = asRecord(
     replaceStrings(asJson(manifest.dialogueGraph), replacements),
     "Assembled dialogue graph",
@@ -1173,6 +1271,7 @@ export function assemblePortableCasePackageV1(args: {
     prosecutorBotId: typeof finalConfig.prosecutorBotId === "string"
       ? finalConfig.prosecutorBotId
       : null,
+    directRecipientContractVersion: finalPrivate.personaPairContext ? 1 : null,
     rivalDefenseBotId: typeof finalConfig.rivalDefenseBotId === "string"
       ? finalConfig.rivalDefenseBotId
       : null,
@@ -1189,6 +1288,7 @@ export function assemblePortableCasePackageV1(args: {
           (entry): entry is string => typeof entry === "string",
         )
       : [],
+    defenseFrame: portableDefenseFrameValidationV1(finalPrivate, finalConfig),
   });
   if (!graphValidation.valid) {
     throw new PortableCasePackageError("The case could not be safely bound to this mansion.");

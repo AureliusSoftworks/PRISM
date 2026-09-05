@@ -92,6 +92,7 @@ import {
   normalizeSpeechTypeVoiceMode,
   normalizeWhodunnitTextVoiceMode,
   normalizeWhodunnitSpeechType,
+  normalizeWhodunnitInvestigationPerspective,
   normalizeGraphicsQuality,
   normalizeCrtFocus,
   normalizePrismTypographyScale,
@@ -121,6 +122,7 @@ import {
   type VoiceMode,
   type WhodunnitTextVoiceMode,
   type WhodunnitSpeechType,
+  type WhodunnitInvestigationPerspective,
   type AutoFallbackChainV1,
   type EphemeralChatProviderPreferences,
   type ImageProviderName,
@@ -230,6 +232,7 @@ export interface BackupUserSettings {
   debateWhodunnitReuseSynthesizedExhibits?: boolean;
   debateWhodunnitTextVoiceMode?: WhodunnitTextVoiceMode;
   debateWhodunnitSpeechType?: WhodunnitSpeechType;
+  debateWhodunnitPerspective?: WhodunnitInvestigationPerspective;
   psychicModeEnabled?: boolean;
   autoModeEnabled?: boolean;
   autoFallbackChain?: AutoFallbackChainV1 | null;
@@ -1931,6 +1934,7 @@ export function exportUserSnapshot(
          debate_whodunnit_reuse_synthesized_exhibits,
          debate_whodunnit_text_voice_mode,
          debate_whodunnit_speech_type,
+         debate_whodunnit_perspective,
          psychic_mode_enabled,
          auto_switch_model,
          auto_fallback_chain,
@@ -2019,6 +2023,7 @@ export function exportUserSnapshot(
         debate_whodunnit_reuse_synthesized_exhibits: number;
         debate_whodunnit_text_voice_mode: string | null;
         debate_whodunnit_speech_type: string | null;
+        debate_whodunnit_perspective: string | null;
         psychic_mode_enabled: number;
         auto_switch_model: number;
         auto_fallback_chain: string | null;
@@ -2131,6 +2136,9 @@ export function exportUserSnapshot(
         ),
         debateWhodunnitSpeechType: normalizeWhodunnitSpeechType(
           user.debate_whodunnit_speech_type,
+        ),
+        debateWhodunnitPerspective: normalizeWhodunnitInvestigationPerspective(
+          user.debate_whodunnit_perspective,
         ),
         psychicModeEnabled: user.psychic_mode_enabled === 1,
         autoModeEnabled: user.auto_switch_model === 1,
@@ -3993,6 +4001,7 @@ function importUserSnapshotWithinTransaction(
         debate_whodunnit_reuse_synthesized_exhibits = ?,
         debate_whodunnit_text_voice_mode = ?,
         debate_whodunnit_speech_type = ?,
+        debate_whodunnit_perspective = ?,
         psychic_mode_enabled = ?,
         auto_switch_model = ?,
         auto_fallback_chain = ?,
@@ -4100,6 +4109,7 @@ function importUserSnapshotWithinTransaction(
         settings.debateWhodunnitTextVoiceMode,
       ),
       normalizeWhodunnitSpeechType(settings.debateWhodunnitSpeechType),
+      normalizeWhodunnitInvestigationPerspective(settings.debateWhodunnitPerspective),
       settings.psychicModeEnabled === true ? 1 : 0,
       settings.autoModeEnabled === true && storedAutoFallbackChain ? 1 : 0,
       storedAutoFallbackChain,

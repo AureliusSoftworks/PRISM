@@ -1817,6 +1817,55 @@ export function botPowerDefinitionIsExplicitInterruptionV1(
   ].some((pattern) => pattern.test(intent));
 }
 
+/**
+ * Recognizes the named Endless Tangent Power and the authored intents that
+ * describe a bot who keeps the floor by never arriving at a stopping point:
+ * rambling on forever, digressing without end, or being unable to be brief.
+ * Long-windedness that still hands the turn back is ordinary verbosity rather
+ * than this primitive, so an explicit yield disqualifies the match.
+ */
+export function botPowerDefinitionIsEndlessTangentV1(
+  nameValue: unknown,
+  intentValue: unknown,
+): boolean {
+  const name = compactText(nameValue, BOT_POWER_NAME_MAX_LENGTH)
+    .toLowerCase()
+    .replace(/[’]/gu, "'");
+  const intent = compactText(intentValue, BOT_POWER_INTENT_MAX_LENGTH)
+    .toLowerCase()
+    .replace(/[’]/gu, "'");
+  if (/^endless tangent(?: power)?$/u.test(name)) return true;
+  if (
+    /\b(?:yields?|surrenders?|cedes?|hands?\s+(?:back|over))\b[\s\S]{0,40}\b(?:floor|turn|word|mic)\b/u.test(
+      intent,
+    ) ||
+    /\b(?:lets?|allows?|invites?)\b[\s\S]{0,40}\b(?:others?|peers?|bots?|everyone)\b[\s\S]{0,40}\b(?:finish|speak|talk|answer|reply)\b/u.test(
+      intent,
+    )
+  ) {
+    return false;
+  }
+  const text = `${name} ${intent}`;
+  const rambles = [
+    /\brambl(?:e|es|ing)\b/u,
+    /\b(?:tangents?|digress\w*|monologues?)\b/u,
+    /\b(?:inability|unable|cannot|can't|incapable|no\s+capacity)\b[\s\S]{0,40}\b(?:brevity|being\s+brief|shutting\s+up)\b/u,
+    /\b(?:goes?|drones?|talks?|blathers?|prattles?)\s+on\b/u,
+    /\bnever\s+(?:stops?|finishes?|shuts?\s+up)\s+(?:talking|speaking)?\b/u,
+  ].some((pattern) => pattern.test(text));
+  if (!rambles) return false;
+  return [
+    /\bforever\b/u,
+    /\bendless\w*\b/u,
+    /\beternal\w*\b/u,
+    /\bon\s+and\s+on\b/u,
+    /\bnever\s+(?:stops?|ends?|finishes?|shuts?\s+up)\b/u,
+    /\b(?:annoys?|irritates?|frustrates?|exhausts?|bores?|wears?\s+out)\b/u,
+    /\b(?:inability|unable|cannot|can't|incapable)\b[\s\S]{0,40}\b(?:brevity|being\s+brief)\b/u,
+    /\bword\s+in\s+edge\s*-?\s*wise\b/u,
+  ].some((pattern) => pattern.test(text));
+}
+
 /** Recognizes the named Troll Power and its deliberately annoying dialect. */
 export function botPowerDefinitionIsTrollV1(
   nameValue: unknown,

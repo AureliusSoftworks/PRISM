@@ -1,5 +1,6 @@
 import {
   modelSupportsNativeReasoningEffort,
+  ollamaModelUsesTieredThinking,
   reasoningGenerationBudgetMs,
   normalizeSimulatedEffortLadderProfile,
   simulatedEffortLadderPasses,
@@ -357,6 +358,8 @@ export function shouldPrepareMessagesWithSimulatedEffort(args: {
   }
   if (args.effort === "max") return false;
   if (args.provider !== "local") return false;
+  // GPT-OSS's native tiers own Low through High; only XHigh stacks passes.
+  if (ollamaModelUsesTieredThinking(args.model)) return args.effort === "xhigh";
   return !modelSupportsNativeReasoningEffort(args.provider, args.model);
 }
 
@@ -376,6 +379,13 @@ export async function prepareMessagesWithSimulatedEffort(args: {
   // Defense in depth: callers normally use the capability helper above, but
   // no direct invocation may turn an ONLINE request into multiple passes.
   if (args.provider.name !== "local") return args.messages;
+  if (
+    ollamaModelUsesTieredThinking(args.options.model) &&
+    args.effort !== "xhigh"
+  ) {
+    // Low through High are GPT-OSS's own tiers; XHigh alone is hollow.
+    return args.messages;
+  }
   if (
     args.effort === "minimal" &&
     (await localModelSupportsNativeThinking(args.options.model))

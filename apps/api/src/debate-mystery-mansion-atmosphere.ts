@@ -114,6 +114,9 @@ export function buildDebateMysteryMansionAtmospherePromptV1(args: {
   styleId: string;
   weather: string;
   timeOfDay: string;
+  /** The player's Refract direction for this pass. Blank keeps the canonical
+   * prompt byte-identical, so an undirected resynthesis never drifts. */
+  direction?: string | null;
 }): string {
   const family = atmosphereFamily(`${args.acousticThemePaletteId} ${args.styleId}`);
   const layers = family === "spacecraft"
@@ -125,6 +128,11 @@ export function buildDebateMysteryMansionAtmospherePromptV1(args: {
     "Create a seamless environmental room-tone loop for quiet mystery investigation.",
     `Sound sources: ${layers}.`,
     `Weather state: ${compact(args.weather, "clear", 40)}. Time of day: ${compact(args.timeOfDay, "unknown", 40)}.`,
+    // The direction colors the bed; it never redefines it. It sits ahead of the
+    // closing sentence so that sentence still bounds the loop and speech space.
+    ...(compact(args.direction, "", 300)
+      ? [`Creative direction for this pass: ${compact(args.direction, "", 300)}`]
+      : []),
     "Use stable low energy, softened high frequencies, sparse neutral detail, broad speech space, and a smooth unchanged loop boundary.",
   ].join(" ");
 }
@@ -191,6 +199,8 @@ export async function stageDebateMysteryMansionAtmosphereV1(args: {
   bundleId: string;
   responseMode: "local" | "online";
   apiKey: string | null;
+  /** Optional player Refract direction for this synthesis pass. */
+  direction?: string | null;
   fetchImpl?: typeof fetch;
 }): Promise<{ assetId: string; title: string }> {
   if (args.responseMode !== "online") {
@@ -211,6 +221,7 @@ export async function stageDebateMysteryMansionAtmosphereV1(args: {
         styleId: mansion.houseStyle.id,
         weather: mansion.houseStyle.atmosphere.weather,
         timeOfDay: mansion.houseStyle.atmosphere.timeOfDay,
+        direction: args.direction,
       }),
       fetchImpl: args.fetchImpl,
     });

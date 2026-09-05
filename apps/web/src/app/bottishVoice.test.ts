@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 import {
+  BOTTISH_NOTE_GAIN,
   buildBottishPlaybackPlan,
   buildBottishPlan,
   bottishPerformanceText,
@@ -228,9 +229,10 @@ describe("Bottish speech plan", () => {
     assert.notDeepEqual(legacyValues.notes, base.notes);
   });
 
-  it("keeps the neutral mix bright and clearly audible", () => {
+  it("keeps the robot carrier quieter than speech-bus unity", () => {
     const plan = buildBottishPlan("Hello, bot!", neutral, "audibility");
-    assert.ok((plan.notes[0]?.gain ?? 0) >= 0.25);
+    assert.equal(plan.notes[0]?.gain, BOTTISH_NOTE_GAIN);
+    assert.ok(BOTTISH_NOTE_GAIN <= 0.08);
     assert.ok((plan.notes[0]?.lowpassHz ?? 0) >= 6000);
   });
 

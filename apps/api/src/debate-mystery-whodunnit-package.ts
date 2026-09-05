@@ -51,6 +51,10 @@ import {
 } from "./debate-mystery-package-safety.ts";
 import { resolveAbsoluteUnderDataRoot, writeGeneratedImageBytesExclusive } from "./image-storage.ts";
 import { decryptBytes, encryptBytes } from "./security.ts";
+import {
+  remapMysteryPersonaPairContextBotIdsV1,
+  validateMysteryPersonaPairContextMapV1,
+} from "./debate-mystery-persona-relationship.ts";
 
 const MANIFEST_PATH = "manifest.json";
 const MAX_INTERNAL_ARCHIVE_BYTES = 256 * 1024 * 1024;
@@ -68,6 +72,7 @@ const FORBIDDEN_PUBLIC_KEYS = new Set([
   "providerTranscript",
   "prompt",
   "systemPrompt",
+  "personaPairContext",
 ]);
 const FORBIDDEN_PACKAGE_KEYS = new Set([
   "userId",
@@ -174,6 +179,32 @@ function validateLeakage(manifest: WhodunnitPackageManifestV1): void {
   }
 }
 
+function portableWhodunnitPrivateCastBotIdsV1(
+  privateCase: Record<string, PortablePackageJsonValueV1>,
+): Set<string> {
+  const config = privateCase.config &&
+      typeof privateCase.config === "object" &&
+      !Array.isArray(privateCase.config)
+    ? privateCase.config
+    : null;
+  if (!config) return new Set();
+  return new Set([
+    ...[
+      config.prosecutorBotId,
+      config.rivalDefenseBotId,
+      config.judgeBotId,
+    ].filter((value): value is string => typeof value === "string"),
+    ...[
+      config.suspectBotIds,
+      config.jurorBotIds,
+    ].flatMap((value) =>
+      Array.isArray(value)
+        ? value.filter((entry): entry is string => typeof entry === "string")
+        : []
+    ),
+  ]);
+}
+
 function validateInternalPackage(input: InternalWhodunnitPackageV1): void {
   const errors = validateWhodunnitPackageManifestV1(input.manifest);
   if (errors.length) throw new PortableWhodunnitPackageError(errors.join("\n"));
@@ -181,6 +212,18 @@ function validateInternalPackage(input: InternalWhodunnitPackageV1): void {
     throw new PortableWhodunnitPackageError("Whodunnit package format is not supported.");
   }
   validateLeakage(input.manifest);
+  if (input.manifest.privateCase.personaPairContext) {
+    try {
+      validateMysteryPersonaPairContextMapV1(
+        input.manifest.privateCase.personaPairContext,
+        portableWhodunnitPrivateCastBotIdsV1(input.manifest.privateCase),
+      );
+    } catch {
+      throw new PortableWhodunnitPackageError(
+        "Private persona pair context is invalid.",
+      );
+    }
+  }
   const ids = new Set<string>();
   const paths = new Set<string>();
   for (const descriptor of input.manifest.assets) {
@@ -349,9 +392,32 @@ function proofContract(privateCase: Record<string, PortablePackageJsonValueV1>):
   const keys = [
     "sealedCulpritSeatId", "sealedAccompliceSeatId", "motive", "method",
     "eyewitnessSeatId", "eyewitnessResolution", "accusedAlibiSupportDiscoveryIds",
-    "contradictionSemanticContractVersion", "graphValidation",
+    "defenseFrame", "contradictionSemanticContractVersion", "graphValidation",
   ];
   return Object.fromEntries(keys.filter((key) => key in privateCase).map((key) => [key, privateCase[key]!]));
+}
+
+/** Defense-stance validator input from a portable private case; null for prosecution cases. */
+function portableDefenseFrameValidationV1(
+  privateCase: Record<string, PortablePackageJsonValueV1>,
+  config: Record<string, unknown> | undefined,
+): Parameters<typeof validateDebateMysteryDialogueGraphV2>[0]["defenseFrame"] {
+  const frame = privateCase.defenseFrame;
+  if (!frame || typeof frame !== "object" || Array.isArray(frame)) return null;
+  const record = frame as Record<string, unknown>;
+  const defendantSeatId =
+    typeof record.defendantSeatId === "string" ? record.defendantSeatId.trim() : "";
+  if (!defendantSeatId) return null;
+  return {
+    defendantSeatId,
+    frameEvidenceId: typeof record.frameEvidenceId === "string" ? record.frameEvidenceId : null,
+    alibiSupportDiscoveryIds: Array.isArray(record.alibiSupportDiscoveryIds)
+      ? record.alibiSupportDiscoveryIds.filter(
+          (entry): entry is string => typeof entry === "string",
+        )
+      : [],
+    investigation: config?.investigationMode !== "court_only",
+  };
 }
 
 function evidenceAssignments(privateCase: Record<string, PortablePackageJsonValueV1>): Record<string, PortablePackageJsonValueV1> {
@@ -391,6 +457,7 @@ function graphValidationForPortableCase(
   // became part of graph validation. Preserve their readable input boundary;
   // current cutscene graphs opt into the stronger ownership contract.
   const validatesOpeningExchangeOwnership = openingExchangeCount(graph) > 0;
+  const validatesDirectRecipients = Boolean(privateCase.personaPairContext);
   return validateDebateMysteryDialogueGraphV2({
     graph: graph as unknown as DebateMysteryDialogueGraphV2,
     suspectSeatIds: actorAccounts.flatMap((entry) =>
@@ -412,10 +479,12 @@ function graphValidationForPortableCase(
       : undefined,
     hotspotIdsByRoom:
       privateCase.investigationHotspotIdsByRoom as Record<string, string[]> | undefined,
-    prosecutorBotId: validatesOpeningExchangeOwnership &&
+    prosecutorBotId: (validatesOpeningExchangeOwnership ||
+        validatesDirectRecipients) &&
         typeof config?.prosecutorBotId === "string"
       ? config.prosecutorBotId
       : null,
+    directRecipientContractVersion: validatesDirectRecipients ? 1 : null,
     rivalDefenseBotId: validatesOpeningExchangeOwnership &&
         typeof config?.rivalDefenseBotId === "string"
       ? config.rivalDefenseBotId
@@ -428,6 +497,7 @@ function graphValidationForPortableCase(
           (entry): entry is string => typeof entry === "string",
         )
       : [],
+    defenseFrame: portableDefenseFrameValidationV1(privateCase, config),
   });
 }
 
@@ -624,10 +694,23 @@ export async function exportPortableWhodunnitPackageV1(args: {
   for (const botId of sourceBotIds) {
     if (botId !== "prism:player-judge") portableReplacements.set(botId, `portable-bot:${randomUUID()}`);
   }
+  const sourcePersonaPairContext = rawPrivateCase.personaPairContext
+    ? validateMysteryPersonaPairContextMapV1(
+        rawPrivateCase.personaPairContext,
+      )
+    : null;
   const privateCase = asRecord(
     sanitizeBotSnapshots(replaceStrings(asJson(rawPrivateCase), portableReplacements)),
     "Portable private case",
   );
+  if (sourcePersonaPairContext) {
+    privateCase.personaPairContext = asJson(
+      remapMysteryPersonaPairContextBotIdsV1(
+        sourcePersonaPairContext,
+        portableReplacements,
+      ),
+    );
+  }
   delete privateCase.authoringRecoveryBySection;
   refreshPortableMansionSnapshotHashes(privateCase);
   // Portable replay owns only the performed transcript clips. Even a legacy
@@ -1549,6 +1632,16 @@ export async function importPortableWhodunnitPackageV1(args: {
     const finalSession = asRecord(replaceStrings(asJson(remappedSession), replacements), "Imported session");
     const finalPublic = asRecord(replaceStrings(asJson(remappedPublic), replacements), "Imported public state");
     const finalPrivate = asRecord(replaceStrings(asJson(remappedPrivate), replacements), "Imported private case");
+    if (manifest.privateCase.personaPairContext) {
+      finalPrivate.personaPairContext = asJson(
+        remapMysteryPersonaPairContextBotIdsV1(
+          validateMysteryPersonaPairContextMapV1(
+            manifest.privateCase.personaPairContext,
+          ),
+          replacements,
+        ),
+      );
+    }
     const finalGraph = asRecord(replaceStrings(asJson(remappedGraph), replacements), "Imported dialogue graph");
     if (manifest.runtime.completedPlaythrough) {
       finalPrivate.portableCompletedPlaythrough = replaceStrings(

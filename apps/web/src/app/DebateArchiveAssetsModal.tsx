@@ -24,13 +24,16 @@ export interface DebateArchiveExhibitRow {
   magentaPassCount: number;
   magentaUndoAvailable: boolean;
   imageCacheKey?: string;
+  /** A Whodunnit exhibit's sealed case sprite (venue prop or case synthesis). */
+  sealedSpriteUrl?: string | null;
 }
 
 function exhibitImageUrl(
   exhibit: DebateEvidenceExhibitV1,
   cacheKey?: string,
+  sealedSpriteUrl?: string | null,
 ): string | null {
-  if (exhibit.visualKind === "emoji" || !exhibit.imageId) return null;
+  if (exhibit.visualKind === "emoji" || !exhibit.imageId) return sealedSpriteUrl ?? null;
   const base = `/api/images/${encodeURIComponent(exhibit.imageId)}/file`;
   return cacheKey ? `${base}?v=${encodeURIComponent(cacheKey)}` : base;
 }
@@ -323,8 +326,9 @@ function ArchiveExhibitAssetCard(props: {
   onError: (message: string) => void;
 }): React.JSX.Element {
   const { exhibit } = props.row;
-  const imageUrl = exhibitImageUrl(exhibit, props.row.imageCacheKey);
+  const imageUrl = exhibitImageUrl(exhibit, props.row.imageCacheKey, props.row.sealedSpriteUrl);
   const hasSprite = Boolean(imageUrl);
+  const sealedSprite = hasSprite && !exhibit.imageId;
   const synthesizeVerb = hasSprite ? "Re-synthesize" : "Synthesize";
   const synthesizeTarget = useMemo<PrismRefractMagicTarget>(
     () => ({
@@ -366,9 +370,11 @@ function ArchiveExhibitAssetCard(props: {
         <strong>{exhibit.title}</strong>
         <p>{exhibit.observation}</p>
         <small>
-          {hasSprite
-            ? "Stage sprite attached · emoji remains the fallback"
-            : "Emoji fallback · synthesize a soft sprite anytime"}
+          {sealedSprite
+            ? "Case sprite attached from the venue's props · emoji remains the fallback"
+            : hasSprite
+              ? "Stage sprite attached · emoji remains the fallback"
+              : "Emoji fallback · synthesize a soft sprite anytime"}
         </small>
       </div>
       <div className={styles.archiveAssetActions}>
@@ -461,6 +467,7 @@ export function useDebateArchiveExhibitRows(
             assetSetId: string | null;
             magentaPassCount: number;
             magentaUndoAvailable: boolean;
+            sealedSpriteUrl?: string | null;
           }>;
         }>(`/api/debates/${encodeURIComponent(sessionId)}/exhibits`);
         setRows(result.exhibits.map((row) => ({ ...row })));

@@ -94,6 +94,28 @@ test("binding keeps actor identities in the private plan", () => {
   );
 });
 
+test("a Defense charge names the client and asks who is really responsible", () => {
+  const plan = composeMysteryIncidentPlanV1({
+    spark: "An accomplice steals a family heirloom.",
+    difficulty: "classic",
+    nonce: "defense-charge",
+  });
+  const bound = bindMysteryIncidentPlanV1({
+    plan,
+    principalSeatId: "suspect-1",
+    accompliceSeatId: "suspect-4",
+  });
+  const prosecution = mysteryPublicChargeV1(bound);
+  assert.equal("defendantSeatId" in prosecution, false);
+  assert.match(prosecution.accusationPrompt, /^Who is responsible/u);
+  assert.deepEqual(mysteryPublicChargeV1(bound, { defendantSeatId: null }), prosecution);
+  const defense = mysteryPublicChargeV1(bound, { defendantSeatId: " suspect-2 " });
+  assert.equal(defense.defendantSeatId, "suspect-2");
+  assert.match(defense.accusationPrompt, /^Who is really responsible/u);
+  assert.equal(defense.title, prosecution.title);
+  assert.equal(defense.incidentId, prosecution.incidentId);
+});
+
 test("an explicit homicide and theft remain one charge with a linked complication", () => {
   const plan = composeMysteryIncidentPlanV1({
     spark: "A murder lets an accomplice steal the diamonds.",

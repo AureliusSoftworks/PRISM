@@ -332,7 +332,20 @@ describe("Avatar Details Studio integration", () => {
     );
     assert.match(
       editorSource,
-      /const guideInk = normalizedAccentColor/,
+      /const AVATAR_DETAILS_FACE_GUIDE_INK = "#ffffff"/,
+    );
+    assert.match(
+      editorSource,
+      /const guideInk = AVATAR_DETAILS_FACE_GUIDE_INK/,
+    );
+    assert.doesNotMatch(editorSource, /const guideInk = normalizedAccentColor/);
+    assert.match(
+      editorSource,
+      /"--zen-live-bot-face-ink": guideInk,[\s\S]*?"--zen-live-bot-face-crt-border-color": guideInk,[\s\S]*?"--coffee-bot-color": guideInk,[\s\S]*?"--coffee-seat-emotion-color": guideInk,/,
+    );
+    assert.match(
+      editorSource,
+      /title="The face guide stays white so ink label colors read true"/,
     );
     assert.match(
       editorCss,

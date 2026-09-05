@@ -1,6 +1,7 @@
 import type { BotAudioVoiceProfileV1, WhodunnitSpeechType } from "@localai/shared";
 import { normalizeBotAudioVoiceProfileV1 } from "@localai/shared";
 import type { DebateUtterance } from "./DebateExperience";
+import type { EnglishVoiceCharacterAlignment } from "./englishVoice";
 import type { RoomAcousticsSend } from "./roomAcoustics";
 
 export interface WhodunnitPremiumVoiceRequest {
@@ -12,12 +13,21 @@ export interface WhodunnitPremiumVoiceRequest {
   roomAcoustics?: RoomAcousticsSend;
 }
 
+/** A take synthesized on the server while the speaker thought; played as-is. */
+export interface WhodunnitPreparedPremiumTake {
+  url: string;
+  alignment: EnglishVoiceCharacterAlignment | null;
+  audioContentType: string;
+  durationMs: number;
+}
+
 export interface WhodunnitSpokenPerformance {
   lineId: string;
   cacheKey: string;
   speakerBotId: string;
   spokenText: string;
   voiceProfile: BotAudioVoiceProfileV1;
+  preparedTake?: WhodunnitPreparedPremiumTake | null;
 }
 
 export interface WhodunnitPremiumSelection {

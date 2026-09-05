@@ -5,7 +5,7 @@ import {
   type LocalVoiceSpeechprintStrength,
 } from "@localai/shared";
 import { useId, useRef, useState } from "react";
-import type { CSSProperties, ReactElement } from "react";
+import type { CSSProperties, ReactElement, ReactNode } from "react";
 
 import { AdjustmentPad } from "./AdjustmentPad";
 import type {
@@ -49,6 +49,8 @@ export interface PronunciationAtlasProps {
   disabled?: boolean;
   className?: string;
   label?: string;
+  /** Accent-owned controls rendered under the map, above the step action. */
+  children?: ReactNode;
 }
 
 function padValueForSelection(
@@ -122,6 +124,7 @@ export function PronunciationAtlas({
   disabled = false,
   className,
   label = "Accent map",
+  children,
 }: PronunciationAtlasProps): ReactElement {
   const normalizedSelection = normalizePronunciationAtlasSelection(selection);
   const [draftValue, setDraftValue] =
@@ -410,6 +413,7 @@ export function PronunciationAtlas({
           </div>
         </details>
       </div>
+      {children}
       {onContinue ? (
         <div className={styles.previewBar} aria-label="Accent map actions">
           <button

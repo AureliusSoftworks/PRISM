@@ -277,6 +277,23 @@ describe("installed mansion library", () => {
     assert.equal(randomInstalledMansionIdV1(installed, "a", 1), "c");
     assert.equal(randomInstalledMansionIdV1([{ id: "a" }], "a", 7), "a");
     assert.equal(randomInstalledMansionIdV1([], "", 0), null);
+    const hold = { version: 1 as const, sessionId: "case-1", caseTitle: "Held House" };
+    assert.equal(
+      randomInstalledMansionIdV1(
+        [{ id: "a", archiveHold: hold }, { id: "b" }, { id: "c" }],
+        "a",
+        0,
+      ),
+      "b",
+    );
+    assert.equal(
+      randomInstalledMansionIdV1(
+        [{ id: "a", archiveHold: hold }, { id: "b", archiveHold: hold }],
+        "a",
+        0,
+      ),
+      null,
+    );
   });
 
   it("presents dedicated selection, randomization, and reversible metadata controls", () => {
@@ -290,6 +307,9 @@ describe("installed mansion library", () => {
     assert.match(component, /data-tutorial-target="whodunnit-random-mansion"/u);
     assert.match(component, /Random Mystery Venue/u);
     assert.match(component, /Use this venue/u);
+    assert.match(component, /Work on a copy/u);
+    assert.match(component, /data-held=\{held \? "true" : undefined\}/u);
+    assert.match(component, /DEBATE_MYSTERY_VENUE_HELD_BY_ONGOING_CASE_MESSAGE_V1/u);
     assert.match(component, /className=\{styles\.installedMansionOrigin\}/u);
     assert.match(component, /origin\.kind === "derived" \? "↗" : "✦"/u);
     assert.match(component, /data-tutorial-target="whodunnit-edit-mansion"/u);
@@ -302,7 +322,7 @@ describe("installed mansion library", () => {
     assert.match(component, /16\/16 themed props/u);
     assert.match(component, /Uses PRISM prop fallbacks/u);
     assert.match(component, /Venue evidence wardrobe/u);
-    assert.match(component, /Recipients use this pack offline without adding it to their Asset Library/u);
+    assert.match(component, /Recipients use it offline without adding it to their Asset Library/u);
     assert.match(component, /Generate themed prop pack/u);
     assert.match(component, /Retry/u);
     assert.match(component, /role="tablist" aria-label="Venue soundscape"/u);
@@ -345,6 +365,7 @@ describe("installed mansion library", () => {
     assert.match(experience, /mystery-mansions\/\$\{encodeURIComponent\(mansion\.id\)\}\/topology/u);
     assert.match(experience, /setMysteryNonce\(nextMysteryRecipeNonce\(\)\)/u);
     assert.match(styles, /\.installedMansionGrid > article\[data-selected="true"\]/u);
+    assert.match(styles, /\.installedMansionGrid > article\[data-held="true"\]/u);
     assert.match(styles, /\.installedMansionOrigin\[data-origin="imported"\]/u);
     assert.match(styles, /\.installedMansionOrigin\[data-origin="created"\]/u);
     assert.match(styles, /\.installedMansionOrigin\[data-origin="derived"\]/u);

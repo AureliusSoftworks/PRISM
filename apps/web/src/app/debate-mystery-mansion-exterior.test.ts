@@ -4,8 +4,10 @@ import { describe, it } from "node:test";
 
 import {
   DEBATE_MYSTERY_MANSION_EXTERIOR_PATHS_V1,
+  debateMysteryExteriorEntryTargetFromClientPointV1,
   debateMysteryMansionDoorTargetV1,
   debateMysteryMansionExteriorFallbackV1,
+  normalizeDebateMysteryExteriorEntryTargetV1,
 } from "./debateMysteryMansionExterior.ts";
 
 describe("mansion exterior presentation", () => {
@@ -110,6 +112,45 @@ describe("mansion exterior presentation", () => {
         },
       ),
       { xPercent: 60, yPercent: 70 },
+    );
+  });
+
+  it("maps entrance clicks through the rendered cover plane at every viewport crop", () => {
+    assert.deepEqual(
+      debateMysteryExteriorEntryTargetFromClientPointV1(
+        { left: 0, top: 0, width: 1_600, height: 900 },
+        { clientX: 960, clientY: 630 },
+      ),
+      { x: 0.6, y: 0.7 },
+    );
+    assert.deepEqual(
+      debateMysteryExteriorEntryTargetFromClientPointV1(
+        { left: -600, top: 0, width: 1_600, height: 900 },
+        { clientX: 360, clientY: 630 },
+      ),
+      { x: 0.6, y: 0.7 },
+    );
+    assert.deepEqual(
+      debateMysteryExteriorEntryTargetFromClientPointV1(
+        { left: 100, top: 50, width: 800, height: 450 },
+        { clientX: 980, clientY: 5 },
+      ),
+      { x: 1, y: 0 },
+    );
+  });
+
+  it("rejects malformed entrance targets and clamps finite numeric input", () => {
+    assert.deepEqual(
+      normalizeDebateMysteryExteriorEntryTargetV1({ x: -0.2, y: 1.4 }),
+      { x: 0, y: 1 },
+    );
+    assert.equal(
+      normalizeDebateMysteryExteriorEntryTargetV1({ x: "0.5", y: 0.5 }),
+      null,
+    );
+    assert.equal(
+      normalizeDebateMysteryExteriorEntryTargetV1({ x: Number.NaN, y: 0.5 }),
+      null,
     );
   });
 

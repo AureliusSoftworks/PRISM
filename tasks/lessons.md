@@ -1020,3 +1020,43 @@
 **Trigger**: Whodunnit light-color sampling chose a broad neutral ceiling instead of the smaller warm fixture the player clicked.
 **Lesson**: Local raster sampling must rank a bounded set of each color cluster’s strongest nearby pixels rather than requiring a fixed percentage of the full search area. Large neutral surfaces must not outvote a compact luminous source, and existing lights need an explicit resample action.
 **Applies to**: Whodunnit room-light placement, raster color sampling, and contextual editor defaults
+
+### 2026-09-03 · [architecture]
+**Trigger**: An explicit Whodunnit overhead redraw replaced an asteroid observatory with terrestrial estate imagery because a legacy venue lacked a structural profile and its current cover could be discarded silently.
+**Lesson**: Derived venue art must resolve one spoiler-safe identity from the current Library presentation before prompting or review. Frozen case snapshots may contribute layout geometry, but never stale visual identity; unknown structures stay neutral, declared cover read failures abort, and asset references rotate only after continuity approval.
+**Applies to**: Whodunnit Mansion Library redraws, case-scene repair, generated venue derivatives, and protected asset replacement
+
+### 2026-09-04 · [UX]
+**Trigger**: The Whodunnit overhead editor projected 16×12 envelope percentages directly onto its 2:1 stage, stretching a correct widescreen plate into an ultrawide strip.
+**Lesson**: Overhead placement, room outlines, and generated composition must use the same fitted board projection as live Investigation. Keep the plate at restrained 2:1 widescreen or narrower; never introduce a separate preview transform that makes it panoramic.
+**Applies to**: Whodunnit overhead generation, Mansion Editor placement, Field Repair placement, and live map registration
+
+### 2026-09-04 · [UX]
+**Trigger**: Whodunnit Field Repair tried to correct a misplaced exterior entrance by asking an image model to infer the doorway, but the player could identify the exact threshold more reliably.
+**Lesson**: Registration repairs should prefer direct manipulation on the exact rendered surface. Let the player click the intended point, convert that click through the surface's real fitted bounds, and persist the normalized coordinates without an image-model call.
+**Applies to**: Whodunnit exterior entrances, Field Repair placement tools, and future visual anchor correction
+
+### 2026-09-04 · [UX]
+**Trigger**: A Whodunnit first meeting staged the player beside an idle suspect and ended with a command tutorial spoken as an in-world thought.
+**Lesson**: First contact belongs to the encountered character: stage that character alone, give their audible line ownership of voice and mouth movement, and keep command instruction out of diegetic dialogue. Bring the player avatar onstage only after Talk or Present deliberately begins an interrogation.
+**Applies to**: Whodunnit room introductions, dialogue staging, voice/mouth synchronization, and contextual guidance
+
+### 2026-09-04 · [UX]
+**Trigger**: A live Whodunnit room enlarged accepted 16:9 artwork with `cover` to fill a taller stage, visibly trimming both sides compared with the Lights & FX editor.
+**Lesson**: Treat accepted room art as a complete composition. Fit it inside one aspect-locked plane shared by the image, lights, effects, and examination geometry; use a subdued ambient extension only outside that plane instead of cropping the playable image.
+**Applies to**: Whodunnit live rooms, Lights & FX registration, examination hit-testing, and future full-frame scene presentation
+
+### 2026-09-04 · [UX]
+**Trigger**: Whodunnit's coarse Examine-grid highlight disappeared when the cursor crossed an invisible hotspot boundary without leaving the visible square.
+**Lesson**: Grid hover feedback must follow the cursor's visible cell continuously. Keep hidden hotspot geometry responsible only for clickability and the hand cursor, and clear the square only when the cursor leaves the room stage.
+**Applies to**: Whodunnit Examine mode, investigation grids, hidden hotspots, and pointer affordances
+
+### 2026-09-04 · [UX]
+**Trigger**: Whodunnit Case File repair exposed separate top-level cards for an item’s emoji, description, and name, making one object-level concern feel fragmented.
+**Lesson**: Organize Field Repair by the thing the player says is wrong before asking which property to change. Keep one inaccurate-item entry with clear Emoji, Item information, and Asset branches; preserve precise name and description choices beneath Information.
+**Applies to**: Whodunnit Case File repair, found-item presentation fixes, and nested repair menus
+
+### 2026-09-04 · [architecture]
+**Trigger**: Lois Griffin formally introduced herself to a player-controlled Peter Griffin because Case Forge stripped all relationship context before authoring their room exchange.
+**Lesson**: Whodunnit persona chemistry must come only from explicit canon in the frozen cast profiles, captured once as bounded private pair context. It may direct recognition, address, and delivery, but it must never become evidence, awareness, a proof route, public session data, or learned Coffee/Signal relationship state. Dialogue advancement must likewise preserve actors already present in one exchange instead of treating every speaker handoff as a new entrance.
+**Applies to**: Whodunnit Case Forge, direct Prosecutor/suspect dialogue, portable case packages, replay-safe staging, and relationship-memory isolation

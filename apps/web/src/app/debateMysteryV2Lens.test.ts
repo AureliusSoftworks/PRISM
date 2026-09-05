@@ -1,12 +1,36 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { debateMysteryV2HotspotAccessiblePoint, debateMysteryV2ExamineGridCellIndexes, debateMysteryV2RoomComplete, resolveDebateMysteryV2Lens } from "./debateMysteryV2Lens.ts";
+import {
+  debateMysteryV2ExamineGridCellIndexes,
+  debateMysteryV2HotspotAccessiblePoint,
+  debateMysteryV2ImagePointFromClientPoint,
+  debateMysteryV2RoomComplete,
+  resolveDebateMysteryV2Lens,
+} from "./debateMysteryV2Lens.ts";
 
 const box = (id: string, min: number, max: number, examined = false) => ({ id, examined, unlocked: true, polygon: [{ x: min, y: min }, { x: max, y: min }, { x: max, y: max }, { x: min, y: max }] });
 
 test("rooms with no meaningful targets do not require inspecting blank space", () => {
   assert.equal(debateMysteryV2RoomComplete([]), true);
   assert.equal(debateMysteryV2RoomComplete([box("clue", 20, 40)]), false);
+});
+
+test("maps examination input through the fitted image and ignores letterbox space", () => {
+  const surface = { left: 100, top: 50, width: 800, height: 450 };
+  assert.deepEqual(
+    debateMysteryV2ImagePointFromClientPoint(
+      { clientX: 500, clientY: 275 },
+      surface,
+    ),
+    { x: 50, y: 50 },
+  );
+  assert.equal(
+    debateMysteryV2ImagePointFromClientPoint(
+      { clientX: 500, clientY: 25 },
+      surface,
+    ),
+    null,
+  );
 });
 
 test("examined details shield broad overlaps without hiding their own unexamined descendants", () => {

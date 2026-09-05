@@ -91,3 +91,41 @@ test("keeps the single illuminated cell directly beneath the lens", () => {
   assert.equal(upperLeftCell.length, 1);
   assert.equal(lowerRightCell.length, 1);
 });
+
+test("keeps the hovered cell illuminated outside hidden hotspot boundaries", () => {
+  const hotspot = [{
+    id: "target",
+    polygon: [
+      { x: 40, y: 40 },
+      { x: 60, y: 40 },
+      { x: 60, y: 60 },
+      { x: 40, y: 60 },
+    ],
+    unlocked: true,
+    examined: false,
+  }];
+  const firstBlankPosition = resolveDebateMysteryV2Lens(10, 10, hotspot);
+  const secondBlankPosition = resolveDebateMysteryV2Lens(12, 12, hotspot);
+  assert.equal(firstBlankPosition.hotspotId, null);
+  assert.equal(secondBlankPosition.hotspotId, null);
+  assert.deepEqual(
+    debateMysteryV2ExamineGridCellIndexes(firstBlankPosition, hotspot),
+    [26],
+  );
+  assert.deepEqual(
+    debateMysteryV2ExamineGridCellIndexes(secondBlankPosition, hotspot),
+    [26],
+  );
+  assert.match(
+    experience,
+    /const examinationGridTrackingActive = examinationPointerInside \|\| examinationKeyboardFocusActive/u,
+  );
+  assert.match(
+    experience,
+    /lensActive && currentRoom && examinationGridTrackingActive/u,
+  );
+  assert.match(
+    experience,
+    /const handleRoomPointerLeave = \(\): void => \{[\s\S]*setExaminationPointerInside\(false\)/u,
+  );
+});

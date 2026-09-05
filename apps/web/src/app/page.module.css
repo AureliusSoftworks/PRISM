@@ -37118,8 +37118,10 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 }
 
 /* Filled glyphs are provider-native. Hollow glyphs mark Prism's private
-   simulated passes while preserving the same effort shape and spectrum. */
-.modelEffortIcon[data-reasoning-mode="simulated"] {
+   simulated passes while preserving the same effort shape and spectrum; a
+   hybrid rung stacks those passes above the model's own native thinking. */
+.modelEffortIcon[data-effort-provenance="simulated"],
+.modelEffortIcon[data-effort-provenance="hybrid"] {
   -webkit-mask-image: var(--model-effort-icon), var(--model-effort-icon);
   mask-image: var(--model-effort-icon), var(--model-effort-icon);
   -webkit-mask-size: contain, calc(100% - 4px) calc(100% - 4px);
@@ -87478,6 +87480,82 @@ a.settingsCreditItem:focus-visible {
   color: var(--muted);
   font-size: 9px;
   line-height: 1.35;
+}
+
+/* Which lane speaks the recipe is status, not a gate. The section stays
+   editable from the Accent step even when today's TTS voice ignores it. */
+.botVoiceLocalLaughLanes {
+  display: grid;
+  gap: 6px;
+  padding-top: 7px;
+  border-top: 1px solid color-mix(in srgb, var(--line) 76%, transparent);
+}
+
+.botVoiceLocalLaughLaneStatus {
+  margin: 0;
+  color: var(--muted);
+  font-size: 9px;
+  line-height: 1.4;
+}
+
+.botVoiceLocalLaughLaneStatus > strong {
+  color: color-mix(in srgb, var(--fg) 72%, var(--muted));
+  font-weight: 740;
+}
+
+.botVoiceLocalLaughLaneStatus[data-laugh-lane-active="true"] > strong {
+  color: var(--fg);
+}
+
+.botVoiceLocalLaughLaneToggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+}
+
+.botVoiceLocalLaughLaneToggle > span {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.botVoiceLocalLaughLaneToggle > span > strong {
+  color: var(--fg);
+  font-size: 9px;
+  font-weight: 740;
+}
+
+.botVoiceLocalLaughLaneToggle > span > small {
+  color: var(--muted);
+  font-size: 9px;
+  line-height: 1.35;
+}
+
+.botVoiceLocalLaughLaneToggle > button {
+  flex: none;
+  min-height: 26px;
+  padding: 4px 10px;
+  border: 1px solid color-mix(in srgb, var(--border) 92%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--bg) 90%, var(--panel));
+  color: var(--muted);
+  font: inherit;
+  font-size: 9px;
+  font-weight: 780;
+  cursor: pointer;
+}
+
+.botVoiceLocalLaughLaneToggle > button[data-active="true"] {
+  border-color: color-mix(in srgb, var(--accent) 62%, var(--border));
+  background: color-mix(in srgb, var(--accent) 16%, var(--panel));
+  color: var(--fg);
+}
+
+.botVoiceLocalLaughLaneToggle > button:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 70%, transparent);
+  outline-offset: 2px;
 }
 
 .botVoiceFeelSupporting .botVoiceSectionHeading {

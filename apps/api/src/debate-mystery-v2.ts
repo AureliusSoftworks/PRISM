@@ -1,6 +1,20 @@
 import { createHash, randomUUID } from "node:crypto";
 import { mysteryPublicActionV1 } from "./debate-mystery-public-action.ts";
-import { normalizeDebateMysteryFiledTheoryV2 } from "@localai/shared";
+import {
+  buildMysteryPersonaPairContextMapV1,
+  mysteryPersonaDirectedPairContextV1,
+  mysteryPersonaLineSelfIntroducesV1,
+  validateMysteryPersonaPairContextMapV1,
+  type MysteryPersonaDirectedPairContextV1,
+  type MysteryPersonaPairContextMapV1,
+} from "./debate-mystery-persona-relationship.ts";
+import { normalizeDebateMysteryFiledTheoryV2, stripDebateMysterySpeakerLabelV2 } from "@localai/shared";
+import type {
+  DebateMysteryDefenseFrameValidationV2,
+  DebateMysteryPlayerStanceV2,
+  DebateMysteryVocalKindV1,
+  WhodunnitInvestigationPerspective,
+} from "@localai/shared";
 import {
   closeSync,
   existsSync,
@@ -36,6 +50,9 @@ import {
   botIdentityMirrorFaceV1,
   debateMysteryAccompliceChance,
   debateMysteryClassifyVerdictV2,
+  debateMysteryClientSeatIdV2,
+  debateMysteryCounselSeatsV2,
+  debateMysteryPlayerStanceV2,
   debateMysteryCredibilityMaximumV2,
   debateMysteryRoomNarrationNamesPersonaV2,
   debateMysteryRoomNarrationTextV2,
@@ -52,6 +69,10 @@ import {
   normalizeDebateEvidenceExhibitObject,
   normalizeDebateEvidencePacketV1,
   normalizeDebateMysteryTalkSubjectV2,
+  debateMysteryDeterministicDenialClaimV2,
+  debateMysteryDeterministicDenialTextV2,
+  debateMysteryStatementIsContractEchoV2,
+  stripDebateMysterySelfAddressV2,
   normalizeDebateMysteryV2ForgeProgressMessage,
   resolveMysteryCaseTitleV1,
   mysteryIncidentPlanRequiresAccompliceV1,
@@ -77,6 +98,7 @@ import {
   validateMysteryCaseTitleV1,
   whodunnitPropPresentationEmojiV1,
   type BotAudioVoiceProfileV1,
+  type BotAudioVoiceProfileV2,
   type DebateMysteryActionRequestV2,
   type DebateEvidenceExhibitV1,
   type DebateMysteryAudioManifestEntryV1,
@@ -135,9 +157,23 @@ import {
   prismGenerationBroker,
 } from "./generation-broker.ts";
 import { AutoFallbackExhaustedError } from "./auto-fallback.ts";
+import {
+  debateMysteryInterestNodeIdV2,
+  debateMysteryNodeCarriesCaseOutcomeV2,
+  debateMysteryRoomClearedV2,
+  DEBATE_MYSTERY_VOCAL_CUES_V1,
+  debateMysteryRoomPointsOfInterestV2,
+} from "@localai/shared";
 import type { PrismGenerationWorkReceipt } from "./generation-work.ts";
 import { PRISM_INSTANT_VOICE_MODEL_ID, pcmWaveDurationMs } from "./local-voice-engine.ts";
 import { resolveAbsoluteUnderDataRoot } from "./image-storage.ts";
+import {
+  buildDebateMysteryProsecutionStageCueV1,
+  debateMysteryPressQuestionCanonicalTextV1,
+  validateDebateMysteryProsecutionPerformanceV1,
+} from "./debate-mystery-prosecution-persona.ts";
+import type { DebateMysteryProsecutionLineKindV1 } from "./debate-mystery-prosecution-persona.ts";
+import { prepareDebateMysteryPremiumTakesV1, readDebateMysteryPremiumTakeV1 } from "./debate-mystery-premium-takes.ts";
 import { updateDebateMysteryMansionPropVariantIdentityV1 } from "./debate-mystery-mansion-prop-variants.ts";
 import { WHODUNNIT_PROP_ARCHETYPES_V1, type WhodunnitPropArchetypeIdV1 } from "@localai/shared";
 import {
@@ -145,6 +181,7 @@ import {
   getDebateMysteryMansionBundleV2,
   retainDebateMysteryMansionSnapshotAssetsV2,
 } from "./debate-mystery-mansion-bundles.ts";
+import { assertDebateMysteryMansionNotHeldByOngoingCaseV1 } from "./debate-mystery-mansion-archive-hold.ts";
 import {
   cloneDebateMysterySealedAssetsForReplayV1,
   deleteDebateMysterySealedAssetsV1,
@@ -177,6 +214,10 @@ const V2_JOB_LEASE_MS = 90_000;
 const V2_TOTAL_PASSES = 5;
 const V2_PERSONA_DIALOGUE_POLISH_TIMEOUT_MS = 75_000;
 export const V2_ROOM_INTRODUCTION_PERSONA_POLISH_TIMEOUT_MS = 2_000;
+/** A Prosecutor line performed in persona while the investigator thinks: long
+ * enough for a small local model to act one line twice, short enough that a
+ * Talk never feels stuck. The frozen line is the fallback. */
+export const V2_PROSECUTION_PERSONA_TIMEOUT_MS = 9_000;
 export const V2_CRITICAL_AUTHORING_MIN_ATTEMPT_TIMEOUT_MS = 120_000;
 const V2_AUDIO_SUBDIR = "debate-mystery-audio-v2";
 const V2_STAGING_RECLAIM_AGE_MS = V2_JOB_LEASE_MS * 2;
@@ -621,6 +662,8 @@ interface AuthoredMysteryV2 {
   method: string;
   prosecutorInternalReasoning: string;
   eyewitnessResolution: string | null;
+  /** Defense stance only: the spoiler-safe surface case against the client. */
+  prosecutionCaseSummary?: string | null;
   evidence: Array<{ id: string; title: string; description: string; emoji: string }>;
   examinations: Array<{ id: string; text: string }>;
   suspects: AuthoredSuspectV2[];
@@ -723,10 +766,15 @@ interface MysteryV2FactLedger {
   };
   roleAssignments: {
     suspectBotIdBySeat: Record<string, string>;
+    /** The player's counsel seat in every stance (player-relative wire name). */
     prosecutorBotId: string;
+    /** The opposing counsel seat in every stance. */
     defenseCounselBotId: string;
     judgeBotId: string;
     jurorBotIds: string[];
+    /** Present only for Defense cases so prosecution ledgers stay byte-identical. */
+    playerStance?: "defense";
+    clientSeatId?: string | null;
   };
   proofRoutesBySeat: Record<string, string>;
   schemaConstraints: {
@@ -815,9 +863,26 @@ interface MysteryV2AuthoringCheckpoint {
     factLedger: MysteryV2FactLedger;
     voiceCardsByBotId: Record<string, MysteryV2VoiceCard>;
   } | null;
+  /**
+   * Frozen explicit profile canon for Prosecutor/suspect pairs. `null` marks
+   * a fresh draft that has not captured profiles yet; omission marks a legacy
+   * draft that must remain neutral rather than selecting mutable Library data.
+   */
+  personaPairContext?: MysteryPersonaPairContextMapV1 | null;
   connectiveAdditions: Record<string, Record<string, string>>;
   provenanceBySection: Record<string, MysteryV2SectionProvenance>;
   recoveryBySection: Record<string, MysteryV2SectionRecoveryReceipt>;
+}
+
+/** Defense stance frame frozen at compile. Missing on prosecution and legacy cases. */
+interface MysteryDefenseFrameV2 {
+  version: 1;
+  /** The innocent client on trial. Public by design; the charge names them. */
+  defendantSeatId: string;
+  /** The red-herring record the surface case leans on, when one is discoverable. */
+  frameEvidenceId: string | null;
+  /** Two examination discoveries that support the client's account. */
+  alibiSupportDiscoveryIds: string[];
 }
 
 interface PrivateMysteryCaseV2 {
@@ -886,6 +951,11 @@ interface PrivateMysteryCaseV2 {
    * so a compiling case keeps the persona it was built around.
    */
   personaVoiceCardsByBotId?: Record<string, MysteryV2VoiceCard>;
+  /**
+   * Explicit profile canon used only to direct familiar performances. This
+   * private optional field is not case-fact authority or public session state.
+   */
+  personaPairContext?: MysteryPersonaPairContextMapV1;
   /** Spoiler-safe authoring recovery receipts retained for Case Forge review. */
   authoringRecoveryBySection?: Record<string, MysteryV2SectionRecoveryReceipt>;
   /** Frozen synthesis inputs for runtime-safe single-line repairs. Older
@@ -916,7 +986,24 @@ interface PrivateMysteryCaseV2 {
      * mistaken for an old cadence-only receipt on replay. */
     stageCueVersion?: 1;
   }>;
+  /** Prosecution Talk questions and Present prompts performed once in the
+   * chosen Prosecutor's own voice as they are asked. The receipt keeps the
+   * graph and its as-heard audio consistent on every later revision check. */
+  prosecutionPersonaPerformanceByLine?: Record<string, {
+    version: 1;
+    nodeId: string;
+    kind: "talk_question" | "present_prompt" | "press_question";
+    sourceTextHash: string;
+    appliedTextHash: string;
+    outcome: "polished" | "canonical";
+  }>;
+  /** Defense stance frame frozen at compile. Missing on prosecution and legacy cases. */
+  defenseFrame?: MysteryDefenseFrameV2 | null;
+  /** Defense stance only: the spoiler-safe surface case against the client. */
+  prosecutionCaseSummary?: string | null;
   playerRoleContractVersion?: 1;
+  /** Marks that `config.playerStance` has been defaulted for this stored case. */
+  playerStanceContractVersion?: 1;
   investigationProgressionContractVersion?: 2;
   /** Private readiness marker: every playable statement #2 was independently
    * checked against its exact assigned record after final author repairs. */
@@ -972,6 +1059,13 @@ function normalizeMysteryV2AuthoringCheckpoint(
       prosecutionChoices: legacyChoices,
       contextCapsule:
         value.kind === "authoring-v2" ? value.contextCapsule ?? null : null,
+      ...(value.kind === "authoring-v2" && "personaPairContext" in value
+        ? {
+            personaPairContext: value.personaPairContext
+              ? validateMysteryPersonaPairContextMapV1(value.personaPairContext)
+              : null,
+          }
+        : {}),
       connectiveAdditions:
         value.kind === "authoring-v2" ? value.connectiveAdditions ?? {} : {},
       provenanceBySection:
@@ -990,6 +1084,7 @@ function normalizeMysteryV2AuthoringCheckpoint(
     prosecutionChoicesByWitnessSeatId: {},
     prosecutionChoices: null,
     contextCapsule: null,
+    personaPairContext: null,
     connectiveAdditions: {},
     provenanceBySection: {},
     recoveryBySection: {},
@@ -1381,6 +1476,9 @@ function compilationSubsteps(
   const draft = isMysteryV2AuthoringCheckpoint(stored) ? stored : null;
   const completedWitnesses = draft ? Object.keys(draft.suspectsBySeatId).length : 0;
   const totalWitnesses = frozenConfig?.suspectBotIds.length ?? 0;
+  const playerSideTitle = frozenConfig
+    ? debateMysteryCounselSeatsV2(frozenConfig).playerSideLabel
+    : "Prosecution";
 
   switch (stage) {
     case "writing_case": {
@@ -1392,7 +1490,7 @@ function compilationSubsteps(
           forgeSubstep("foundation", "Case foundation", currentState),
           ...(!omitInvestigation ? [forgeSubstep("room-details", "Room details", "upcoming" as const)] : []),
           forgeSubstep("witness-chapters", "Witness chapters", "upcoming"),
-          forgeSubstep("prosecution-responses", "Prosecution responses", "upcoming"),
+          forgeSubstep("prosecution-responses", `${playerSideTitle} responses`, "upcoming"),
         ];
       }
       if (!omitInvestigation && !foundationComplete) {
@@ -1400,7 +1498,7 @@ function compilationSubsteps(
           forgeSubstep("foundation", "Case foundation", "complete"),
           forgeSubstep("room-details", "Room details", currentState),
           forgeSubstep("witness-chapters", "Witness chapters", "upcoming"),
-          forgeSubstep("prosecution-responses", "Prosecution responses", "upcoming"),
+          forgeSubstep("prosecution-responses", `${playerSideTitle} responses`, "upcoming"),
         ];
       }
       if (!witnessesComplete) {
@@ -1412,7 +1510,7 @@ function compilationSubsteps(
             totalWitnesses > 0 ? `Witness chapters · ${completedWitnesses} of ${totalWitnesses}` : "Witness chapters",
             currentState,
           ),
-          forgeSubstep("prosecution-responses", "Prosecution responses", "upcoming"),
+          forgeSubstep("prosecution-responses", `${playerSideTitle} responses`, "upcoming"),
         ];
       }
       if (!draft?.prosecutionChoices) {
@@ -1420,14 +1518,14 @@ function compilationSubsteps(
           forgeSubstep("foundation", "Case foundation", "complete"),
           ...(!omitInvestigation ? [forgeSubstep("room-details", "Room details", "complete" as const)] : []),
           forgeSubstep("witness-chapters", "Witness chapters", "complete"),
-          forgeSubstep("prosecution-responses", "Prosecution responses", currentState),
+          forgeSubstep("prosecution-responses", `${playerSideTitle} responses`, currentState),
         ];
       }
       return [
         forgeSubstep("foundation", "Case foundation", "complete"),
         ...(!omitInvestigation ? [forgeSubstep("room-details", "Room details", "complete" as const)] : []),
         forgeSubstep("witness-chapters", "Witness chapters", "complete"),
-        forgeSubstep("prosecution-responses", "Prosecution responses", "complete"),
+        forgeSubstep("prosecution-responses", `${playerSideTitle} responses`, "complete"),
         forgeSubstep("assemble-case", "Assembling the case package", currentState),
       ];
     }
@@ -2404,6 +2502,10 @@ function mysteryRewriteDroppedFactV1(source: string, text: string): string | nul
  * receives the previous rejection as data so it is not a blind repeat. */
 const MYSTERY_REWRITE_REVIEW_ATTEMPTS = 5;
 const MYSTERY_REWRITE_ATTEMPT_TIMEOUT_MS = 60_000;
+/** Case File clean-ups review entry by entry in small batches; a batch gets
+ * two tries at a usable reply before its entries fall to a solo pass. */
+const CASE_FILE_CLEAN_BATCH_SIZE = 4;
+const CASE_FILE_CLEAN_BATCH_ATTEMPTS = 2;
 
 /** Runs one presentation rewrite on the session's selected lane, LOCAL-safe,
  * and returns the parsed JSON. The prompt payload is data, never instructions. */
@@ -2411,8 +2513,20 @@ async function runMysteryPresentationRewriteV1(
   db: DatabaseSync,
   userId: string,
   runtime: DebateAiRuntime,
-  args: { operation: string; system: string; payload: Record<string, unknown>; maxTokens: number; validate: (raw: string) => unknown },
+  args: {
+    operation: string;
+    system: string;
+    payload: Record<string, unknown>;
+    maxTokens: number;
+    validate: (raw: string) => unknown;
+    /** Interactive asides trade retries for latency. */
+    attempts?: number;
+    attemptTimeoutMs?: number;
+    temperature?: number;
+  },
 ): Promise<unknown> {
+  const attempts = args.attempts ?? MYSTERY_REWRITE_REVIEW_ATTEMPTS;
+  const attemptTimeoutMs = args.attemptTimeoutMs ?? MYSTERY_REWRITE_ATTEMPT_TIMEOUT_MS;
   const accountIsLocal = (): boolean => (db.prepare("SELECT preferred_provider FROM users WHERE id = ?")
     .get(userId) as { preferred_provider: string } | undefined)?.preferred_provider === "local";
   const localOnly = accountIsLocal() || runtime.responseMode === "local" || runtime.preferredProvider === "local";
@@ -2422,13 +2536,13 @@ async function runMysteryPresentationRewriteV1(
       workflow: "whodunnit_v2", operation: args.operation, stage: "field_repair",
       executionLane: "selected", role: "repair", outputClass: "connective",
       priority: "interactive", privacyMode: localOnly ? "local" : "online",
-      timeoutMs: MYSTERY_REWRITE_ATTEMPT_TIMEOUT_MS,
+      timeoutMs: attemptTimeoutMs,
     },
     lanes,
     modelSelectionKind: runtime.modelSelectionKind ?? "fixed",
-    maxAttempts: MYSTERY_REWRITE_REVIEW_ATTEMPTS,
-    totalTimeoutMs: MYSTERY_REWRITE_REVIEW_ATTEMPTS * MYSTERY_REWRITE_ATTEMPT_TIMEOUT_MS,
-    perAttemptTimeoutMs: () => MYSTERY_REWRITE_ATTEMPT_TIMEOUT_MS,
+    maxAttempts: attempts,
+    totalTimeoutMs: attempts * attemptTimeoutMs,
+    perAttemptTimeoutMs: () => attemptTimeoutMs,
     run: ({ lane, signal, work, priorError }) => {
       assertRefractionActive();
       if ((localOnly || accountIsLocal()) && lane.providerName !== "local") {
@@ -2442,7 +2556,7 @@ async function runMysteryPresentationRewriteV1(
         { role: "user", content: JSON.stringify(payload) },
       ], {
         model: lane.model, reasoningEffort: lane.reasoningEffort, turbo: lane.turbo,
-        maxTokens: args.maxTokens, temperature: 0.2, jsonMode: true,
+        maxTokens: args.maxTokens, temperature: args.temperature ?? 0.2, jsonMode: true,
         usagePurpose: "debate_generation", generationWork: work, signal,
       });
     },
@@ -2527,6 +2641,546 @@ export async function rerollDebateMysteryItemDescriptionV1(
     action: "reroll_evidence_description", subjectId: args.subjectId, expectedRevision: session.revision,
     evidencePresentation: { description },
   });
+}
+
+/** Rooms compiled before points of interest existed derive them from the same
+ * template or venue-anchor geometry the compiler used, then keep them. */
+/** The examination points in a room whose authored node, or a node it leads
+ * straight into, changes the case. Everything else in the room is flavour. */
+function mysteryRoomClueHotspotIdsV2(
+  privateCase: PrivateMysteryCaseV2,
+  graph: DebateMysteryDialogueGraphV2,
+  roomId: string,
+): Set<string> {
+  const nodeById = new Map(graph.nodes.map((node) => [node.id, node]));
+  const clueHotspotIds = new Set<string>();
+  for (const [key, nodeId] of Object.entries(privateCase.examineNodeIdByHotspot)) {
+    if (!key.startsWith(`${roomId}:`)) continue;
+    const visited = new Set<string>();
+    const queue = [nodeId];
+    let carries = false;
+    while (queue.length && !carries && visited.size < 12) {
+      const current = queue.shift()!;
+      if (visited.has(current)) continue;
+      visited.add(current);
+      const node = nodeById.get(current);
+      if (!node) continue;
+      if (debateMysteryNodeCarriesCaseOutcomeV2(node)) carries = true;
+      else queue.push(...node.nextNodeIds);
+    }
+    if (carries) clueHotspotIds.add(key.slice(roomId.length + 1));
+  }
+  return clueHotspotIds;
+}
+
+function refreshRoomClearedV2(
+  privateCase: PrivateMysteryCaseV2,
+  graph: DebateMysteryDialogueGraphV2,
+  room: DebateMysteryRoomV2,
+): void {
+  room.cleared = debateMysteryRoomClearedV2({
+    hotspots: room.hotspots,
+    clueHotspotIds: mysteryRoomClueHotspotIdsV2(privateCase, graph, room.id),
+  });
+}
+
+/** Cases compiled before the flag existed learn it on their next action. */
+function ensureRoomsClearedV2(
+  state: DebateWhodunnitFormatStateV2,
+  privateCase: PrivateMysteryCaseV2,
+  graph: DebateMysteryDialogueGraphV2,
+): void {
+  for (const room of state.rooms) {
+    if (room.cleared === undefined) refreshRoomClearedV2(privateCase, graph, room);
+  }
+}
+function ensureRoomPointsOfInterestV2(state: DebateWhodunnitFormatStateV2): void {
+  for (const room of state.rooms) {
+    if (room.pointsOfInterest !== undefined) continue;
+    const layout = state.config.mansionSnapshot?.layoutV2;
+    const layoutRoom = layout?.entities.find((entity) => entity.kind === "room" && entity.id === room.id);
+    const anchors = layout?.placementAnchors.filter((anchor) => anchor.roomId === room.id) ?? [];
+    const presentation = resolveDebateMysteryRoomPresentationV1({
+      templateId: room.templateId ?? "",
+      imageId: room.imageId,
+      bundledAssetPath: room.bundledAssetPath,
+      acceptedRoomAssetId: layoutRoom?.kind === "room" ? layoutRoom.acceptedRoomAssetId : null,
+      venueContract: layoutRoom?.kind === "room" ? layoutRoom.venueContract : null,
+      placementAnchors: anchors,
+      ...(anchors.length > 0
+        ? {
+            presentationRegions: anchors.map((anchor) => {
+              const x = Math.max(7, Math.min(93, anchor.point.x * 100));
+              const y = Math.max(7, Math.min(93, anchor.point.y * 100));
+              return {
+                id: `venue-anchor:${anchor.id}`,
+                label: anchor.name,
+                keywords: [...new Set(anchor.name.toLocaleLowerCase().split(/\s+/gu).filter(Boolean))],
+                physicalAnchor: `${anchor.relation} ${anchor.name}`,
+                polygon: [
+                  { x: x - 7, y: y - 7 },
+                  { x: x + 7, y: y - 7 },
+                  { x: x + 7, y: y + 7 },
+                  { x: x - 7, y: y + 7 },
+                ],
+              };
+            }),
+          }
+        : {}),
+    });
+    room.pointsOfInterest = debateMysteryRoomPointsOfInterestV2({
+      regions: presentation.regions,
+      hotspotIds: room.hotspots.map((hotspot) => hotspot.id),
+    });
+  }
+}
+
+/** Voices one interest aside in the investigator's persona. The prompt sees
+ * the room name, the fixture, and the persona's voice cues only: no case
+ * facts, no cast names, no graph. Rejected or unavailable output leaves the
+ * deterministic ambient line to speak instead. */
+async function prepareMysteryInterestObservationV2(args: {
+  db: DatabaseSync;
+  userId: string;
+  session: DebateSessionV1;
+  roomId: string;
+  interestId: string;
+  runtime: DebateAiRuntime | null;
+}): Promise<{ roomId: string; interestId: string; text: string } | null> {
+  const state = args.session.formatState;
+  if (state.format !== "whodunnit" || state.version !== 2 || !args.runtime) return null;
+  const room = state.rooms.find((entry) => entry.id === args.roomId);
+  const interest = room?.pointsOfInterest?.find((entry) => entry.id === args.interestId);
+  if (!room || !interest) return null;
+  if (state.dialogueHistory.some((entry) => entry.nodeId === debateMysteryInterestNodeIdV2(room.id, interest.id))) return null;
+  const prosecutor = botRows(args.db, args.userId, [state.config.prosecutorBotId])[0] ?? null;
+  const { privateCase } = getDebateMysteryCaseV2(args.db, args.userId, args.session.id);
+  const cues = privateCase.personaVoiceCardsByBotId?.[state.config.prosecutorBotId]?.cues ?? [];
+  const castNameKeys = new Set(
+    [...state.suspects.map((suspect) => suspect.name), state.victim?.name ?? ""]
+      .flatMap((name) => mysteryRewriteWordsV1(name).map(mysteryRewriteWordKeyV1))
+      .filter((key) => key.length > 2),
+  );
+  try {
+    const text = await runMysteryPresentationRewriteV1(args.db, args.userId, args.runtime, {
+      operation: "observe_interest",
+      system: "You voice the private, in-character asides of a detective taking in a room. Comment in one or two short sentences on the named fixture, in the persona the cues describe: what such a thing plainly looks like here, with atmosphere or a dry aside if it suits the persona. Never name any person, never mention evidence, suspects, victims, the crime, or the case, never address the player, and never add a fact that would matter to an investigation. Return only JSON: {\"observation\": string}.",
+      payload: {
+        investigator: { name: prosecutor?.name ?? "the investigator", cues: cues.slice(0, 8) },
+        caseTitle: state.caseTitle,
+        room: {
+          name: room.name,
+          fixtures: [...new Set([
+            ...room.hotspots.map((hotspot) => hotspot.label),
+            ...(room.pointsOfInterest ?? []).map((entry) => entry.label),
+          ])].slice(0, 12),
+        },
+        fixture: { label: interest.label, where: interest.physicalAnchor },
+        maxCharacters: 220,
+      },
+      maxTokens: 160,
+      attempts: 2,
+      attemptTimeoutMs: 15_000,
+      temperature: 0.8,
+      validate: (raw) => {
+        const aside = cleanRewriteText(parseRewriteJson(raw).observation, 220);
+        if (!aside || aside.length < 12) throw new Error("The aside was empty or too long.");
+        if (/\bPRISM\b/u.test(aside) || mysteryRewriteAddsForbiddenV1(aside, [])) throw new Error("The aside strayed into the case.");
+        if (mysteryRewriteWordsV1(aside).some((word) => castNameKeys.has(mysteryRewriteWordKeyV1(word)))) {
+          throw new Error("The aside named someone in the case.");
+        }
+        return aside;
+      },
+    }) as string;
+    return { roomId: room.id, interestId: interest.id, text };
+  } catch {
+    return null;
+  }
+}
+
+export interface DebateMysteryArrivalLineV2 {
+  text: string;
+  audio: { absolutePath: string; mimeType: string; byteSize: number; durationMs: number } | null;
+}
+
+const MYSTERY_ARRIVAL_AUDIO_SUBDIR = "debate-mystery-audio-v2/arrival";
+const mysteryArrivalLineCache = new Map<string, Promise<DebateMysteryArrivalLineV2 | null>>();
+const mysteryArrivalLineLatest = new Map<string, DebateMysteryArrivalLineV2>();
+const mysteryArrivalLocalFileBySession = new Map<string, string>();
+
+/** The investigator's spoken line at the venue door, prepared on every Start
+ * and Resume. A first arrival sizes the place up; a return opens with a small
+ * aside about the break, then where the case stands from facts already on the
+ * public record, closing on getting back to work. The words are persona-
+ * coloured by the case's provider when one answers, else a plain line stands
+ * in. The take is synthesized in the investigator's own voice, English or
+ * Premium per the account's Speech Type, so the loading screen carries the
+ * whole cost once. Cached per case revision; nothing is written to the case. */
+export async function prepareDebateMysteryArrivalLineV2(
+  db: DatabaseSync,
+  userId: string,
+  sessionId: string,
+  runtime: DebateAiRuntime | null,
+  options: { premiumTakes?: { apiKey: string; model: unknown } | null } = {},
+): Promise<DebateMysteryArrivalLineV2 | null> {
+  const session = getDebateSession(db, userId, sessionId);
+  const state = session.formatState;
+  if (
+    state.format !== "whodunnit" || state.version !== 2 ||
+    !["title_card", "case_opening", "investigation"].includes(state.playPhase)
+  ) return null;
+  const key = `${userId}:${sessionId}:${session.revision}:${options.premiumTakes ? "premium" : "english"}`;
+  let pending = mysteryArrivalLineCache.get(key);
+  if (!pending) {
+    pending = buildMysteryArrivalLineV2(db, userId, session, runtime, options.premiumTakes ?? null)
+      .then((line) => {
+        if (line) mysteryArrivalLineLatest.set(`${userId}:${sessionId}`, line);
+        return line;
+      })
+      .catch(() => null);
+    mysteryArrivalLineCache.set(key, pending);
+    if (mysteryArrivalLineCache.size > 64) {
+      const oldest = mysteryArrivalLineCache.keys().next().value;
+      if (oldest !== undefined) mysteryArrivalLineCache.delete(oldest);
+    }
+  }
+  return pending;
+}
+
+/** The most recently prepared arrival take for this case, for playback. */
+export function readDebateMysteryArrivalLineAudioV2(
+  userId: string,
+  sessionId: string,
+): DebateMysteryArrivalLineV2["audio"] {
+  const line = mysteryArrivalLineLatest.get(`${userId}:${sessionId}`);
+  if (!line?.audio || !existsSync(line.audio.absolutePath)) return null;
+  return line.audio;
+}
+
+async function buildMysteryArrivalLineV2(
+  db: DatabaseSync,
+  userId: string,
+  session: DebateSessionV1,
+  runtime: DebateAiRuntime | null,
+  premiumTakes: { apiKey: string; model: unknown } | null,
+): Promise<DebateMysteryArrivalLineV2 | null> {
+  const state = session.formatState;
+  if (state.format !== "whodunnit" || state.version !== 2) return null;
+  const prosecutor = botRows(db, userId, [state.config.prosecutorBotId])[0] ?? null;
+  const text = await mysteryArrivalLineTextV2(db, userId, session, runtime, prosecutor);
+  if (!text) return null;
+  const audio = prosecutor
+    ? await synthesizeMysteryArrivalTakeV2({ db, userId, session, prosecutor, text, premiumTakes }).catch(() => null)
+    : null;
+  return { text, audio };
+}
+
+async function mysteryArrivalLineTextV2(
+  db: DatabaseSync,
+  userId: string,
+  session: DebateSessionV1,
+  runtime: DebateAiRuntime | null,
+  prosecutor: MysteryV2BotRow | null,
+): Promise<string | null> {
+  const state = session.formatState;
+  if (state.format !== "whodunnit" || state.version !== 2) return null;
+  const investigatorName = prosecutor?.name ?? "the investigator";
+  const visitedRooms = state.rooms.filter((room) => room.visited).map((room) => room.name);
+  const detailsExamined = state.rooms.reduce(
+    (count, room) => count + room.hotspots.filter((hotspot) => hotspot.examined).length,
+    0,
+  );
+  const itemsInFile = state.record
+    .filter((entry) => entry.admitted && entry.reference.kind === "evidence")
+    .map((entry) => entry.title);
+  const metSeats = new Set(state.metSuspectSeatIds);
+  const witnessesMet = state.suspects.filter((suspect) => metSeats.has(suspect.seatId)).map((suspect) => suspect.name);
+  const witnessesUnmet = state.suspects.filter((suspect) => !metSeats.has(suspect.seatId)).map((suspect) => suspect.name);
+  const returning = state.playPhase === "investigation";
+  const fallback = returning
+    ? deterministicMysteryReturnLineV2({ visitedRooms, itemsInFile, witnessesMet })
+    : "Here we are. The case will not explain itself from out here. Time to get inside and start.";
+  if (!runtime) return fallback;
+  const { privateCase } = getDebateMysteryCaseV2(db, userId, session.id);
+  const cues = privateCase.personaVoiceCardsByBotId?.[state.config.prosecutorBotId]?.cues ?? [];
+  const nameKeys = (names: readonly string[]): Set<string> => new Set(
+    names.flatMap((name) => mysteryRewriteWordsV1(name).map(mysteryRewriteWordKeyV1)).filter((key) => key.length > 2),
+  );
+  const knownKeys = nameKeys([investigatorName, state.victim?.name ?? "", ...witnessesMet]);
+  const unmetKeys = nameKeys(witnessesUnmet);
+  const system = returning
+    ? "You voice the private thoughts of a detective coming back to a case after stepping away. Write two or three short first-person sentences in the persona described. Open with one small, in-character aside about where they just were or what they did on the break: something modest and ordinary for the setting, invented freely, never about the case. Then turn back to the work with a plain rundown of where the investigation stands, drawn only from the progress facts given, and close on getting back to it. Never invent evidence, motives, or suspicions, and never name anyone who is not listed. Reply as JSON: {\"line\": \"...\"}."
+    : "You voice the private thoughts of a detective arriving at a venue for the first time. Write two short first-person sentences in the persona described. Open with one small, in-character aside about the trip here or a first impression of the place: something modest and ordinary for the setting, invented freely, never about the case. Then resolve to get inside and begin. Never invent evidence, motives, or suspicions, and never name anyone who is not listed. Reply as JSON: {\"line\": \"...\"}.";
+  try {
+    return await runMysteryPresentationRewriteV1(db, userId, runtime, {
+      operation: returning ? "arrival_return_line" : "arrival_first_line",
+      system,
+      payload: {
+        investigator: {
+          name: investigatorName,
+          persona: compact(prosecutor?.system_prompt ?? null, 500),
+          cues: cues.slice(0, 8),
+        },
+        caseTitle: state.caseTitle,
+        charge: state.caseCharge?.title ?? null,
+        setting: { houseStyle: state.config.houseStyle.id },
+        ...(returning
+          ? {
+              progress: {
+                roomsSeen: visitedRooms.slice(0, 8),
+                detailsExamined,
+                itemsInFile: itemsInFile.slice(0, 8),
+                witnessesMet,
+                theoryReady: state.theoryAvailable,
+              },
+            }
+          : {}),
+        maxCharacters: returning ? 380 : 240,
+      },
+      maxTokens: 220,
+      attempts: 2,
+      attemptTimeoutMs: 20_000,
+      temperature: 0.85,
+      validate: (raw) => {
+        const text = cleanRewriteText(parseRewriteJson(raw).line, returning ? 380 : 240);
+        if (!text || text.length < 24) throw new Error("The line was empty or too long.");
+        if (/\bPRISM\b/u.test(text) || mysteryRewriteAddsForbiddenV1(text, [])) throw new Error("The line strayed into the case.");
+        if (mysteryRewriteWordsV1(text).some((word) => {
+          const key = mysteryRewriteWordKeyV1(word);
+          return unmetKeys.has(key) && !knownKeys.has(key);
+        })) throw new Error("The line named a witness not yet met.");
+        return text;
+      },
+    }) as string;
+  } catch {
+    return fallback;
+  }
+}
+
+/** The take for the arrival line in the investigator's own voice. Premium uses
+ * the same take storage as spoken dialogue; English writes one local clip per
+ * case, replacing the previous arrival's clip. */
+async function synthesizeMysteryArrivalTakeV2(args: {
+  db: DatabaseSync;
+  userId: string;
+  session: DebateSessionV1;
+  prosecutor: MysteryV2BotRow;
+  text: string;
+  premiumTakes: { apiKey: string; model: unknown } | null;
+}): Promise<DebateMysteryArrivalLineV2["audio"]> {
+  const profile = mysteryBotAudioVoiceProfileV2(args.prosecutor);
+  if (!profile.enabled) return null;
+  const lineId = `arrival:${args.session.revision}`;
+  if (args.premiumTakes) {
+    const result = await prepareDebateMysteryPremiumTakesV1({
+      db: args.db,
+      userId: args.userId,
+      sessionId: args.session.id,
+      lines: [{ lineId, speakerBotId: args.prosecutor.id, spokenText: args.text, voiceProfile: profile }],
+      request: args.premiumTakes,
+    });
+    if (result.prepared.includes(lineId)) {
+      const take = readDebateMysteryPremiumTakeV1(args.db, args.userId, args.session.id, {
+        lineId, spokenText: args.text, voiceProfile: profile,
+      });
+      if (take) {
+        return { absolutePath: take.absolutePath, mimeType: take.mimeType, byteSize: take.byteSize, durationMs: take.durationMs };
+      }
+    }
+    // A voice without a Premium take falls back to the local engine.
+  }
+  const wave = await generateBuiltinEnglishWave({
+    text: args.text,
+    profile,
+    allowOperatingSystemVoices: false,
+  });
+  if (!isPlayablePcmWave(wave)) return null;
+  const durationMs = pcmWaveDurationMs(wave) ?? 0;
+  if (durationMs <= 0) return null;
+  const relativePath = `${MYSTERY_ARRIVAL_AUDIO_SUBDIR}/${sha256(args.userId).slice(0, 24)}/${sha256(`${args.session.id}:${lineId}:${args.text}`).slice(0, 32)}.wav`;
+  const absolutePath = resolveAbsoluteUnderDataRoot(relativePath);
+  mkdirSync(dirname(absolutePath), { recursive: true });
+  writeFileSync(absolutePath, wave);
+  const sessionKey = `${args.userId}:${args.session.id}`;
+  const previous = mysteryArrivalLocalFileBySession.get(sessionKey);
+  if (previous && previous !== absolutePath) {
+    try { if (existsSync(previous)) unlinkSync(previous); } catch { /* the next sweep reclaims it */ }
+  }
+  mysteryArrivalLocalFileBySession.set(sessionKey, absolutePath);
+  return { absolutePath, mimeType: "audio/wav", byteSize: wave.byteLength, durationMs };
+}
+
+function deterministicMysteryReturnLineV2(args: {
+  visitedRooms: readonly string[];
+  itemsInFile: readonly string[];
+  witnessesMet: readonly string[];
+}): string {
+  const count = (n: number, one: string, many: string): string =>
+    n === 1 ? `one ${one}` : `${n} ${many}`;
+  const parts = [
+    args.visitedRooms.length ? `${count(args.visitedRooms.length, "room", "rooms")} seen` : "nothing seen yet",
+    ...(args.itemsInFile.length ? [`${count(args.itemsInFile.length, "item", "items")} in the file`] : []),
+    ...(args.witnessesMet.length ? [`${count(args.witnessesMet.length, "witness", "witnesses")} heard`] : []),
+  ];
+  const summary = parts.join(", ");
+  return `Back again. ${summary.charAt(0).toUpperCase()}${summary.slice(1)}. Time to get back to work.`;
+}
+
+export interface DebateMysteryVocalBankEntryV2 {
+  id: string;
+  kind: DebateMysteryVocalKindV1;
+  absolutePath: string;
+  mimeType: string;
+  byteSize: number;
+  durationMs: number;
+}
+export type DebateMysteryVocalBankV2 = Record<string, DebateMysteryVocalBankEntryV2[]>;
+
+const MYSTERY_VOCAL_AUDIO_SUBDIR = "debate-mystery-audio-v2/vocal";
+const mysteryVocalBankCache = new Map<string, Promise<DebateMysteryVocalBankV2>>();
+const mysteryVocalBankLatest = new Map<string, DebateMysteryVocalBankV2>();
+
+/** Every cast voice's short vocalisations, recorded once per voice at case
+ * load. English clips sit in the audio cache under a key of voice and cue, so
+ * a bot shared between cases records once; Premium cues go through the take
+ * storage, which caches by words and voice the same way. Bots are prepared
+ * one at a time so a Premium pass never floods the provider. */
+export async function prepareDebateMysteryVocalBankV2(
+  db: DatabaseSync,
+  userId: string,
+  sessionId: string,
+  options: { premiumTakes?: { apiKey: string; model: unknown } | null } = {},
+): Promise<DebateMysteryVocalBankV2> {
+  const session = getDebateSession(db, userId, sessionId);
+  const state = session.formatState;
+  if (state.format !== "whodunnit" || state.version !== 2 || !state.voicesEnabled) return {};
+  const { graph } = getDebateMysteryCaseV2(db, userId, sessionId);
+  const botIds = [...new Set([
+    state.config.prosecutorBotId,
+    ...graph.lines.flatMap((line) => line.speakerBotId ? [line.speakerBotId] : []),
+  ])];
+  const bots = botRows(db, userId, botIds);
+  const premiumTakes = options.premiumTakes ?? null;
+  const key = [
+    userId, sessionId, premiumTakes ? "premium" : "english",
+    ...bots.map((bot) => `${bot.id}:${sha256(JSON.stringify(mysteryBotAudioVoiceProfileV2(bot)))}`),
+  ].join("|");
+  let pending = mysteryVocalBankCache.get(key);
+  if (!pending) {
+    pending = (async () => {
+      const bank: DebateMysteryVocalBankV2 = {};
+      for (const bot of bots) {
+        const entries = await prepareMysteryVocalEntriesForBotV2({ db, userId, sessionId, bot, premiumTakes })
+          .catch(() => []);
+        if (entries.length) bank[bot.id] = entries;
+      }
+      mysteryVocalBankLatest.set(`${userId}:${sessionId}`, bank);
+      return bank;
+    })();
+    mysteryVocalBankCache.set(key, pending);
+    if (mysteryVocalBankCache.size > 64) {
+      const oldest = mysteryVocalBankCache.keys().next().value;
+      if (oldest !== undefined) mysteryVocalBankCache.delete(oldest);
+    }
+  }
+  return pending;
+}
+
+/** One prepared cue for playback, or null when the bank has not been prepared
+ * in this process or its clip is gone. */
+export function readDebateMysteryVocalEntryV2(
+  userId: string,
+  sessionId: string,
+  botId: string,
+  cueId: string,
+): DebateMysteryVocalBankEntryV2 | null {
+  const entry = mysteryVocalBankLatest.get(`${userId}:${sessionId}`)?.[botId]
+    ?.find((candidate) => candidate.id === cueId) ?? null;
+  return entry && existsSync(entry.absolutePath) ? entry : null;
+}
+
+async function prepareMysteryVocalEntriesForBotV2(args: {
+  db: DatabaseSync;
+  userId: string;
+  sessionId: string;
+  bot: MysteryV2BotRow;
+  premiumTakes: { apiKey: string; model: unknown } | null;
+}): Promise<DebateMysteryVocalBankEntryV2[]> {
+  const profile = mysteryBotAudioVoiceProfileV2(args.bot);
+  if (!profile.enabled) return [];
+  const voiceProfileHash = sha256(JSON.stringify(profile));
+  const entries: DebateMysteryVocalBankEntryV2[] = [];
+  if (args.premiumTakes) {
+    const lines = DEBATE_MYSTERY_VOCAL_CUES_V1.map((cue) => ({
+      lineId: `vocal:${args.bot.id}:${cue.id}`,
+      speakerBotId: args.bot.id,
+      spokenText: cue.text,
+      voiceProfile: profile,
+    }));
+    for (let index = 0; index < lines.length; index += 4) {
+      await prepareDebateMysteryPremiumTakesV1({
+        db: args.db,
+        userId: args.userId,
+        sessionId: args.sessionId,
+        lines: lines.slice(index, index + 4),
+        request: args.premiumTakes,
+      });
+    }
+    for (const cue of DEBATE_MYSTERY_VOCAL_CUES_V1) {
+      const take = readDebateMysteryPremiumTakeV1(args.db, args.userId, args.sessionId, {
+        lineId: `vocal:${args.bot.id}:${cue.id}`, spokenText: cue.text, voiceProfile: profile,
+      });
+      if (take) {
+        entries.push({ id: cue.id, kind: cue.kind, absolutePath: take.absolutePath, mimeType: take.mimeType, byteSize: take.byteSize, durationMs: take.durationMs });
+      }
+    }
+    // A voice without Premium takes records its cues with the local engine.
+    if (entries.length) return entries;
+  }
+  for (const cue of DEBATE_MYSTERY_VOCAL_CUES_V1) {
+    const cacheKey = `vocal-v1:${sha256(JSON.stringify([args.bot.id, voiceProfileHash, PRISM_INSTANT_VOICE_MODEL_ID, cue.id, cue.text]))}`;
+    const cached = args.db.prepare(
+      `SELECT clip_path, mime_type, sha256, byte_size, duration_ms
+         FROM debate_mystery_audio_cache
+        WHERE user_id = ? AND cache_key = ?`,
+    ).get(args.userId, cacheKey) as {
+      clip_path: string; mime_type: string; sha256: string; byte_size: number; duration_ms: number;
+    } | undefined;
+    if (cached && audioFileValid({ clipPath: cached.clip_path, sha256: cached.sha256, byteSize: cached.byte_size })) {
+      entries.push({
+        id: cue.id, kind: cue.kind,
+        absolutePath: resolveAbsoluteUnderDataRoot(cached.clip_path),
+        mimeType: cached.mime_type, byteSize: cached.byte_size, durationMs: cached.duration_ms,
+      });
+      continue;
+    }
+    let wave: Buffer;
+    try {
+      wave = await generateBuiltinEnglishWave({ text: cue.text, profile, allowOperatingSystemVoices: false });
+    } catch {
+      continue;
+    }
+    if (!isPlayablePcmWave(wave)) continue;
+    const durationMs = pcmWaveDurationMs(wave) ?? 0;
+    if (durationMs <= 0) continue;
+    const clipPath = `${MYSTERY_VOCAL_AUDIO_SUBDIR}/${sha256(args.userId).slice(0, 24)}/${cacheKey.slice("vocal-v1:".length, "vocal-v1:".length + 32)}.wav`;
+    const absolutePath = resolveAbsoluteUnderDataRoot(clipPath);
+    mkdirSync(dirname(absolutePath), { recursive: true });
+    writeFileSync(absolutePath, wave);
+    const now = new Date().toISOString();
+    args.db.prepare(
+      `INSERT INTO debate_mystery_audio_cache
+         (cache_key, user_id, clip_path, mime_type, sha256, byte_size,
+          duration_ms, ref_count, created_at, last_used_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
+       ON CONFLICT(user_id, cache_key) DO UPDATE SET
+         clip_path = excluded.clip_path, mime_type = excluded.mime_type,
+         sha256 = excluded.sha256, byte_size = excluded.byte_size,
+         duration_ms = excluded.duration_ms, last_used_at = excluded.last_used_at`,
+    ).run(cacheKey, args.userId, clipPath, "audio/wav", sha256(wave), wave.byteLength, durationMs, now, now);
+    entries.push({ id: cue.id, kind: cue.kind, absolutePath, mimeType: "audio/wav", byteSize: wave.byteLength, durationMs });
+  }
+  return entries;
 }
 
 /** Renames one found item after the physical object its description actually
@@ -2703,52 +3357,99 @@ export async function cleanDebateMysteryCaseFileV1(
   // Short surrogate ids keep observation node ids and timestamps out of the
   // prompt and give a small model nothing to mangle when it echoes them back.
   const promptEntries = entries.map((entry, index) => ({ promptId: String(index + 1), entry }));
-  const entriesByPromptId = new Map(promptEntries.map(({ promptId, entry }) => [promptId, entry]));
-  let rewritten: Record<string, string>;
-  let reviewFailed = false;
-  try {
-    rewritten = await runMysteryPresentationRewriteV1(db, userId, runtime, {
+  type PromptEntry = (typeof promptEntries)[number];
+  const reviewEntry = (
+    entry: MysteryPresentationRewriteEntryV1,
+    value: unknown,
+  ): { text: string } | { error: string } => {
+    const text = cleanRewriteText(value, limitFor(entry));
+    if (!text || text.length < 12) return { error: `Entry ${entry.label} came back empty or too long.` };
+    if (mysteryRewriteIntroducesNamesV1(text, allowed) || mysteryRewriteAddsForbiddenV1(text, [entry.label, entry.text]) || /\bPRISM\b/u.test(text)) {
+      return { error: `Entry ${entry.label} added something not in the record.` };
+    }
+    const dropped = mysteryRewriteDroppedFactV1(entry.text, text);
+    if (dropped) return { error: `Entry ${entry.label} dropped a fact: ${dropped}.` };
+    return { text };
+  };
+  // Review is per entry. An entry the model cannot tidy without losing a fact
+  // keeps its deterministic clean while every other entry still improves; one
+  // slip no longer fails the whole file. Small batches give a small model a
+  // fair prompt, and an entry rejected in its batch gets one more pass alone,
+  // told why.
+  const requestBatch = async (
+    batch: readonly PromptEntry[],
+    previousRejections?: Record<string, string>,
+  ): Promise<{ accepted: Map<string, string>; reasons: Map<string, string> }> => {
+    const byPromptId = new Map(batch.map(({ promptId, entry }) => [promptId, entry]));
+    return await runMysteryPresentationRewriteV1(db, userId, runtime, {
       operation: "clean_case_file",
       system: "Tidy a detective's Case File. For every entry return a cleaner version of its text: remove repeated sentences, filler, and any sentence about PRISM, fallbacks, or artwork; keep every distinct fact once; write plain past-tense prose that is easy to scan. Every name, place, time, and number in an entry must survive exactly, and a sentence that states a distinct fact may be shortened but never dropped. Observations open with where the thing was seen. Never merge entries, add ownership, use, location, significance, or any person, and never mention a suspect that the entry does not already name. Return only JSON: {\"entries\": [{\"id\": string, \"text\": string}]} with exactly the supplied ids.",
       payload: {
-        entries: promptEntries.map(({ promptId, entry }) => ({ id: promptId, kind: entry.kind, label: entry.label, text: entry.text, maxCharacters: limitFor(entry) })),
+        entries: batch.map(({ promptId, entry }) => ({ id: promptId, kind: entry.kind, label: entry.label, text: entry.text, maxCharacters: limitFor(entry) })),
+        ...(previousRejections ? { previousRejections } : {}),
       },
-      maxTokens: Math.min(6_000, 220 + entries.reduce((sum, entry) => sum + Math.ceil(limitFor(entry) / 3), 0)),
+      maxTokens: Math.min(6_000, 220 + batch.reduce((sum, { entry }) => sum + Math.ceil(limitFor(entry) / 3), 0)),
+      attempts: CASE_FILE_CLEAN_BATCH_ATTEMPTS,
       validate: (raw) => {
         const parsed = parseRewriteJson(raw);
         const list = Array.isArray(parsed.entries) ? parsed.entries as Array<Record<string, unknown>> : null;
         if (!list) throw new Error("The clean-up did not return entries.");
-        const byId = new Map<string, string>();
+        const accepted = new Map<string, string>();
+        const reasons = new Map<string, string>();
         for (const row of list) {
           if (!row || typeof row !== "object") continue;
           const rowId = typeof row.id === "string" ? row.id.trim() : typeof row.id === "number" ? String(row.id) : "";
-          const entry = entriesByPromptId.get(rowId);
-          if (!entry) continue;
-          const text = cleanRewriteText(row.text, limitFor(entry));
-          if (!text || text.length < 12) throw new Error(`Entry ${entry.label} came back empty or too long.`);
-          if (mysteryRewriteIntroducesNamesV1(text, allowed) || mysteryRewriteAddsForbiddenV1(text, [entry.label, entry.text]) || /\bPRISM\b/u.test(text)) {
-            throw new Error(`Entry ${entry.label} added something not in the record.`);
-          }
-          const dropped = mysteryRewriteDroppedFactV1(entry.text, text);
-          if (dropped) throw new Error(`Entry ${entry.label} dropped a fact: ${dropped}.`);
-          byId.set(entry.id, text);
+          const entry = byPromptId.get(rowId);
+          if (!entry || accepted.has(entry.id)) continue;
+          const verdict = reviewEntry(entry, row.text);
+          if ("error" in verdict) reasons.set(entry.id, verdict.error);
+          else accepted.set(entry.id, verdict.text);
         }
-        if (byId.size !== entries.length) throw new Error("The clean-up dropped an entry.");
-        return Object.fromEntries(byId);
+        for (const { entry } of batch) {
+          if (!accepted.has(entry.id) && !reasons.has(entry.id)) {
+            reasons.set(entry.id, `Entry ${entry.label} was missing from the reply.`);
+          }
+        }
+        // A reply with nothing usable is a format failure worth a retry; a
+        // reply that tidies some entries is kept as far as it goes.
+        if (accepted.size === 0) throw new Error([...reasons.values()].slice(0, 3).join(" "));
+        return { accepted, reasons };
       },
-    }) as Record<string, string>;
-  } catch {
-    // The model could not tidy without losing something. Keep the
-    // deterministic clean, which only removes boilerplate and exact repeats.
-    reviewFailed = true;
-    rewritten = Object.fromEntries(entries.map((entry) => [entry.id, entry.text]));
+    }) as { accepted: Map<string, string>; reasons: Map<string, string> };
+  };
+  const rewritten = new Map<string, string>();
+  const rejected = new Map<string, string>();
+  for (let index = 0; index < promptEntries.length; index += CASE_FILE_CLEAN_BATCH_SIZE) {
+    const batch = promptEntries.slice(index, index + CASE_FILE_CLEAN_BATCH_SIZE);
+    try {
+      const { accepted, reasons } = await requestBatch(batch);
+      for (const [id, text] of accepted) rewritten.set(id, text);
+      for (const [id, reason] of reasons) rejected.set(id, reason);
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : "The clean-up did not answer.";
+      for (const { entry } of batch) rejected.set(entry.id, reason);
+    }
+  }
+  for (const prompt of promptEntries) {
+    if (rewritten.has(prompt.entry.id)) continue;
+    try {
+      const { accepted } = await requestBatch([prompt], { [prompt.promptId]: rejected.get(prompt.entry.id) ?? "" });
+      const text = accepted.get(prompt.entry.id);
+      if (text) {
+        rewritten.set(prompt.entry.id, text);
+        rejected.delete(prompt.entry.id);
+      }
+    } catch {
+      // This entry keeps its deterministic clean, which only removes
+      // boilerplate and exact repeats.
+    }
   }
   const evidence: Record<string, { description?: string }> = {};
   const caseKit: Record<string, { description?: string }> = {};
   const observations: Record<string, { text?: string }> = {};
   let changed = 0;
   for (const entry of entries) {
-    const text = rewritten[entry.id];
+    const text = rewritten.get(entry.id) ?? entry.text;
     if (!text || text === entry.original) continue;
     changed += 1;
     if (entry.kind === "evidence") evidence[entry.id] = { description: text };
@@ -2756,9 +3457,11 @@ export async function cleanDebateMysteryCaseFileV1(
     else observations[entry.id] = { text };
   }
   if (changed === 0) {
-    throw new HttpError(409, reviewFailed
-      ? "The clean-up did not pass review. The Case File is unchanged."
-      : "The Case File is already as clean as PRISM can make it.");
+    throw new HttpError(409, rejected.size === 0
+      ? "The Case File is already as clean as PRISM can make it."
+      : rejected.size === entries.length
+        ? "PRISM could not tidy any entry without losing a fact. The Case File is unchanged."
+        : "PRISM could not tidy the remaining entries without losing a fact. The Case File is unchanged.");
   }
   return commitDebateMysterySceneRepairV1(db, userId, sessionId, {
     action: "clean_case_file", expectedRevision: session.revision,
@@ -3409,6 +4112,7 @@ function initialV2State(
   now: string,
   mansionExterior: DebateMysterySealedAssetRefV1 | null = null,
 ): DebateWhodunnitFormatStateV2 {
+  const playerSideTitle = debateMysteryCounselSeatsV2(config).playerSideLabel;
   const omitInvestigation = mysteryCompilationOmitsInvestigationV2(
     resolveMysteryCompilationScopeV2(config),
   );
@@ -3432,7 +4136,7 @@ function initialV2State(
           ? [forgeSubstep("room-details", "Room details", "upcoming" as const)]
           : []),
         forgeSubstep("witness-chapters", "Witness chapters", "upcoming"),
-        forgeSubstep("prosecution-responses", "Prosecution responses", "upcoming"),
+        forgeSubstep("prosecution-responses", `${playerSideTitle} responses`, "upcoming"),
       ],
       retryable: false,
       publicFailureCode: null,
@@ -3491,6 +4195,48 @@ function initialV2State(
   };
 }
 
+/**
+ * Role words for authoring prompts and fallbacks. Every stance substitution is
+ * a one- or two-word swap so a small local model sees the same instruction
+ * shapes it was tuned against; the seats themselves never move.
+ */
+interface MysteryStanceVocabularyV2 {
+  stance: DebateMysteryPlayerStanceV2;
+  playerRole: "Prosecutor" | "Defense Attorney";
+  playerSide: "prosecution" | "defense";
+  playerSideTitle: "Prosecution" | "Defense";
+  opposingRole: "Defense Counsel" | "Prosecutor";
+  opposingSide: "defense" | "prosecution";
+  opposingSideTitle: "Defense" | "Prosecution";
+  openingSelfIntro: "I am the lead investigator" | "I am counsel for the defense";
+  clientSeatId: string | null;
+  clientName: string | null;
+}
+
+function mysteryStanceVocabularyV2(
+  config: Pick<DebateMysteryResolvedConfigV2, "prosecutorBotId" | "rivalDefenseBotId"> & {
+    playerStance?: unknown;
+  },
+  defenseFrame?: { defendantSeatId: string } | null,
+  nameBySeat?: ReadonlyMap<string, string>,
+): MysteryStanceVocabularyV2 {
+  const seats = debateMysteryCounselSeatsV2(config);
+  const defense = seats.stance === "defense";
+  const clientSeatId = defense ? defenseFrame?.defendantSeatId ?? null : null;
+  return {
+    stance: seats.stance,
+    playerRole: seats.playerRoleLabel,
+    playerSide: defense ? "defense" : "prosecution",
+    playerSideTitle: seats.playerSideLabel,
+    opposingRole: seats.opposingRoleLabel,
+    opposingSide: defense ? "prosecution" : "defense",
+    opposingSideTitle: seats.opposingSideLabel,
+    openingSelfIntro: defense ? "I am counsel for the defense" : "I am the lead investigator",
+    clientSeatId,
+    clientName: clientSeatId ? nameBySeat?.get(clientSeatId) ?? null : null,
+  };
+}
+
 function mysteryV2SessionRequest(
   config: DebateMysteryResolvedConfigV2,
   source: DebateWhodunnitCreateConfigV2,
@@ -3510,14 +4256,26 @@ function mysteryV2SessionRequest(
       enabled: config.trialType === "jury",
       jurorBotIds: config.trialType === "jury" ? [...config.jurorBotIds] : [],
     },
-    motion: {
-      version: 1,
-      id: randomUUID(),
-      title: "Whodunnit?",
-      motion: "Determine who is responsible for the central incident and prove the filed accusation in court.",
-      forSide: { label: "Prosecution", brief: "Investigate, file charges, and prove the accusation from the admitted record." },
-      againstSide: { label: "Defense", brief: "Test the accusation against every fair alternative in the admitted record." },
-    },
+    // The player's counsel always sits on the "for" side so advocate mapping,
+    // objection colours, and replay stay stance-agnostic; only the motion's
+    // labels and briefs follow the chosen chair.
+    motion: debateMysteryPlayerStanceV2(config) === "defense"
+      ? {
+          version: 1,
+          id: randomUUID(),
+          title: "Whodunnit?",
+          motion: "Defend the accused client, break the case against them, and name who is really responsible.",
+          forSide: { label: "Defense", brief: "Investigate, break the case against your client, and name who is really responsible." },
+          againstSide: { label: "Prosecution", brief: "Press the surface case against the defendant from the admitted record." },
+        }
+      : {
+          version: 1,
+          id: randomUUID(),
+          title: "Whodunnit?",
+          motion: "Determine who is responsible for the central incident and prove the filed accusation in court.",
+          forSide: { label: "Prosecution", brief: "Investigate, file charges, and prove the accusation from the admitted record." },
+          againstSide: { label: "Defense", brief: "Test the accusation against every fair alternative in the admitted record." },
+        },
     evidence: { version: 1, notes: "", sources: [], exhibits: [], frozenAt: null },
     moderatorTitle: "The Court",
     moderatorBotId: config.judgeBotId,
@@ -3703,6 +4461,7 @@ export async function createDebateMysterySessionV2(
       userId,
       config.mansionBundleId,
     );
+    assertDebateMysteryMansionNotHeldByOngoingCaseV1(db, userId, config.mansionBundleId);
     if (mansion.suspectCount !== config.suspectBotIds.length) {
       throw new HttpError(
         400,
@@ -3889,6 +4648,7 @@ export function authoredFoundationCoreFromJson(args: {
     method,
     prosecutorInternalReasoning,
     eyewitnessResolution: compact(args.value.eyewitnessResolution, 900) || null,
+    prosecutionCaseSummary: compact(args.value.prosecutionCaseSummary, 600) || null,
     evidence,
   };
 }
@@ -3904,15 +4664,47 @@ function assertFrozenEvidencePresentationV1(args: {
 
 function normalizeProsecutorOpeningPerspectiveV2(text: string): string {
   return text.replace(
-    /\bYou are the lead investigator\b/giu,
-    "I am the lead investigator",
+    /\bYou are (the lead investigator|counsel for the defense)\b/giu,
+    "I am $1",
   );
+}
+
+/** Defense stance fallback: the public surface case, naming the frame item and the client's presence. */
+function deterministicProsecutionCaseSummaryV2(args: {
+  scaffold: ReturnType<typeof compileDeterministicDebateMystery>;
+  vocabulary?: MysteryStanceVocabularyV2;
+  defenseFrame?: MysteryDefenseFrameV2 | null;
+}): string | null {
+  const clientName = args.vocabulary?.clientName;
+  if (args.vocabulary?.stance !== "defense" || !args.defenseFrame || !clientName) return null;
+  const frameId = args.defenseFrame.frameEvidenceId;
+  const client = args.scaffold.suspects.find(
+    (suspect) => suspect.seatId === args.defenseFrame?.defendantSeatId,
+  );
+  const frame = frameId
+    ? args.scaffold.evidence.find((item) => item.id === frameId) ?? null
+    : null;
+  const closing = "The prosecution will ask the court to find that no one else had the same opportunity.";
+  if (frame && client && frame.roomId === client.roomId) {
+    return `${clientName} was present during the incident window, and the ${frame.title} was recovered from their own room. ${closing}`;
+  }
+  if (frame) {
+    const room = args.scaffold.rooms.find((entry) => entry.id === frame.roomId);
+    const roomName = room
+      ? DEBATE_MYSTERY_ROOM_TEMPLATES.find((template) => template.id === room.templateId)?.name ??
+        room.templateId.replace(/^venue:/u, "").replaceAll("-", " ")
+      : null;
+    return `${clientName} was present during the incident window, and the ${frame.title}${roomName ? ` found in the ${roomName}` : ""} is being read against them. ${closing}`;
+  }
+  return `${clientName} was present during the incident window and has no one to vouch for their movements. ${closing}`;
 }
 
 function deterministicAuthoredMysteryFoundationCoreV2(args: {
   scaffold: ReturnType<typeof compileDeterministicDebateMystery>;
   eyewitnessSeatId: string | null;
   incidentPlan: MysteryBoundIncidentPlanV1;
+  vocabulary?: MysteryStanceVocabularyV2;
+  defenseFrame?: MysteryDefenseFrameV2 | null;
 }): AuthoredMysteryFoundationCoreV2 {
   const incidentRoom = args.scaffold.rooms.find(
     (room) => room.id === args.scaffold.crimeSceneRoomId,
@@ -3927,8 +4719,8 @@ function deterministicAuthoredMysteryFoundationCoreV2(args: {
     victimName: args.scaffold.victim.name,
     victimDescription: args.scaffold.victim.description,
     publicOpening:
-      `${args.scaffold.publicOpening.replace(/\s*(?:You are|I am) the lead investigator\.?$/iu, "")} ` +
-      `I am the lead investigator. The first report points to the ${incidentRoomName}. I need to begin there.`,
+      `${args.scaffold.publicOpening.replace(/\s*(?:You are|I am) (?:the lead investigator|counsel for the defense)\.?$/iu, "")} ` +
+      `${args.vocabulary?.openingSelfIntro ?? "I am the lead investigator"}. The first report points to the ${incidentRoomName}. I need to begin there.`,
     motive: args.scaffold.motive,
     method: args.scaffold.method,
     prosecutorInternalReasoning:
@@ -3936,6 +4728,11 @@ function deterministicAuthoredMysteryFoundationCoreV2(args: {
     eyewitnessResolution: args.eyewitnessSeatId
       ? "The eyewitness account supplies context but cannot establish identity alone; reconcile it with the independently frozen timeline and physical record."
       : null,
+    prosecutionCaseSummary: deterministicProsecutionCaseSummaryV2({
+      scaffold: args.scaffold,
+      vocabulary: args.vocabulary,
+      defenseFrame: args.defenseFrame,
+    }),
     evidence: args.scaffold.evidence.map((item) => ({
       id: item.id,
       title: item.title,
@@ -4649,6 +5446,7 @@ function authoredSuspectFromJson(args: {
   rooms: readonly { id: string; name: string }[];
   people: readonly { id: string; name: string }[];
   knowledge: MysteryV2SuspectKnowledge;
+  familiarPair?: boolean;
   openingForbiddenFacts?: readonly string[];
   courtOnly?: boolean;
 }): AuthoredSuspectV2 {
@@ -4667,11 +5465,13 @@ function authoredSuspectFromJson(args: {
     const id = compact(topic.id, 100);
     const label = compact(topic.label, 100);
     const question = compact(topic.question, 600);
-    const response = compact(topic.response, 1_200);
+    // A model sometimes labels the witness's own line ("Sassy Sarah: …"). The label is
+    // never spoken, and a repeat lead-in would otherwise carry it mid-sentence.
+    const response = stripDebateMysterySpeakerLabelV2(compact(topic.response, 1_200), suspectName);
     const repeatResponses = (Array.isArray(topic.repeatResponses) ? topic.repeatResponses : []).flatMap((repeatValue) => {
       if (!repeatValue || typeof repeatValue !== "object") return [];
       const repeat = repeatValue as Record<string, unknown>;
-      const repeatResponse = compact(repeat.response, 1_200);
+      const repeatResponse = stripDebateMysterySpeakerLabelV2(compact(repeat.response, 1_200), suspectName);
       return repeatResponse ? [{
         response: repeatResponse,
         responseStageAction: compact(repeat.responseStageAction, 180) || null,
@@ -4936,10 +5736,9 @@ function authoredSuspectFromJson(args: {
         ? (row.roomOpeningExchange as Record<string, unknown>).occupantResponse
         : row.roomIntroduction,
       900,
-    ) || (() => {
-      const suspectName = args.people.find((person) => person.id === args.seatId)?.name ?? "I";
-      return `I am ${suspectName}. The house has given everyone reasons to be careful; ask what you need, and I will answer.`;
-    })(),
+    ) || (args.familiarPair
+      ? "You know me. Ask what you need, and I will answer only what I know."
+      : "Ask what you need, and I will answer only what I know."),
     roomIntroductionStageAction: compact(row.roomIntroductionStageAction, 180) || null,
     roomIntroductionPerformance:
       row.roomIntroductionPerformance && typeof row.roomIntroductionPerformance === "object"
@@ -4980,6 +5779,17 @@ function authoredSuspectFromJson(args: {
     testimony,
   };
   if (suspect.seatId !== args.seatId) throw new Error(`The authored chapter changed frozen seat ${args.seatId}.`);
+  if (
+    args.familiarPair &&
+    mysteryPersonaLineSelfIntroducesV1(
+      suspect.roomIntroduction,
+      suspectName,
+    )
+  ) {
+    throw new Error(
+      `The authored room introduction for ${args.seatId} formally reintroduced a familiar character.`,
+    );
+  }
   const rawTestimony = Array.isArray(row.testimony)
     ? row.testimony.filter((value): value is Record<string, unknown> => Boolean(value && typeof value === "object"))
     : [];
@@ -5265,6 +6075,51 @@ async function prepareMysteryVoiceCardsV2(args: {
   } catch {
     return fallback;
   }
+}
+
+function mysteryPersonaPairAuthoringBriefV1(args: {
+  context: MysteryPersonaDirectedPairContextV1 | null;
+  contextSourceHash: string;
+  prosecutor: MysteryV2BotRow;
+  suspect: MysteryV2BotRow;
+  voiceCardsByBotId: Readonly<Record<string, MysteryV2VoiceCard>>;
+}): Record<string, unknown> {
+  return {
+    version: 1,
+    contextSourceHash: args.contextSourceHash,
+    prosecutor: {
+      botId: args.prosecutor.id,
+      name: args.prosecutor.name,
+      voiceCard: args.voiceCardsByBotId[args.prosecutor.id],
+    },
+    suspect: {
+      botId: args.suspect.id,
+      name: args.suspect.name,
+      voiceCard: args.voiceCardsByBotId[args.suspect.id],
+    },
+    relationship: args.context
+      ? {
+          status: "explicit_profile_canon",
+          sources: args.context.sources.map((source) => ({
+            sourceOwnerBotId: source.sourceOwnerBotId,
+            sourceOwnerName: source.sourceOwnerName,
+            sourceTargetBotId: source.sourceTargetBotId,
+            sourceTargetName: source.sourceTargetName,
+            field: source.field,
+            text: source.text,
+          })),
+          performanceRule:
+            "Both characters recognize the established relationship. Use it for natural address, familiarity, restraint, and chemistry only. Do not formally introduce either character to the other.",
+        }
+      : {
+          status: "not_explicitly_stated",
+          sources: [],
+          performanceRule:
+            "Do not infer a relationship or shared history from names, model knowledge, or outside canon. Keep the exchange natural and neutral without forcing a formal self-introduction.",
+        },
+    boundary:
+      "This context directs presentation only. Never quote it as evidence, grant case knowledge, alter an alibi, clue, testimony, contradiction, proof route, or verdict, or let it satisfy a case-fact requirement.",
+  };
 }
 
 async function prepareMysteryConnectiveAdditionsV2(args: {
@@ -5644,21 +6499,14 @@ async function evaluateMysteryContradictionSemanticsV2(args: {
     repairInstruction:
       "Rewrite statement #2 so it directly denies the assigned record's exact claim under an ordinary literal reading.",
   });
-  const deterministicDenial =
-    "The assigned record's exact claim is false.";
   const deterministicByKey = new Map<string, MysteryV2ContradictionEvaluationV2>();
   const pendingPairs = args.pairs.filter((pair) => {
     const recordId = mysteryRecordKey(pair.record.reference);
-    const legacyDeterministicPrefix =
-      "The assigned record's exact claim is false: ";
     const basis = pair.statement.contradictionBasis;
-    const conciseDeterministicDenial =
-      pair.statement.text === deterministicDenial;
-    const deniedRecordClaim = conciseDeterministicDenial
-      ? basis?.recordClaim ?? ""
-      : pair.statement.text.startsWith(legacyDeterministicPrefix)
-        ? pair.statement.text.slice(legacyDeterministicPrefix.length)
-        : "";
+    // A deterministic denial, in its sworn wording or either retired contract
+    // phrasing, denies exactly the claim it names.
+    const deniedRecordClaim =
+      debateMysteryDeterministicDenialClaimV2(pair.statement.text, basis?.recordClaim) ?? "";
     if (
       !mysteryContradictionExcerptIsGroundedV2(
         deniedRecordClaim,
@@ -5901,6 +6749,8 @@ async function authorMysteryV2(args: {
   powerPlan: DebateSessionV1["powerPlan"];
   eyewitnessSeatId: string | null;
   examinationIds: string[];
+  /** Defense stance only; null for prosecution cases. */
+  defenseFrame: MysteryDefenseFrameV2 | null;
   requiredContradictionBySeat: ReadonlyMap<string, DebateMysteryRecordReferenceV2>;
   evidencePropBindingsById: Readonly<Record<string, EvidencePropBindingV1>>;
   draft: MysteryV2AuthoringCheckpoint;
@@ -5910,11 +6760,19 @@ async function authorMysteryV2(args: {
   const omitInvestigation = mysteryCompilationOmitsInvestigationV2(compilationScope);
   const automatedSpectator = args.config.playerRole === "spectator";
   const botById = new Map(args.bots.map((bot) => [bot.id, bot]));
+  // Player-relative seats: `prosecutor` is the player's counsel and
+  // `defenseCounsel` the opposing counsel in every stance. Only the words
+  // the prompts use for them follow `vocabulary`.
   const prosecutor = botById.get(args.config.prosecutorBotId);
   const defenseCounsel = botById.get(args.config.rivalDefenseBotId);
   if (!prosecutor || !defenseCounsel) {
     throw new Error("The frozen Prosecutor or Defense Counsel is unavailable.");
   }
+  const vocabulary = mysteryStanceVocabularyV2(
+    args.config,
+    args.defenseFrame,
+    new Map(args.scaffold.suspects.map((suspect) => [suspect.seatId, suspect.name])),
+  );
   const reachableEvidenceIds = new Set(
     args.scaffold.activeRegions.flatMap((outcome) => outcome.evidenceId ? [outcome.evidenceId] : []),
   );
@@ -5964,6 +6822,23 @@ async function authorMysteryV2(args: {
       ordinal: index + 1,
     };
   });
+  if (args.draft.personaPairContext === null) {
+    args.draft.personaPairContext = buildMysteryPersonaPairContextMapV1({
+      bots: args.bots.map((bot) => ({
+        botId: bot.id,
+        displayName: bot.name,
+        systemPrompt: bot.system_prompt,
+      })),
+      eligiblePairs: args.scaffold.suspects.map((suspect) => [
+        args.config.prosecutorBotId,
+        suspect.botId,
+      ]),
+    });
+    args.onDraft(
+      args.draft,
+      "Writing the Case · Persona relationships frozen",
+    );
+  }
   const factLedgerWithoutHash = {
     version: 1 as const,
     incidentPlan: args.incidentPlan,
@@ -5995,6 +6870,9 @@ async function authorMysteryV2(args: {
       defenseCounselBotId: args.config.rivalDefenseBotId,
       judgeBotId: args.config.judgeBotId,
       jurorBotIds: [...args.config.jurorBotIds],
+      ...(vocabulary.stance === "defense"
+        ? { playerStance: "defense" as const, clientSeatId: vocabulary.clientSeatId }
+        : {}),
     },
     powerPlan: Object.fromEntries(
       Object.entries(args.powerPlan.bots).map(([botId, plan]) => [
@@ -6110,6 +6988,8 @@ async function authorMysteryV2(args: {
       scaffold: args.scaffold,
       eyewitnessSeatId: args.eyewitnessSeatId,
       incidentPlan: args.incidentPlan,
+      vocabulary,
+      defenseFrame: args.defenseFrame,
     }),
     incidentPlan: args.incidentPlan,
     scaffold: args.scaffold,
@@ -6126,6 +7006,18 @@ async function authorMysteryV2(args: {
     culpritSeatId: args.scaffold.culpritSeatId,
     accompliceSeatId: args.scaffold.accompliceSeatId,
     eyewitnessSeatId: args.eyewitnessSeatId,
+    // Prosecution prompts stay byte-identical; Defense adds the client frame.
+    ...(args.defenseFrame
+      ? {
+          playerStance: "defense" as const,
+          defenseFrame: {
+            clientSeatId: args.defenseFrame.defendantSeatId,
+            clientName: vocabulary.clientName,
+            frameEvidenceId: args.defenseFrame.frameEvidenceId,
+            alibiSupportHotspotIds: args.defenseFrame.alibiSupportDiscoveryIds,
+          },
+        }
+      : {}),
     victimId: args.scaffold.victim.id,
     timeline: authoredTimeline,
     roomNames: omitInvestigation ? [] : args.scaffold.rooms.map((room) => ({
@@ -6159,7 +7051,7 @@ async function authorMysteryV2(args: {
         ? [{
             botId,
             name: botById.get(botId)?.name ?? botId,
-            rule: "When another cast bot or the player-controlled Prosecutor directly addresses this holder, the holder knowingly masquerades as that addresser: copy their exact eyes and blink package, complete resting/live mouth package including glyph style and Custom Speech poses, Avatar Details Ink, lower glyph, public name The real <effective target name>, and eligible public Power consequences. Keep the holder's persona, behavior, color, communication frame, complete authored voice, Accent Map location, pronunciation, Speechprint, provider voice identity, native Powers, memories, role, and every private or mechanical identity field. Never copy Identity Crisis recursively or transfer private awareness or audience permissions. The original remains themselves; do not force an impostor dispute. Copied Power consequences may shape frozen presentation and dialogue but must never change sealed facts, evidence, proof routes, or outcomes.",
+            rule: `When another cast bot or the player-controlled ${vocabulary.playerRole} directly addresses this holder, the holder knowingly masquerades as that addresser: copy their exact eyes and blink package, complete resting/live mouth package including glyph style and Custom Speech poses, Avatar Details Ink, lower glyph, public name The real <effective target name>, and eligible public Power consequences. Keep the holder's persona, behavior, color, communication frame, complete authored voice, Accent Map location, pronunciation, Speechprint, provider voice identity, native Powers, memories, role, and every private or mechanical identity field. Never copy Identity Crisis recursively or transfer private awareness or audience permissions. The original remains themselves; do not force an impostor dispute. Copied Power consequences may shape frozen presentation and dialogue but must never change sealed facts, evidence, proof routes, or outcomes.`,
           }]
         : [],
     ),
@@ -6185,6 +7077,11 @@ async function authorMysteryV2(args: {
     frozenVoiceCues: [...prosecutorVoiceCard.cues],
     sourceHash: prosecutorVoiceCard.sourceHash,
   };
+  const frameEvidenceTitle = args.defenseFrame?.frameEvidenceId
+    ? setup.evidencePresentation.find(
+        (entry) => entry.id === args.defenseFrame?.frameEvidenceId,
+      )?.identity ?? null
+    : null;
 
   // Legacy/resumed drafts may have renamed a register to a key after writing
   // its examinations and testimony. Repair before any cached section is reused.
@@ -6223,12 +7120,17 @@ async function authorMysteryV2(args: {
               victimName: "fictional name",
               victimDescription: "specific original identity and stakes",
               publicOpening: omitInvestigation
-                ? "spoiler-safe prosecution case summary suitable for a court title card"
-                : "spoiler-safe first-person thought in the selected Prosecutor persona; state the public incident and why the investigator is heading to the exact incidentScene name without naming the culprit or hidden evidence",
+                ? `spoiler-safe ${vocabulary.playerSide} case summary suitable for a court title card`
+                : `spoiler-safe first-person thought in the selected ${vocabulary.playerRole} persona; state the public incident and why the investigator is heading to the exact incidentScene name without naming the culprit or hidden evidence`,
               motive: "sealed motive",
               method: "sealed method",
-              prosecutorInternalReasoning: "spoiler-free first-person internal reasoning in the selected Prosecutor persona; it reviews the record but never chooses strategy for the player",
+              prosecutorInternalReasoning: `spoiler-free first-person internal reasoning in the selected ${vocabulary.playerRole} persona; it reviews the record but never chooses strategy for the player`,
               eyewitnessResolution: args.eyewitnessSeatId ? "exact fair weakness or reconciliation of eyewitness and two-source alibi" : null,
+              ...(vocabulary.stance === "defense"
+                ? {
+                    prosecutionCaseSummary: `two-sentence spoiler-safe summary of the public case against ${vocabulary.clientName ?? "the client"} in the opposing Prosecutor's voice: name the frame evidence and the client's presence; never name the true culprit or hidden evidence`,
+                  }
+                : {}),
               evidence: "every evidence id exactly once; copy id, identity as title, observation as description, and emoji exactly from evidencePresentation",
             },
             qualityRules: [
@@ -6239,11 +7141,16 @@ async function authorMysteryV2(args: {
                 : caseIncludesHomicide
                   ? `The primary charge is ${args.incidentPlan.primary.title}. Homicide is a linked secondary incident only; preserve it without turning it into the filed charge.`
                 : `The primary charge is ${args.incidentPlan.primary.title}, not homicide. Never describe a murder, killing, death, corpse, fatal injury, or murder weapon anywhere in this case. The person named by victimName is the affected party and remains alive.`,
-              "Keep the public opening, victim description, motive, method, and Prosecutor internal reasoning under 120 words each.",
+              `Keep the public opening, victim description, motive, method, and ${vocabulary.playerRole} internal reasoning under 120 words each.`,
+              ...(vocabulary.stance === "defense"
+                ? [
+                    `The player's client ${vocabulary.clientName ?? "the client"} is innocent. The opposing Prosecutor's surface case rests on ${frameEvidenceTitle ?? "the client's presence"}. Do not confirm or deny the client's guilt in public prose.`,
+                  ]
+                : []),
               "Evidence descriptions are frozen physical facts: copy each supplied observation exactly, without added, removed, or rewritten sentences. This exact-copy requirement takes precedence over prose length preferences.",
               "For every evidencePresentation entry, preserve its exact identity, physical subject, observation, appearanceDescription, and emoji. A reference to another object is allowed only when it is already in that frozen observation.",
               "Keep public prose free of culprit labels and private proof-route metadata.",
-              "Write publicOpening in the selected Prosecutor's distinct voice using its frozen voiceCard. Preserve every public fact exactly, add no deductions, and name the supplied incidentScene as the immediate destination.",
+              `Write publicOpening in the selected ${vocabulary.playerRole}'s distinct voice using its frozen voiceCard. Preserve every public fact exactly, add no deductions, and name the supplied incidentScene as the immediate destination.`,
               "Identity Crisis is presentation-only. Its cues must never change the sealed culprit, evidence, alibis, or proof routes.",
               "No placeholders, TODOs, bracketed alternatives, or copied franchise characters.",
             ],
@@ -6263,6 +7170,8 @@ async function authorMysteryV2(args: {
           scaffold: args.scaffold,
           eyewitnessSeatId: args.eyewitnessSeatId,
           incidentPlan: args.incidentPlan,
+          vocabulary,
+          defenseFrame: args.defenseFrame,
         });
         deterministicFoundationFallback = true;
       }
@@ -6702,6 +7611,26 @@ async function authorMysteryV2(args: {
         .filter((reference) => reference.kind === "evidence")
         .map((reference) => reference.id),
     );
+    const suspectBot = botById.get(requirement.botId);
+    if (!suspectBot) {
+      throw new Error(
+        `The frozen persona for ${requirement.seatId} is unavailable.`,
+      );
+    }
+    const directedPairContext = mysteryPersonaDirectedPairContextV1(
+      args.draft.personaPairContext,
+      requirement.botId,
+      prosecutor.id,
+    );
+    const directDialoguePair = args.draft.personaPairContext
+      ? mysteryPersonaPairAuthoringBriefV1({
+          context: directedPairContext,
+          contextSourceHash: args.draft.personaPairContext.sourceHash,
+          prosecutor,
+          suspect: suspectBot,
+          voiceCardsByBotId,
+        })
+      : null;
     const suspectSetupPacket = {
       investigationMode: setup.investigationMode,
       houseStyle: setup.houseStyle,
@@ -6718,6 +7647,9 @@ async function authorMysteryV2(args: {
       identityMirrorHolders: setup.identityMirrorHolders,
       prosecutor: setup.prosecutor,
       defenseCounsel: setup.defenseCounsel,
+      ...(setup.defenseFrame
+        ? { playerStance: "defense" as const, defenseFrame: setup.defenseFrame }
+        : {}),
       suspects: setup.suspects,
       frozenLedger: {
         culpritSeatId: factLedger.culpritSeatId,
@@ -6768,6 +7700,7 @@ async function authorMysteryV2(args: {
               })),
             ],
             knowledge: suspectKnowledgeBySeat[requirement.seatId]!,
+            familiarPair: Boolean(directedPairContext),
             openingForbiddenFacts: [
               validatedFoundation.motive,
               validatedFoundation.method,
@@ -6843,7 +7776,7 @@ async function authorMysteryV2(args: {
               defenseRebuttal:
                 "The witness has limited this statement to firsthand knowledge; speculation is not evidence.",
               defenseObjection:
-                "Objection. The prosecution is asking the witness to claim knowledge they do not possess.",
+                `Objection. The ${vocabulary.playerSide} is asking the witness to claim knowledge they do not possess.`,
               revision:
                 "I knew the affected party through the household, but I cannot speak to anyone else's private decisions.",
             },
@@ -6855,7 +7788,7 @@ async function authorMysteryV2(args: {
               defenseRebuttal:
                 "That record does not contradict this active sentence unless it proves the exact opposite claim.",
               defenseObjection:
-                "Objection. The prosecution must compare the record to the witness's exact words.",
+                `Objection. The ${vocabulary.playerSide} must compare the record to the witness's exact words.`,
               revision:
                 "I withdraw that denial. The assigned record's exact claim is true.",
               contradictionBasis: {
@@ -6921,6 +7854,7 @@ async function authorMysteryV2(args: {
         suspect: {
           ...requirement,
           voiceCard: voiceCardsByBotId[requirement.botId],
+          ...(directDialoguePair ? { directDialoguePair } : {}),
           contradictionContract: {
             version: 1,
             statementId: requirement.requiredStatementIds[1],
@@ -6939,17 +7873,19 @@ async function authorMysteryV2(args: {
             seatId: requirement.seatId,
             relationship: "complete relationship to the victim",
             alibi: "specific authored alibi",
-            testimony: "exactly 3 statements using every required statement ID; each has id, text, press, Defense-Counsel-owned defenseRebuttal, Defense-Counsel-owned defenseObjection, and a materially changed revision. Statement #2 also has contradictionBasis with the exact recordId, a verbatim 3+ word statementClaim excerpt, a verbatim 3+ word recordClaim excerpt, and relationship cannot_both_be_true",
+            testimony: `exactly 3 statements using every required statement ID; each has id, text, press, ${vocabulary.opposingRole}-owned defenseRebuttal, ${vocabulary.opposingRole}-owned defenseObjection, and a materially changed revision. Statement #2 also has contradictionBasis with the exact recordId, a verbatim 3+ word statementClaim excerpt, a verbatim 3+ word recordClaim excerpt, and relationship cannot_both_be_true`,
           } : {
             seatId: requirement.seatId,
             relationship: "complete relationship to the victim",
             alibi: "specific authored alibi",
             roomOpeningExchange: {
-              prosecutionOpening: "one concise in-character Prosecutor line that opens this room interview using only public room and identity context",
-              occupantResponse: "one concise in-character response that welcomes direct questions without volunteering a clue, alibi, accusation, or deduction",
-              prosecutionHandoff: "one concise in-character Prosecutor line that hands control to the normal Talk, Present, and Examine investigation",
+              prosecutionOpening: `one concise in-character ${vocabulary.playerRole} line that opens this room interview using only public room and identity context`,
+              occupantResponse: directedPairContext
+                ? `one concise in-character response that recognizes the familiar ${vocabulary.playerRole} without a self-introduction and welcomes direct questions without volunteering a clue, alibi, accusation, or deduction`
+                : "one concise in-character neutral response that welcomes direct questions without inventing shared history, forcing a self-introduction, or volunteering a clue, alibi, accusation, or deduction",
+              prosecutionHandoff: `one concise in-character ${vocabulary.playerRole} line that hands control to the normal Talk, Present, and Examine investigation`,
             },
-            talkTopics: "1-3 concise non-evidence subjects with only id, short menu label, category (person, general, motive, alibi, or room), subjectId for person/room, an in-character Prosecutor question, and the suspect response. PRISM supplies safe relationship/alibi subjects when fewer than 3 survive. Room subjectId must be an exact setup roomId; person subjectId must be the victim ID or an exact suspect seatId. Never make a Case File evidence/testimony title into a Talk subject.",
+            talkTopics: `1-3 concise non-evidence subjects with only id, short menu label, category (person, general, motive, alibi, or room), subjectId for person/room, an in-character ${vocabulary.playerRole} question, and the suspect response. PRISM supplies safe relationship/alibi subjects when fewer than 3 survive. Room subjectId must be an exact setup roomId; person subjectId must be the victim ID or an exact suspect seatId. Never make a Case File evidence/testimony title into a Talk subject.`,
             presentationGate: requiredPresentationGateRecord
               ? {
                   unlockTopicId: "optional id of one authored Talk topic to reserve as the evidence follow-up. PRISM binds the frozen record and moves the topic to the final position; omit this field if no authored topic fits",
@@ -6959,11 +7895,16 @@ async function authorMysteryV2(args: {
               recordId,
               response: "specific proof-bearing suspect reaction to this exact record; PRISM materializes its public Case File title",
             })),
-            testimony: "exactly 3 statements using every required statement ID; each has id, text, press, Defense-Counsel-owned defenseRebuttal, Defense-Counsel-owned defenseObjection, and a materially changed revision. Statement #2 also has contradictionBasis with the exact recordId, a verbatim 3+ word statementClaim excerpt, a verbatim 3+ word recordClaim excerpt, and relationship cannot_both_be_true",
+            testimony: `exactly 3 statements using every required statement ID; each has id, text, press, ${vocabulary.opposingRole}-owned defenseRebuttal, ${vocabulary.opposingRole}-owned defenseObjection, and a materially changed revision. Statement #2 also has contradictionBasis with the exact recordId, a verbatim 3+ word statementClaim excerpt, a verbatim 3+ word recordClaim excerpt, and relationship cannot_both_be_true`,
           },
         },
         qualityRules: [
           "The second statement must be plainly contradicted by the assigned record: both texts cannot be true under an ordinary literal reading. Shared subject matter, suspicion, or a possible inconsistency is not enough.",
+          directDialoguePair
+            ? directedPairContext
+              ? "For room entry, Talk, Present, and direct Press exchanges, both personas recognize only the supplied explicit profile canon. Keep that chemistry restrained and scene-serving; never make either familiar character introduce themselves to the other."
+              : "No explicit relationship is frozen for this pair. Keep room entry, Talk, Present, and direct Press exchanges socially neutral; do not infer shared history from outside canon or force a self-introduction."
+            : "This legacy draft has no frozen relationship contract. Preserve its existing dialogue without selecting mutable profile canon.",
           "Ground contradictionBasis by copying one short claim verbatim from statement #2 and one short claim verbatim from the supplied record text. The two quoted claims must express the mutually exclusive facts; never quote an ID or invent a fact.",
           "Press answers add context without erasing the proof route.",
           "Revision text materially changes the sworn account.",
@@ -6983,9 +7924,9 @@ async function authorMysteryV2(args: {
           ...(omitInvestigation ? [
             "This compilation omits investigation. Do not write room, venue, investigation, Talk, or Present dialogue.",
           ] : [
-            "roomOpeningExchange is a linear first-entry cutscene, never a choice. Write exactly Prosecution, occupant, Prosecution in that order and keep each line under 45 words.",
+            `roomOpeningExchange is a linear first-entry cutscene, never a choice. Write exactly ${vocabulary.playerSideTitle}, occupant, ${vocabulary.playerSideTitle} in that order and keep each line under 45 words.`,
             "The room opening may use only the public room name, visible atmosphere, and speaker identities. It must not reveal or imply the culprit, motive, method, alibi, timeline, hidden evidence, accusation, proof route, or any fact the player has not discovered.",
-            "Each Talk question is a natural, specific way for the prosecution to ask about its typed person, general, motive, alibi, or room subject and stays under 25 words.",
+            `Each Talk question is a natural, specific way for the ${vocabulary.playerSide} to ask about its typed person, general, motive, alibi, or room subject and stays under 25 words.`,
           "Talk never contains a physical evidence or sworn-testimony record as its subject. A room topic names and references one exact setup roomId.",
           requiredPresentationGateRecord
             ? "You may nominate one authored Talk topic as the pivotal evidence follow-up through presentationGate.unlockTopicId. Do not echo a gate id or record id: PRISM binds the exact frozen record, moves a valid topic to the final position, or supplies a safe follow-up from the required Present response."
@@ -6993,9 +7934,15 @@ async function authorMysteryV2(args: {
           "Do not author repeat responses, stage actions, performance directions, generic Present copy, chapter transitions, or defendant reactions. PRISM owns those presentation-only fallbacks and freezes them around the three room-opening lines.",
           `The investigation happens before court. In Talk and Present responses, never refer to the Court, a courtroom, the bench, a jury, a witness stand, sworn testimony, or 'Your Honor'. Use the room, ${args.config.mansionSnapshot?.layoutV2?.venueProfile?.placeNoun ?? "venue"}, investigation, Case File, and direct questions instead; courtroom language belongs only to trial dialogue.`,
           "Each required Present response addresses only its exact supplied record. PRISM materializes the public Case File title; never name a different record or expose sealed reasoning.",
-          "Write Talk questions only in the frozen Prosecutor persona and Defense rebuttals only in the frozen Defense Counsel persona. The accused is never their own attorney.",
+          `Write Talk questions only in the frozen ${vocabulary.playerRole} persona and rebuttals only in the frozen ${vocabulary.opposingRole} persona. ${vocabulary.stance === "defense" ? "The client never argues their own case." : "The accused is never their own attorney."}`,
           "Keep each Talk response, statement, Press answer, rebuttal, revision, and reaction under 75 words.",
           ]),
+          ...(vocabulary.stance === "defense" ? [
+            `${vocabulary.opposingRole} ${defenseCounsel.name} is prosecuting ${vocabulary.clientName ?? "the client"}; rebuttals and objections defend that case.`,
+            ...(requirement.seatId === vocabulary.clientSeatId ? [
+              "This witness is the Defense's client and is innocent. Statement #2 is an honest mistake the prosecution exploits; its revision must clarify the client's account without confessing.",
+            ] : []),
+          ] : []),
           "Write in this suspect's persona with no placeholders.",
         ],
       },
@@ -7003,7 +7950,10 @@ async function authorMysteryV2(args: {
         section: "suspect_chapter",
         setup,
         caseFoundation: foundation,
-        suspect: requirement,
+        suspect: {
+          ...requirement,
+          ...(directDialoguePair ? { directDialoguePair } : {}),
+        },
         precedingSwornStatements: Object.values(
           args.draft.suspectsBySeatId,
         ).flatMap((entry) =>
@@ -7117,6 +8067,7 @@ async function authorMysteryV2(args: {
             proofRoute: factLedger.proofRoutesBySeat[requirement.seatId],
             relevantFrozenIds: suspectFrozenIds,
           },
+          ...(directDialoguePair ? { directDialoguePair } : {}),
           contradictionContract: {
             version: 1,
             statementId: requirement.requiredStatementIds[1],
@@ -7249,14 +8200,14 @@ async function authorMysteryV2(args: {
       try {
         choices = await generateMysteryAuthoringSectionV2({
           runtime: args.runtime,
-          label: `Prosecution responses for witness ${index + 1}`,
+          label: `${vocabulary.playerSideTitle} responses for witness ${index + 1}`,
           maxTokens: debateMysteryProsecutionChoiceMaxTokensV2({
             suspectCount: 1,
             automatedSpectator,
           }),
           onAttempt: (attempt) => args.onDraft(
             args.draft,
-            `Writing the Case · Prosecution responses ${index + 1} of ${suspectRequirements.length} · attempt ${attempt} of ${DEBATE_MYSTERY_V2_MAX_AUTHOR_ATTEMPTS}`,
+            `Writing the Case · ${vocabulary.playerSideTitle} responses ${index + 1} of ${suspectRequirements.length} · attempt ${attempt} of ${DEBATE_MYSTERY_V2_MAX_AUTHOR_ATTEMPTS}`,
           ),
           onReceipt: (receipt) =>
             recordMysterySectionReceipt(args.draft, sectionKey, receipt),
@@ -7272,6 +8223,9 @@ async function authorMysteryV2(args: {
               identityMirrorHolders: setup.identityMirrorHolders,
               prosecutor: setup.prosecutor,
               defenseCounsel: setup.defenseCounsel,
+              ...(setup.defenseFrame
+                ? { playerStance: "defense" as const, defenseFrame: setup.defenseFrame }
+                : {}),
               suspects: setup.suspects.filter(
                 (suspect) => suspect.seatId === requirement.seatId,
               ),
@@ -7300,8 +8254,8 @@ async function authorMysteryV2(args: {
                     maximumItems: automatedSpectator ? 1 : 4,
                     itemShape: {
                       id: "stable option id",
-                      text: "selected Prosecutor spoken line",
-                      stageAction: "short visual-only Prosecutor beat",
+                      text: `selected ${vocabulary.playerRole} spoken line`,
+                      stageAction: `short visual-only ${vocabulary.playerRole} beat`,
                       reaction: "witness spoken reaction",
                       reactionStageAction: "short visual-only witness beat",
                     },
@@ -7311,12 +8265,12 @@ async function authorMysteryV2(args: {
             },
             qualityRules: [
               automatedSpectator
-                ? "Author exactly one complete response for this automated Spectator prosecution choice."
+                ? `Author exactly one complete response for this automated Spectator ${vocabulary.playerSide} choice.`
                 : "The player chooses the option. Never choose or recommend an option in authored text.",
               "Every returned choice must use the one supplied witnessSeatId.",
-              "Write each option in the frozen Prosecutor persona and keep every nonverbal beat out of spoken text.",
+              `Write each option in the frozen ${vocabulary.playerRole} persona and keep every nonverbal beat out of spoken text.`,
               ...(caseIncludesHomicide ? [] : [
-                `This is a ${args.incidentPlan.primary.title} prosecution, not a homicide. Never mention murder, killing, death, a corpse, a fatal injury, or a murder weapon.`,
+                `This is a ${args.incidentPlan.primary.title} ${vocabulary.playerSide} case, not a homicide. Never mention murder, killing, death, a corpse, a fatal injury, or a murder weapon.`,
               ]),
             ],
           },
@@ -7360,8 +8314,8 @@ async function authorMysteryV2(args: {
       args.onDraft(
         args.draft,
         deterministicProsecutionFallback
-          ? `Writing the Case · Prosecution responses ${index + 1} of ${suspectRequirements.length} recovered from frozen case facts`
-          : `Writing the Case · Prosecution responses ${index + 1} of ${suspectRequirements.length} complete`,
+          ? `Writing the Case · ${vocabulary.playerSideTitle} responses ${index + 1} of ${suspectRequirements.length} recovered from frozen case facts`
+          : `Writing the Case · ${vocabulary.playerSideTitle} responses ${index + 1} of ${suspectRequirements.length} complete`,
       );
     }
     if (!deterministicProsecutionFallback) {
@@ -7394,7 +8348,7 @@ async function authorMysteryV2(args: {
         args.draft.prosecutionChoices = rebuildProsecutionChoices();
         args.onDraft(
           args.draft,
-          `Writing the Case · Prosecution response ${index + 1} repaired`,
+          `Writing the Case · ${vocabulary.playerSideTitle} response ${index + 1} repaired`,
         );
       });
     }
@@ -7493,6 +8447,22 @@ async function authorMysteryV2(args: {
         "A frozen witness proof route disappeared during contradiction repair.",
       );
     }
+    const repairSuspectBot = botById.get(requirement.botId);
+    const repairPairContext = mysteryPersonaDirectedPairContextV1(
+      args.draft.personaPairContext,
+      requirement.botId,
+      prosecutor.id,
+    );
+    const repairDirectDialoguePair =
+      args.draft.personaPairContext && repairSuspectBot
+        ? mysteryPersonaPairAuthoringBriefV1({
+            context: repairPairContext,
+            contextSourceHash: args.draft.personaPairContext.sourceHash,
+            prosecutor,
+            suspect: repairSuspectBot,
+            voiceCardsByBotId,
+          })
+        : null;
     const requiredPresentationGateRecord =
       requirement.requiredPresentationGateRecordId
         ? {
@@ -7536,6 +8506,13 @@ async function authorMysteryV2(args: {
           })),
         ],
         knowledge: suspectKnowledgeBySeat[requirement.seatId]!,
+        familiarPair: Boolean(
+          mysteryPersonaDirectedPairContextV1(
+            args.draft.personaPairContext,
+            requirement.botId,
+            prosecutor.id,
+          ),
+        ),
         openingForbiddenFacts: [
           (args.draft.foundation ?? validatedFoundation).motive,
           (args.draft.foundation ?? validatedFoundation).method,
@@ -7618,6 +8595,9 @@ async function authorMysteryV2(args: {
               "The repaired statement #2 and supplied record must be impossible to reconcile under an ordinary literal reading.",
           },
           existingSection: { suspect: existing },
+          ...(repairDirectDialoguePair
+            ? { directDialoguePair: repairDirectDialoguePair }
+            : {}),
           semanticFinding: {
             verdict: evaluation.verdict,
             rationale: evaluation.rationale,
@@ -8001,8 +8981,11 @@ function buildMysteryV2Graph(args: {
   authored: AuthoredMysteryV2;
   eyewitnessSeatId: string | null;
   alibiSupportDiscoveryIds: string[];
+  /** Defense stance only; null for prosecution cases. */
+  defenseFrame: MysteryDefenseFrameV2 | null;
   contradictionBySeat: ReadonlyMap<string, DebateMysteryRecordReferenceV2>;
   personaVoiceCardsByBotId?: Record<string, MysteryV2VoiceCard>;
+  personaPairContext?: MysteryPersonaPairContextMapV1;
   authoringRecoveryBySection?: Record<string, MysteryV2SectionRecoveryReceipt>;
   evidencePropBindingsById?: Record<string, EvidencePropBindingV1>;
 }): { graph: DebateMysteryDialogueGraphV2; privateCase: PrivateMysteryCaseV2; publicState: DebateWhodunnitFormatStateV2 } {
@@ -8130,6 +9113,7 @@ function buildMysteryV2Graph(args: {
     roomName: string;
     speakerBotId: string;
     speakerName: string;
+    familiar: boolean;
   }): DebateMysteryStageCueV1 => {
     const roomFactId = `room:${options.roomId}`;
     const speakerFactId = `speaker:${options.speakerBotId}`;
@@ -8138,7 +9122,9 @@ function buildMysteryV2Graph(args: {
       id: `stage-cue:room-introduction:${options.roomId}`,
       objective:
         "Invite the investigator to question this character without volunteering a clue or changing the case record.",
-      emotionalState: "Guarded, observant, and willing to engage without overplaying suspicion.",
+      emotionalState: options.familiar
+        ? "Recognizes the investigator personally while staying guarded, observant, and focused on the immediate inquiry."
+        : "Guarded, observant, and willing to engage without inventing familiarity or overplaying suspicion.",
       knownFactIds: [roomFactId, speakerFactId],
       allowedFacts: [
         {
@@ -8151,7 +9137,7 @@ function buildMysteryV2Graph(args: {
           id: speakerFactId,
           statement: `The speaker is ${options.speakerName}.`,
           mentionFragments: [options.speakerName],
-          required: true,
+          required: false,
         },
       ],
       requiredBeats: [
@@ -8193,9 +9179,11 @@ function buildMysteryV2Graph(args: {
       ],
       contradictionTrigger: null,
       exitCondition: "Return control after one concise invitation to investigate.",
-      deterministicFallbackText:
-        `I am ${options.speakerName}. Take a careful look around ${options.roomName}. ` +
-        "Ask what you came to ask; I will answer only what I know.",
+      deterministicFallbackText: options.familiar
+        ? `You know me. Take a careful look around ${options.roomName}. ` +
+          "Ask what you came to ask; I will answer only what I know."
+        : `Take a careful look around ${options.roomName}. ` +
+          "Ask what you came to ask; I will answer only what I know.",
       maxCharacters: 420,
     };
   };
@@ -8406,16 +9394,38 @@ function buildMysteryV2Graph(args: {
       if (!scaffoldRoom || !suspectBotId || !suspectName) {
         throw new Error(`Room introduction ${suspectRoomId} is missing its frozen performance identity.`);
       }
+      const roomPairContext = mysteryPersonaDirectedPairContextV1(
+        args.personaPairContext,
+        suspectBotId,
+        args.config.prosecutorBotId,
+      );
       const stageCue = roomIntroductionStageCueV1({
         roomId: suspectRoomId,
         roomName: roomPresentation?.name ?? roomTemplate?.name ?? venueRoom?.name ?? scaffoldRoom.templateId,
         speakerBotId: suspectBotId,
         speakerName: suspectName,
+        familiar: Boolean(roomPairContext),
       });
-      const safeOccupantOpening = validateDebateMysteryStageCuePerformanceV1({
+      const occupantOpeningValidation =
+        validateDebateMysteryStageCuePerformanceV1({
         cue: stageCue,
         text: suspect.roomIntroduction,
       });
+      const safeOccupantOpening =
+        roomPairContext &&
+          mysteryPersonaLineSelfIntroducesV1(
+            suspect.roomIntroduction,
+            suspectName,
+          )
+          ? {
+              ...occupantOpeningValidation,
+              valid: false,
+              errors: [
+                ...occupantOpeningValidation.errors,
+                "A familiar character formally reintroduced themselves.",
+              ],
+            }
+          : occupantOpeningValidation;
       const prosecutionCue = (options: {
         id: "opening" | "handoff";
         text: string;
@@ -8478,6 +9488,7 @@ function buildMysteryV2Graph(args: {
           : stageCue.deterministicFallbackText,
         stageAction: suspect.roomIntroductionStageAction,
         speakerSeatId: suspect.seatId,
+        intendedRecipientBotId: args.config.prosecutorBotId,
         locationId: suspectRoomId,
         performance: suspect.roomIntroductionPerformance,
         stageCue,
@@ -8717,7 +9728,16 @@ function buildMysteryV2Graph(args: {
         id: `statement-node-${authoredStatement.id}`,
         kind: "testimony_statement",
         scene: "court",
-        text: authoredStatement.text,
+        // An author who echoed the contract itself swears the denial in plain words.
+        text: statementIndex === 1 && debateMysteryStatementIsContractEchoV2(authoredStatement.text)
+          ? debateMysteryDeterministicDenialTextV2({
+              recordTitle: assignedProof.kind === "evidence"
+                ? args.authored.evidence.find((item) => item.id === assignedProof.id)?.title ?? "evidence"
+                : "sworn testimony",
+              // The record's exact wording stays out of witness recall.
+              recordClaim: null,
+            })
+          : authoredStatement.text,
         stageAction: authoredStatement.stageAction,
         speakerSeatId: suspect.seatId,
         performance: authoredStatement.performance,
@@ -8730,6 +9750,7 @@ function buildMysteryV2Graph(args: {
         text: authoredStatement.press,
         stageAction: authoredStatement.pressStageAction,
         speakerSeatId: suspect.seatId,
+        intendedRecipientBotId: args.config.prosecutorBotId,
         requirements: chapterRequirement,
       });
       const rebuttal = addLineNode({
@@ -8809,7 +9830,8 @@ function buildMysteryV2Graph(args: {
       ordinal: index + 1,
       pivotal:
         suspect.seatId === args.scaffold.culpritSeatId ||
-        suspect.seatId === args.eyewitnessSeatId,
+        suspect.seatId === args.eyewitnessSeatId ||
+        suspect.seatId === args.defenseFrame?.defendantSeatId,
       recall: suspect.testimony.length > 4,
       checkpointNodeId: checkpoint.id,
       initialStatementIds: suspect.testimony.map((statement) => statement.id),
@@ -8872,7 +9894,11 @@ function buildMysteryV2Graph(args: {
     id: "prosecutor-strategy-default",
     kind: "prosecutor_strategy",
     scene: omitInvestigation ? "court" : "investigation",
-    text: args.authored.prosecutorInternalReasoning,
+    // Private reasoning is spoken by the Prosecutor, never addressed to them.
+    text: stripDebateMysterySelfAddressV2(
+      args.authored.prosecutorInternalReasoning,
+      nameByBotId.get(args.config.prosecutorBotId) ?? null,
+    ),
     speakerKind: "player",
     speakerBotId: args.config.prosecutorBotId,
   });
@@ -8926,9 +9952,13 @@ function buildMysteryV2Graph(args: {
         .map((outcome) => outcome.regionId),
     ])),
     prosecutorBotId: args.config.prosecutorBotId,
+    directRecipientContractVersion: args.personaPairContext ? 1 : null,
     rivalDefenseBotId: args.config.rivalDefenseBotId,
     eyewitnessSeatId: args.eyewitnessSeatId,
     accusedAlibiSupportDiscoveryIds: args.alibiSupportDiscoveryIds,
+    defenseFrame: args.defenseFrame
+      ? { ...args.defenseFrame, investigation: !omitInvestigation }
+      : null,
   });
   if (!validation.valid) throw new Error(validation.errors.join("\n"));
   const suspectKnowledgeBySeat = resolveMysterySuspectKnowledgeV2({
@@ -8943,7 +9973,15 @@ function buildMysteryV2Graph(args: {
     version: 2,
     config: args.config,
     incidentPlan: args.incidentPlan,
-    publicCharge: mysteryPublicChargeV1(args.incidentPlan),
+    publicCharge: mysteryPublicChargeV1(args.incidentPlan, {
+      defendantSeatId: args.defenseFrame?.defendantSeatId ?? null,
+    }),
+    ...(args.defenseFrame
+      ? {
+          defenseFrame: args.defenseFrame,
+          prosecutionCaseSummary: args.authored.prosecutionCaseSummary ?? null,
+        }
+      : {}),
     sealedResponsibleSeatIds: [...args.incidentPlan.primary.responsibleSeatIds],
     sealedCulpritSeatId: args.scaffold.culpritSeatId,
     sealedAccompliceSeatId: args.scaffold.accompliceSeatId,
@@ -9012,6 +10050,16 @@ function buildMysteryV2Graph(args: {
         cues: [...card.cues],
       }];
     })),
+    ...(args.personaPairContext
+      ? {
+          personaPairContext: structuredClone(
+            validateMysteryPersonaPairContextMapV1(
+              args.personaPairContext,
+              new Set(args.bots.map((bot) => bot.id)),
+            ),
+          ),
+        }
+      : {}),
     authoringRecoveryBySection: Object.fromEntries(
       Object.entries(args.authoringRecoveryBySection ?? {}).map(
         ([sectionKey, receipt]) => [sectionKey, { ...receipt }],
@@ -9024,6 +10072,7 @@ function buildMysteryV2Graph(args: {
     audioPreparationMode: "lazy-on-demand-v1",
     graphValidation: validation,
     playerRoleContractVersion: 1,
+    playerStanceContractVersion: 1,
     investigationProgressionContractVersion: 2,
     contradictionSemanticContractVersion: 1,
   };
@@ -9035,7 +10084,12 @@ function buildMysteryV2Graph(args: {
   const publicState: DebateWhodunnitFormatStateV2 = {
     ...initialV2State(args.config, "pending", now, args.mansionExterior ?? null),
     caseTitle: args.authored.title,
-    caseCharge: mysteryPublicChargeV1(args.incidentPlan),
+    caseCharge: mysteryPublicChargeV1(args.incidentPlan, {
+      defendantSeatId: args.defenseFrame?.defendantSeatId ?? null,
+    }),
+    ...(args.defenseFrame
+      ? { prosecutionCaseSummary: args.authored.prosecutionCaseSummary ?? null }
+      : {}),
     victim: { id: args.scaffold.victim.id, name: args.authored.victimName },
     suspects: args.scaffold.suspects.map(({ roomId: _roomId, ...suspect }) => ({ ...suspect, roomId: _roomId })),
     rooms: omitInvestigation ? [] : args.scaffold.rooms.map((room) => {
@@ -9088,6 +10142,10 @@ function buildMysteryV2Graph(args: {
           examined: false,
           unlocked: true,
         })),
+        pointsOfInterest: debateMysteryRoomPointsOfInterestV2({
+          regions: presentationRegions,
+          hotspotIds: [...activeRegionIds],
+        }),
       };
     }),
     spatialProjection: omitInvestigation
@@ -9152,10 +10210,26 @@ function validateMysteryV2CheckpointGraph(
     personIds: checkpoint.privateCase.investigationPersonIds,
     hotspotIdsByRoom: checkpoint.privateCase.investigationHotspotIdsByRoom,
     prosecutorBotId: checkpoint.privateCase.config.prosecutorBotId,
+    directRecipientContractVersion: checkpoint.privateCase.personaPairContext
+      ? 1
+      : null,
     rivalDefenseBotId: checkpoint.privateCase.config.rivalDefenseBotId,
     eyewitnessSeatId: checkpoint.privateCase.eyewitnessSeatId,
     accusedAlibiSupportDiscoveryIds: checkpoint.privateCase.accusedAlibiSupportDiscoveryIds,
+    defenseFrame: mysteryDefenseFrameValidationV2(checkpoint.privateCase),
   });
+}
+
+function mysteryV2PrivateCaseCastBotIds(
+  privateCase: PrivateMysteryCaseV2,
+): Set<string> {
+  return new Set([
+    ...privateCase.config.suspectBotIds,
+    privateCase.config.prosecutorBotId,
+    privateCase.config.rivalDefenseBotId,
+    privateCase.config.judgeBotId,
+    ...privateCase.config.jurorBotIds,
+  ]);
 }
 
 function storeCompiledCaseV2(
@@ -9165,6 +10239,12 @@ function storeCompiledCaseV2(
   privateCase: PrivateMysteryCaseV2,
   graph: DebateMysteryDialogueGraphV2,
 ): void {
+  if (privateCase.personaPairContext) {
+    validateMysteryPersonaPairContextMapV1(
+      privateCase.personaPairContext,
+      mysteryV2PrivateCaseCastBotIds(privateCase),
+    );
+  }
   const now = new Date().toISOString();
   const privateJson = JSON.stringify(privateCase);
   const graphJson = JSON.stringify(graph);
@@ -9222,8 +10302,15 @@ export function getDebateMysteryCaseV2(
   sessionId: string,
 ): { privateCase: PrivateMysteryCaseV2; graph: DebateMysteryDialogueGraphV2 } {
   const row = mysteryV2CaseRow(db, userId, sessionId);
+  const privateCase = JSON.parse(row.private_case_json) as PrivateMysteryCaseV2;
+  if (privateCase.personaPairContext) {
+    validateMysteryPersonaPairContextMapV1(
+      privateCase.personaPairContext,
+      mysteryV2PrivateCaseCastBotIds(privateCase),
+    );
+  }
   return {
-    privateCase: JSON.parse(row.private_case_json) as PrivateMysteryCaseV2,
+    privateCase,
     graph: JSON.parse(row.dialogue_graph_json) as DebateMysteryDialogueGraphV2,
   };
 }
@@ -9508,6 +10595,15 @@ function migrateDebateMysteryPlayerRoleContractV2(args: {
   delete rawPublicConfig.prosecutorPartnerBotId;
   rawPrivateConfig.prosecutorBotId = prosecutorBotId;
   rawPublicConfig.prosecutorBotId = prosecutorBotId;
+  // Cases frozen before the stance flag are prosecution cases. The private
+  // config is authoritative; the public projection must agree with it.
+  const playerStance = debateMysteryPlayerStanceV2(rawPrivateConfig);
+  if (
+    rawPrivateConfig.playerStance !== playerStance ||
+    rawPublicConfig.playerStance !== playerStance
+  ) changed = true;
+  rawPrivateConfig.playerStance = playerStance;
+  rawPublicConfig.playerStance = playerStance;
 
   const botNameById = new Map(args.botRows.map((bot) => [bot.id, bot.name]));
   const botRowById = new Map(args.botRows.map((bot) => [bot.id, bot]));
@@ -10180,6 +11276,48 @@ function migrateDebateMysteryPlayerRoleContractV2(args: {
       changed = true;
     }
   }
+  // The Prosecutor's private reasoning never addresses the Prosecutor by name;
+  // an authored vocative was a note to the actor.
+  const prosecutorName = args.botRows.find((bot) => bot.id === prosecutorBotId)?.name ?? null;
+  const strategyLineText = strategyNode.lineId ? lineById().get(strategyNode.lineId) : null;
+  if (strategyLineText && prosecutorName) {
+    const spoken = stripDebateMysterySelfAddressV2(strategyLineText.spokenText, prosecutorName);
+    if (spoken !== strategyLineText.spokenText) {
+      strategyLineText.spokenText = spoken;
+      strategyLineText.visibleText = stripDebateMysterySelfAddressV2(strategyLineText.visibleText, prosecutorName);
+      changed = true;
+    }
+  }
+  // A contradiction statement frozen as the retired contract phrasing is sworn
+  // again in plain words; its assigned record and the sealed check are untouched.
+  const recordTitleByKey = new Map(privateCase.recordItems.map((item) => [mysteryRecordKey(item.reference), item.title]));
+  for (const chapter of graph.witnessChapters) {
+    for (const version of chapter.statementVersions) {
+      if (version.version !== 1 || version.correctPresentations.length === 0) continue;
+      const statementLine = lineById().get(version.lineId);
+      if (!statementLine || !debateMysteryStatementIsContractEchoV2(statementLine.spokenText)) continue;
+      const proof = version.correctPresentations[0]!;
+      const sworn = debateMysteryDeterministicDenialTextV2({
+        recordTitle: recordTitleByKey.get(mysteryRecordKey(proof)) ??
+          (proof.kind === "evidence" ? "evidence" : "sworn testimony"),
+        recordClaim: null,
+      });
+      statementLine.spokenText = sworn;
+      statementLine.visibleText = sworn;
+      changed = true;
+    }
+  }
+  if (publicState.court) {
+    publicState.court = {
+      ...publicState.court,
+      statements: publicState.court.statements.map((statement) => {
+        const line = lineById().get(statement.lineId);
+        return line
+          ? { ...statement, visibleText: line.visibleText, stageActionText: line.stageActionText }
+          : statement;
+      }),
+    };
+  }
   privateCase.prosecutorStrategyNodeId = strategyNode.id;
   graph.prosecutorStrategyNodeId = strategyNode.id;
   if (privateCase.partnerConsultNodeId) changed = true;
@@ -10401,14 +11539,34 @@ function migrateDebateMysteryPlayerRoleContractV2(args: {
     personIds: privateCase.investigationPersonIds,
     hotspotIdsByRoom: privateCase.investigationHotspotIdsByRoom,
     prosecutorBotId,
+    directRecipientContractVersion: privateCase.personaPairContext ? 1 : null,
     rivalDefenseBotId,
     eyewitnessSeatId: privateCase.eyewitnessSeatId,
     accusedAlibiSupportDiscoveryIds: privateCase.accusedAlibiSupportDiscoveryIds,
+    defenseFrame: mysteryDefenseFrameValidationV2(privateCase),
   });
   if (!validation.valid) throw new Error(validation.errors.join("\n"));
   privateCase.graphValidation = validation;
   if (privateCase.playerRoleContractVersion !== 1) changed = true;
   privateCase.playerRoleContractVersion = 1;
+  if (privateCase.playerStanceContractVersion !== 1) changed = true;
+  privateCase.playerStanceContractVersion = 1;
+  if (privateCase.defenseFrame) {
+    const responsible = new Set(privateMysteryResponsibleSeatIdsV2(privateCase));
+    if (responsible.has(privateCase.defenseFrame.defendantSeatId)) {
+      throw new Error("The frozen Defense client cannot be a responsible party.");
+    }
+    if (
+      publicState.caseCharge &&
+      publicState.caseCharge.defendantSeatId !== privateCase.defenseFrame.defendantSeatId
+    ) {
+      publicState.caseCharge = {
+        ...publicState.caseCharge,
+        defendantSeatId: privateCase.defenseFrame.defendantSeatId,
+      };
+      changed = true;
+    }
+  }
   if (privateCase.investigationProgressionContractVersion !== 2) changed = true;
   privateCase.investigationProgressionContractVersion = 2;
 
@@ -10448,7 +11606,7 @@ function migrateDebateMysteryPlayerRoleContractV2(args: {
 
 function mysteryBotAudioVoiceProfileV2(
   bot: Pick<MysteryV2BotRow, "authored_audio_voice_profile" | "audio_voice_profile_override">,
-): BotAudioVoiceProfileV1 {
+): BotAudioVoiceProfileV2 {
   return normalizeBotAudioVoiceProfileV1(
     parseStoredBotAudioVoiceProfileV1(
       bot.audio_voice_profile_override ?? bot.authored_audio_voice_profile,
@@ -10488,6 +11646,15 @@ function frozenAudioProfileForLineV2(args: {
   allowFrozenSnapshotRepair?: boolean;
 }): BotAudioVoiceProfileV1 {
   const expectedHash = args.frozenVoiceProfileHash ?? null;
+  const liveBot = args.line.speakerBotId
+    ? args.botById.get(args.line.speakerBotId)
+    : null;
+  // A case whose voices are synthesized as heard follows the Library for a line that
+  // has not sounded yet, so a voice picked in the Avatar Studio reaches the next line.
+  // A line with verified audio keeps the profile its clip was made with.
+  if (!expectedHash && liveBot && args.privateCase.audioPreparationMode === "lazy-on-demand-v1") {
+    return mysteryBotAudioVoiceProfileV2(liveBot);
+  }
   const frozenPrivateProfile = args.line.speakerBotId
     ? args.privateCase.audioVoiceProfilesByBotId?.[args.line.speakerBotId]
     : null;
@@ -10515,9 +11682,6 @@ function frozenAudioProfileForLineV2(args: {
     return profile;
   }
 
-  const liveBot = args.line.speakerBotId
-    ? args.botById.get(args.line.speakerBotId)
-    : null;
   const profile = liveBot
     ? mysteryBotAudioVoiceProfileV2(liveBot)
     : args.prismVoiceProfile;
@@ -11048,9 +12212,11 @@ export function playDebateMysteryV2Again(
       personIds: privateCase.investigationPersonIds,
       hotspotIdsByRoom: privateCase.investigationHotspotIdsByRoom,
       prosecutorBotId: privateCase.config.prosecutorBotId,
+      directRecipientContractVersion: privateCase.personaPairContext ? 1 : null,
       rivalDefenseBotId: privateCase.config.rivalDefenseBotId,
       eyewitnessSeatId: privateCase.eyewitnessSeatId,
       accusedAlibiSupportDiscoveryIds: privateCase.accusedAlibiSupportDiscoveryIds,
+      defenseFrame: mysteryDefenseFrameValidationV2(privateCase),
     });
     if (!graphValidation.valid) {
       throw new HttpError(409, "The compiled Whodunnit V2 dialogue graph failed its integrity check.");
@@ -11365,6 +12531,15 @@ function debateMysteryPlayContractHashV2(args: {
     playerRoleContractVersion: args.privateCase.playerRoleContractVersion ?? 0,
     prosecutorBotId: args.privateCase.config.prosecutorBotId,
     rivalDefenseBotId: args.privateCase.config.rivalDefenseBotId,
+    // Only Defense cases contribute stance material, so every legacy
+    // prosecution hash stays byte-identical.
+    ...(debateMysteryPlayerStanceV2(args.privateCase.config) === "defense"
+      ? {
+          playerStance: "defense",
+          playerStanceContractVersion: args.privateCase.playerStanceContractVersion ?? 0,
+          defenseFrame: args.privateCase.defenseFrame ?? null,
+        }
+      : {}),
     graph: args.graph,
     lineContracts,
   }));
@@ -11865,6 +13040,77 @@ function deterministicEyewitnessSeat(
   return suspects.find((suspect) => suspect.seatId !== culpritSeatId)?.seatId ?? null;
 }
 
+/**
+ * Defense stance: pins one innocent suspect as the player's client. The draw
+ * uses its own derived stream so existing seeds never re-roll, and prefers the
+ * innocent whose room holds the case's red-herring record so the surface case
+ * has a physical anchor. Two examination hotspots away from the incident scene
+ * and the client's room become the client's alibi supports.
+ */
+function deterministicDefenseClientV2(args: {
+  caseSeed: string;
+  scaffold: ReturnType<typeof compileDeterministicDebateMystery>;
+  responsibleSeatIds: readonly string[];
+  eyewitnessSeatId: string | null;
+  discoverableEvidenceIds: ReadonlySet<string>;
+  investigation: boolean;
+}): MysteryDefenseFrameV2 {
+  const responsible = new Set(args.responsibleSeatIds);
+  const innocents = args.scaffold.suspects.filter((suspect) => !responsible.has(suspect.seatId));
+  const withoutEyewitness = innocents.filter((suspect) => suspect.seatId !== args.eyewitnessSeatId);
+  const pool = (withoutEyewitness.length ? withoutEyewitness : innocents)
+    .slice()
+    .sort((a, b) => a.seatId.localeCompare(b.seatId));
+  if (!pool.length) throw new Error("The frozen Defense case has no innocent suspect to defend.");
+  const frameCandidates = args.scaffold.evidence
+    .filter((item) =>
+      item.relation === "unrelated" &&
+      (!args.investigation || args.discoverableEvidenceIds.has(item.id)))
+    .sort((a, b) => a.id.localeCompare(b.id));
+  const topFrame = frameCandidates[0] ?? null;
+  const score = (suspect: { roomId: string }): number =>
+    topFrame && topFrame.roomId === suspect.roomId
+      ? 2
+      : frameCandidates.some((item) => item.roomId === suspect.roomId)
+        ? 1
+        : 0;
+  const rotation = Number.parseInt(sha256(`${args.caseSeed}:defendant`).slice(0, 8), 16) % pool.length;
+  const rotated = [...pool.slice(rotation), ...pool.slice(0, rotation)];
+  const best = Math.max(...rotated.map(score));
+  const client = rotated.find((suspect) => score(suspect) === best)!;
+  const frame = frameCandidates.find((item) => item.roomId === client.roomId) ?? topFrame;
+  const regions = args.scaffold.activeRegions;
+  const preferred = regions.filter((region) =>
+    region.roomId !== args.scaffold.crimeSceneRoomId && region.roomId !== client.roomId);
+  const supports = (preferred.length >= 2 ? preferred : regions)
+    .slice(0, 2)
+    .map((region) => `hotspot:${region.roomId}:${region.regionId}`);
+  if (args.investigation && supports.length < 2) {
+    throw new Error("The frozen Defense case cannot support two independent alibi discoveries.");
+  }
+  return {
+    version: 1,
+    defendantSeatId: client.seatId,
+    frameEvidenceId: frame?.id ?? null,
+    alibiSupportDiscoveryIds: args.investigation ? supports : [],
+  };
+}
+
+/** Validator input for a stored Defense frame; null for prosecution and legacy cases. */
+function mysteryDefenseFrameValidationV2(
+  privateCase: Pick<PrivateMysteryCaseV2, "config" | "defenseFrame">,
+): DebateMysteryDefenseFrameValidationV2 | null {
+  if (!privateCase.defenseFrame) return null;
+  return {
+    defendantSeatId: privateCase.defenseFrame.defendantSeatId,
+    frameEvidenceId: privateCase.defenseFrame.frameEvidenceId,
+    alibiSupportDiscoveryIds: privateCase.defenseFrame.alibiSupportDiscoveryIds,
+    investigation: !mysteryCompilationOmitsInvestigationV2(
+      resolveMysteryCompilationScopeV2(privateCase.config),
+    ),
+  };
+}
+
 export function debateMysteryRoomUsesBundledHotspotGeometryV2(args: {
   templateId: string;
   imageId: string | null;
@@ -12245,6 +13491,18 @@ export async function runDebateMysteryCompilationV2(
           : scaffold.activeRegions.flatMap((outcome) =>
               outcome.evidenceId ? [outcome.evidenceId] : []),
       );
+      const defenseFrame = debateMysteryPlayerStanceV2(config) === "defense"
+        ? deterministicDefenseClientV2({
+            caseSeed: scaffold.caseSeed,
+            scaffold,
+            responsibleSeatIds: boundIncidentPlan.primary.responsibleSeatIds,
+            eyewitnessSeatId,
+            discoverableEvidenceIds,
+            investigation: !mysteryCompilationOmitsInvestigationV2(
+              resolveMysteryCompilationScopeV2(config),
+            ),
+          })
+        : null;
       const evidenceRefs = scaffold.evidence
         .filter((evidence) => discoverableEvidenceIds.has(evidence.id))
         .map((evidence) => ({ kind: "evidence" as const, id: evidence.id }));
@@ -12268,6 +13526,7 @@ export async function runDebateMysteryCompilationV2(
         powerPlan: session.powerPlan,
         eyewitnessSeatId,
         examinationIds,
+        defenseFrame,
         requiredContradictionBySeat: contradictionBySeat,
         evidencePropBindingsById,
         draft: authoringDraft,
@@ -12294,8 +13553,10 @@ export async function runDebateMysteryCompilationV2(
         authored,
         eyewitnessSeatId,
         alibiSupportDiscoveryIds,
+        defenseFrame,
         contradictionBySeat,
         personaVoiceCardsByBotId: authoringDraft.contextCapsule?.voiceCardsByBotId,
+        personaPairContext: authoringDraft.personaPairContext ?? undefined,
         authoringRecoveryBySection: authoringDraft.recoveryBySection,
         evidencePropBindingsById,
       });
@@ -13148,7 +14409,9 @@ export function getDebateMysterySpokenPerformanceV2(
     line,
     privateCase,
     session,
-    botById: new Map(),
+    botById: new Map(
+      line.speakerBotId ? botRows(db, userId, [line.speakerBotId]).map((bot) => [bot.id, bot]) : [],
+    ),
     prismVoiceProfile: DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
     frozenVoiceProfileHash: loadAudioManifest(db, userId, sessionId)?.entries
       .find((entry) => entry.lineId === lineId)?.voiceProfileHash,
@@ -13157,6 +14420,87 @@ export function getDebateMysterySpokenPerformanceV2(
     sessionId, lineId, spokenText: line.spokenText, voiceProfile,
   });
   return { lineId, cacheKey, speakerBotId: line.speakerBotId!, spokenText: line.spokenText, voiceProfile };
+}
+
+/** Gives a text case its voices after the fact. A case forged with Voices off
+ * carries a "silent" manifest that preparation never touches; this rewrites it
+ * as an empty, complete lazy manifest so each spoken line is synthesized the
+ * first time it is heard. Case facts, the graph, and the record are untouched. */
+export function enableDebateMysteryVoicesV2(
+  db: DatabaseSync,
+  userId: string,
+  sessionId: string,
+): DebateSessionV1 {
+  const session = getDebateSession(db, userId, sessionId);
+  if (session.formatState.format !== "whodunnit" || session.formatState.version !== 2) {
+    throw new HttpError(409, "Only a Whodunnit case can enable voices.");
+  }
+  if (session.status === "cancelled" || session.status === "failed") {
+    throw new HttpError(409, "This case is no longer playable.");
+  }
+  if (session.formatState.voicesEnabled) return session;
+  const { privateCase, graph } = getDebateMysteryCaseV2(db, userId, sessionId);
+  if (privateCase.audioPreparationMode !== "lazy-on-demand-v1") {
+    throw new HttpError(409, "This case's voices were frozen as a fixed pack and cannot be enabled later.");
+  }
+  const now = new Date().toISOString();
+  const existing = loadAudioManifest(db, userId, sessionId);
+  storeAudioManifest(db, userId, sessionId, {
+    version: 1,
+    preparationMode: "lazy-on-demand-v1",
+    caseId: sessionId,
+    caseHash: sha256(JSON.stringify(privateCase)),
+    scriptHash: mysteryAudioScriptHashV2(graph, privateCase),
+    dialogueGraphHash: sha256(JSON.stringify(graph)),
+    engine: existing?.engine ?? "prism-instant-local",
+    model: existing?.model ?? PRISM_INSTANT_VOICE_MODEL_ID,
+    modelVersion: existing?.modelVersion ?? "q8-pinned-1",
+    entries: [],
+    complete: true,
+    completedAt: now,
+    verifiedAt: now,
+  }, "complete");
+  const state = structuredClone(session.formatState);
+  state.voicesEnabled = true;
+  state.audioReady = true;
+  state.localAudioFailure = null;
+  state.readiness = {
+    ...state.readiness,
+    spoilerSafeMessage: "The frozen local case pack is ready",
+    checkedAt: now,
+  };
+  return persistV2Session(db, userId, session, state);
+}
+
+const mysteryLineAudioPreparationsInFlight = new Map<string, Promise<void>>();
+
+/** Prepares exactly one transcript line's local clip on demand. A line the
+ * player is about to hear must never fall silent because an earlier attempt
+ * failed or the case predates lazy preparation; only lines already in the
+ * spoken transcript are eligible, so nothing unheard is ever synthesized. */
+export async function prepareDebateMysteryLineAudioV2(
+  db: DatabaseSync,
+  userId: string,
+  sessionId: string,
+  lineId: string,
+): Promise<void> {
+  const key = `${userId}:${sessionId}:${lineId}`;
+  const inFlight = mysteryLineAudioPreparationsInFlight.get(key);
+  if (inFlight) return inFlight;
+  const work = (async () => {
+    const session = getDebateSession(db, userId, sessionId);
+    if (session.formatState.format !== "whodunnit" || session.formatState.version !== 2) return;
+    const spoken = session.formatState.dialogueHistory.some((entry) =>
+      entry.lineId === lineId && entry.delivery !== "text_only");
+    if (!spoken) return;
+    await prepareLazyMysteryTranscriptAudioV2({ db, userId, session, lineIds: [lineId] });
+  })().finally(() => {
+    if (mysteryLineAudioPreparationsInFlight.get(key) === work) {
+      mysteryLineAudioPreparationsInFlight.delete(key);
+    }
+  });
+  mysteryLineAudioPreparationsInFlight.set(key, work);
+  return work;
 }
 
 export function getDebateMysteryAudioClipV2(
@@ -13235,6 +14579,8 @@ export function cleanupUnreferencedDebateMysteryAudioV2(
     try {
       const absolutePath = resolveAbsoluteUnderDataRoot(candidate.clip_path);
       if (existsSync(absolutePath)) unlinkSync(absolutePath);
+      // A Premium take keeps its character alignment beside the clip.
+      if (existsSync(`${absolutePath}.alignment.json`)) unlinkSync(`${absolutePath}.alignment.json`);
     } catch {
       // The database no longer references this file; a later storage sweep can reclaim it.
     }
@@ -13468,6 +14814,12 @@ export function importDebateMysteryV2BackupV1(
     importedFamilyRuns.add(familyRunKey);
     const privateCase = parseJson(mystery.privateCaseJson, "Whodunnit V2 private case") as PrivateMysteryCaseV2;
     const graph = parseJson(mystery.dialogueGraphJson, "Whodunnit V2 dialogue graph") as DebateMysteryDialogueGraphV2;
+    if (privateCase.personaPairContext) {
+      validateMysteryPersonaPairContextMapV1(
+        privateCase.personaPairContext,
+        mysteryV2PrivateCaseCastBotIds(privateCase),
+      );
+    }
     parseJson(mystery.validationJson, "Whodunnit V2 validation");
     const graphValidation = validateDebateMysteryDialogueGraphV2({
       graph,
@@ -13478,9 +14830,11 @@ export function importDebateMysteryV2BackupV1(
       personIds: privateCase.investigationPersonIds,
       hotspotIdsByRoom: privateCase.investigationHotspotIdsByRoom,
       prosecutorBotId: privateCase.config.prosecutorBotId,
+      directRecipientContractVersion: privateCase.personaPairContext ? 1 : null,
       rivalDefenseBotId: privateCase.config.rivalDefenseBotId,
       eyewitnessSeatId: privateCase.eyewitnessSeatId,
       accusedAlibiSupportDiscoveryIds: privateCase.accusedAlibiSupportDiscoveryIds,
+      defenseFrame: mysteryDefenseFrameValidationV2(privateCase),
     });
     if (!graphValidation.valid) {
       throw new Error("Account backup contains an invalid Whodunnit V2 dialogue graph.");
@@ -13510,7 +14864,22 @@ export function importDebateMysteryV2BackupV1(
       !Number.isInteger(job.requiredAudioCount) || job.requiredAudioCount < 0
     ) throw new Error("Account backup contains an invalid Whodunnit V2 compilation job.");
     parseJson(job.inputJson, "Whodunnit V2 compilation input");
-    if (job.checkpointJson) parseJson(job.checkpointJson, "Whodunnit V2 checkpoint");
+    if (job.checkpointJson) {
+      const checkpoint = parseJson(
+        job.checkpointJson,
+        "Whodunnit V2 checkpoint",
+      );
+      if (isMysteryV2AuthoringCheckpoint(checkpoint)) {
+        normalizeMysteryV2AuthoringCheckpoint(checkpoint);
+      } else if (isMysteryV2CompiledCheckpoint(checkpoint)) {
+        if (checkpoint.privateCase.personaPairContext) {
+          validateMysteryPersonaPairContextMapV1(
+            checkpoint.privateCase.personaPairContext,
+            mysteryV2PrivateCaseCastBotIds(checkpoint.privateCase),
+          );
+        }
+      }
+    }
     const restoredStatus = job.status === "running" ? "queued" : job.status;
     db.prepare(
       `INSERT OR REPLACE INTO debate_mystery_v2_jobs
@@ -13986,6 +15355,7 @@ function enterWitnessChapterV2(args: {
     court: {
       witnessOrder: [...args.graph.witnessChapters].sort((a, b) => a.ordinal - b.ordinal).map((chapter) => chapter.id),
       defendantSeatId:
+        mysteryClientSeatIdV2(args.state, args.privateCase) ??
         debateMysteryTheoryAccusedSeatIdsV2(args.state.theory)[0] ??
         (args.state.config.investigationMode === "court_only"
           ? privateMysteryResponsibleSeatIdsV2(args.privateCase)[0] ?? null
@@ -14040,23 +15410,65 @@ function privateMysteryResponsibleSeatIdsV2(
   return [...new Set(explicit.length ? explicit : [privateCase.sealedCulpritSeatId])];
 }
 
+/** Defense stance: the frozen client, from the public charge or the sealed frame. */
+function mysteryClientSeatIdV2(
+  state: Pick<DebateWhodunnitFormatStateV2, "config" | "caseCharge">,
+  privateCase: Pick<PrivateMysteryCaseV2, "defenseFrame">,
+): string | null {
+  if (debateMysteryPlayerStanceV2(state.config) !== "defense") return null;
+  return debateMysteryClientSeatIdV2(state) ?? privateCase.defenseFrame?.defendantSeatId ?? null;
+}
+
+/** The player's side loses on acquittal as Prosecution and on conviction as Defense. */
+function mysteryPlayerLostVerdictV2(
+  state: Pick<DebateWhodunnitFormatStateV2, "config" | "verdict">,
+): boolean {
+  if (!state.verdict) return false;
+  return debateMysteryPlayerStanceV2(state.config) === "defense"
+    ? state.verdict.legalResult === "guilty"
+    : state.verdict.legalResult === "not_guilty";
+}
+
+function mysteryJurorDefaultReasonV2(
+  stance: DebateMysteryPlayerStanceV2,
+  vote: "guilty" | "not_guilty",
+): string {
+  if (stance === "defense") {
+    return vote === "guilty"
+      ? "The defense did not dislodge the case against the client."
+      : "The defense broke the case against the client.";
+  }
+  return vote === "guilty"
+    ? "The admitted contradictions proved the charge."
+    : "The prosecution did not eliminate reasonable doubt.";
+}
+
 function jurorVerdictV2(args: {
   session: DebateSessionV1;
   state: DebateWhodunnitFormatStateV2;
   privateCase: PrivateMysteryCaseV2;
   proofEstablished: boolean;
 }): DebateMysteryVerdictV2 {
+  const stance = debateMysteryPlayerStanceV2(args.state.config);
   const accusedSeatIds = debateMysteryTheoryAccusedSeatIdsV2(args.state.theory);
   const responsibleSeatIds = privateMysteryResponsibleSeatIdsV2(args.privateCase);
   const responsibleSeatIdSet = new Set(responsibleSeatIds);
+  const accusationCorrect = debateMysteryAccusationMatchesV2(accusedSeatIds, responsibleSeatIds);
+  // Defense stance tries the frozen client, not the filed accused. Established
+  // contradictions then favor acquittal, and a jury that leans toward the
+  // player leans toward the client, so the bias sign flips with the chair.
+  const clientSeatId = mysteryClientSeatIdV2(args.state, args.privateCase);
+  const defendantSeatIds = clientSeatId ? [clientSeatId] : accusedSeatIds;
+  const proofFavorsGuilt = stance === "defense" ? !args.proofEstablished : args.proofEstablished;
+  const playerBiasSign = stance === "defense" ? -1 : 1;
   const ballots = args.state.config.trialType === "jury"
-    ? accusedSeatIds.flatMap((defendantSeatId) => {
+    ? defendantSeatIds.flatMap((defendantSeatId) => {
       const accused = args.state.suspects.find((suspect) => suspect.seatId === defendantSeatId);
       return args.session.jury.jurors.map((juror) => {
         const predisposition = args.session.voterPredispositions?.find((entry) => entry.voterBotId === juror.id);
         const personaNoise = (Number.parseInt(sha256(`${args.session.id}:${juror.id}:${defendantSeatId}:verdict`).slice(0, 8), 16) / 0xffffffff - 0.5) * 0.35;
         const bias = Math.max(-1, Math.min(1, predisposition?.participantBias ?? 0));
-        let score = (args.proofEstablished ? 0.65 : -0.45) + bias * 0.6 + personaNoise;
+        let score = (proofFavorsGuilt ? 0.65 : -0.45) + playerBiasSign * bias * 0.6 + personaNoise;
         let powerAffected = false;
         const effects = args.session.powerPlan.bots[juror.id]?.effects.map((entry) => entry.effect) ?? [];
         for (const effect of botPowerChromaticBiasEffectsFromEffectsV1(effects)) {
@@ -14072,19 +15484,19 @@ function jurorVerdictV2(args: {
           vote,
           reason: powerAffected
             ? "A shared Power overrode this juror's ordinary proof assessment."
-            : predisposition?.rationale || (vote === "guilty" ? "The admitted contradictions proved the charge." : "The prosecution did not eliminate reasonable doubt."),
+            : predisposition?.rationale || mysteryJurorDefaultReasonV2(stance, vote),
           powerAffected,
         };
       });
     })
     : [];
   const proofSafe = args.proofEstablished && (args.state.theory?.evidenceIds.length ?? 0) > 0;
-  const defendantVerdicts = accusedSeatIds.map((seatId) => {
+  const defendantVerdicts = defendantSeatIds.map((seatId) => {
     const guiltyVotes = ballots.filter(
       (ballot) => ballot.defendantSeatId === seatId && ballot.vote === "guilty",
     ).length;
     const legalResult = args.state.config.trialType === "bench"
-      ? args.proofEstablished ? "guilty" as const : "not_guilty" as const
+      ? proofFavorsGuilt ? "guilty" as const : "not_guilty" as const
       : guiltyVotes >= 3 ? "guilty" as const : "not_guilty" as const;
     const factuallyResponsible = responsibleSeatIdSet.has(seatId);
     return {
@@ -14096,16 +15508,18 @@ function jurorVerdictV2(args: {
         accusedIsCulprit: factuallyResponsible,
         proofEstablished: args.proofEstablished,
         proofSafe,
+        stance,
+        theoryNamedCulprit: accusationCorrect,
       }),
     };
   });
   const legalResult = defendantVerdicts.some((entry) => entry.legalResult === "guilty")
     ? "guilty" as const
     : "not_guilty" as const;
-  const accusationCorrect = debateMysteryAccusationMatchesV2(accusedSeatIds, responsibleSeatIds);
   const classification = defendantVerdicts.find(
     (entry) => entry.classification === "wrongful_conviction",
-  )?.classification ?? defendantVerdicts[0]?.classification ?? "failed_prosecution";
+  )?.classification ?? defendantVerdicts[0]?.classification ??
+    (stance === "defense" ? "acquittal_without_truth" : "failed_prosecution");
   return {
     legalResult,
     classification,
@@ -14136,42 +15550,54 @@ function failCourtForCredibilityV2(
   state: DebateWhodunnitFormatStateV2,
   privateCase: PrivateMysteryCaseV2,
 ): DebateWhodunnitFormatStateV2 {
+  const stance = debateMysteryPlayerStanceV2(state.config);
   const accusedSeatIds = debateMysteryTheoryAccusedSeatIdsV2(state.theory);
   const responsibleSeatIds = privateMysteryResponsibleSeatIdsV2(privateCase);
   const responsibleSeatIdSet = new Set(responsibleSeatIds);
-  const defendantVerdicts = accusedSeatIds.map((seatId) => {
+  const accusationCorrect = debateMysteryAccusationMatchesV2(accusedSeatIds, responsibleSeatIds);
+  const clientSeatId = mysteryClientSeatIdV2(state, privateCase);
+  const defendantSeatIds = clientSeatId ? [clientSeatId] : accusedSeatIds;
+  // Running out of credibility loses the player's case: an acquittal for the
+  // Prosecution, a conviction of the innocent client for the Defense.
+  const lossLegalResult = stance === "defense" ? "guilty" as const : "not_guilty" as const;
+  const defendantVerdicts = defendantSeatIds.map((seatId) => {
     const factuallyResponsible = responsibleSeatIdSet.has(seatId);
     return {
       seatId,
-      legalResult: "not_guilty" as const,
+      legalResult: lossLegalResult,
       factuallyResponsible,
       classification: debateMysteryClassifyVerdictV2({
-        legalResult: "not_guilty",
+        legalResult: lossLegalResult,
         accusedIsCulprit: factuallyResponsible,
         proofEstablished: false,
         proofSafe: false,
+        stance,
+        theoryNamedCulprit: accusationCorrect,
       }),
     };
   });
   const verdict: DebateMysteryVerdictV2 = {
-    legalResult: "not_guilty",
-    classification: defendantVerdicts[0]?.classification ?? "failed_prosecution",
-    accusationCorrect: debateMysteryAccusationMatchesV2(accusedSeatIds, responsibleSeatIds),
+    legalResult: lossLegalResult,
+    classification: defendantVerdicts[0]?.classification ??
+      (stance === "defense" ? "wrongful_conviction" : "failed_prosecution"),
+    accusationCorrect,
     defendantVerdicts,
     sealedCulpritCorrect: accusedSeatIds[0] === privateCase.sealedCulpritSeatId,
     proofGrade: "failed",
     jurorBallots: state.config.trialType === "jury"
-      ? accusedSeatIds.flatMap((defendantSeatId) => state.config.jurorBotIds.map((jurorBotId) => ({
+      ? defendantSeatIds.flatMap((defendantSeatId) => state.config.jurorBotIds.map((jurorBotId) => ({
           jurorBotId,
           defendantSeatId,
-          vote: "not_guilty" as const,
-          reason: "The prosecution exhausted its credibility before proving the active testimony.",
+          vote: lossLegalResult,
+          reason: stance === "defense"
+            ? "The defense exhausted its credibility before breaking the case against the client."
+            : "The prosecution exhausted its credibility before proving the active testimony.",
           powerAffected: false,
         })))
       : [],
     deliveredAt: new Date().toISOString(),
   };
-  return addCallouts({ ...state, playPhase: "verdict", verdict }, ["not_guilty"], null);
+  return addCallouts({ ...state, playPhase: "verdict", verdict }, [lossLegalResult], null);
 }
 
 function prepareSpectatorTheoryV2(args: {
@@ -14183,7 +15609,7 @@ function prepareSpectatorTheoryV2(args: {
   const accused = accusedSeatIds.map((seatId) =>
     args.state.suspects.find((suspect) => suspect.seatId === seatId));
   if (accused.some((suspect) => !suspect)) {
-    throw new HttpError(409, "The automated Prosecutor could not form a reviewable conclusion.");
+    throw new HttpError(409, `The automated ${debateMysteryCounselSeatsV2(args.state.config).playerRoleLabel} could not form a reviewable conclusion.`);
   }
   const accusedNames = accused.map((suspect) => suspect!.name).join(" and ");
   const admittedReferences = debateMysterySpectatorEvidenceReferencesV2(args.graph);
@@ -14195,7 +15621,7 @@ function prepareSpectatorTheoryV2(args: {
       : [],
   );
   if (!record.length) {
-    throw new HttpError(409, "The automated Prosecutor could not assemble an admissible public record.");
+    throw new HttpError(409, `The automated ${debateMysteryCounselSeatsV2(args.state.config).playerRoleLabel} could not assemble an admissible public record.`);
   }
   return {
     ...args.state,
@@ -14212,7 +15638,11 @@ function prepareSpectatorTheoryV2(args: {
       nodeId: "prosecutor-offstage-investigation",
       lineId: null,
       stageActionText: null,
-      visibleText: `The selected Prosecutor investigated the mansion and proposed charges against ${accusedNames}. Review the admitted physical findings and revise the conclusion before filing it.`,
+      visibleText: `The selected ${debateMysteryCounselSeatsV2(args.state.config).playerRoleLabel} investigated the mansion and ${
+        debateMysteryPlayerStanceV2(args.state.config) === "defense"
+          ? `concluded that the truth points to ${accusedNames}`
+          : `proposed charges against ${accusedNames}`
+      }. Review the admitted physical findings and revise the conclusion before filing it.`,
       speakerSeatId: null,
       speakerBotId: args.state.config.prosecutorBotId,
       speakerKind: "bot",
@@ -14280,7 +15710,7 @@ function prepareCourtOnlyTrialV2(args: {
       claim: args.state.caseCharge?.accusationPrompt,
       method: args.privateCase.method,
       motive: args.privateCase.motive,
-      opportunity: "The admitted prosecution record places the defendant within the incident timeline and supplies the statement-level contradictions for trial.",
+      opportunity: "The admitted record places the accused within the incident timeline and supplies the statement-level contradictions for trial.",
       evidenceIds: admittedReferences.map((reference) => reference.id),
       testimonyIds: [],
     }, accusedSeatIds),
@@ -14438,7 +15868,7 @@ function advanceSpectatorTrialV2(args: {
   }
   const proof = proofStatement.correctPresentations[0]!;
   if (!state.record.some((item) => item.admitted && mysteryRecordKey(item.reference) === mysteryRecordKey(proof))) {
-    throw new HttpError(409, "The automated Prosecutor's admissible proof is missing from the public record.");
+    throw new HttpError(409, `The automated ${debateMysteryCounselSeatsV2(state.config).playerRoleLabel}'s admissible proof is missing from the public record.`);
   }
   const witness = state.suspects.find((entry) => entry.seatId === chapter.witnessSeatId);
   if (proofStatement.objectionNodeId) {
@@ -14768,10 +16198,27 @@ interface PreparedMysteryRoomIntroductionPersonaV2 {
   stagedAudio: StagedMysteryAudioLineV2 | null;
 }
 
-interface DebateMysteryPersonaActionOptionsV2 {
+interface DebateMysteryPersonaActionOptionsV2 extends DebateMysteryPersonaActionOptionsV2Perspective {
   generateWave?: typeof generateBuiltinEnglishWave;
   personaPolishTimeoutMs?: number;
+  prosecutionPersonaTimeoutMs?: number;
+  /** The Speech picker's Premium choice: prepare the ElevenLabs take while
+   * the speaker thinks instead of the local clip. Null keeps English. */
+  premiumTakes?: { apiKey: string; model: unknown } | null;
 }
+
+interface DebateMysteryPersonaActionOptionsV2Perspective {
+  /** Staging only: first person keeps the investigator off stage, embodied
+   * shows them beside the witness. Neither performs the investigator's
+   * question; the chosen button suffices, and only the witness's answer is
+   * prepared. */
+  perspective?: WhodunnitInvestigationPerspective | null;
+}
+
+/** The investigator's Talk question or Present prompt is recorded as written
+ * and never performed: no persona rewrite, no clip. The chosen button is the
+ * player's line; the investigator's persona colours observations instead. */
+const MYSTERY_V2_PERFORM_INVESTIGATOR_QUESTIONS = false;
 
 async function prepareMysteryRoomIntroductionPersonaV2(args: {
   db: DatabaseSync;
@@ -15204,13 +16651,690 @@ function persistMysteryRoomIntroductionPersonaV2(args: {
  * remains playable without audio and can fill the same cache on a later turn. */
 /** Spoken lines that entered the transcript at or after `startedAt`. Entries
  * are stamped by the same process clock, so an ISO comparison is exact. */
+interface PreparedMysteryProsecutionPersonaV2 {
+  kind: DebateMysteryProsecutionLineKindV1;
+  nodeId: string;
+  lineId: string;
+  sourceGraphHash: string;
+  sourceTextHash: string;
+  outcome: "polished" | "canonical";
+  polishedLine: DebateMysterySpokenLineV2 | null;
+}
+
+/** Sealed spoilers for a play-time Prosecutor performance: the base culprit
+ * phrasings, every suspect named as the culprit, and whatever the frozen room
+ * cues already seal. Checked locally; never sent to a provider. */
+function sealedProsecutionDisclosuresV2(
+  graph: DebateMysteryDialogueGraphV2,
+  state: DebateWhodunnitFormatStateV2,
+): string[] {
+  const sealed = new Set<string>([
+    "i killed",
+    "i murdered",
+    "i poisoned",
+    "the culprit is",
+    "the murderer is",
+    "the killer is",
+    ...state.suspects.flatMap((suspect) => [
+      `${suspect.name} is the culprit`,
+      `${suspect.name} is the murderer`,
+      `${suspect.name} is the killer`,
+      `${suspect.name} did it`,
+    ]),
+  ]);
+  for (const line of graph.lines) {
+    for (const disclosure of line.stageCue?.forbiddenDisclosures ?? []) sealed.add(disclosure);
+  }
+  return [...sealed];
+}
+
+function mysteryTalkSubjectMentionsV2(
+  subject: DebateMysteryTalkSubjectV2 | null | undefined,
+  state: DebateWhodunnitFormatStateV2,
+): string[] {
+  if (!subject) return [];
+  if (subject.category === "person") {
+    if (state.victim && subject.personId === state.victim.id) return [state.victim.name];
+    const suspect = state.suspects.find((entry) => entry.seatId === subject.personId);
+    return suspect ? [suspect.name] : [];
+  }
+  if (subject.category === "room") {
+    const room = state.rooms.find((entry) => entry.id === subject.roomId);
+    return room ? [room.name] : [];
+  }
+  return [];
+}
+
+/**
+ * Performs the Prosecutor's own line for a Talk or Present action in the
+ * chosen Prosecutor's voice, once per line, while the investigator visibly
+ * thinks. The sealed stage cue keeps the canonical subject, names, and intent
+ * and forbids case disclosures; anything else keeps the frozen line. Only a
+ * case whose audio is synthesized as heard can take a new line; a fixed pack
+ * keeps its frozen text so its verified clips stay canonical.
+ */
+async function prepareMysteryProsecutionPersonaV2(args: {
+  db: DatabaseSync;
+  userId: string;
+  session: DebateSessionV1;
+  request: DebateMysteryActionRequestV2;
+  runtime: DebateAiRuntime | null;
+  options: DebateMysteryPersonaActionOptionsV2;
+}): Promise<PreparedMysteryProsecutionPersonaV2 | null> {
+  const state = args.session.formatState;
+  if (state.format !== "whodunnit" || state.version !== 2) return null;
+  if (!args.runtime) return null;
+  if (state.playPhase !== "investigation" || state.roomView !== "room") return null;
+  if (args.request.action !== "talk" && args.request.action !== "present_to_suspect") return null;
+  // A const keeps the narrowed request type inside the callbacks below; `args.request` would not.
+  const request = args.request;
+  const { privateCase, graph } = getDebateMysteryCaseV2(args.db, args.userId, args.session.id);
+  if (state.voicesEnabled && privateCase.audioPreparationMode !== "lazy-on-demand-v1") return null;
+  const suspect = state.suspects.find((entry) => entry.seatId === request.suspectSeatId);
+  if (!suspect || suspect.roomId !== state.currentRoomId) return null;
+
+  let kind: DebateMysteryProsecutionLineKindV1;
+  let nodeId: string | null = null;
+  let subjectLabel = "";
+  let subjectMentions: string[] = [];
+  if (request.action === "talk") {
+    const topic = state.topics.find((entry) =>
+      entry.nodeId === request.topicNodeId && entry.suspectSeatId === suspect.seatId);
+    if (!topic?.unlocked) return null;
+    const repeatOrdinal = topic.completed
+      ? Math.max(1, state.dialogueHistory.filter((entry) => entry.nodeId === topic.nodeId).length)
+      : 0;
+    const exchange = resolveDebateMysteryTalkExchangeV2(graph, topic.nodeId, suspect.seatId, repeatOrdinal);
+    if (!exchange?.questionNodeId) return null;
+    kind = "talk_question";
+    nodeId = exchange.questionNodeId;
+    const questionNode = graph.nodes.find((node) => node.id === nodeId);
+    subjectLabel = compact(questionNode?.label ?? topic.label, 120) || "the subject";
+    subjectMentions = mysteryTalkSubjectMentionsV2(questionNode?.talkSubject, state);
+  } else {
+    const recordKey = mysteryRecordKey(request.record);
+    const item = state.record.find((entry) =>
+      entry.admitted && mysteryRecordKey(entry.reference) === recordKey);
+    if (!item) return null;
+    kind = "present_prompt";
+    nodeId = privateCase.presentNodeIdBySuspectRecord[`${suspect.seatId}:${recordKey}`] ?? null;
+    subjectLabel = compact(item.title, 120) || "the item";
+    subjectMentions = [item.title];
+  }
+  if (!nodeId) return null;
+  const node = graph.nodes.find((entry) => entry.id === nodeId);
+  const line = node?.lineId ? graph.lines.find((entry) => entry.id === node.lineId) : null;
+  if (
+    !line ||
+    line.mode !== "spoken" ||
+    line.speakerKind !== "player" ||
+    line.speakerBotId !== state.config.prosecutorBotId ||
+    privateCase.prosecutionPersonaPerformanceByLine?.[line.id]
+  ) return null;
+
+  const canonicalText = line.spokenText;
+  const canonicalResult: PreparedMysteryProsecutionPersonaV2 = {
+    kind,
+    nodeId,
+    lineId: line.id,
+    sourceGraphHash: sha256(JSON.stringify(graph)),
+    sourceTextHash: sha256(JSON.stringify([line.visibleText, line.spokenText])),
+    outcome: "canonical",
+    polishedLine: null,
+  };
+  const prosecutor = botRows(args.db, args.userId, [state.config.prosecutorBotId])[0] ?? null;
+  const stanceVocabulary = mysteryStanceVocabularyV2(
+    state.config,
+    privateCase.defenseFrame,
+    new Map(state.suspects.map((entry) => [entry.seatId, entry.name])),
+  );
+  const prosecutorName = compact(prosecutor?.name, 160) || `the ${stanceVocabulary.playerRole}`;
+  const familiar = Boolean(mysteryPersonaDirectedPairContextV1(
+    privateCase.personaPairContext,
+    state.config.prosecutorBotId,
+    suspect.botId,
+  ));
+  const cue = buildDebateMysteryProsecutionStageCueV1({
+    kind,
+    lineId: line.id,
+    canonicalText,
+    mood: line.performance.mood,
+    suspectName: suspect.name,
+    subjectLabel,
+    subjectMentions,
+    familiar,
+    forbiddenDisclosures: sealedProsecutionDisclosuresV2(graph, state),
+    roleLabel: stanceVocabulary.playerRole,
+  });
+  const voiceCard = privateCase.personaVoiceCardsByBotId?.[state.config.prosecutorBotId];
+  const personaStyleCues = voiceCard?.cues ?? [
+    `Keep this ${stanceVocabulary.playerRole}'s established voice distinct and controlled.`,
+  ];
+  const prompt = {
+    section: "prosecution_line_stage_cue_performance",
+    lineId: line.id,
+    speakerBotId: line.speakerBotId,
+    speakerName: prosecutorName,
+    addressing: suspect.name,
+    familiar,
+    personaStyleCues,
+    performance: line.performance,
+    canonicalLine: canonicalText,
+    stageCue: {
+      id: cue.id,
+      objective: cue.objective,
+      emotionalState: cue.emotionalState,
+      allowedFacts: cue.allowedFacts.map((fact) => ({
+        id: fact.id,
+        statement: fact.statement,
+        required: fact.required,
+      })),
+      exitCondition: cue.exitCondition,
+      maxCharacters: cue.maxCharacters,
+    },
+    outputContract: {
+      spokenText: kind === "talk_question"
+        ? `one fresh version of the canonical question in this ${stanceVocabulary.playerRole}'s own voice and idiom: same subject, same intent, ending in a question mark; no new fact, no stage direction, no speaker label`
+        : `one fresh version of the canonical line in this ${stanceVocabulary.playerRole}'s own voice and idiom: names the item exactly, same intent; no new fact, no stage direction, no speaker label`,
+    },
+  };
+  const promptText = JSON.stringify(prompt);
+  const timeoutMs = Math.max(
+    1,
+    Math.floor(args.options.prosecutionPersonaTimeoutMs ?? V2_PROSECUTION_PERSONA_TIMEOUT_MS),
+  );
+  try {
+    const localOnly =
+      args.runtime.preferredProvider === "local" ||
+      args.runtime.responseMode === "local";
+    const lanes = localOnly
+      ? [mysteryV2Lane(args.runtime)]
+      : args.runtime.lanes?.length
+      ? args.runtime.lanes
+      : [mysteryV2Lane(args.runtime)];
+    const result = await prismGenerationBroker.runStructured({
+      work: {
+        workflow: "whodunnit_v2",
+        operation: "perform_prosecution_stage_cue",
+        stage: "investigation",
+        executionLane: "selected",
+        role: "author",
+        outputClass: "connective",
+        priority: "interactive",
+        privacyMode:
+          args.runtime.preferredProvider === "local"
+            ? "local"
+            : args.runtime.modelSelectionKind === "auto"
+              ? "auto"
+              : "online",
+        timeoutMs,
+        cacheKey: `whodunnit-prosecution-stage-cue-v1:${args.session.id}:${sha256(promptText)}`,
+        sourceTokenEstimate: estimatePrismTextTokens(promptText),
+        exportedTokenEstimate: estimatePrismTextTokens(promptText),
+      },
+      lanes,
+      modelSelectionKind: args.runtime.modelSelectionKind ?? "fixed",
+      maxAttempts: timeoutMs >= 100 ? 2 : 1,
+      totalTimeoutMs: timeoutMs,
+      perAttemptTimeoutMs: () => Math.max(1, Math.floor(timeoutMs / 2)),
+      run: ({ lane, signal, work }) => lane.provider.generateResponse([
+        {
+          role: "system",
+          content: `You are an actor performing one sealed stage cue as the ${stanceVocabulary.playerRole}, not the author of the mystery. Say the canonical line again in this character's own voice and idiom, keeping exactly its subject and intent. Use only the allowed facts; never infer, reveal, or invent a clue, culprit, motive, method, timeline, or testimony fact. Return JSON only with spokenText.`,
+        },
+        { role: "user", content: promptText },
+      ], {
+        model: lane.model,
+        reasoningEffort: lane.reasoningEffort,
+        turbo: lane.turbo,
+        maxTokens: 160,
+        temperature: 0.75,
+        jsonMode: true,
+        usagePurpose: "debate_generation",
+        allowFinalLocalFallback: lane.providerName === "local",
+        generationWork: work,
+        signal,
+      }),
+      validate: (raw) => {
+        const parsed = parseJsonObject(raw);
+        const validation = validateDebateMysteryProsecutionPerformanceV1({
+          cue,
+          kind,
+          text: typeof parsed.spokenText === "string" ? parsed.spokenText : "",
+          canonicalText,
+          speakerNames: [prosecutorName, stanceVocabulary.playerRole],
+        });
+        // The frozen line handed back unchanged is a fine answer, not a retry.
+        if (validation.unchanged) return { spokenText: null };
+        if (!validation.valid) throw new Error(validation.errors.join(" "));
+        return { spokenText: validation.text };
+      },
+    });
+    const performed = result.value.spokenText;
+    if (!performed) return canonicalResult;
+    return {
+      ...canonicalResult,
+      outcome: "polished",
+      polishedLine: { ...line, visibleText: performed, spokenText: performed },
+    };
+  } catch {
+    return canonicalResult;
+  }
+}
+
+interface PreparedMysteryPressQuestionV2 {
+  statementId: string;
+  versionId: string;
+  nodeId: string;
+  lineId: string;
+  sourceGraphHash: string;
+  outcome: "polished" | "canonical";
+  node: DebateMysteryDialogueNodeV2;
+  line: DebateMysterySpokenLineV2;
+  /** The question for this statement version already lives in the graph. */
+  existing: boolean;
+}
+
+/** The frozen case's own validation contract, for a graph that gained a line at play time. */
+function mysteryGraphValidationArgsV2(
+  graph: DebateMysteryDialogueGraphV2,
+  privateCase: PrivateMysteryCaseV2,
+): Parameters<typeof validateDebateMysteryDialogueGraphV2>[0] {
+  return {
+    graph,
+    suspectSeatIds: privateCase.actorAccounts.map((account) => account.seatId),
+    recordReferences: privateCase.recordItems.map((item) => item.reference),
+    playerRole: privateCase.config.playerRole,
+    roomIds: privateCase.investigationRoomIds,
+    personIds: privateCase.investigationPersonIds,
+    hotspotIdsByRoom: privateCase.investigationHotspotIdsByRoom,
+    prosecutorBotId: privateCase.config.prosecutorBotId,
+    directRecipientContractVersion: privateCase.personaPairContext ? 1 : null,
+    rivalDefenseBotId: privateCase.config.rivalDefenseBotId,
+    eyewitnessSeatId: privateCase.eyewitnessSeatId,
+    accusedAlibiSupportDiscoveryIds: privateCase.accusedAlibiSupportDiscoveryIds,
+  };
+}
+
+/**
+ * Press is Turnabout's beat: the player's counsel challenges the statement
+ * aloud before the witness answers. The press question is a new spoken line,
+ * added to the frozen graph as an interaction root the first time this
+ * statement version is pressed. A model performs it in the chosen counsel's
+ * own voice and idiom inside the same sealed rails as a Talk question; without
+ * one, or when the rails refuse, its deterministic wording is spoken. Only a
+ * case whose audio is synthesized as heard can take a new line, and the graph
+ * must still validate with it before the mutation promises to speak it.
+ */
+async function prepareMysteryPressQuestionPersonaV2(args: {
+  db: DatabaseSync;
+  userId: string;
+  session: DebateSessionV1;
+  request: DebateMysteryActionRequestV2;
+  runtime: DebateAiRuntime | null;
+  options: DebateMysteryPersonaActionOptionsV2;
+}): Promise<PreparedMysteryPressQuestionV2 | null> {
+  const state = args.session.formatState;
+  if (state.format !== "whodunnit" || state.version !== 2) return null;
+  if (args.request.action !== "press_statement") return null;
+  const request = args.request;
+  if (state.playPhase !== "trial" || !state.court || state.court.activeStatementId !== request.statementId) return null;
+  const { privateCase, graph } = getDebateMysteryCaseV2(args.db, args.userId, args.session.id);
+  if (state.voicesEnabled && privateCase.audioPreparationMode !== "lazy-on-demand-v1") return null;
+  const chapter = graph.witnessChapters.find((entry) => entry.id === state.court?.activeChapterId);
+  const version = chapter?.statementVersions.find((entry) => entry.statementId === request.statementId);
+  const statementLine = version ? graph.lines.find((entry) => entry.id === version.lineId) : null;
+  const witness = chapter ? state.suspects.find((entry) => entry.seatId === chapter.witnessSeatId) : null;
+  if (!chapter || !version || !statementLine || !witness) return null;
+  const nodeId = `press-question-${version.id}`;
+  const lineId = `line-${nodeId}`;
+  const sourceGraphHash = sha256(JSON.stringify(graph));
+  const existingNode = graph.nodes.find((node) => node.id === nodeId);
+  const existingLine = graph.lines.find((line) => line.id === lineId);
+  if (existingNode && existingLine) {
+    return {
+      statementId: request.statementId,
+      versionId: version.id,
+      nodeId,
+      lineId,
+      sourceGraphHash,
+      outcome: privateCase.prosecutionPersonaPerformanceByLine?.[lineId]?.outcome ?? "canonical",
+      node: existingNode,
+      line: existingLine,
+      existing: true,
+    };
+  }
+  const canonicalText = debateMysteryPressQuestionCanonicalTextV1(statementLine.spokenText);
+  const counsel = botRows(args.db, args.userId, [state.config.prosecutorBotId])[0] ?? null;
+  const stanceVocabulary = mysteryStanceVocabularyV2(
+    state.config,
+    privateCase.defenseFrame,
+    new Map(state.suspects.map((entry) => [entry.seatId, entry.name])),
+  );
+  const counselName = compact(counsel?.name, 160) || `the ${stanceVocabulary.playerRole}`;
+  const familiar = Boolean(mysteryPersonaDirectedPairContextV1(
+    privateCase.personaPairContext,
+    state.config.prosecutorBotId,
+    witness.botId,
+  ));
+  const performance: DebateMysteryPerformanceDirectionV2 = {
+    mood: "pressing, precise",
+    pace: "measured",
+    intensity: 2,
+    actorNote: "Challenge the statement itself and demand the full account without adding a fact.",
+  };
+  const cue = buildDebateMysteryProsecutionStageCueV1({
+    kind: "press_question",
+    lineId,
+    canonicalText,
+    mood: performance.mood,
+    suspectName: witness.name,
+    subjectLabel: "their sworn statement",
+    subjectMentions: [],
+    familiar,
+    forbiddenDisclosures: sealedProsecutionDisclosuresV2(graph, state),
+    roleLabel: stanceVocabulary.playerRole,
+  });
+  let performed: string | null = null;
+  if (args.runtime) {
+    const runtime = args.runtime;
+    const voiceCard = privateCase.personaVoiceCardsByBotId?.[state.config.prosecutorBotId];
+    const personaStyleCues = voiceCard?.cues ?? [
+      `Keep this ${stanceVocabulary.playerRole}'s established voice distinct and controlled.`,
+    ];
+    const prompt = {
+      section: "prosecution_line_stage_cue_performance",
+      kind: "press_question",
+      lineId,
+      speakerBotId: state.config.prosecutorBotId,
+      speakerName: counselName,
+      addressing: witness.name,
+      familiar,
+      personaStyleCues,
+      performance,
+      canonicalLine: canonicalText,
+      pressedStatement: statementLine.spokenText,
+      stageCue: {
+        id: cue.id,
+        objective: cue.objective,
+        emotionalState: cue.emotionalState,
+        allowedFacts: cue.allowedFacts.map((fact) => ({
+          id: fact.id,
+          statement: fact.statement,
+          required: fact.required,
+        })),
+        exitCondition: cue.exitCondition,
+        maxCharacters: cue.maxCharacters,
+      },
+      outputContract: {
+        spokenText: `one fresh version of the canonical press in this ${stanceVocabulary.playerRole}'s own voice and idiom: challenge exactly the quoted statement and demand the full account, ending in a question mark; no new fact, no stage direction, no speaker label`,
+      },
+    };
+    const promptText = JSON.stringify(prompt);
+    const timeoutMs = Math.max(
+      1,
+      Math.floor(args.options.prosecutionPersonaTimeoutMs ?? V2_PROSECUTION_PERSONA_TIMEOUT_MS),
+    );
+    try {
+      const localOnly =
+        runtime.preferredProvider === "local" ||
+        runtime.responseMode === "local";
+      const lanes = localOnly
+        ? [mysteryV2Lane(runtime)]
+        : runtime.lanes?.length
+        ? runtime.lanes
+        : [mysteryV2Lane(runtime)];
+      const result = await prismGenerationBroker.runStructured({
+        work: {
+          workflow: "whodunnit_v2",
+          operation: "perform_press_stage_cue",
+          stage: "court",
+          executionLane: "selected",
+          role: "author",
+          outputClass: "connective",
+          priority: "interactive",
+          privacyMode:
+            runtime.preferredProvider === "local"
+              ? "local"
+              : runtime.modelSelectionKind === "auto"
+                ? "auto"
+                : "online",
+          timeoutMs,
+          cacheKey: `whodunnit-press-stage-cue-v1:${args.session.id}:${sha256(promptText)}`,
+          sourceTokenEstimate: estimatePrismTextTokens(promptText),
+          exportedTokenEstimate: estimatePrismTextTokens(promptText),
+        },
+        lanes,
+        modelSelectionKind: runtime.modelSelectionKind ?? "fixed",
+        maxAttempts: timeoutMs >= 100 ? 2 : 1,
+        totalTimeoutMs: timeoutMs,
+        perAttemptTimeoutMs: () => Math.max(1, Math.floor(timeoutMs / 2)),
+        run: ({ lane, signal, work }) => lane.provider.generateResponse([
+          {
+            role: "system",
+            content: `You are an actor performing one sealed stage cue as the ${stanceVocabulary.playerRole}, not the author of the mystery. Say the canonical press again in this character's own voice and idiom, challenging exactly the quoted statement. Use only the allowed facts; never infer, reveal, or invent a clue, culprit, motive, method, timeline, or testimony fact. Return JSON only with spokenText.`,
+          },
+          { role: "user", content: promptText },
+        ], {
+          model: lane.model,
+          reasoningEffort: lane.reasoningEffort,
+          turbo: lane.turbo,
+          maxTokens: 160,
+          temperature: 0.75,
+          jsonMode: true,
+          usagePurpose: "debate_generation",
+          allowFinalLocalFallback: lane.providerName === "local",
+          generationWork: work,
+          signal,
+        }),
+        validate: (raw) => {
+          const parsed = parseJsonObject(raw);
+          const validation = validateDebateMysteryProsecutionPerformanceV1({
+            cue,
+            kind: "press_question",
+            text: typeof parsed.spokenText === "string" ? parsed.spokenText : "",
+            canonicalText,
+            speakerNames: [counselName, stanceVocabulary.playerRole],
+          });
+          // The canonical press handed back unchanged is a fine answer, not a retry.
+          if (validation.unchanged) return { spokenText: null };
+          if (!validation.valid) throw new Error(validation.errors.join(" "));
+          return { spokenText: validation.text };
+        },
+      });
+      performed = result.value.spokenText;
+    } catch {
+      performed = null;
+    }
+  }
+  const delivery = resolveDebateMysteryLineDeliveryV2({
+    value: performed ?? canonicalText,
+    speakerNames: counselName,
+    stableId: lineId,
+    performance,
+    materializeFallback: true,
+  });
+  const line: DebateMysterySpokenLineV2 = {
+    id: lineId,
+    nodeId,
+    speakerKind: "player",
+    speakerBotId: state.config.prosecutorBotId,
+    stageActionText: delivery.stageActionText,
+    visibleText: delivery.spokenText,
+    spokenText: delivery.spokenText,
+    performance,
+    mode: "spoken",
+    reusableCalloutKey: null,
+  };
+  const node: DebateMysteryDialogueNodeV2 = {
+    id: nodeId,
+    kind: "prosecution_choice",
+    scene: "court",
+    speakerSeatId: null,
+    intendedRecipientSeatId: chapter.witnessSeatId,
+    lineId,
+    label: null,
+    locationId: null,
+    talkSubject: null,
+    requirements: emptyDebateMysteryRequirementsV2(),
+    mutations: emptyDebateMysteryMutationsV2(),
+    recordReferences: [],
+    nextNodeIds: [],
+    terminalOutcome: null,
+  };
+  const candidate = structuredClone(graph);
+  candidate.nodes.push(node);
+  candidate.lines.push(line);
+  candidate.interactionRootNodeIds = [...new Set([...candidate.interactionRootNodeIds, nodeId])];
+  const validation = validateDebateMysteryDialogueGraphV2(mysteryGraphValidationArgsV2(candidate, privateCase));
+  if (!validation.valid) return null;
+  return {
+    statementId: request.statementId,
+    versionId: version.id,
+    nodeId,
+    lineId,
+    sourceGraphHash,
+    outcome: performed ? "polished" : "canonical",
+    node,
+    line,
+    existing: false,
+  };
+}
+
+/**
+ * Commits a performed Prosecutor line with the mutation that speaks it. The
+ * graph and private case move together under the source graph hash; the
+ * manifest drops the line's old clip entry so the words heard are synthesized
+ * as heard, and every hash the readiness check compares is refreshed.
+ */
+function persistMysteryProsecutionPersonaV2(args: {
+  db: DatabaseSync;
+  userId: string;
+  sessionId: string;
+  graph: DebateMysteryDialogueGraphV2;
+  privateCase: PrivateMysteryCaseV2;
+  prepared: PreparedMysteryProsecutionPersonaV2;
+}): void {
+  const privateJson = JSON.stringify(args.privateCase);
+  const graphJson = JSON.stringify(args.graph);
+  const graphHash = sha256(graphJson);
+  const now = new Date().toISOString();
+  const updated = args.db.prepare(
+    `UPDATE debate_mystery_v2_cases
+        SET private_case_json = ?, dialogue_graph_json = ?,
+            case_hash = ?, graph_hash = ?, validation_json = ?, updated_at = ?
+      WHERE user_id = ? AND session_id = ? AND graph_hash = ?`,
+  ).run(
+    privateJson,
+    graphJson,
+    sha256(privateJson),
+    graphHash,
+    JSON.stringify(args.privateCase.graphValidation),
+    now,
+    args.userId,
+    args.sessionId,
+    args.prepared.sourceGraphHash,
+  );
+  if (Number(updated.changes) !== 1) {
+    throw new HttpError(409, "This case changed in another window. Refresh and try again.");
+  }
+  const job = args.db.prepare(
+    `SELECT checkpoint_json
+       FROM debate_mystery_v2_jobs
+      WHERE user_id = ? AND session_id = ?`,
+  ).get(args.userId, args.sessionId) as { checkpoint_json: string | null } | undefined;
+  const checkpoint = job?.checkpoint_json
+    ? JSON.parse(job.checkpoint_json) as unknown
+    : null;
+  if (isMysteryV2CompiledCheckpoint(checkpoint)) {
+    checkpoint.graph = args.graph;
+    checkpoint.privateCase = args.privateCase;
+    args.db.prepare(
+      `UPDATE debate_mystery_v2_jobs
+          SET checkpoint_json = ?, updated_at = ?
+        WHERE user_id = ? AND session_id = ?`,
+    ).run(JSON.stringify(checkpoint), now, args.userId, args.sessionId);
+  }
+  const manifestRow = args.db.prepare(
+    `SELECT status, manifest_json
+       FROM debate_mystery_audio_manifests
+      WHERE user_id = ? AND session_id = ?`,
+  ).get(args.userId, args.sessionId) as {
+    status: "preparing" | "complete" | "failed" | "silent";
+    manifest_json: string;
+  } | undefined;
+  if (!manifestRow) return;
+  const manifest = JSON.parse(manifestRow.manifest_json) as DebateMysteryAudioManifestV1;
+  if (args.prepared.outcome === "polished") {
+    manifest.entries = manifest.entries.filter((entry) => entry.lineId !== args.prepared.lineId);
+  }
+  manifest.caseHash = sha256(privateJson);
+  manifest.dialogueGraphHash = graphHash;
+  manifest.scriptHash = manifestRow.status === "silent"
+    ? sha256("silent")
+    : mysteryAudioScriptHashV2(args.graph, args.privateCase);
+  if (manifestRow.status === "complete") {
+    const validation = validateDebateMysteryAudioManifestV1({
+      graph: args.graph,
+      manifest,
+      reachableSpokenLineIds: args.privateCase.graphValidation.reachableSpokenLineIds,
+    });
+    if (!validation.valid) throw new Error(validation.errors.join("\n"));
+  }
+  storeAudioManifest(args.db, args.userId, args.sessionId, manifest, manifestRow.status);
+}
+
+/** The lines this action added that can carry a Premium take, resolved to
+ * their disclosed performance (frozen voice, current words). */
+async function prepareMysteryPremiumTakesForLinesV2(args: {
+  db: DatabaseSync;
+  userId: string;
+  session: DebateSessionV1;
+  lineIds: readonly string[];
+  request: { apiKey: string; model: unknown };
+}): Promise<string[]> {
+  if (
+    args.session.formatState.format !== "whodunnit" ||
+    args.session.formatState.version !== 2 ||
+    !args.session.formatState.voicesEnabled
+  ) return [];
+  const lines: Array<{ lineId: string; speakerBotId: string; spokenText: string; voiceProfile: BotAudioVoiceProfileV1 }> = [];
+  for (const lineId of args.lineIds) {
+    try {
+      const performance = getDebateMysterySpokenPerformanceV2(args.db, args.userId, args.session.id, lineId);
+      lines.push({
+        lineId,
+        speakerBotId: performance.speakerBotId,
+        spokenText: performance.spokenText,
+        voiceProfile: performance.voiceProfile,
+      });
+    } catch {
+      // Not a Premium-eligible line (babble, narrator, or no frozen voice).
+    }
+  }
+  if (!lines.length) return [];
+  const result = await prepareDebateMysteryPremiumTakesV1({
+    db: args.db,
+    userId: args.userId,
+    sessionId: args.session.id,
+    lines,
+    request: args.request,
+  });
+  return result.prepared;
+}
+
 function mysteryV2SpokenLineIdsSince(
   session: DebateSessionV1,
   startedAt: string,
+  options: { skipInvestigator?: boolean } = {},
 ): string[] {
   if (session.formatState.format !== "whodunnit" || session.formatState.version !== 2) return [];
+  const skippedSpeakerBotId = options.skipInvestigator
+    ? session.formatState.config.prosecutorBotId
+    : null;
   return [...new Set(session.formatState.dialogueHistory.flatMap((entry) =>
-    entry.lineId && entry.delivery !== "text_only" && entry.occurredAt >= startedAt
+    entry.lineId && entry.delivery !== "text_only" && entry.occurredAt >= startedAt &&
+    entry.speakerBotId !== skippedSpeakerBotId
       ? [entry.lineId]
       : []))];
 }
@@ -15361,30 +17485,80 @@ export async function applyDebateMysteryActionWithPersonaV2(
       });
       return replay;
     }
+    if (request.action === "observe_interest") {
+      // An aside is text only: voice it, record it, return. No audio pass.
+      const current = getDebateSession(db, userId, sessionId);
+      const prepared = await prepareMysteryInterestObservationV2({
+        db, userId, session: current, roomId: request.roomId, interestId: request.interestId, runtime,
+      });
+      return applyDebateMysteryActionV2(db, userId, sessionId, request, prepared ? { interestObservation: prepared } : {});
+    }
     // Only the lines this action adds need audio; an Examine adds none and
     // returns as soon as its frozen observation is recorded.
     const startedAt = new Date().toISOString();
+    // The Speech picker decides the take prepared while the speaker thinks:
+    // Premium synthesizes the ElevenLabs take now and leaves the local clip to
+    // on-demand synthesis, so the line sounds the moment it is queued; English
+    // keeps the local clip.
+    const finishActionAudio = async (applied: DebateSessionV1): Promise<void> => {
+      const lineIds = mysteryV2SpokenLineIdsSince(applied, startedAt, {
+        // Court presses are the exception: the counsel's own press is spoken.
+        skipInvestigator: !MYSTERY_V2_PERFORM_INVESTIGATOR_QUESTIONS && request.action !== "press_statement",
+      });
+      if (!lineIds.length) return;
+      // Only the first new line, the Prosecutor's question, is prepared before the
+      // reply goes out. The witness's answer prepares behind it, while the question
+      // plays and the witness visibly thinks: that beat exists to cover this work.
+      const [firstLineId, ...laterLineIds] = lineIds;
+      await prepareMysteryActionLinesAudioV2({ db, userId, session: applied, lineIds: [firstLineId!], options });
+      if (laterLineIds.length) {
+        startMysteryBackgroundLineAudioV2({ db, userId, session: applied, lineIds: laterLineIds, options });
+      }
+    };
     if (request.action !== "advance_room_introduction") {
-      const applied = applyDebateMysteryActionV2(db, userId, sessionId, request);
-      await prepareLazyMysteryTranscriptAudioV2({
+      // A Talk question or Present prompt is performed in the chosen
+      // Prosecutor's own voice while the investigator visibly thinks.
+      const prosecutionPersona = MYSTERY_V2_PERFORM_INVESTIGATOR_QUESTIONS &&
+        (request.action === "talk" || request.action === "present_to_suspect")
+        ? await prepareMysteryProsecutionPersonaV2({
+            db,
+            userId,
+            session: getDebateSession(db, userId, sessionId),
+            request,
+            runtime,
+            options,
+          })
+        : null;
+      // Court Press is Turnabout's beat and stays voiced: the counsel's own
+      // press is spoken before the witness answers, whatever the room does
+      // with its Talk and Present questions.
+      const pressQuestion = request.action === "press_statement"
+        ? await prepareMysteryPressQuestionPersonaV2({
+            db,
+            userId,
+            session: getDebateSession(db, userId, sessionId),
+            request,
+            runtime,
+            options,
+          })
+        : null;
+      const applied = applyDebateMysteryActionV2(
         db,
         userId,
-        session: applied,
-        generateWave: options.generateWave,
-        lineIds: mysteryV2SpokenLineIdsSince(applied, startedAt),
-      });
+        sessionId,
+        request,
+        {
+          ...(prosecutionPersona ? { prosecutionPersona } : {}),
+          ...(pressQuestion ? { pressQuestion } : {}),
+        },
+      );
+      await finishActionAudio(applied);
       return applied;
     }
     const session = getDebateSession(db, userId, sessionId);
     if (request.expectedRevision !== session.revision) {
       const applied = applyDebateMysteryActionV2(db, userId, sessionId, request);
-      await prepareLazyMysteryTranscriptAudioV2({
-        db,
-        userId,
-        session: applied,
-        generateWave: options.generateWave,
-        lineIds: mysteryV2SpokenLineIdsSince(applied, startedAt),
-      });
+      await finishActionAudio(applied);
       return applied;
     }
     const prepared = await prepareMysteryRoomIntroductionPersonaV2({
@@ -15402,13 +17576,7 @@ export async function applyDebateMysteryActionWithPersonaV2(
       request,
       prepared ? { roomIntroductionPersona: prepared } : {},
     );
-    await prepareLazyMysteryTranscriptAudioV2({
-      db,
-      userId,
-      session: applied,
-      generateWave: options.generateWave,
-      lineIds: mysteryV2SpokenLineIdsSince(applied, startedAt),
-    });
+    await finishActionAudio(applied);
     return applied;
   });
   mysteryV2ActionQueues.set(queueKey, pending);
@@ -15421,6 +17589,70 @@ export async function applyDebateMysteryActionWithPersonaV2(
   }
 }
 
+/** Premium takes where requested, the local clip otherwise, for exactly these lines. */
+async function prepareMysteryActionLinesAudioV2(args: {
+  db: DatabaseSync;
+  userId: string;
+  session: DebateSessionV1;
+  lineIds: readonly string[];
+  options: DebateMysteryPersonaActionOptionsV2;
+}): Promise<void> {
+  const taken = args.options.premiumTakes
+    ? await prepareMysteryPremiumTakesForLinesV2({
+        db: args.db,
+        userId: args.userId,
+        session: args.session,
+        lineIds: args.lineIds,
+        request: args.options.premiumTakes,
+      })
+    : [];
+  await prepareLazyMysteryTranscriptAudioV2({
+    db: args.db,
+    userId: args.userId,
+    session: args.session,
+    generateWave: args.options.generateWave,
+    lineIds: args.lineIds.filter((lineId) => !taken.includes(lineId)),
+  });
+}
+
+/** Prepares lines after the reply has gone out. The pass is registered under each
+ * line id, so an on-demand request for one of them waits for this work instead of
+ * synthesizing its own clip on another lane. */
+function startMysteryBackgroundLineAudioV2(args: {
+  db: DatabaseSync;
+  userId: string;
+  session: DebateSessionV1;
+  lineIds: readonly string[];
+  options: DebateMysteryPersonaActionOptionsV2;
+}): void {
+  const keys = args.lineIds.map((lineId) => `${args.userId}:${args.session.id}:${lineId}`);
+  const work: Promise<void> = prepareMysteryActionLinesAudioV2(args)
+    .catch(() => undefined)
+    .finally(() => {
+      for (const key of keys) {
+        if (mysteryLineAudioPreparationsInFlight.get(key) === work) mysteryLineAudioPreparationsInFlight.delete(key);
+      }
+    });
+  for (const key of keys) mysteryLineAudioPreparationsInFlight.set(key, work);
+}
+
+/** Waits, bounded, for a background pass that is still preparing this line,
+ * so a take requested the moment the line is queued arrives prepared instead
+ * of missing. Resolves at once when nothing is in flight. */
+export async function awaitMysteryLineAudioPreparationV2(
+  userId: string,
+  sessionId: string,
+  lineId: string,
+  timeoutMs = 20_000,
+): Promise<void> {
+  const work = mysteryLineAudioPreparationsInFlight.get(`${userId}:${sessionId}:${lineId}`);
+  if (!work) return;
+  await Promise.race([
+    work.catch(() => undefined),
+    new Promise<void>((resolve) => setTimeout(resolve, timeoutMs).unref?.()),
+  ]);
+}
+
 export function applyDebateMysteryActionV2(
   db: DatabaseSync,
   userId: string,
@@ -15428,6 +17660,12 @@ export function applyDebateMysteryActionV2(
   request: DebateMysteryActionRequestV2,
   options: {
     roomIntroductionPersona?: PreparedMysteryRoomIntroductionPersonaV2;
+    /** The Prosecutor's own Talk question or Present prompt, performed in persona. */
+    prosecutionPersona?: PreparedMysteryProsecutionPersonaV2;
+    /** The counsel's spoken press of the active statement, added to the graph. */
+    pressQuestion?: PreparedMysteryPressQuestionV2;
+    /** A persona-voiced aside prepared for exactly one point of interest. */
+    interestObservation?: { roomId: string; interestId: string; text: string };
   } = {},
 ): DebateSessionV1 {
   if (request.version !== 2) throw new HttpError(400, "Whodunnit V2 actions require version 2.");
@@ -15512,8 +17750,96 @@ export function applyDebateMysteryActionV2(
       },
     };
   }
+  const preparedProsecutionPersona =
+    request.action === "talk" || request.action === "present_to_suspect"
+      ? options.prosecutionPersona
+      : undefined;
+  if (preparedProsecutionPersona) {
+    const sourceLine = graph.lines.find((line) => line.id === preparedProsecutionPersona.lineId);
+    if (
+      !sourceLine ||
+      sha256(JSON.stringify([sourceLine.visibleText, sourceLine.spokenText])) !==
+        preparedProsecutionPersona.sourceTextHash ||
+      sha256(JSON.stringify(graph)) !== preparedProsecutionPersona.sourceGraphHash
+    ) {
+      throw new HttpError(409, "This case changed in another window. Refresh and try again.");
+    }
+    graph = structuredClone(graph);
+    privateCase = structuredClone(privateCase);
+    if (
+      preparedProsecutionPersona.outcome === "polished" &&
+      preparedProsecutionPersona.polishedLine
+    ) {
+      graph.lines = graph.lines.map((line) =>
+        line.id === preparedProsecutionPersona.lineId
+          ? preparedProsecutionPersona.polishedLine!
+          : line);
+    }
+    const appliedLine = graph.lines.find(
+      (line) => line.id === preparedProsecutionPersona.lineId,
+    )!;
+    privateCase.prosecutionPersonaPerformanceByLine = {
+      ...(privateCase.prosecutionPersonaPerformanceByLine ?? {}),
+      [preparedProsecutionPersona.lineId]: {
+        version: 1,
+        nodeId: preparedProsecutionPersona.nodeId,
+        kind: preparedProsecutionPersona.kind,
+        sourceTextHash: preparedProsecutionPersona.sourceTextHash,
+        appliedTextHash: sha256(JSON.stringify([
+          appliedLine.visibleText,
+          appliedLine.spokenText,
+        ])),
+        outcome: preparedProsecutionPersona.outcome,
+      },
+    };
+  }
+  // Press adds the Prosecutor's spoken question to the frozen graph the first
+  // time a statement version is pressed; later presses of the same version
+  // replay it.
+  const preparedPressQuestion =
+    request.action === "press_statement" && options.pressQuestion?.statementId === request.statementId
+      ? options.pressQuestion
+      : undefined;
+  let pressQuestionAdded = false;
+  if (preparedPressQuestion) {
+    if (sha256(JSON.stringify(graph)) !== preparedPressQuestion.sourceGraphHash) {
+      throw new HttpError(409, "This case changed in another window. Refresh and try again.");
+    }
+    if (!preparedPressQuestion.existing) {
+      graph = structuredClone(graph);
+      privateCase = structuredClone(privateCase);
+      graph.nodes.push(preparedPressQuestion.node);
+      graph.lines.push(preparedPressQuestion.line);
+      graph.interactionRootNodeIds = [...new Set([...graph.interactionRootNodeIds, preparedPressQuestion.nodeId])];
+      const validation = validateDebateMysteryDialogueGraphV2(mysteryGraphValidationArgsV2(graph, privateCase));
+      if (!validation.valid) throw new Error(validation.errors.join("\n"));
+      privateCase.graphValidation = validation;
+      const textHash = sha256(JSON.stringify([
+        preparedPressQuestion.line.visibleText,
+        preparedPressQuestion.line.spokenText,
+      ]));
+      privateCase.prosecutionPersonaPerformanceByLine = {
+        ...(privateCase.prosecutionPersonaPerformanceByLine ?? {}),
+        [preparedPressQuestion.lineId]: {
+          version: 1,
+          nodeId: preparedPressQuestion.nodeId,
+          kind: "press_question",
+          sourceTextHash: textHash,
+          appliedTextHash: textHash,
+          outcome: preparedPressQuestion.outcome,
+        },
+      };
+      pressQuestionAdded = true;
+    }
+  }
   let state = structuredClone(session.formatState);
-  if (preparedRoomIntroductionPersona?.outcome === "polished") {
+  ensureRoomPointsOfInterestV2(state);
+  ensureRoomsClearedV2(state, privateCase, graph);
+  if (
+    preparedRoomIntroductionPersona?.outcome === "polished" ||
+    preparedProsecutionPersona?.outcome === "polished" ||
+    pressQuestionAdded
+  ) {
     state.readiness = {
       ...state.readiness,
       contractHash: debateMysteryPlayContractHashV2({
@@ -15573,7 +17899,7 @@ export function applyDebateMysteryActionV2(
       (request.action === "advance_spectator_trial" && state.playPhase === "trial")
     )
   ) {
-    throw new HttpError(409, "This Spectator case only allows reviewing and filing the automated Prosecutor theory before watch-only court.");
+    throw new HttpError(409, `This Spectator case only allows reviewing and filing the automated ${debateMysteryCounselSeatsV2(state.config).playerRoleLabel} theory before watch-only court.`);
   }
   if (!spectator && request.action === "advance_spectator_trial") {
     throw new HttpError(409, "Only a Spectator case advances automatically.");
@@ -15720,16 +18046,18 @@ export function applyDebateMysteryActionV2(
     if (!introduction || state.roomIntroductions[request.roomId] !== "casekeeper") {
       throw new HttpError(409, "That room introduction is not waiting for the player's thought beat.");
     }
-    const openingNodeIds = introduction.openingExchangeNodeIds
-      ? [
-          introduction.openingExchangeNodeIds.prosecutionOpeningNodeId,
-          introduction.openingExchangeNodeIds.occupantResponseNodeId,
-          introduction.openingExchangeNodeIds.prosecutionHandoffNodeId,
-        ]
-      : [introduction.personaNodeId];
-    for (const nodeId of openingNodeIds) {
-      state = executeDialogueNodeV2({ state, graph, privateCase, nodeId });
-    }
+    // First contact belongs to the room occupant. Earlier case packs may retain
+    // authored Prosecutor bookends for replay compatibility, but they are not
+    // performed: the normal Talk and Present actions own the interrogation.
+    const occupantNodeId =
+      introduction.openingExchangeNodeIds?.occupantResponseNodeId ??
+      introduction.personaNodeId;
+    state = executeDialogueNodeV2({
+      state,
+      graph,
+      privateCase,
+      nodeId: occupantNodeId,
+    });
     state.metSuspectSeatIds = [
       ...new Set([...state.metSuspectSeatIds, introduction.suspectSeatId]),
     ];
@@ -15742,6 +18070,41 @@ export function applyDebateMysteryActionV2(
       throw new HttpError(409, "That room introduction is not currently performing.");
     }
     state.roomIntroductions = { ...state.roomIntroductions, [request.roomId]: "complete" };
+  } else if (request.action === "observe_interest") {
+    if (state.playPhase !== "investigation" || state.currentRoomId !== request.roomId || state.roomView !== "room") {
+      throw new HttpError(409, "Enter this room before looking around it.");
+    }
+    const room = state.rooms.find((entry) => entry.id === request.roomId);
+    if (!room) throw new HttpError(404, "That room is not authored for this case.");
+    if (state.roomIntroductions[request.roomId] && state.roomIntroductions[request.roomId] !== "complete") {
+      throw new HttpError(409, "Let the room introduction finish before looking around.");
+    }
+    const interest = room.pointsOfInterest?.find((entry) => entry.id === request.interestId);
+    if (!interest) throw new HttpError(404, "That is not a point of interest in this room.");
+    const nodeId = debateMysteryInterestNodeIdV2(room.id, interest.id);
+    if (!state.dialogueHistory.some((entry) => entry.nodeId === nodeId)) {
+      const prepared = options.interestObservation;
+      const text = prepared && prepared.roomId === room.id && prepared.interestId === interest.id
+        ? prepared.text
+        : deterministicMysteryAmbientObservationV2({
+            anchor: interest.physicalAnchor,
+            personaSourceHash: sha256(`${sessionId}:${state.config.prosecutorBotId}`),
+          });
+      // Flavour only: it is the investigator's own remark, never a Case File entry.
+      state.dialogueHistory.push({
+        nodeId,
+        lineId: null,
+        delivery: "text_only",
+        stageActionText: null,
+        visibleText: text,
+        speakerSeatId: null,
+        speakerBotId: state.config.prosecutorBotId,
+        speakerKind: "player",
+        caseFileRelevant: false,
+        occurredAt: new Date().toISOString(),
+      });
+    }
+    state.activeDialogueNodeId = nodeId;
   } else if (request.action === "examine") {
     if (state.playPhase !== "investigation" || state.currentRoomId !== request.roomId || state.roomView !== "room") {
       throw new HttpError(409, "Enter this room before examining it.");
@@ -15758,8 +18121,11 @@ export function applyDebateMysteryActionV2(
     if (!nodeId) throw new HttpError(404, "That examination point is not authored for this case.");
     state = executeDialogueNodeV2({ state, graph, privateCase, nodeId });
     hotspot.examined = true;
+    // The room's investigation ends once every clue-bearing point is examined;
+    // the rest are optional, and the opening sweep follows the same rule.
+    refreshRoomClearedV2(privateCase, graph, room);
     if (room.id === (state.crimeSceneRoomId ?? privateCase.crimeSceneRoomId)) {
-      state.openingSweepComplete = room.hotspots.every((entry) => entry.examined);
+      state.openingSweepComplete = room.cleared === true;
     }
   } else if (request.action === "talk") {
     if (state.playPhase !== "investigation" || state.roomView !== "room") {
@@ -15829,7 +18195,7 @@ export function applyDebateMysteryActionV2(
       presentNodeId: nodeId,
     });
   } else if (request.action === "review_strategy") {
-    if (spectator) throw new HttpError(409, "Spectator mode uses the automated Prosecutor route.");
+    if (spectator) throw new HttpError(409, `Spectator mode uses the automated ${debateMysteryCounselSeatsV2(state.config).playerRoleLabel} route.`);
     if (state.playPhase !== "investigation" && state.playPhase !== "trial") {
       throw new HttpError(409, "Strategy review is available during investigation and court.");
     }
@@ -15887,6 +18253,10 @@ export function applyDebateMysteryActionV2(
     }
     const chapter = graph.witnessChapters.find((entry) => entry.id === state.court?.activeChapterId)!;
     const version = chapter.statementVersions.find((entry) => entry.statementId === request.statementId)!;
+    // The counsel presses in their own voice before the witness answers.
+    if (preparedPressQuestion) {
+      state = executeDialogueNodeV2({ state, graph, privateCase, nodeId: preparedPressQuestion.nodeId });
+    }
     state = executeDialogueNodeV2({ state, graph, privateCase, nodeId: version.pressNodeId });
     state.court!.statements = state.court!.statements.map((entry) => entry.statementId === request.statementId ? { ...entry, pressed: true } : entry);
     const witness = state.suspects.find((entry) => entry.seatId === chapter.witnessSeatId);
@@ -15988,7 +18358,7 @@ export function applyDebateMysteryActionV2(
     state = advanceSpectatorTrialV2({ session, state, graph, privateCase });
   } else if (request.action === "retry_witness_checkpoint") {
     const checkpoint = state.court?.checkpoint;
-    if (!checkpoint || state.playPhase !== "verdict" || state.verdict?.legalResult !== "not_guilty") {
+    if (!checkpoint || state.playPhase !== "verdict" || !mysteryPlayerLostVerdictV2(state)) {
       throw new HttpError(409, "No failed witness checkpoint is available.");
     }
     const restored = JSON.parse(checkpoint.publicStateJson) as DebateWhodunnitFormatStateV2;
@@ -16035,7 +18405,7 @@ export function applyDebateMysteryActionV2(
     phase: state.playPhase === "verdict" ? "verdict" : state.playPhase === "trial" ? "challenge" : "opening",
     stepKey: `mystery_v2_${state.playPhase}`,
     winnerSideId: state.verdict
-      ? state.verdict.legalResult === "guilty" ? "for" : "against"
+      ? mysteryPlayerLostVerdictV2(state) ? "against" : "for"
       : null,
     completedAt: state.playPhase === "verdict" ? state.caseCheck?.concludedAt ?? new Date().toISOString() : null,
   };
@@ -16048,6 +18418,37 @@ export function applyDebateMysteryActionV2(
     ? false : session.formatState.publicActionHistoryComplete ?? false;
   db.exec("BEGIN IMMEDIATE");
   try {
+    if (preparedPressQuestion && pressQuestionAdded) {
+      persistMysteryProsecutionPersonaV2({
+        db,
+        userId,
+        sessionId,
+        graph,
+        privateCase,
+        prepared: {
+          kind: "press_question",
+          nodeId: preparedPressQuestion.nodeId,
+          lineId: preparedPressQuestion.lineId,
+          sourceGraphHash: preparedPressQuestion.sourceGraphHash,
+          sourceTextHash: sha256(JSON.stringify([
+            preparedPressQuestion.line.visibleText,
+            preparedPressQuestion.line.spokenText,
+          ])),
+          outcome: preparedPressQuestion.outcome,
+          polishedLine: null,
+        },
+      });
+    }
+    if (preparedProsecutionPersona) {
+      persistMysteryProsecutionPersonaV2({
+        db,
+        userId,
+        sessionId,
+        graph,
+        privateCase,
+        prepared: preparedProsecutionPersona,
+      });
+    }
     if (preparedRoomIntroductionPersona) {
       persistMysteryRoomIntroductionPersonaV2({
         db,

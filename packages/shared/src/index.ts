@@ -282,6 +282,7 @@ export {
   botPowerAntiTruthInvertPromptV1,
   botPowerDefinitionIsExplicitInterruptionV1,
   botPowerDefinitionIsUnconditionalInterruptionV1,
+  botPowerDefinitionIsEndlessTangentV1,
   botPowerDefinitionIsTrollV1,
   botPowerTrollAuthoringCueV1,
   botPowerTrollsV1,
@@ -773,6 +774,7 @@ export {
   normalizeVoiceMode,
   normalizeWhodunnitTextVoiceMode,
   normalizeWhodunnitSpeechType,
+  normalizeWhodunnitInvestigationPerspective,
   normalizeVoiceDeliveryMood,
   elevenLabsVoiceDirectionForMood,
   expectedVoicePlaybackDurationMs,
@@ -847,7 +849,9 @@ export {
   type WhodunnitTextVoiceMode,
   DEFAULT_WHODUNNIT_TEXT_VOICE_MODE,
   type WhodunnitSpeechType,
+  type WhodunnitInvestigationPerspective,
   DEFAULT_WHODUNNIT_SPEECH_TYPE,
+  DEFAULT_WHODUNNIT_INVESTIGATION_PERSPECTIVE,
 } from "./audioVoice.js";
 
 export {
@@ -858,6 +862,7 @@ export {
   normalizeBotLocalLaughDelimiter,
   normalizeBotLocalLaughSyllable,
   projectLocalWrittenLaughterForSynthesis,
+  projectPremiumLaughterForSynthesis,
   type BotLocalLaughIntensity,
 } from "./localLaugh.js";
 
@@ -1336,7 +1341,9 @@ export {
   anthropicReasoningEffortForRequest,
   effectiveModelReasoningEffort,
   isAutoModelTurboPreferenceId,
+  modelReasoningEffortMaxUnlockLevel,
   modelReasoningEffortPreferenceKey,
+  modelReasoningEffortRungProvenance,
   modelSupportsNativeReasoningEffort,
   modelSupportsTurboMode,
   ollamaModelIsKnownToSupportNativeThinking,
@@ -1371,6 +1378,7 @@ export {
   type ModelReasoningEffortCapabilityV1,
   type ModelReasoningEffortPreference,
   type ModelReasoningEffortPreferenceV1,
+  type ModelReasoningEffortRungProvenance,
   type ModelTurboPreferenceV1,
   type MaxReasoningEffort,
   type NativeReasoningEffortProvider,
@@ -3917,6 +3925,7 @@ export * from "./slateHandoff.js";
 export * from "./debate.js";
 export * from "./debateMystery.js";
 export * from "./debateMysteryV2.js";
+export * from "./debateMysteryExterior.js";
 export * from "./mysteryIncidentPlan.js";
 export * from "./portableMysteryPackage.js";
 export * from "./portableMysteryCase.js";

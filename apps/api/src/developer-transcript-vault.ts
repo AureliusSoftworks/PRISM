@@ -8,6 +8,7 @@ import type { DatabaseSync } from "node:sqlite";
 const DIAGNOSTIC_CIPHER = "aes-256-gcm";
 const DIAGNOSTIC_NONCE_BYTES = 12;
 const DIAGNOSTIC_ENVELOPE_KIND = "prism-owner-encrypted-diagnostic";
+export const DEVELOPER_TRANSCRIPT_VAULT_MIGRATION_VERSION_V1 = 1 as const;
 
 interface DeveloperTranscriptEnvelopeV1 {
   v: 1;
@@ -43,6 +44,44 @@ function parseEnvelope(value: string): DeveloperTranscriptEnvelopeV1 | null {
 
 export function developerTranscriptPayloadIsSealedV1(value: string): boolean {
   return parseEnvelope(value) !== null;
+}
+
+/** Whether this owner's one-time legacy transcript sealing pass completed. */
+export function developerTranscriptVaultMigrationIsCompleteV1(args: {
+  db: DatabaseSync;
+  userId: string;
+}): boolean {
+  const row = args.db
+    .prepare(
+      `SELECT migration_version
+         FROM developer_transcript_vault_migrations
+        WHERE user_id = ?`,
+    )
+    .get(args.userId) as { migration_version?: unknown } | undefined;
+  return (
+    row?.migration_version ===
+    DEVELOPER_TRANSCRIPT_VAULT_MIGRATION_VERSION_V1
+  );
+}
+
+function markDeveloperTranscriptVaultMigrationCompleteV1(args: {
+  db: DatabaseSync;
+  userId: string;
+}): void {
+  args.db
+    .prepare(
+      `INSERT INTO developer_transcript_vault_migrations (
+         user_id, migration_version, completed_at
+       ) VALUES (?, ?, ?)
+       ON CONFLICT(user_id) DO UPDATE SET
+         migration_version = excluded.migration_version,
+         completed_at = excluded.completed_at`,
+    )
+    .run(
+      args.userId,
+      DEVELOPER_TRANSCRIPT_VAULT_MIGRATION_VERSION_V1,
+      new Date().toISOString(),
+    );
 }
 
 export function sealDeveloperTranscriptPayloadV1(args: {
@@ -100,6 +139,7 @@ export function migrateDeveloperTranscriptPayloadsForOwnerV1(args: {
   userId: string;
   userKey: Buffer;
 }): number {
+  if (developerTranscriptVaultMigrationIsCompleteV1(args)) return 0;
   const rows = args.db
     .prepare(
       `SELECT id, payload_json
@@ -124,5 +164,6 @@ export function migrateDeveloperTranscriptPayloadsForOwnerV1(args: {
     const result = update.run(sealed, row.id, args.userId, row.payload_json);
     migrated += Number(result.changes ?? 0);
   }
+  markDeveloperTranscriptVaultMigrationCompleteV1(args);
   return migrated;
 }

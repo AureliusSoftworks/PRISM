@@ -20,6 +20,14 @@ export const WHODUNNIT_DIALOGUE_TYPEWRITER = {
 } as const;
 
 /**
+ * How long a queued spoken line may wait for its prepared voice (the Premium
+ * take or the local clip) before the caption proceeds on its own clock. Long
+ * enough for a slow ElevenLabs round trip; short enough that a take which
+ * never starts cannot hold the exchange.
+ */
+export const WHODUNNIT_PREPARED_VOICE_WAIT_MS = 15_000;
+
+/**
  * A deliberately readable Phoenix Wright-style caption clock. Every visible
  * Whodunnit line uses this when prepared speech is absent or intentionally
  * suppressed; a player gesture can still settle the line immediately.
@@ -106,9 +114,71 @@ export type WhodunnitInterrogationPhase =
   | "suspect_entrance"
   | "suspect_speaking";
 
+export type WhodunnitRoomCommand =
+  | "move"
+  | "examine"
+  | "talk"
+  | "present"
+  | null;
+
+/**
+ * The player character enters the room stage only for a deliberate
+ * interrogation. First-contact dialogue may reuse the same playback phases,
+ * but it belongs visually to the suspect alone.
+ */
+export function whodunnitPlayerCharacterStagingActive(args: {
+  command: WhodunnitRoomCommand;
+  hasPlayerCharacter: boolean;
+  hasSuspect: boolean;
+  interrogationPhase: WhodunnitInterrogationPhase | null;
+  roomIntroductionActive: boolean;
+}): boolean {
+  if (
+    !args.hasPlayerCharacter ||
+    !args.hasSuspect ||
+    args.roomIntroductionActive
+  ) {
+    return false;
+  }
+  return (
+    args.command === "talk" ||
+    args.command === "present" ||
+    args.interrogationPhase !== null
+  );
+}
+
 export interface WhodunnitInterrogationEntry {
   speakerBotId: string | null;
   speakerSeatId: string | null;
+}
+
+export interface WhodunnitInterrogationFirstEntryState {
+  prosecutorEntered: boolean;
+  suspectEntered: boolean;
+}
+
+/**
+ * Tracks which figures have made their first appearance at the current queue
+ * index. Once present, a figure remains staged until the exchange is cleared.
+ */
+export function whodunnitInterrogationFirstEntryState(args: {
+  entries: readonly WhodunnitInterrogationEntry[];
+  index: number;
+  prosecutorBotId: string;
+  suspectSeatId: string;
+}): WhodunnitInterrogationFirstEntryState {
+  const visibleEntries = args.entries.slice(
+    0,
+    Math.max(0, Math.min(args.entries.length, args.index + 1)),
+  );
+  return {
+    prosecutorEntered: visibleEntries.some(
+      (entry) => entry.speakerBotId === args.prosecutorBotId,
+    ),
+    suspectEntered: visibleEntries.some(
+      (entry) => entry.speakerSeatId === args.suspectSeatId,
+    ),
+  };
 }
 
 export type WhodunnitInterrogationFinishDecision =
@@ -159,16 +229,32 @@ export function startWhodunnitInterrogation(
   );
 }
 
-/** Resolve every queued handoff from the next frozen speaker, rather than
- * assuming all room exchanges end after one Prosecutor/witness pair. */
+/**
+ * Resolve every queued handoff from the next frozen speaker. An actor receives
+ * an entrance only on their first appearance in this exchange; later lines
+ * resume in place. A fresh queue starts with an empty `priorEntries` list.
+ */
 export function whodunnitInterrogationEntrancePhaseForEntry(
   entry: WhodunnitInterrogationEntry | null,
   prosecutorBotId: string,
   suspectSeatId: string,
+  priorEntries: readonly WhodunnitInterrogationEntry[] = [],
 ): WhodunnitInterrogationPhase | null {
   if (!entry) return null;
-  if (entry.speakerBotId === prosecutorBotId) return "prosecutor_entrance";
-  if (entry.speakerSeatId === suspectSeatId) return "suspect_entrance";
+  if (entry.speakerBotId === prosecutorBotId) {
+    return priorEntries.some(
+      (priorEntry) => priorEntry.speakerBotId === prosecutorBotId,
+    )
+      ? "prosecutor_speaking"
+      : "prosecutor_entrance";
+  }
+  if (entry.speakerSeatId === suspectSeatId) {
+    return priorEntries.some(
+      (priorEntry) => priorEntry.speakerSeatId === suspectSeatId,
+    )
+      ? "suspect_speaking"
+      : "suspect_entrance";
+  }
   return null;
 }
 
@@ -316,10 +402,29 @@ export function whodunnitInterrogationAudioOwnsMouth(args: {
 }
 
 /**
+ * A queued spoken line whose voice has not sounded yet: its entrance beat, or
+ * the prepared take still loading. The speaker keeps thinking through it, and
+ * a gesture never cuts the coming voice into silent text.
+ */
+export function whodunnitPreparedVoicePending(args: {
+  queued: boolean;
+  preparedAudioExpected: boolean;
+  preparedAudioStatus: "idle" | "pending" | "started" | "unavailable";
+  phase: WhodunnitInterrogationPhase | null;
+}): boolean {
+  if (!args.queued) return false;
+  if (args.phase === "prosecutor_entrance" || args.phase === "suspect_entrance") return true;
+  return args.preparedAudioExpected &&
+    (args.preparedAudioStatus === "idle" || args.preparedAudioStatus === "pending");
+}
+
+/**
  * Resolves one pointer/keyboard gesture without changing the authoritative
  * dialogue queue. Streaming text fills on the first gesture and advances on
  * the next, for every speaker. A repeated click may advance a line filled by
  * its first click, except when that first click cut a running line short.
+ * While the line's voice is still on its way the speaker is thinking, not
+ * waiting: the gesture is ignored rather than turning the voice into text.
  */
 export function whodunnitDialogueGestureDecision(args: {
   advanceArmed: boolean;
@@ -328,7 +433,9 @@ export function whodunnitDialogueGestureDecision(args: {
   clickCount: number;
   filledByGesture: boolean;
   streaming: boolean;
+  voicePending?: boolean;
 }): WhodunnitDialogueGestureDecision {
+  if (args.voicePending) return "ignore";
   if (args.clickCount > 1 && (args.advanceArmed || args.botFillArmed)) return "ignore";
   if (args.filledByGesture) return "advance";
   if (args.streaming || args.automatedBotPlayback) return "fill";
@@ -382,4 +489,28 @@ export function whodunnitInterrogationCompletionIsCurrent(
   activeGeneration: number,
 ): boolean {
   return completionGeneration === activeGeneration;
+}
+
+export interface WhodunnitStagedExchangeEntry {
+  nodeId: string;
+  occurredAt: string;
+  speakerBotId: string | null;
+  delivery?: "spoken" | "text_only" | "persona_babble" | "anonymous_babble";
+  visibleText: string;
+}
+
+/** Stages one action's new dialogue for the witness alone. The investigator's
+ * spoken question is never performed: the button the player chose is their
+ * line, so any investigator speech that a later speaker answers leaves the
+ * queue. A trailing investigator line with nothing after it stays, so no
+ * words are lost. Text-only observations are the player's and always stay. */
+export function whodunnitStageWitnessExchange<T extends WhodunnitStagedExchangeEntry>(
+  entries: readonly T[],
+  prosecutorBotId: string,
+): T[] {
+  const investigatorSpeech = (entry: WhodunnitStagedExchangeEntry): boolean =>
+    entry.speakerBotId === prosecutorBotId && entry.delivery !== "text_only";
+  return entries.filter((entry, index) =>
+    !investigatorSpeech(entry) ||
+    !entries.slice(index + 1).some((later) => !investigatorSpeech(later)));
 }

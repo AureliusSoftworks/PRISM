@@ -45,7 +45,10 @@ export, not a `PrismReviewArtifactV1` or a claim about experienced delivery.
 `formatDebateMysteryV2PublicReview` whitelists public session provenance, recorded
 dialogue and observations, accepted actions, admitted records, the filed theory,
 and the terminal result. It is shared by Case File, Theory Board, result, and
-Archive copies. Legacy action summaries may supplement the chronology; missing
+Archive copies. The setup block records the player's stance and, for a Defense
+case, the public client; the embodied player always prints as "Investigator",
+and the opposing counsel's label follows the stance ("Defense" in a
+prosecution case, "Prosecution" in a Defense case). Legacy action summaries may supplement the chronology; missing
 history, per-line runtime attribution, and observed playback remain explicit
 unknowns. Sealed solutions, private prompts, voice-carrier identity, unadmitted
 evidence, and undiscovered branches never enter the copy. Diagnostic review must

@@ -2,6 +2,7 @@ import {
   BOTCAST_PRODUCER_GUEST_ID,
   botPowerMutePublicResponseAtElapsedV1,
   botPowerResponseIsSilentV1,
+  botcastIdentityMirrorStateBeforeMessageV1,
   botcastPublicReactionSpeechForMessage,
   botcastProducerCueLifecyclesFromEvents,
   botcastReplayTimeline,
@@ -338,6 +339,12 @@ export function buildSignalReviewTranscript(
       const recordedAt = event?.occurredAt ?? message.createdAt;
       const autoRecovery = event?.payload.autoRecovery;
       const providerRecovery = event?.payload.providerRecovery;
+      const identityMirrorState =
+        botcastIdentityMirrorStateBeforeMessageV1(
+          episode,
+          message.botId,
+          message.id,
+        );
       const visibleTranscript = message.mutePerformance
         ? botPowerMutePublicResponseAtElapsedV1(
             message.content,
@@ -384,6 +391,11 @@ export function buildSignalReviewTranscript(
               : "recorded repaired/fallback utterance; raw provider draft not preserved"
         }`,
         `- Immersive voice effect: ${event?.payload.immersiveVoiceEffect === true ? "yes" : "no"}`,
+        `- Active identity mirror: ${
+          identityMirrorState
+            ? `${identityMirrorState.holderBotName} is wearing ${identityMirrorState.targetBotName}'s public presentation; the holder's underlying persona and voice remain their own by design.`
+            : "None"
+        }`,
         `- Live voice recovery: ${
           voicePlaybackRecoveries.length > 0
             ? voicePlaybackRecoveries

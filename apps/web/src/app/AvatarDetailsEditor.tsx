@@ -115,6 +115,13 @@ import styles from "./avatar-details-editor.module.css";
 import pageStyles from "./page.module.css";
 
 const AVATAR_DETAILS_NEUTRAL_FACE = zenLiveActionPlateFace("neutral", "closed");
+/**
+ * The screen editor's eyes and mouth are an editing template drawn over a
+ * dark screen, never the rendered CRT. They stay white in every theme and
+ * layout so the red, blue, and green ink labels read true; a bot whose color
+ * is blue would otherwise be indistinguishable from Speech ink.
+ */
+const AVATAR_DETAILS_FACE_GUIDE_INK = "#ffffff";
 const AVATAR_DETAILS_INK_OPTIONS: ReadonlyArray<{
   role: AvatarDetailsInkSelection;
   label: string;
@@ -376,7 +383,7 @@ const AvatarDetailsEditorSession = forwardRef<
   const paintedPixels = avatarDetailsPaintColorPixelCount(paintColorMap);
   const coveragePercent =
     avatarDetailsPaintColorCoveragePercent(paintColorMap);
-  const guideInk = normalizedAccentColor;
+  const guideInk = AVATAR_DETAILS_FACE_GUIDE_INK;
   const faceGuideStyle = {
     ...BOT_AVATAR_DETAILS_FACE_REGISTRATION_STYLE,
     "--coffee-plate-emoji-nudge-y": "clamp(-5px, -2.6%, -2px)",
@@ -1670,6 +1677,7 @@ const AvatarDetailsEditorSession = forwardRef<
               type="button"
               className={styles.guideToggleButton}
               aria-pressed={faceGuideVisible}
+              title="The face guide stays white so ink label colors read true"
               onClick={() => setFaceGuideVisible((visible) => !visible)}
             >
               {faceGuideVisible ? (

@@ -214,3 +214,53 @@ describe("Whodunnit V2 public review", () => {
     assert.match(css, /\.theoryBoardFields \{[^}]*overflow-y: auto/);
   });
 });
+
+describe("Whodunnit V2 public review stance", () => {
+  it("labels the opposing seat by stance and records the Defense client", () => {
+    const prosecution = formatDebateMysteryV2PublicReview(state);
+    assert.match(prosecution, /- Stance: prosecution · player counsel=Prosecutor · opposing counsel=Defense Counsel/u);
+    assert.match(prosecution, /- Client: None \(prosecution stance\)/u);
+
+    const fixture = structuredClone(state);
+    fixture.config = {
+      ...fixture.config,
+      playerStance: "defense",
+      prosecutorBotId: "bot-counsel",
+      rivalDefenseBotId: "bot-rival",
+    } as typeof fixture.config;
+    fixture.caseCharge = {
+      version: 1,
+      incidentId: "incident-1",
+      kind: "homicide",
+      title: "Homicide",
+      subject: "the victim",
+      accusationPrompt: "Who is really responsible for the victim's death?",
+      defendantSeatId: "suspect-iris",
+    } as typeof fixture.caseCharge;
+    fixture.dialogueHistory = [
+      {
+        nodeId: "node-rival",
+        lineId: "line-rival",
+        visibleText: "Objection. The defense is reaching.",
+        speakerSeatId: null,
+        speakerBotId: "bot-rival",
+        occurredAt: "2026-08-24T20:01:30.000Z",
+      },
+      {
+        nodeId: "node-player",
+        lineId: "line-player",
+        visibleText: "My client was elsewhere.",
+        speakerSeatId: null,
+        speakerBotId: "bot-counsel",
+        speakerKind: "player",
+        occurredAt: "2026-08-24T20:01:40.000Z",
+      },
+    ] as typeof fixture.dialogueHistory;
+    const defense = formatDebateMysteryV2PublicReview(fixture);
+    assert.match(defense, /- Stance: defense · player counsel=Defense Attorney · opposing counsel=Prosecutor/u);
+    assert.match(defense, /- Client: Iris \[suspect-iris\]/u);
+    assert.match(defense, /Prosecution: Objection\. The defense is reaching\./u);
+    assert.match(defense, /Investigator: My client was elsewhere\./u);
+    assert.doesNotMatch(defense, /\n {2}Defense: /u);
+  });
+});

@@ -4,6 +4,7 @@ import { DatabaseSync } from "node:sqlite";
 
 import {
   developerTranscriptPayloadIsSealedV1,
+  developerTranscriptVaultMigrationIsCompleteV1,
   migrateDeveloperTranscriptPayloadsForOwnerV1,
   openDeveloperTranscriptPayloadV1,
   sealDeveloperTranscriptPayloadV1,
@@ -59,6 +60,11 @@ describe("developer transcript owner vault", () => {
         user_id TEXT NOT NULL,
         payload_json TEXT NOT NULL
       );
+      CREATE TABLE developer_transcript_vault_migrations (
+        user_id TEXT PRIMARY KEY,
+        migration_version INTEGER NOT NULL,
+        completed_at TEXT NOT NULL
+      );
     `);
     db.prepare(
       "INSERT INTO developer_transcript_events (id, user_id, payload_json) VALUES (?, ?, ?)",
@@ -84,6 +90,32 @@ describe("developer transcript owner vault", () => {
     assert.equal(developerTranscriptPayloadIsSealedV1(rows[1]!.payload_json), false);
     assert.doesNotMatch(rows[0]!.payload_json, /owner-a-canary/u);
     assert.match(rows[1]!.payload_json, /owner-b-canary/u);
+    assert.equal(
+      developerTranscriptVaultMigrationIsCompleteV1({
+        db,
+        userId: "owner-a",
+      }),
+      true,
+    );
+    assert.equal(
+      developerTranscriptVaultMigrationIsCompleteV1({
+        db,
+        userId: "owner-b",
+      }),
+      false,
+    );
+
+    // A completed owner must take the constant-time marker path without ever
+    // touching the large event table again.
+    db.exec("DROP TABLE developer_transcript_events");
+    assert.equal(
+      migrateDeveloperTranscriptPayloadsForOwnerV1({
+        db,
+        userId: "owner-a",
+        userKey: ownerAKey,
+      }),
+      0,
+    );
     db.close();
   });
 });

@@ -71,6 +71,8 @@ import {
   debateTitleForMotion,
   debateSilenceHoldDurationMs,
   debateSpokenText,
+  debateMysteryMansionHeldByArchiveV1,
+  DEBATE_MYSTERY_VENUE_HELD_BY_ONGOING_CASE_MESSAGE_V1,
   heardBotPresenceBeatTextV1,
   inferMysterySparkMotifsV1,
   normalizeDebateVoicePerformanceCue,
@@ -131,6 +133,7 @@ import {
   type DebateTurnaboutCourtFigureV1,
   type DebateTurnaboutFormatStateV1,
   type DebateWhodunnitCreateConfigV1,
+  type DebateMysteryPlayerStanceV2,
   type DebateWhodunnitCreateConfigV2,
   type BotAudioVoiceProfileV1,
   type DebateTurnaboutStatementV1,
@@ -149,6 +152,7 @@ import {
   type LiveBakeArtifactV1,
   type ProviderReasoningEffort,
   type WhodunnitTextVoiceMode,
+  type WhodunnitInvestigationPerspective,
 } from "@localai/shared";
 import {
   liveBakeStatusCopy,
@@ -948,6 +952,9 @@ export interface DebateExperienceProps {
   whodunnitTextVoiceMode?: WhodunnitTextVoiceMode;
   /** Prism's default voice, the player's audible stand-in for written observations. */
   playerVoiceProfile?: BotAudioVoiceProfileV1 | null;
+  /** Who the player is while investigating a Whodunnit: first person keeps
+   * the investigator off stage until Court; embodied stages them. */
+  investigationPerspective?: WhodunnitInvestigationPerspective;
   playMysteryTextVoice?: (args: {
     instant?: boolean;
     mode: Exclude<WhodunnitTextVoiceMode, "off">;
@@ -5463,6 +5470,16 @@ export function DebateExperience(
   const [mysteryAmbienceAssetSynthesis, setMysteryAmbienceAssetSynthesis] =
     useState(false);
   const [mysterySkipInvestigation, setMysterySkipInvestigation] = useState(false);
+  // Which counsel chair the player takes. The frozen seats never move; stance
+  // only decides their roles, so it stays outside the Recipe Seed.
+  const [mysteryPlayerStance, setMysteryPlayerStance] =
+    useState<DebateMysteryPlayerStanceV2>("prosecution");
+  const whodunnitPlayerRoleLabel =
+    mysteryPlayerStance === "defense" ? "Defense Attorney" : "Prosecutor";
+  const whodunnitOpposingRoleLabel =
+    mysteryPlayerStance === "defense" ? "Prosecutor" : "Defense Counsel";
+  const whodunnitTeamDefaults: readonly [string, string] =
+    mysteryPlayerStance === "defense" ? ["Defense", "Prosecution"] : ["Prosecution", "Defense"];
   const [mysteryMansionBundles, setMysteryMansionBundles] = useState<
     DebateMysteryMansionBundleSummaryV1[]
   >([]);
@@ -5491,8 +5508,10 @@ export function DebateExperience(
     useState<DebateMysteryProductionCapabilitiesV1 | null>(null);
   const [mysteryExteriorAssetSynthesis, setMysteryExteriorAssetSynthesis] =
     useState(false);
+  // Voices are local, lazy, and cheap; a case should speak unless the player
+  // deliberately makes it a text case.
   const [mysteryVoiceAssetSynthesis, setMysteryVoiceAssetSynthesis] =
-    useState(false);
+    useState(true);
   const [mysteryMansionBundleId, setMysteryMansionBundleId] = useState("");
   const [mansionPackageFile, setMansionPackageFile] = useState<File | null>(null);
   const [mansionPackagePassword, setMansionPackagePassword] = useState("");
@@ -7246,6 +7265,7 @@ export function DebateExperience(
     setMysteryDifficulty(caseFile.difficulty);
     setJuryEnabled(caseFile.trialType === "jury");
     setMysterySkipInvestigation(false);
+    setMysteryPlayerStance("prosecution");
   }, [mysteryCasePackages]);
 
   const inspectCasePackage = useCallback(async (file: File, password = ""): Promise<void> => {
@@ -7293,6 +7313,7 @@ export function DebateExperience(
       setMysteryDifficulty(installed.difficulty);
       setJuryEnabled(installed.trialType === "jury");
       setMysterySkipInvestigation(false);
+    setMysteryPlayerStance("prosecution");
       setCaseImportOpen(false);
     } catch (caught) {
       if (mountedRef.current) {
@@ -7360,6 +7381,7 @@ export function DebateExperience(
       (candidate) => candidate.id === mansionId,
     );
     if (!mansionId || (!mansion && !suppliedMansion)) return;
+    if (mansion && debateMysteryMansionHeldByArchiveV1(mansion)) return;
     setMysteryMansionSource("installed");
     setMysteryMansionBundleId(mansionId);
     setMysteryPreset("custom");
@@ -7714,6 +7736,7 @@ export function DebateExperience(
   const mutateSavedMansionAtmosphere = useCallback(async (
     mansion: DebateMysteryMansionBundleSummaryV1,
     action: "generate" | "accept" | "discard" | "undo",
+    direction = "",
   ): Promise<{ ok: boolean; error: string | null }> => {
     setMansionPackageState(action === "generate" ? "generating-atmosphere" : "updating");
     setError(null);
@@ -7721,7 +7744,11 @@ export function DebateExperience(
       const result = await request<{ mansion: DebateMysteryMansionBundleSummaryV1 }>(
         `/api/debates/mystery-mansions/${encodeURIComponent(mansion.id)}/atmosphere/${action}`,
         {
-          ...requestBody(action === "generate" ? { responseMode: props.responseMode } : {}),
+          ...requestBody(
+            action === "generate"
+              ? { responseMode: props.responseMode, direction }
+              : {},
+          ),
           method: "POST",
         },
       );
@@ -7747,6 +7774,7 @@ export function DebateExperience(
     mansion: DebateMysteryMansionBundleSummaryV1,
     cueId: import("@localai/shared").WhodunnitSfxCueIdV1,
     action: "generate" | "accept" | "discard" | "undo",
+    direction = "",
   ): Promise<{ ok: boolean; error: string | null }> => {
     setMansionPackageState(action === "generate" ? "generating-sfx" : "updating");
     setError(null);
@@ -7754,7 +7782,11 @@ export function DebateExperience(
       const result = await request<{ mansion: DebateMysteryMansionBundleSummaryV1 }>(
         `/api/debates/mystery-mansions/${encodeURIComponent(mansion.id)}/sfx/${encodeURIComponent(cueId)}/${action}`,
         {
-          ...requestBody(action === "generate" ? { responseMode: props.responseMode } : {}),
+          ...requestBody(
+            action === "generate"
+              ? { responseMode: props.responseMode, direction }
+              : {},
+          ),
           method: "POST",
         },
       );
@@ -7794,6 +7826,7 @@ export function DebateExperience(
   const mutateSavedMansionTheme = useCallback(async (
     mansion: DebateMysteryMansionBundleSummaryV1,
     action: "generate" | "accept" | "discard" | "undo",
+    direction = "",
   ): Promise<{ ok: boolean; error: string | null }> => {
     setMansionPackageState(action === "generate" ? "generating-music" : "updating");
     setError(null);
@@ -7802,7 +7835,7 @@ export function DebateExperience(
         `/api/debates/mystery-mansions/${encodeURIComponent(mansion.id)}/theme/${action}`,
         {
           ...requestBody(action === "generate"
-            ? { responseMode: props.responseMode }
+            ? { responseMode: props.responseMode, direction }
             : {}),
           method: "POST",
         },
@@ -7864,7 +7897,9 @@ export function DebateExperience(
       const result = await request<{ mansion: DebateMysteryMansionBundleSummaryV1 }>(
         `/api/debates/mystery-mansions/${encodeURIComponent(mansion.id)}/prop-theme${suffix}`,
         {
-          ...requestBody({ responseMode: props.responseMode }),
+          // Only a drawing pass takes the response mode. Using or discarding a redraw
+          // accepts no client-authored fields, and the server refuses any it is sent.
+          ...requestBody(generates ? { responseMode: props.responseMode } : {}),
           method: "POST",
         },
       );
@@ -9299,6 +9334,7 @@ export function DebateExperience(
     },
     useRelevantAssetLibraryProps: mysteryUseRelevantAssetLibraryProps,
     investigationMode: mysterySkipInvestigation ? "court_only" : "full",
+    playerStance: mysteryPlayerStance,
     mansionBundleId: selectedMysteryMansionBundle?.id ?? null,
     ...(mysteryMansionSource === "new" && mysteryMansionExteriorDraft
       ? {
@@ -9359,7 +9395,7 @@ export function DebateExperience(
       mysteryCastRequirement + (juryEnabled ? DEBATE_JURY_SIZE : 0)
   ) {
     const total = mysteryCastRequirement + (juryEnabled ? DEBATE_JURY_SIZE : 0);
-    mysterySetupError = `Whodunnit needs ${total} distinct Library bots for ${mysteryTargetSuspects} suspects, Judge, player Prosecutor, Defense Counsel${juryEnabled ? ", and four jurors" : ""}.`;
+    mysterySetupError = `Whodunnit needs ${total} distinct Library bots for ${mysteryTargetSuspects} suspects, Judge, your counsel seat, opposing counsel${juryEnabled ? ", and four jurors" : ""}.`;
   } else if (format === "whodunnit" && mysteryHasSurpriseSeats) {
     mysterySetupError = null;
   }
@@ -9396,7 +9432,7 @@ export function DebateExperience(
       ? ["Prosecution", "Defense"]
       : ["For", "Against", "Pro", "Con"];
     const nextDefaults = format === "whodunnit"
-      ? ["Prosecution", "Defense"]
+      ? [...whodunnitTeamDefaults]
       : ["Pro", "Con"];
     setMotion((current) => ({
       ...current,
@@ -9420,6 +9456,33 @@ export function DebateExperience(
       },
     }));
   }, [defaultModeratorTitle, format]);
+  // Swapping chairs swaps the default team names; authored names are kept.
+  useEffect(() => {
+    if (format !== "whodunnit") return;
+    const [nextFor, nextAgainst] =
+      mysteryPlayerStance === "defense" ? ["Defense", "Prosecution"] : ["Prosecution", "Defense"];
+    const defaults = ["Prosecution", "Defense"];
+    setMotion((current) => {
+      const forLabel =
+        !forTeamNameAuthoredRef.current &&
+        (!current.forSide.label.trim() || defaults.includes(current.forSide.label))
+          ? nextFor
+          : current.forSide.label;
+      const againstLabel =
+        !againstTeamNameAuthoredRef.current &&
+        (!current.againstSide.label.trim() || defaults.includes(current.againstSide.label))
+          ? nextAgainst
+          : current.againstSide.label;
+      if (forLabel === current.forSide.label && againstLabel === current.againstSide.label) {
+        return current;
+      }
+      return {
+        ...current,
+        forSide: { ...current.forSide, label: forLabel },
+        againstSide: { ...current.againstSide, label: againstLabel },
+      };
+    });
+  }, [format, mysteryPlayerStance]);
   const effectiveModeratorTitle = normalizeDebateModeratorTitle(
     moderatorTitle.trim() ? moderatorTitle : defaultModeratorTitle,
   );
@@ -9825,6 +9888,7 @@ export function DebateExperience(
     setMysteryIllustratedRoomSynthesis(false);
     setMysteryAmbienceAssetSynthesis(false);
     setMysterySkipInvestigation(false);
+    setMysteryPlayerStance("prosecution");
     setMysteryMansionBundleId("");
     setMysteryNonce(nextMysteryRecipeNonce());
     setMysteryFloors(1);
@@ -16065,6 +16129,10 @@ export function DebateExperience(
 
   const startMystery = async (): Promise<void> => {
     if (!mysterySetupValidated || busy) return;
+    if (selectedMysteryMansionBundle && debateMysteryMansionHeldByArchiveV1(selectedMysteryMansionBundle)) {
+      setError(DEBATE_MYSTERY_VENUE_HELD_BY_ONGOING_CASE_MESSAGE_V1);
+      return;
+    }
     if (selectedMysteryCasePackage) {
       if (!selectedMysteryMansionBundle || selectedMysteryCaseCompatibilityError) {
         setError(selectedMysteryCaseCompatibilityError ?? "Choose a compatible installed Mystery Venue.");
@@ -21243,7 +21311,11 @@ export function DebateExperience(
         ? `Choose what PRISM should make for this case. ${selectedMysteryMansionBundle.name} keeps everything it already has; nothing here changes the venue.`
         : "Choose what PRISM should draw and prepare for this case. Anything you skip uses PRISM's packaged art and sound.",
     };
-    const mansionStepReady = Boolean(mysteryMansionBundleId);
+    const mansionStepReady = Boolean(
+      mysteryMansionBundleId &&
+      selectedMysteryMansionBundle &&
+      !debateMysteryMansionHeldByArchiveV1(selectedMysteryMansionBundle),
+    );
     const mansionPageIndex = WHODUNNIT_SETUP_PAGES.findIndex(
       (setupPage) => setupPage.id === "mansion",
     );
@@ -21353,16 +21425,17 @@ export function DebateExperience(
                   onDetectRoomLights={(mansion, roomId) => requestSavedMansionTool<{ lights: import("@localai/shared").MansionDynamicLightV2[] }>(mansion, `room-art/${encodeURIComponent(roomId)}/detect-lights`).then((result) => result?.lights ?? null)}
                   onDetectRoomAnchors={(mansion, roomId) => requestSavedMansionTool<{ placementAnchors: import("@localai/shared").MansionPlacementAnchorV2[] }>(mansion, `room-art/${encodeURIComponent(roomId)}/detect-anchors`).then((result) => result?.placementAnchors ?? null)}
                   onGenerateOverhead={(mansion) => requestSavedMansionTool<{ mansion: DebateMysteryMansionBundleSummaryV1 }>(mansion, "overhead/generate", { responseMode: props.responseMode }).then((result) => result?.mansion ?? null)}
+                  onNameRooms={(mansion, entityIds) => requestSavedMansionTool<{ names: Record<string, string> }>(mansion, "room-names", { requests: entityIds.map((id) => ({ id })), responseMode: props.responseMode }).then((result) => result?.names ?? null)}
                   onExport={(mansion) => void exportSavedMansion(mansion)}
-                  onGenerateTheme={(mansion) => mutateSavedMansionTheme(mansion, "generate")}
+                  onGenerateTheme={(mansion, direction) => mutateSavedMansionTheme(mansion, "generate", direction)}
                   onAcceptTheme={(mansion) => mutateSavedMansionTheme(mansion, "accept")}
                   onDiscardTheme={(mansion) => mutateSavedMansionTheme(mansion, "discard")}
                   onUndoTheme={(mansion) => mutateSavedMansionTheme(mansion, "undo")}
-                  onGenerateAtmosphere={(mansion) => mutateSavedMansionAtmosphere(mansion, "generate")}
+                  onGenerateAtmosphere={(mansion, direction) => mutateSavedMansionAtmosphere(mansion, "generate", direction)}
                   onAcceptAtmosphere={(mansion) => mutateSavedMansionAtmosphere(mansion, "accept")}
                   onDiscardAtmosphere={(mansion) => mutateSavedMansionAtmosphere(mansion, "discard")}
                   onUndoAtmosphere={(mansion) => mutateSavedMansionAtmosphere(mansion, "undo")}
-                  onGenerateSfx={(mansion, cueId) => mutateSavedMansionSfx(mansion, cueId, "generate")}
+                  onGenerateSfx={(mansion, cueId, direction) => mutateSavedMansionSfx(mansion, cueId, "generate", direction)}
                   onAcceptSfx={(mansion, cueId) => mutateSavedMansionSfx(mansion, cueId, "accept")}
                   onDiscardSfx={(mansion, cueId) => mutateSavedMansionSfx(mansion, cueId, "discard")}
                   onUndoSfx={(mansion, cueId) => mutateSavedMansionSfx(mansion, cueId, "undo")}
@@ -21558,6 +21631,29 @@ export function DebateExperience(
               }} />
               <span><strong>{playerRole === "spectator" ? "Start directly in court" : "Skip investigation"}</strong><small>{playerRole === "spectator" ? "Bypass conclusion review and begin the watch-only trial after the title card." : "Prepare only the second act and enter court directly after the title card."}</small></span>
             </label>
+            <fieldset className={styles.rolePicker} data-tutorial-target="whodunnit-v2-stance">
+              <legend>Your side</legend>
+              {(["prosecution", "defense"] as const).map((stance) => (
+                <label
+                  key={stance}
+                  data-selected={mysteryPlayerStance === stance ? "true" : undefined}
+                >
+                  <input
+                    type="radio"
+                    name="whodunnit-player-stance"
+                    value={stance}
+                    checked={mysteryPlayerStance === stance}
+                    onChange={() => setMysteryPlayerStance(stance)}
+                  />
+                  <strong>{stance === "defense" ? "Defense" : "Prosecution"}</strong>
+                  <span>
+                    {stance === "defense"
+                      ? "Case Forge assigns you an innocent client facing a strong surface case. Investigate, break the frame, and name who is really responsible."
+                      : "Investigate the venue, file charges against who you believe is responsible, and prove them in court."}
+                  </span>
+                </label>
+              ))}
+            </fieldset>
           </div>
         ) : null}
 
@@ -22559,8 +22655,8 @@ export function DebateExperience(
           <p>
             {format === "whodunnit"
               ? playerRole === "spectator"
-                ? "Choose any voices you care about, or leave seats on Surprise me. The selected Prosecutor investigates offstage; you review and file the editable conclusion before watching court."
-                : "Choose any voices you care about, or leave seats on Surprise me. You control every legal choice through the selected Prosecutor; the remaining courtroom voices keep their own roles."
+                ? `Choose any voices you care about, or leave seats on Surprise me. The selected ${whodunnitPlayerRoleLabel} investigates offstage; you review and file the editable conclusion before watching court.`
+                : `Choose any voices you care about, or leave seats on Surprise me. You control every legal choice through the selected ${whodunnitPlayerRoleLabel}; the remaining courtroom voices keep their own roles.`
               : playerRole === "participant"
               ? "PRISM holds your side. Pin an opposing bot or Moderator/Judge when you care who fills the role; every unselected seat rests on Surprise me until the willingness check."
               : playerRole === "spectator"
@@ -22662,7 +22758,7 @@ export function DebateExperience(
                   {[
                     {
                       seat: { kind: "prosecutor" } as const,
-                      label: "Prosecution",
+                      label: mysteryPlayerStance === "defense" ? "Defense (you)" : "Prosecution",
                       botId: mysteryProsecutorBotId,
                     },
                     {
@@ -22840,8 +22936,8 @@ export function DebateExperience(
                           : activeMysteryCastSeat.kind === "judge"
                             ? "presiding Judge"
                           : activeMysteryCastSeat.kind === "prosecutor"
-                            ? "player Prosecutor"
-                            : "rival defense"
+                            ? `player ${whodunnitPlayerRoleLabel}`
+                            : "opposing counsel"
                       }`
                     : `Bot for ${
                         effectiveActiveCastSlot === "moderator"
@@ -23053,11 +23149,11 @@ export function DebateExperience(
                     ...current.forSide,
                     label:
                       label ||
-                      (format === "whodunnit" ? "Prosecution" : "Pro"),
+                      (format === "whodunnit" ? whodunnitTeamDefaults[0] : "Pro"),
                   },
                 };
               })}
-              placeholder={format === "whodunnit" ? "Prosecution" : "Pro"}
+              placeholder={format === "whodunnit" ? whodunnitTeamDefaults[0] : "Pro"}
             />
             <input
               value={motion.againstSide.label}
@@ -23080,11 +23176,11 @@ export function DebateExperience(
                     ...current.againstSide,
                     label:
                       label ||
-                      (format === "whodunnit" ? "Defense" : "Con"),
+                      (format === "whodunnit" ? whodunnitTeamDefaults[1] : "Con"),
                   },
                 };
               })}
-              placeholder={format === "whodunnit" ? "Defense" : "Con"}
+              placeholder={format === "whodunnit" ? whodunnitTeamDefaults[1] : "Con"}
             />
             <small>These public labels freeze into the court; the bots keep their private identities.</small>
           </label>
@@ -23150,7 +23246,11 @@ export function DebateExperience(
                   onChange={() => selectPlayerRole(role)}
                 />
                 <strong>{role.charAt(0).toUpperCase() + role.slice(1)}</strong>
-                <span>{roleDescription(role, format, formality)}</span>
+                <span>{format === "whodunnit" && mysteryPlayerStance === "defense" && role === "participant"
+                  ? "Defend the client Case Forge assigns, break the frame, and name who is really responsible."
+                  : format === "whodunnit" && mysteryPlayerStance === "defense" && role === "spectator"
+                    ? "Review the selected Defense Attorney’s offstage findings, revise and file the conclusion, then watch the courtroom case unfold automatically."
+                    : roleDescription(role, format, formality)}</span>
               </label>
             ))}
           </fieldset>
@@ -24657,7 +24757,7 @@ export function DebateExperience(
               ? mysteryHasSurpriseSeats
                 ? `Compile randomly assigns every Surprise me seat, then freezes the ${mysterySkipInvestigation ? "court act" : "case"}.`
                 : playerRole === "spectator"
-                  ? "Compile prepares the selected Prosecutor’s findings for your review before court."
+                  ? `Compile prepares the selected ${whodunnitPlayerRoleLabel}’s findings for your review before court.`
                   : "Compile freezes the complete Debate Studio draft."
               : `Start freezes the ${debatePublicMaterialName(formality).toLowerCase()}.`
             : !motionComplete
@@ -28027,7 +28127,7 @@ export function DebateExperience(
                                   <div
                                     className={mysteryV2Styles.counselIdentity}
                                   >
-                                    <small>Player Prosecutor</small>
+                                    <small>Player {whodunnitPlayerRoleLabel}</small>
                                     <strong>{forBot.name}</strong>
                                   </div>
                                 </article>
@@ -28060,7 +28160,7 @@ export function DebateExperience(
                                   <div
                                     className={mysteryV2Styles.counselIdentity}
                                   >
-                                    <small>Defense Counsel</small>
+                                    <small>{whodunnitOpposingRoleLabel}</small>
                                     <strong>{againstBot.name}</strong>
                                   </div>
                                 </article>
@@ -33358,6 +33458,7 @@ export function DebateExperience(
     whodunnitTextVoiceMode: props.whodunnitTextVoiceMode,
     playMysteryTextVoice: props.playMysteryTextVoice,
     playerVoiceProfile: props.playerVoiceProfile ?? null,
+    investigationPerspective: props.investigationPerspective ?? "first_person",
     request,
     renderBotGlyph: props.renderBotGlyph,
     renderMysteryBotAvatar: (

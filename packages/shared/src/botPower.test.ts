@@ -57,6 +57,7 @@ import {
   applyBotPowerAntiTruthTrueNameLeakV1,
   botPowerAntiTruthInvertPromptV1,
   botPowerCandorResponseRuleV1,
+  botPowerDefinitionIsEndlessTangentV1,
   botPowerDefinitionIsExplicitInterruptionV1,
   botPowerDefinitionIsUnconditionalInterruptionV1,
   botPowerDefinitionIsExplicitMuteV1,
@@ -3087,5 +3088,55 @@ test("a false-name holder's own introduction counts as fresh contact", () => {
       { hasPreviousOnAirTurn: true, alsoRecognizesName: library },
     ),
     /^[^.]*\bRemy\b[^.]*\. What does forgetting cost you\?$/u,
+  );
+});
+
+test("Endless Tangent recognizes floor-holding rambling but not polite verbosity", () => {
+  // The authored Power that motivated the primitive, verbatim.
+  assert.equal(
+    botPowerDefinitionIsEndlessTangentV1(
+      "Endless Tangent",
+      "Cursed to ramble on forever. This bot annoys other bots with their inability for brevity.",
+    ),
+    true,
+  );
+  // The name alone is enough, the way Troll and Interrupter are recognized.
+  assert.equal(botPowerDefinitionIsEndlessTangentV1("Endless Tangent", ""), true);
+  assert.equal(
+    botPowerDefinitionIsEndlessTangentV1(
+      "Sir Digress-a-lot",
+      "Every answer wanders into another tangent and he never stops talking.",
+    ),
+    true,
+  );
+  assert.equal(
+    botPowerDefinitionIsEndlessTangentV1(
+      "Windbag",
+      "Talks on and on until everyone else gives up trying to speak.",
+    ),
+    true,
+  );
+  // Rambling that hands the turn back is ordinary verbosity, not this Power.
+  assert.equal(
+    botPowerDefinitionIsEndlessTangentV1(
+      "Storyteller",
+      "Rambles at length about anything, then always yields the floor when asked.",
+    ),
+    false,
+  );
+  assert.equal(
+    botPowerDefinitionIsEndlessTangentV1(
+      "Chatty",
+      "Rambles happily but lets other bots finish every thought.",
+    ),
+    false,
+  );
+  // Long answers without the unbounded framing stay with the budget primitive.
+  assert.equal(
+    botPowerDefinitionIsEndlessTangentV1(
+      "Thorough",
+      "Gives detailed, expansive answers when the subject deserves them.",
+    ),
+    false,
   );
 });

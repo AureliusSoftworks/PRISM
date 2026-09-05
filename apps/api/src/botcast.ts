@@ -17789,12 +17789,11 @@ export async function advanceBotcastEpisode(
     transitionEpisodeSegment(db, userId, episode, nextSegment, now);
     episode = getBotcastEpisode(db, userId, episodeId);
   }
-  const mirroredHostAtClosing =
+  const mirroredHoldersAtClosing =
     episode.segment === "closing"
-      ? botcastIdentityMirrorStatesV1(episode.events).get(episode.hostBotId) ??
-        null
-      : null;
-  if (mirroredHostAtClosing) {
+      ? [...botcastIdentityMirrorStatesV1(episode.events).keys()]
+      : [];
+  for (const holderBotId of mirroredHoldersAtClosing) {
     recordEvent(
       db,
       userId,
@@ -17803,11 +17802,13 @@ export async function advanceBotcastEpisode(
       {
         v: 1,
         effect: "identity_mirror_reset",
-        holderBotId: episode.hostBotId,
+        holderBotId,
         reason: "signal_host_closing",
       },
       now,
     );
+  }
+  if (mirroredHoldersAtClosing.length > 0) {
     episode = getBotcastEpisode(db, userId, episodeId);
   }
   let scheduledSpeakerRole = botcastNextSpeakerRole({
@@ -21386,7 +21387,7 @@ export async function advanceBotcastEpisode(
   });
   const identityMirrorState =
     socialSilenceMarker ||
-    (episode.segment === "closing" && listenerRole === "host")
+    episode.segment === "closing"
       ? null
       : botcastIdentityMirrorCanTriggerV1({
           guestKind: episode.guestKind,

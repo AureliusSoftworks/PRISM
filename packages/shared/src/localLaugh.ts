@@ -107,3 +107,52 @@ export function projectLocalWrittenLaughterForSynthesis(
     },
   );
 }
+
+/** Provider laughter tags Premium may hand back, in any bracket casing. */
+const PREMIUM_LAUGH_TAG_WORDS =
+  /\b(?:laugh\w*|chuckl\w*|giggl\w*|snicker\w*|cackl\w*|guffaw\w*|titter\w*)\b/iu;
+
+const PREMIUM_TAG_SPLIT_PATTERN = /(\[[^\[\]\r\n]{1,48}\])/gu;
+
+/**
+ * Project one Premium line onto the authored laugh recipe. Premium laughter
+ * normally arrives as a provider audio tag rather than written syllables, so
+ * parity with Instant TTS means answering both: a laughter tag becomes the
+ * authored phrase at the intensity its own wording implies, and written
+ * laughter in the prose is projected exactly as the local lane projects it.
+ * Non-laughter tags are untouched, so `[sighs]` still reaches the provider.
+ * Returns the input unchanged when no laugh syllable is authored.
+ */
+export function projectPremiumLaughterForSynthesis(
+  value: unknown,
+  authoredSyllable?: unknown,
+  authoredDelimiter?: unknown,
+): string {
+  if (typeof value !== "string" || !value) return "";
+  const authored = normalizeBotLocalLaughSyllable(authoredSyllable);
+  if (!authored) return value;
+  const delimiter = normalizeBotLocalLaughDelimiter(authoredDelimiter);
+  return value
+    .split(PREMIUM_TAG_SPLIT_PATTERN)
+    .map((segment, index) => {
+      if (index % 2 === 0) {
+        return projectLocalWrittenLaughterForSynthesis(
+          segment,
+          authored,
+          delimiter,
+        );
+      }
+      const body = segment.slice(1, -1);
+      if (!PREMIUM_LAUGH_TAG_WORDS.test(body)) return segment;
+      return (
+        botLocalLaughSynthesisText({
+          syllable: authored,
+          delimiter,
+          intensity: botLocalLaughIntensityForCue(body),
+        }) ?? segment
+      );
+    })
+    .join("")
+    .replace(/[^\S\r\n]{2,}/gu, " ")
+    .trim();
+}

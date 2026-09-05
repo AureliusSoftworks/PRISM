@@ -168,6 +168,11 @@ export interface MysteryPublicChargeV1 {
   title: string;
   subject: string;
   accusationPrompt: string;
+  /**
+   * Defense stance: the innocent client on trial. The seat is public by design
+   * (the charge names them). Omitted by prosecution charges and legacy cases.
+   */
+  defendantSeatId?: string;
 }
 
 export interface MysteryIncidentPlanV1 {
@@ -442,14 +447,25 @@ function primaryAccusationPrompt(kind: MysteryIncidentKindV1, subject: string): 
 
 export function mysteryPublicChargeV1(
   plan: Pick<MysteryIncidentPlanV1, "primary">,
+  options: { defendantSeatId?: string | null } = {},
 ): MysteryPublicChargeV1 {
+  const defendantSeatId =
+    typeof options.defendantSeatId === "string" && options.defendantSeatId.trim()
+      ? options.defendantSeatId.trim()
+      : null;
+  const accusationPrompt = primaryAccusationPrompt(plan.primary.kind, plan.primary.subject);
   return {
     version: MYSTERY_INCIDENT_PLAN_VERSION_V1,
     incidentId: plan.primary.id,
     kind: plan.primary.kind,
     title: plan.primary.title,
     subject: plan.primary.subject,
-    accusationPrompt: primaryAccusationPrompt(plan.primary.kind, plan.primary.subject),
+    // A Defense charge already names the accused, so the board asks who is
+    // really responsible. Prosecution charges stay byte-identical.
+    accusationPrompt: defendantSeatId
+      ? accusationPrompt.replace(/^Who is responsible/u, "Who is really responsible")
+      : accusationPrompt,
+    ...(defendantSeatId ? { defendantSeatId } : {}),
   };
 }
 

@@ -1,7 +1,8 @@
-import type {
-  ModelReasoningEffortCapabilityV1,
-  ProviderReasoningEffort,
-  ReasoningEffort,
+import {
+  modelReasoningEffortMaxUnlockLevel,
+  type ModelReasoningEffortCapabilityV1,
+  type ProviderReasoningEffort,
+  type ReasoningEffort,
 } from "@localai/shared";
 
 export type ModelEffortCapabilityMode =
@@ -27,9 +28,7 @@ export function modelEffortRequestValue(
   maxEnabled: boolean,
 ): ProviderReasoningEffort {
   return maxEnabled &&
-    ordinaryEffort === "xhigh" &&
-    capability.mode === "native" &&
-    capability.supportsMax
+    ordinaryEffort === modelReasoningEffortMaxUnlockLevel(capability)
     ? "max"
     : ordinaryEffort;
 }

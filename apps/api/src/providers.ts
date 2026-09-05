@@ -518,6 +518,7 @@ const OPENAI_FALLBACK_MODELS = [
   "gpt-5.6-sol",
   "gpt-5.6-terra",
   "gpt-5.6-luna",
+  "gpt-6-astra",
 ] as const;
 const ANTHROPIC_FALLBACK_MODELS = [
   ANTHROPIC_DEFAULT_MODEL,
@@ -1516,17 +1517,20 @@ function localNativeThinkRequested(options?: GenerateOptions): boolean {
   );
 }
 
-/** GPT-OSS cannot fully disable its trace. Its provider-native tiers are
- * shifted down onto Prism's player-facing ladder: Minimal requests provider
- * Low, Low requests Medium, and Medium requests High. Default keeps the
- * provider baseline; stale None/High/XHigh/Max values clamp safely. */
+/** GPT-OSS cannot fully disable its trace. Its provider-native tiers keep
+ * their own names on Prism's ladder: Low, Medium, and High request exactly
+ * that tier, and XHigh runs native High beneath Prism's preparation passes.
+ * Default keeps the provider baseline; stale None/Minimal values clamp to
+ * the Low floor and Max clamps to High. */
 function ollamaTieredThinkLevel(
   options?: GenerateOptions,
 ): "low" | "medium" | "high" {
   const effort = normalizeProviderReasoningEffort(options?.reasoningEffort);
   if (effort === "auto") return "medium";
-  if (effort === "none" || effort === "minimal") return "low";
-  if (effort === "low") return "medium";
+  if (effort === "none" || effort === "minimal" || effort === "low") {
+    return "low";
+  }
+  if (effort === "medium") return "medium";
   return "high";
 }
 

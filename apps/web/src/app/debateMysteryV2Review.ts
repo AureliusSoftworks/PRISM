@@ -1,4 +1,8 @@
-import { debateMysteryTheoryAccusedSeatIdsV2 } from "@localai/shared";
+import {
+  debateMysteryClientSeatIdV2,
+  debateMysteryCounselSeatsV2,
+  debateMysteryTheoryAccusedSeatIdsV2,
+} from "@localai/shared";
 import type { DebateSessionV1, DebateWhodunnitFormatStateV2 } from "@localai/shared";
 
 export const WHODUNNIT_DIAGNOSTIC_TRANSCRIPT_VERSION = 1;
@@ -24,6 +28,10 @@ export function formatDebateMysteryV2PublicReview(
     ? "Unknown / not recorded" : String(value);
   const suspects = new Map(state.suspects.map((suspect) => [suspect.seatId, suspect.name]));
   const person = (id: string): string => suspects.get(id) ?? "Unknown public suspect";
+  // The player prints as "Investigator" in every stance; only the opposing
+  // seat's label follows the chosen chair.
+  const counsel = debateMysteryCounselSeatsV2(state.config);
+  const clientSeatId = debateMysteryClientSeatIdV2(state);
   const admitted = state.record.filter((item) => item.admitted);
   const reference = (kind: string, id: string): string => {
     const item = admitted.find((entry) => entry.reference.kind === kind && entry.reference.id === id);
@@ -71,7 +79,7 @@ export function formatDebateMysteryV2PublicReview(
       : entry.speakerKind === "judge" ? "Judge"
       : entry.speakerSeatId && suspects.has(entry.speakerSeatId) ? person(entry.speakerSeatId)
       : entry.speakerBotId && entry.speakerBotId === state.config.prosecutorBotId ? "Investigator"
-      : entry.speakerBotId && entry.speakerBotId === state.config.rivalDefenseBotId ? "Defense"
+      : entry.speakerBotId && entry.speakerBotId === state.config.rivalDefenseBotId ? counsel.opposingSideLabel
       : "Unknown speaker (legacy public record)";
     timeline.push({ time: entry.occurredAt, order: index + 0.5,
       text: `- ${known(entry.occurredAt)} · dialogue[${index}] · node=${entry.nodeId} · line=${known(entry.lineId)} · recorded · intended delivery=${known(entry.delivery)}\n  ${speaker}: ${entry.visibleText}${entry.stageActionText ? `\n  Recorded stage action: ${entry.stageActionText}` : ""}${entry.caseFileRelevant ? "\n  Case File relevant observation" : ""}` });
@@ -98,6 +106,8 @@ export function formatDebateMysteryV2PublicReview(
     `- Selection: ${known(session?.modelSelectionKind)} · Effort: ${known(session?.lastReasoningEffort)} · Turbo: ${known(session?.lastTurbo)}`,
     "- Running API/web/desktop build, per-line provider, source-case identity and package origin: unknown / not recorded in this projection",
     `- Setup: ${known(state.config.preset)} · ${state.config.difficulty} · ${state.config.trialType} · ${state.config.playerRole} · investigation=${known(state.config.investigationMode)}`,
+    `- Stance: ${counsel.stance} · player counsel=${counsel.playerRoleLabel} · opposing counsel=${counsel.opposingRoleLabel}`,
+    `- Client: ${clientSeatId ? `${person(clientSeatId)} [${clientSeatId}]` : "None (prosecution stance)"}`,
     `- Mansion bundle: ${known(state.config.mansionBundleId)} · floors=${known(state.config.floors)} · rooms=${known(state.config.totalRooms)}`,
     `- Frozen mansion source: ${known(mansion?.sourceBundleId)} · captured=${known(mansion?.capturedAt)} · layout SHA-256=${known(mansion?.layoutSha256)} · presentation SHA-256=${known(mansion?.presentationSha256)}`,
     `- Charge: ${known(state.caseCharge?.title)} · ${known(state.caseCharge?.accusationPrompt)}`,

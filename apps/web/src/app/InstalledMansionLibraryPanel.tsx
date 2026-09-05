@@ -8,10 +8,12 @@ import type {
   WhodunnitPropArchetypeIdV1,
 } from "@localai/shared";
 import {
+  DEBATE_MYSTERY_VENUE_HELD_BY_ONGOING_CASE_MESSAGE_V1,
   WHODUNNIT_PROP_ARCHETYPES_V1,
   WHODUNNIT_PROP_ARCHETYPE_IDS_V1,
   WHODUNNIT_SFX_CUE_IDS_V1,
   WHODUNNIT_SFX_CUES_V1,
+  debateMysteryMansionHeldByArchiveV1,
   isWhodunnitSfxCueIdV1,
   mansionSfxPackStateFromAssetsV1,
   type WhodunnitSfxCueIdV1,
@@ -210,16 +212,26 @@ export interface InstalledMansionLibraryProps {
   onGenerateOverhead?: (
     mansion: DebateMysteryMansionBundleSummaryV1,
   ) => Promise<DebateMysteryMansionBundleSummaryV1 | null>;
+  onNameRooms?: (
+    mansion: DebateMysteryMansionBundleSummaryV1,
+    entityIds: readonly string[],
+  ) => Promise<Record<string, string> | null>;
   onExport: (mansion: DebateMysteryMansionBundleSummaryV1) => void;
+  /** Synthesizes the investigation theme. The direction is the player's
+   * Refract for this pass; an empty string keeps the canonical prompt. */
   onGenerateTheme: (
     mansion: DebateMysteryMansionBundleSummaryV1,
+    direction: string,
   ) => Promise<MansionSoundscapeMutationResultV1>;
   onAcceptTheme: (mansion: DebateMysteryMansionBundleSummaryV1) => Promise<MansionSoundscapeMutationResultV1>;
   onDiscardTheme: (mansion: DebateMysteryMansionBundleSummaryV1) => Promise<MansionSoundscapeMutationResultV1>;
   onUndoTheme: (mansion: DebateMysteryMansionBundleSummaryV1) => Promise<MansionSoundscapeMutationResultV1>;
-  onGenerateAtmosphere: (mansion: DebateMysteryMansionBundleSummaryV1) => Promise<MansionSoundscapeMutationResultV1>;
-  /** Venue effects pack: one clip per cue, ONLINE only, a preview until Save. */
-  onGenerateSfx?: (mansion: DebateMysteryMansionBundleSummaryV1, cueId: WhodunnitSfxCueIdV1) => Promise<MansionSoundscapeMutationResultV1>;
+  /** Synthesizes the environmental bed under the same Refract contract. */
+  onGenerateAtmosphere: (mansion: DebateMysteryMansionBundleSummaryV1, direction: string) => Promise<MansionSoundscapeMutationResultV1>;
+  /** Venue effects pack: one clip per cue, ONLINE only, a preview until Save.
+   * The direction is the player's Refract for this pass; an empty string keeps
+   * the venue's canonical prompt for that cue. */
+  onGenerateSfx?: (mansion: DebateMysteryMansionBundleSummaryV1, cueId: WhodunnitSfxCueIdV1, direction: string) => Promise<MansionSoundscapeMutationResultV1>;
   onAcceptSfx?: (mansion: DebateMysteryMansionBundleSummaryV1, cueId: WhodunnitSfxCueIdV1) => Promise<MansionSoundscapeMutationResultV1>;
   onDiscardSfx?: (mansion: DebateMysteryMansionBundleSummaryV1, cueId: WhodunnitSfxCueIdV1) => Promise<MansionSoundscapeMutationResultV1>;
   onUndoSfx?: (mansion: DebateMysteryMansionBundleSummaryV1, cueId: WhodunnitSfxCueIdV1) => Promise<MansionSoundscapeMutationResultV1>;
@@ -300,6 +312,7 @@ export default function InstalledMansionLibrary({
   onDetectRoomLights,
   onDetectRoomAnchors,
   onGenerateOverhead,
+  onNameRooms,
   onExport,
   onGenerateTheme,
   onAcceptTheme,
@@ -327,6 +340,10 @@ export default function InstalledMansionLibrary({
   const [editorError, setEditorError] = useState<string | null>(null);
   const [editorSaving, setEditorSaving] = useState(false);
   const [exteriorDirection, setExteriorDirection] = useState("");
+  const [musicDirection, setMusicDirection] = useState("");
+  const [atmosphereDirection, setAtmosphereDirection] = useState("");
+  const [effectsDirection, setEffectsDirection] = useState("");
+  const [effectCueDirections, setEffectCueDirections] = useState<Partial<Record<WhodunnitSfxCueIdV1, string>>>({});
   const [exteriorCandidate, setExteriorCandidate] = useState<MansionExteriorCandidateV1 | null>(null);
   const [exteriorBusy, setExteriorBusy] = useState(false);
   const [exteriorStaged, setExteriorStaged] = useState(false);
@@ -372,6 +389,10 @@ export default function InstalledMansionLibrary({
     setDiscardConfirmation(false);
     setSoundscapeTab("music");
     setExteriorDirection("");
+    setMusicDirection("");
+    setAtmosphereDirection("");
+    setEffectsDirection("");
+    setEffectCueDirections({});
     setExteriorCandidate(null);
     setEditorError(null);
   };
@@ -575,6 +596,14 @@ export default function InstalledMansionLibrary({
       return { ...current, soundDecisions: { ...current.soundDecisions, effects } };
     });
   };
+  /** A cue's own prompt wins; otherwise it takes the section direction. Every
+   * synthesis path resolves here so one row button and "Resynthesize every
+   * effect" can never disagree about which prompt a cue was drawn from. */
+  const directionForCue = (cueId: WhodunnitSfxCueIdV1): string =>
+    (effectCueDirections[cueId] ?? "").trim() ? effectCueDirections[cueId]! : effectsDirection;
+  const cuesWithOwnDirection = WHODUNNIT_SFX_CUE_IDS_V1.filter(
+    (cueId) => (effectCueDirections[cueId] ?? "").trim().length > 0,
+  );
   // One cue at a time so the loader can name the clip in flight and a batch can
   // stop between clips. Each finished clip is already a preview on the server.
   const synthesizeEffects = async (cueIds: readonly WhodunnitSfxCueIdV1[]): Promise<void> => {
@@ -586,7 +615,7 @@ export default function InstalledMansionLibrary({
       for (const [index, cueId] of cueIds.entries()) {
         if (sfxBatchStopRef.current) break;
         setSfxBusy({ cueId, index, total: cueIds.length });
-        const result = await onGenerateSfx(editingMansion, cueId);
+        const result = await onGenerateSfx(editingMansion, cueId, directionForCue(cueId));
         if (!result.ok) {
           setEditorError(result.error ?? `The ${WHODUNNIT_SFX_CUES_V1[cueId].label.toLowerCase()} effect could not be synthesized.`);
           break;
@@ -663,7 +692,7 @@ export default function InstalledMansionLibrary({
           type="button"
           className={styles.randomMansionButton}
           data-tutorial-target="whodunnit-random-mansion"
-          disabled={busy || mansions.length === 0}
+          disabled={busy || mansions.every((mansion) => debateMysteryMansionHeldByArchiveV1(mansion))}
           onClick={onRandom}
         >
           <span aria-hidden="true">✦</span>
@@ -688,9 +717,15 @@ export default function InstalledMansionLibrary({
               presentation.thumbnailAssetId,
             );
             const origin = installedMansionOriginV1(mansion);
-            const selected = mansion.id === selectedMansionId;
+            const held = debateMysteryMansionHeldByArchiveV1(mansion);
+            const selected = mansion.id === selectedMansionId && !held;
+            const holdTitle = mansion.archiveHold?.caseTitle?.trim() || "an ongoing case";
             return (
-              <article key={mansion.id} data-selected={selected ? "true" : undefined}>
+              <article
+                key={mansion.id}
+                data-selected={selected ? "true" : undefined}
+                data-held={held ? "true" : undefined}
+              >
                 <div className={styles.installedMansionThumbnail}>
                   {thumbnailUrl ? (
                     <img src={thumbnailUrl} alt="" />
@@ -718,25 +753,55 @@ export default function InstalledMansionLibrary({
                         ? `${mansion.propThemeProgress.readyCount}/16 themed props · ${mansion.propThemeProgress.failedCount > 0 ? `${mansion.propThemeProgress.failedCount} need Retry` : "generation in progress"}`
                         : "Uses PRISM prop fallbacks"}
                   </small>
+                  {held ? (
+                    <small className={styles.installedMansionHold} title={DEBATE_MYSTERY_VENUE_HELD_BY_ONGOING_CASE_MESSAGE_V1}>
+                      In use by {holdTitle} in Archive
+                    </small>
+                  ) : null}
                 </div>
-                <div className={styles.installedMansionActions}>
+                <div className={styles.installedMansionActions} data-held={held ? "true" : undefined}>
                   <button
                     type="button"
                     className={styles.installedMansionSelect}
                     aria-pressed={selected}
-                    disabled={busy}
+                    disabled={busy || held}
+                    title={held ? DEBATE_MYSTERY_VENUE_HELD_BY_ONGOING_CASE_MESSAGE_V1 : undefined}
                     onClick={() => onSelect(mansion.id)}
                   >
                     {selected ? "Selected ✓" : "Use this venue"}
                   </button>
-                  <button
-                    type="button"
-                    data-tutorial-target="whodunnit-edit-mansion"
-                    disabled={busy}
-                    onClick={() => beginEditing(mansion)}
-                  >
-                    Edit details
-                  </button>
+                  {held ? (
+                    <>
+                      <button
+                        type="button"
+                        disabled={busy || mansion.portable?.license.allowsRedistribution === false}
+                        onClick={() => onExport(mansion)}
+                      >
+                        Export
+                      </button>
+                      <button
+                        type="button"
+                        disabled={busy}
+                        title="Make an editable copy. The original stays reserved for the case still in Archive."
+                        onClick={() => {
+                          void onClone(mansion).then((copy) => {
+                            if (copy) onSelect(copy.id);
+                          });
+                        }}
+                      >
+                        Work on a copy
+                      </button>
+                    </>
+                  ) : (
+                    <button
+                      type="button"
+                      data-tutorial-target="whodunnit-edit-mansion"
+                      disabled={busy}
+                      onClick={() => beginEditing(mansion)}
+                    >
+                      Edit details
+                    </button>
+                  )}
                 </div>
               </article>
             );
@@ -1080,11 +1145,29 @@ export default function InstalledMansionLibrary({
                           <button type="button" disabled={busy || editorSaving} onClick={() => void runSoundscapeMutation(onDiscardTheme, "That venue music preview could not be discarded.")}>Discard</button>
                         </div>
                       ) : (
+                        <>
+                        <div className={styles.installedMansionDirection}>
+                          <label htmlFor="installed-mansion-music-direction">Direction for the Refract</label>
+                          <textarea
+                            id="installed-mansion-music-direction"
+                            value={musicDirection}
+                            maxLength={600}
+                            rows={2}
+                            disabled={busy || editorSaving || responseMode === "local"}
+                            placeholder="Optional character for this theme: instrument to favor, mood, era. It stays instrument-only, quiet, and dialogue-safe."
+                            onChange={(event) => setMusicDirection(event.currentTarget.value)}
+                          />
+                          <small>
+                            {musicDirection.trim()
+                              ? "Applies to the next music synthesis."
+                              : "Leave it blank to keep the venue's canonical PRISM prompt."}
+                          </small>
+                        </div>
                         <div className={styles.installedMansionMusicControls}>
                           <button
                             type="button"
                             disabled={busy || editorSaving || responseMode === "local"}
-                            onClick={() => void runSoundscapeMutation(onGenerateTheme, "That venue music could not be synthesized.")}
+                            onClick={() => void runSoundscapeMutation((mansion) => onGenerateTheme(mansion, musicDirection), "That venue music could not be synthesized.")}
                           >
                             {editingMansion.music?.active ? "Resynthesize music" : "Synthesize music"}
                           </button>
@@ -1092,6 +1175,7 @@ export default function InstalledMansionLibrary({
                             <button type="button" disabled={busy || editorSaving} data-staged={editor.soundDecisions.music === "undo" ? "true" : undefined} onClick={() => stageSoundDecision("music", "undo")}>{editor.soundDecisions.music === "undo" ? "Will restore the previous version · Save to apply" : "Undo previous version"}</button>
                           ) : null}
                         </div>
+                        </>
                       )}
                       <small className={styles.installedMansionMusicPrivacy}>
                         {responseMode === "local"
@@ -1130,11 +1214,29 @@ export default function InstalledMansionLibrary({
                           <button type="button" disabled={busy || editorSaving} onClick={() => void runSoundscapeMutation(onDiscardAtmosphere, "That venue atmosphere preview could not be discarded.")}>Discard</button>
                         </div>
                       ) : (
+                        <>
+                        <div className={styles.installedMansionDirection}>
+                          <label htmlFor="installed-mansion-atmosphere-direction">Direction for the Refract</label>
+                          <textarea
+                            id="installed-mansion-atmosphere-direction"
+                            value={atmosphereDirection}
+                            maxLength={600}
+                            rows={2}
+                            disabled={busy || editorSaving || responseMode === "local"}
+                            placeholder="Optional character for this bed: weather, materials, distance. It stays a seamless non-semantic loop with room for speech."
+                            onChange={(event) => setAtmosphereDirection(event.currentTarget.value)}
+                          />
+                          <small>
+                            {atmosphereDirection.trim()
+                              ? "Applies to the next atmosphere synthesis."
+                              : "Leave it blank to keep the venue's canonical PRISM prompt."}
+                          </small>
+                        </div>
                         <div className={styles.installedMansionMusicControls}>
                           <button
                             type="button"
                             disabled={busy || editorSaving || responseMode === "local"}
-                            onClick={() => void runSoundscapeMutation(onGenerateAtmosphere, "That venue atmosphere could not be synthesized.")}
+                            onClick={() => void runSoundscapeMutation((mansion) => onGenerateAtmosphere(mansion, atmosphereDirection), "That venue atmosphere could not be synthesized.")}
                           >
                             {editingMansion.atmosphere?.active ? "Resynthesize atmosphere" : "Synthesize atmosphere"}
                           </button>
@@ -1142,6 +1244,7 @@ export default function InstalledMansionLibrary({
                             <button type="button" disabled={busy || editorSaving} data-staged={editor.soundDecisions.atmosphere === "undo" ? "true" : undefined} onClick={() => stageSoundDecision("atmosphere", "undo")}>{editor.soundDecisions.atmosphere === "undo" ? "Will restore the previous version · Save to apply" : "Undo previous version"}</button>
                           ) : null}
                         </div>
+                        </>
                       )}
                       <small className={styles.installedMansionMusicPrivacy}>
                         {responseMode === "local"
@@ -1158,6 +1261,27 @@ export default function InstalledMansionLibrary({
                         </div>
                         <span>{`${sfxPack.readyCount}/${WHODUNNIT_SFX_CUE_IDS_V1.length} venue clips`}</span>
                       </header>
+                      <div className={styles.installedMansionDirection}>
+                        <label htmlFor="installed-mansion-effects-direction">Direction for the Refract</label>
+                        <textarea
+                          id="installed-mansion-effects-direction"
+                          value={effectsDirection}
+                          maxLength={600}
+                          rows={2}
+                          disabled={busy || editorSaving || responseMode === "local" || sfxBusy !== null || !onGenerateSfx}
+                          placeholder="Optional character for these effects: materials, weight, age, room. Every cue keeps its own job and stays a short dry one-shot."
+                          onChange={(event) => setEffectsDirection(event.currentTarget.value)}
+                        />
+                        <small>
+                          {effectsDirection.trim()
+                            ? cuesWithOwnDirection.length > 0
+                              ? `Applies to every effect you synthesize next, except the ${cuesWithOwnDirection.length} with their own prompt below.`
+                              : "Applies to every effect you synthesize next, one cue or all of them."
+                            : cuesWithOwnDirection.length > 0
+                              ? `Blank, so each cue keeps its canonical PRISM prompt except the ${cuesWithOwnDirection.length} with their own below.`
+                              : "Leave it blank to keep each cue's canonical PRISM prompt."}
+                        </small>
+                      </div>
                       <div className={styles.installedMansionMusicControls}>
                         <button
                           type="button"
@@ -1218,6 +1342,23 @@ export default function InstalledMansionLibrary({
                                   </>
                                 )}
                               </div>
+                              {cue.candidate ? null : (
+                                <input
+                                  className={styles.installedMansionCueDirection}
+                                  type="text"
+                                  value={effectCueDirections[cueId] ?? ""}
+                                  maxLength={300}
+                                  disabled={busy || editorSaving || responseMode === "local" || sfxBusy !== null || !onGenerateSfx}
+                                  data-cue-direction={cueId}
+                                  data-overriding={(effectCueDirections[cueId] ?? "").trim() ? "true" : undefined}
+                                  aria-label={`Direction for the ${definition.label.toLocaleLowerCase()} effect`}
+                                  placeholder={`Prompt just this cue, or leave it to the direction above${effectsDirection.trim() ? "" : " and PRISM's own"}.`}
+                                  onChange={(event) => {
+                                    const next = event.currentTarget.value;
+                                    setEffectCueDirections((current) => ({ ...current, [cueId]: next }));
+                                  }}
+                                />
+                              )}
                             </li>
                           );
                         })}
@@ -1295,6 +1436,7 @@ export default function InstalledMansionLibrary({
           onDetectRoomLights={onDetectRoomLights}
           onDetectRoomAnchors={onDetectRoomAnchors}
           onGenerateOverhead={onGenerateOverhead}
+          onNameRooms={onNameRooms}
         />
       ) : null}
 

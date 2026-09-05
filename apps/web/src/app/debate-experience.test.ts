@@ -1846,6 +1846,15 @@ describe("Debate experience", () => {
     assert.match(source, /The stopped case remains saved in Archive/u);
   });
 
+  it("keeps a venue unavailable in setup while an Archive case still occupies it", () => {
+    assert.match(source, /debateMysteryMansionHeldByArchiveV1\(mansion\)/u);
+    assert.match(source, /DEBATE_MYSTERY_VENUE_HELD_BY_ONGOING_CASE_MESSAGE_V1/u);
+    assert.match(
+      source,
+      /mysteryMansionBundleId &&[\s\S]*selectedMysteryMansionBundle &&[\s\S]*!debateMysteryMansionHeldByArchiveV1\(selectedMysteryMansionBundle\)/u,
+    );
+  });
+
   it("leads Whodunnit setup through one preserved decision page at a time", () => {
     assert.match(source, /data-tutorial-target="whodunnit-quick-start"/u);
     assert.match(
@@ -1861,7 +1870,24 @@ describe("Debate experience", () => {
         source.indexOf('{ id: "mansion", label: "Mystery Venue"'),
     );
     assert.match(source, /useState<WhodunnitSetupPage>\("experience"\)/u);
+    // The Prosecution/Defense stance lives on the Experience page and never
+    // rolls the Recipe Seed: same nonce, same case, either chair.
+    assert.match(
+      source,
+      /data-tutorial-target="whodunnit-v2-stance">\s*<legend>Your side<\/legend>/u,
+    );
+    assert.match(source, /useState<DebateMysteryPlayerStanceV2>\("prosecution"\)/u);
+    assert.match(source, /playerStance: mysteryPlayerStance,/u);
+    assert.match(source, /onChange=\{\(\) => setMysteryPlayerStance\(stance\)\}/u);
+    assert.match(source, /Case Forge assigns you an innocent client facing a strong surface case\./u);
+    assert.match(source, /Investigate the venue, file charges against who you believe is responsible, and prove them in court\./u);
+    assert.match(source, /mysteryPlayerStance === "defense" \? "Defense \(you\)" : "Prosecution"/u);
     assert.match(source, /setupPage\.id === "mansion"/u);
+    assert.match(
+      source,
+      /mysteryMansionBundleId &&[\s\S]*selectedMysteryMansionBundle &&[\s\S]*!debateMysteryMansionHeldByArchiveV1\(selectedMysteryMansionBundle\)/u,
+    );
+    assert.match(source, /DEBATE_MYSTERY_VENUE_HELD_BY_ONGOING_CASE_MESSAGE_V1/u);
     assert.match(
       source,
       /mysterySetupPage !== "mansion" \|\| mansionStepReady/u,
@@ -1910,6 +1936,14 @@ describe("Debate experience", () => {
     assert.match(mysteryCss, /\.quickStartNote\s*\{/u);
     assert.match(mysteryCss, /\.guidedSetupProgress\s*\{/u);
     assert.match(mysteryCss, /\.mansionSourcePicker\s*\{/u);
+    assert.match(
+      mysteryCss,
+      /\.setupSection > \.setupField\s*\{[\s\S]*?display:\s*grid[\s\S]*?margin-bottom:\s*1\.2rem/u,
+    );
+    assert.match(
+      mysteryCss,
+      /\.setupSection > \.setupField textarea\s*\{[\s\S]*?width:\s*100%[\s\S]*?min-height:\s*6\.25rem/u,
+    );
     assert.match(
       mysteryCss,
       /\.presetThumbnail\s*\{[\s\S]*?aspect-ratio:\s*16\s*\/\s*9/u,

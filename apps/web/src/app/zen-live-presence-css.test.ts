@@ -5303,24 +5303,25 @@ describe("Zen live presence CSS", () => {
     );
   });
 
-  it("moves refresh to the permanent recycle navbar button", () => {
-    assert.match(pageSource, /Recycle,/);
-    assert.match(
-      pageSource,
-      /onClick=\{\(\) => runAction\(refreshPrismFromNavbar\)\}/,
-    );
-    assert.match(pageSource, /aria-label="Refresh Prism"/);
-    assert.match(
-      pageSource,
-      /function refreshPrismFromNavbar\(\): void \{ reloadPrismPage\(typeof window === "undefined" \? null : window\.location\); \}/,
-    );
+  it("keeps the withdrawn navbar refresh out of every trigger surface", () => {
+    assert.doesNotMatch(pageSource, /Recycle/);
+    assert.doesNotMatch(pageSource, /refreshPrismFromNavbar/);
+    assert.doesNotMatch(pageSource, /aria-label="Refresh Prism"/);
     assert.doesNotMatch(pageSource, /createBuiltInRefreshCommand/);
     assert.doesNotMatch(pageSource, /id:\s*"builtin:\/refresh"/);
     assert.doesNotMatch(pageSource, /renderNavbarRefreshSplash/);
     assert.doesNotMatch(pageSource, /navbarRefreshSplashVisible/);
+    // /refresh may not advertise a control that no longer exists.
+    assert.doesNotMatch(pageSource, /Use the recycle icon in the navbar\./);
     assert.match(
       pageSource,
-      /showLocalCommandToast\(\s*"Refresh moved"\s*,\s*"Use the recycle icon in the navbar\."\s*,?\s*\)/,
+      /showLocalCommandToast\(\s*"Refresh unavailable"\s*,\s*"The navbar refresh was withdrawn\. Reload the window instead\."\s*,?\s*\)/,
+    );
+    // Reloading survives in Settings under Help, which still owns the helper.
+    assert.match(pageSource, /data-settings-action="reload-prism"/);
+    assert.match(
+      pageSource,
+      /onClick=\{\(\) => reloadPrismPage\(window\.location\)\}/,
     );
   });
 

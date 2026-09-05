@@ -657,7 +657,8 @@ describe("shared routing model picker integration", () => {
       /type="range"[\s\S]{0,400}aria-valuetext=\{displayedEffortLabel\}/u,
     );
     assert.match(cssSource, /mask: var\(--model-effort-icon\)/u);
-    assert.match(cssSource, /data-reasoning-mode="simulated"/u);
+    assert.match(cssSource, /data-effort-provenance="simulated"/u);
+    assert.match(cssSource, /data-effort-provenance="hybrid"/u);
     assert.match(cssSource, /-webkit-mask-composite: xor/u);
     assert.match(
       cssSource,

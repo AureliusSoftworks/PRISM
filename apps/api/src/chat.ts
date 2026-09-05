@@ -1487,13 +1487,14 @@ export function shouldSimulateReasoningEffort(args: {
         describeRequestedModel(args.provider, args.botOverrides),
       )
     ) {
-      // GPT-OSS uses its three native tiers through Medium; High adds PRISM's
-      // top preparation pass above native High.
-      return args.effort === "high";
+      // GPT-OSS's native tiers own Low through High under their real names;
+      // XHigh is the one hollow rung that stacks PRISM's preparation passes.
+      return args.effort === "xhigh";
     }
-    // Default leaves effort unset and keeps the model's native baseline;
-    // every explicit stop adds PRISM preparation above native thinking.
-    return true;
+    // Default leaves effort unset and keeps the model's native baseline, and
+    // Minimal is that native trace alone (matching the surface runner); every
+    // higher stop adds PRISM preparation above native thinking.
+    return args.effort !== "minimal";
   }
   return !providerModelSupportsNativeReasoningEffort(
     args.provider,

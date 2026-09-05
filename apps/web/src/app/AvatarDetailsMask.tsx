@@ -440,10 +440,12 @@ export function AvatarDetailsMask({
   );
   const speechInkAnimation =
     normalizedDetails.screen.speechInkAnimation ?? "none";
+  // A surface may hide the authored idle-rest Speech layer for a whole performance
+  // (`speechInkVisible === false`); that override never cancels the authored animation.
+  // While the bot talks, animated Speech ink renders in its own plane regardless.
   const speechMotion: AvatarDetailsSpeechMotion | null =
     detailLevel === "full" &&
     talking &&
-    speechInkVisible !== false &&
     speechMotionActive &&
     speechInkAnimation !== "none"
       ? speechInkAnimation

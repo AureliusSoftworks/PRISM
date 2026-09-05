@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 
 import {
   BOTCAST_PRODUCER_GUEST_ID,
+  createBotIdentityMirrorStateV1,
   type BotcastEpisode,
   type BotcastShow,
 } from "@localai/shared";
@@ -301,6 +302,52 @@ describe("Signal review transcript", () => {
       /- Turn routing: auto -> unknown -> provider default or unrecorded/u,
     );
     assert.match(transcript, /No production events were recorded\./u);
+  });
+
+  it("explains active Identity Crisis presentation without implying persona or voice replacement", () => {
+    const identityMirrorState = createBotIdentityMirrorStateV1({
+      surface: "signal",
+      holderBotId: "guest-1",
+      holderBotName: "Grace",
+      targetBotId: "host-1",
+      targetBotName: "Ada",
+      targetPersonaPrompt: "A patient interviewer.",
+      targetFace: {},
+      holderVoice: { v: 2, enabled: true, baseVoiceId: "voice-2" },
+      sourceMessageId: "message-1",
+      occurredAt: "2026-07-17T17:00:04.000Z",
+    });
+    const transcript = buildSignalReviewTranscript({
+      episode: {
+        ...episode,
+        events: [
+          episode.events[2]!,
+          {
+            id: "event-identity-mirror",
+            episodeId: episode.id,
+            sequence: 4,
+            kind: "power_effect",
+            payload: {
+              effect: "identity_mirror",
+              state: identityMirrorState,
+            },
+            occurredAt: "2026-07-17T17:00:04.000Z",
+          },
+          {
+            ...episode.events[4]!,
+            sequence: 5,
+          },
+        ],
+      },
+      show,
+      host: { id: "host-1", name: "Ada" },
+      guest: { id: "guest-1", name: "Grace" },
+    });
+
+    assert.match(
+      transcript,
+      /Active identity mirror: Grace is wearing Ada's public presentation; the holder's underlying persona and voice remain their own by design\./u,
+    );
   });
 
   it("exports bounded live voice recovery beside its canonical turn", () => {

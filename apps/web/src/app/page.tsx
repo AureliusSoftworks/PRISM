@@ -1018,7 +1018,6 @@ import {
   PencilLine,
   Play,
   Plus,
-  Recycle,
   RotateCcw,
   RotateCw,
   ScanLine,
@@ -1558,6 +1557,7 @@ import {
   normalizeVoiceMode,
   normalizeWhodunnitTextVoiceMode,
   normalizeWhodunnitSpeechType,
+  normalizeWhodunnitInvestigationPerspective,
   voiceDeliveryRateForMood,
   voicePerformanceTextFromActionCues,
   voicePerformancePlanFromText,
@@ -1589,6 +1589,8 @@ import {
   AUTO_MODEL_TURBO_PREFERENCE_ID,
   normalizeModelReasoningEffortPreference,
   modelSupportsTurboMode,
+  modelReasoningEffortMaxUnlockLevel,
+  modelReasoningEffortRungProvenance,
   resolveModelReasoningEffortCapability,
   prismTutorialShouldRun,
   createReplaySceneSamplerV2,
@@ -1596,6 +1598,7 @@ import {
   replayVoiceLightLevelAtV2,
   replayManifestV2IsValid,
   type BotAudioVoiceProfileV1,
+  type ModelReasoningEffortRungProvenance,
   type BotFoundryBatchGroupIdentityV1,
   type BotFoundryCreationMode,
   type BotFoundryPowerCount,
@@ -1628,6 +1631,7 @@ import {
   type VoiceMode,
   type WhodunnitTextVoiceMode,
   type WhodunnitSpeechType,
+  type WhodunnitInvestigationPerspective,
   type AutoFallbackChainV1,
   type AutoFallbackModelRef,
   type AutoRecoveryTraceV1,
@@ -10628,6 +10632,7 @@ interface UserSettings {
   debateWhodunnitReuseSynthesizedExhibits: boolean;
   debateWhodunnitTextVoiceMode: WhodunnitTextVoiceMode;
   debateWhodunnitSpeechType: WhodunnitSpeechType;
+  debateWhodunnitPerspective: WhodunnitInvestigationPerspective;
   modelEffortPreferences: ModelReasoningEffortPreferenceV1[];
   modelTurboPreferences: ModelTurboPreferenceV1[];
   psychicModeEnabled: boolean;
@@ -14854,10 +14859,13 @@ function providerReasoningEffortLabel(
 function ModelEffortIcon({
   level,
   mode = "native",
+  provenance,
   className,
 }: {
   level: ReasoningEffort;
   mode?: ModelEffortCapabilityMode;
+  /** Per-rung truth; falls back to the whole-model mode when unknown. */
+  provenance?: ModelReasoningEffortRungProvenance;
   className?: string;
 }): React.JSX.Element {
   const iconPath = MODEL_EFFORT_ICON_PATHS[level];
@@ -14866,6 +14874,9 @@ function ModelEffortIcon({
       className={`${styles.modelEffortIcon}${className ? ` ${className}` : ""}`}
       data-effort-level={level}
       data-reasoning-mode={mode}
+      data-effort-provenance={
+        provenance ?? (mode === "simulated" ? "simulated" : "native")
+      }
       style={
         {
           "--model-effort-icon": `url("${iconPath}")`,
@@ -14882,6 +14893,7 @@ function MaxEffortIcon({ className }: { className?: string }): React.JSX.Element
       className={`${styles.modelEffortIcon}${className ? ` ${className}` : ""}`}
       data-effort-level="max"
       data-reasoning-mode="native"
+      data-effort-provenance="native"
       style={
         {
           "--model-effort-icon": `url("${MODEL_EFFORT_MAX_ICON_PATH}")`,
@@ -24838,23 +24850,33 @@ function ComposerModelPicker({
     : !effortControl || effortControl.capability.mode === "unavailable"
       ? "Not adjustable"
       : REASONING_EFFORT_LABELS[effortControl.value];
-  const maxEffortAvailable =
-    effortControl?.capability.mode === "native" &&
-    effortControl.capability.supportsMax === true;
+  const maxEffortUnlockLevel = effortControl
+    ? modelReasoningEffortMaxUnlockLevel(effortControl.capability)
+    : null;
+  const maxEffortAvailable = maxEffortUnlockLevel !== null;
   const maxEffortUnlocked =
-    maxEffortAvailable && effortControl?.value === "xhigh";
+    maxEffortAvailable && effortControl?.value === maxEffortUnlockLevel;
   const presentedEffort =
     sessionEffort && sessionEffort !== "auto" ? sessionEffort : null;
   const maxEffortActive = presentedEffort
     ? presentedEffort === "max"
     : !autoSelected && effortControl?.maxEnabled === true;
+  const effortRungProvenance = effortControl
+    ? modelReasoningEffortRungProvenance(
+        effortControl.capability,
+        effortControl.value,
+      )
+    : null;
   const effortProvenanceLabel =
+    effortRungProvenance === "simulated" ||
     effortControl?.capability.mode === "simulated"
       ? "Prism simulated"
-      : effortControl?.capability.mode === "native" ||
-          effortControl?.capability.mode === "native-thinking"
-        ? "Native reasoning"
-        : "Unavailable";
+      : effortRungProvenance === "hybrid"
+        ? "Native thinking + Prism passes"
+        : effortControl?.capability.mode === "native" ||
+            effortControl?.capability.mode === "native-thinking"
+          ? "Native reasoning"
+          : "Unavailable";
   const effortLevels = effortControl
     ? modelEffortSliderLevels(effortControl.capability)
     : [];
@@ -25750,6 +25772,10 @@ function ComposerModelPicker({
               <ModelEffortIcon
                 level={presentedEffort}
                 mode={effortControl.capability.mode}
+                provenance={modelReasoningEffortRungProvenance(
+                  effortControl.capability,
+                  presentedEffort,
+                )}
               />
             ) : maxEffortActive ? (
               <MaxEffortIcon />
@@ -25757,6 +25783,7 @@ function ComposerModelPicker({
               <ModelEffortIcon
                 level={effortControl.value}
                 mode={effortControl.capability.mode}
+                provenance={effortRungProvenance ?? undefined}
               />
             )}
             <span className={styles.srOnly} aria-live={autoSelected ? "polite" : undefined}>
@@ -25901,6 +25928,17 @@ function ComposerModelPicker({
                       ollamaNativeThinking: model.thinking === true,
                     })
                   : null;
+                const rowProvenance =
+                  rowEffort && rowCapability
+                    ? modelReasoningEffortRungProvenance(rowCapability, rowEffort)
+                    : null;
+                const rowProvenanceLabel =
+                  rowProvenance === "simulated" ||
+                  rowCapability?.mode === "simulated"
+                    ? "Prism simulated"
+                    : rowProvenance === "hybrid"
+                      ? "Native thinking + Prism passes"
+                      : "Native reasoning";
                 return (
                   <button
                     key={`${model.provider}:${model.id}`}
@@ -25948,12 +25986,13 @@ function ComposerModelPicker({
                         <span
                           className={styles.composeModelRowEffort}
                           role="img"
-                          aria-label={`Saved effort: ${REASONING_EFFORT_LABELS[rowEffort]} · ${rowCapability?.mode === "simulated" ? "Prism simulated" : "Native reasoning"}`}
-                          title={`Saved effort: ${REASONING_EFFORT_LABELS[rowEffort]} · ${rowCapability?.mode === "simulated" ? "Prism simulated" : "Native reasoning"}`}
+                          aria-label={`Saved effort: ${REASONING_EFFORT_LABELS[rowEffort]} · ${rowProvenanceLabel}`}
+                          title={`Saved effort: ${REASONING_EFFORT_LABELS[rowEffort]} · ${rowProvenanceLabel}`}
                         >
                           <ModelEffortIcon
                             level={rowEffort}
                             mode={rowCapability?.mode ?? "unavailable"}
+                            provenance={rowProvenance ?? undefined}
                             className={
                               isSelected
                                 ? undefined
@@ -26003,6 +26042,10 @@ function ComposerModelPicker({
                 <ModelEffortIcon
                   level={displayedEffortValue ?? effortControl.value}
                   mode={effortControl.capability.mode}
+                  provenance={modelReasoningEffortRungProvenance(
+                    effortControl.capability,
+                    displayedEffortValue ?? effortControl.value,
+                  )}
                 />
                 {displayedEffortLabel}
               </strong>
@@ -26048,6 +26091,10 @@ function ComposerModelPicker({
                     <ModelEffortIcon
                       level={displayedEffortValue ?? effortControl.value}
                       mode={effortControl.capability.mode}
+                      provenance={modelReasoningEffortRungProvenance(
+                        effortControl.capability,
+                        displayedEffortValue ?? effortControl.value,
+                      )}
                       className={styles.composeModelEffortSliderThumb}
                     />
                   </div>
@@ -26084,6 +26131,10 @@ function ComposerModelPicker({
                       <ModelEffortIcon
                         level={level}
                         mode={effortControl.capability.mode}
+                        provenance={modelReasoningEffortRungProvenance(
+                          effortControl.capability,
+                          level,
+                        )}
                       />
                       <span>{REASONING_EFFORT_LABELS[level]}</span>
                     </button>
@@ -26116,7 +26167,11 @@ function ComposerModelPicker({
                   <small id={`${pickerId}-max-effort-description`}>
                     {maxEffortUnlocked
                       ? "Native reasoning overdrive · active in this applet"
-                      : "Unlocks when ordinary Effort is XHigh"}
+                      : `Unlocks when ordinary Effort is ${
+                          maxEffortUnlockLevel
+                            ? REASONING_EFFORT_LABELS[maxEffortUnlockLevel]
+                            : "XHigh"
+                        }`}
                   </small>
                 </span>
                 <span
@@ -43628,6 +43683,185 @@ function BotVoicePerformanceControls({
   );
 }
 
+function BotVoiceLaughRecipe({
+  profile,
+  onChange,
+  onPreview,
+}: {
+  profile: BotAudioVoiceProfileV1;
+  onChange: (
+    profile: BotAudioVoiceProfileV1,
+    options?: BotVoiceProfileChangeOptions,
+  ) => void;
+  onPreview: (
+    profile: BotAudioVoiceProfileV1,
+    forcedMode?: Exclude<VoiceMode, "mute">,
+    previewText?: string,
+    options?: VoicePreviewPlaybackOptions,
+  ) => Promise<void>;
+}): React.JSX.Element {
+  const normalizedProfile = normalizeBotAudioVoiceProfileV1(profile);
+  const laughSyllable = normalizedProfile.localLaughSyllable ?? "";
+  const laughDelimiter = normalizedProfile.localLaughDelimiter ?? "-";
+  const premiumLaughEnabled = normalizedProfile.premiumLaughEnabled === true;
+  // The recipe is authored identity and belongs beside the accent, so it stays
+  // editable here. Whether a lane speaks it is a status line, never a reason to
+  // hide a control the player has already filled in.
+  const instantTtsSpeaksLaugh =
+    normalizedProfile.localVoiceSource === "portable" &&
+    !normalizedProfile.systemVoiceName &&
+    normalizedProfile.localEnginePreference !== "voice-plus";
+  return (
+    <section
+      className={styles.botVoiceLocalLaugh}
+      data-tutorial-target="avatar-local-laugh"
+      aria-labelledby="bot-voice-local-laugh-title"
+    >
+      <div className={styles.botVoiceLocalLaughHeading}>
+        <span id="bot-voice-local-laugh-title">Laugh</span>
+        <small>Build this bot’s repeated laugh phrase.</small>
+      </div>
+      <div className={styles.botVoiceLocalLaughRecipe}>
+        <label htmlFor="bot-voice-local-laugh-syllable">
+          <span>Sound</span>
+          <input
+            id="bot-voice-local-laugh-syllable"
+            type="text"
+            value={laughSyllable}
+            placeholder="ha"
+            maxLength={BOT_LOCAL_LAUGH_SYLLABLE_MAX_LENGTH}
+            autoCapitalize="off"
+            autoCorrect="off"
+            spellCheck={false}
+            aria-label="Local laugh sound"
+            pattern="[A-Za-z]{1,4}"
+            onChange={(event) => {
+              const next = event.currentTarget.value
+                .normalize("NFKC")
+                .replace(/[^\p{L}]/gu, "")
+                .slice(0, BOT_LOCAL_LAUGH_SYLLABLE_MAX_LENGTH)
+                .toLocaleLowerCase();
+              onChange({
+                ...normalizedProfile,
+                localLaughSyllable: normalizeBotLocalLaughSyllable(next),
+              });
+            }}
+          />
+        </label>
+        <label htmlFor="bot-voice-local-laugh-delimiter">
+          <span>Delimiter</span>
+          <input
+            id="bot-voice-local-laugh-delimiter"
+            type="text"
+            value={laughDelimiter}
+            placeholder="-"
+            maxLength={BOT_LOCAL_LAUGH_DELIMITER_MAX_LENGTH}
+            autoCapitalize="off"
+            autoCorrect="off"
+            spellCheck={false}
+            aria-label="Local laugh delimiter"
+            title="One punctuation mark, a space, or blank"
+            onChange={(event) => {
+              const next = event.currentTarget.value.normalize("NFKC");
+              onChange({
+                ...normalizedProfile,
+                localLaughDelimiter: normalizeBotLocalLaughDelimiter(next, ""),
+              });
+            }}
+          />
+        </label>
+      </div>
+      <div
+        className={styles.botVoiceLocalLaughSamples}
+        aria-label="Laugh samples"
+      >
+        {(
+          [
+            ["soft", "Chuckle"],
+            ["medium", "Laugh"],
+            ["hard", "Hard"],
+          ] as const
+        ).map(([intensity, label]) => (
+          <button
+            key={intensity}
+            type="button"
+            aria-label={`Preview ${label.toLocaleLowerCase()} laugh`}
+            title={`Preview ${label.toLocaleLowerCase()} laugh in Instant TTS`}
+            disabled={!laughSyllable}
+            onClick={() => {
+              const previewText = botLocalLaughSynthesisText({
+                syllable: laughSyllable,
+                delimiter: laughDelimiter,
+                intensity,
+              });
+              if (!previewText) return;
+              void onPreview(
+                {
+                  ...normalizedProfile,
+                  localEnginePreference: "instant",
+                },
+                "english",
+                previewText,
+                {
+                  englishVoiceEngine: "builtin",
+                  cacheKey: `avatar-local-laugh:${laughSyllable}:${laughDelimiter}:${intensity}:${JSON.stringify(
+                    normalizedProfile,
+                  )}`,
+                },
+              );
+            }}
+          >
+            <Play size={12} strokeWidth={2.3} aria-hidden="true" />
+            {label}
+          </button>
+        ))}
+      </div>
+      <div className={styles.botVoiceLocalLaughLanes}>
+        <p
+          className={styles.botVoiceLocalLaughLaneStatus}
+          data-laugh-lane-active={instantTtsSpeaksLaugh ? "true" : undefined}
+        >
+          <strong>Instant TTS</strong>
+          {instantTtsSpeaksLaugh
+            ? " speaks this laugh."
+            : " ignores it while this bot uses an OS or Voice+ voice. Pick a Prism Instant voice on TTS to hear it."}
+        </p>
+        <div className={styles.botVoiceLocalLaughLaneToggle}>
+          <span>
+            <strong>Premium</strong>
+            <small>
+              Speak this laugh instead of the provider’s own laughter.
+            </small>
+          </span>
+          <button
+            type="button"
+            role="switch"
+            aria-label="Premium authored laugh"
+            aria-checked={premiumLaughEnabled}
+            data-active={premiumLaughEnabled ? "true" : undefined}
+            data-premium-laugh-toggle="true"
+            onClick={() =>
+              onChange(
+                normalizeBotAudioVoiceProfileV1({
+                  ...normalizedProfile,
+                  premiumLaughEnabled: !premiumLaughEnabled,
+                }),
+                { saveImmediately: true },
+              )
+            }
+          >
+            {premiumLaughEnabled ? "Premium laugh on" : "Premium laugh off"}
+          </button>
+        </div>
+      </div>
+      <small>
+        Sound accepts 1–4 letters. Delimiter changes how each repetition
+        collides. Samples always play in Instant TTS.
+      </small>
+    </section>
+  );
+}
+
 function BotVoiceLocalStage({
   profile,
   onChange,
@@ -43661,12 +43895,6 @@ function BotVoiceLocalStage({
   onContinue?: () => void;
 }): React.JSX.Element {
   const normalizedProfile = normalizeBotAudioVoiceProfileV1(profile);
-  const laughSyllable = normalizedProfile.localLaughSyllable ?? "";
-  const laughDelimiter = normalizedProfile.localLaughDelimiter ?? "-";
-  const laughControlAvailable =
-    normalizedProfile.localVoiceSource === "portable" &&
-    !normalizedProfile.systemVoiceName &&
-    normalizedProfile.localEnginePreference !== "voice-plus";
   return (
     <div
       className={styles.botVoiceFeelStage}
@@ -43688,8 +43916,8 @@ function BotVoiceLocalStage({
               baseVoiceId: DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1.baseVoiceId,
               systemVoiceName: null,
               localVoiceSource: "portable",
-              localLaughSyllable: null,
-              localLaughDelimiter: "-",
+              // The laugh recipe is authored on the Accent step and shared with
+              // Premium, so resetting this engine's voice must not erase it.
               pitch: 0,
               pace: 0,
               lilt: 0,
@@ -43741,120 +43969,6 @@ function BotVoiceLocalStage({
           </button>
         </div>
       </section>
-      {laughControlAvailable ? (
-        <section
-          className={styles.botVoiceLocalLaugh}
-          data-tutorial-target="avatar-local-laugh"
-          aria-labelledby="bot-voice-local-laugh-title"
-        >
-          <div className={styles.botVoiceLocalLaughHeading}>
-            <span id="bot-voice-local-laugh-title">Laugh</span>
-            <small>Build this bot’s repeated laugh phrase.</small>
-          </div>
-          <div className={styles.botVoiceLocalLaughRecipe}>
-            <label htmlFor="bot-voice-local-laugh-syllable">
-              <span>Sound</span>
-              <input
-                id="bot-voice-local-laugh-syllable"
-                type="text"
-                value={laughSyllable}
-                placeholder="ha"
-                maxLength={BOT_LOCAL_LAUGH_SYLLABLE_MAX_LENGTH}
-                autoCapitalize="off"
-                autoCorrect="off"
-                spellCheck={false}
-                aria-label="Local laugh sound"
-                pattern="[A-Za-z]{1,4}"
-                onChange={(event) => {
-                  const next = event.currentTarget.value
-                    .normalize("NFKC")
-                    .replace(/[^\p{L}]/gu, "")
-                    .slice(0, BOT_LOCAL_LAUGH_SYLLABLE_MAX_LENGTH)
-                    .toLocaleLowerCase();
-                  onChange({
-                    ...normalizedProfile,
-                    localLaughSyllable: normalizeBotLocalLaughSyllable(next),
-                  });
-                }}
-              />
-            </label>
-            <label htmlFor="bot-voice-local-laugh-delimiter">
-              <span>Delimiter</span>
-              <input
-                id="bot-voice-local-laugh-delimiter"
-                type="text"
-                value={laughDelimiter}
-                placeholder="-"
-                maxLength={BOT_LOCAL_LAUGH_DELIMITER_MAX_LENGTH}
-                autoCapitalize="off"
-                autoCorrect="off"
-                spellCheck={false}
-                aria-label="Local laugh delimiter"
-                title="One punctuation mark, a space, or blank"
-                onChange={(event) => {
-                  const next = event.currentTarget.value.normalize("NFKC");
-                  onChange({
-                    ...normalizedProfile,
-                    localLaughDelimiter: normalizeBotLocalLaughDelimiter(
-                      next,
-                      "",
-                    ),
-                  });
-                }}
-              />
-            </label>
-          </div>
-          <div
-            className={styles.botVoiceLocalLaughSamples}
-            aria-label="Laugh samples"
-          >
-            {(
-              [
-                ["soft", "Chuckle"],
-                ["medium", "Laugh"],
-                ["hard", "Hard"],
-              ] as const
-            ).map(([intensity, label]) => (
-              <button
-                key={intensity}
-                type="button"
-                aria-label={`Preview ${label.toLocaleLowerCase()} laugh`}
-                title={`Preview ${label.toLocaleLowerCase()} laugh`}
-                disabled={!laughSyllable}
-                onClick={() => {
-                  const previewText = botLocalLaughSynthesisText({
-                    syllable: laughSyllable,
-                    delimiter: laughDelimiter,
-                    intensity,
-                  });
-                  if (!previewText) return;
-                  void onPreview(
-                    {
-                      ...normalizedProfile,
-                      localEnginePreference: "instant",
-                    },
-                    "english",
-                    previewText,
-                    {
-                      englishVoiceEngine: "builtin",
-                      cacheKey: `avatar-local-laugh:${laughSyllable}:${laughDelimiter}:${intensity}:${JSON.stringify(
-                        normalizedProfile,
-                      )}`,
-                    },
-                  );
-                }}
-              >
-                <Play size={12} strokeWidth={2.3} aria-hidden="true" />
-                {label}
-              </button>
-            ))}
-          </div>
-          <small>
-            Sound accepts 1–4 letters. Delimiter changes how each repetition
-            collides in Local Instant TTS.
-          </small>
-        </section>
-      ) : null}
       <section
         className={styles.botVoiceFeelSupporting}
         aria-labelledby="bot-voice-local-feel-title"
@@ -47904,7 +48018,13 @@ function BotAvatarCustomizerModal({
             )
           }
           onContinue={() => setActiveAdjustmentTarget("local")}
-        />
+        >
+          <BotVoiceLaughRecipe
+            profile={audioVoiceProfile}
+            onChange={onAudioVoiceProfileChange}
+            onPreview={playAvatarVoicePreview}
+          />
+        </PronunciationAtlas>
       );
     }
     if (activeControlTab === "voice" && !avatarVoiceAccentReady) {
@@ -51631,7 +51751,7 @@ function HomeContent(): React.JSX.Element {
     (target: ActiveModelEffortTarget, nextValue: ReasoningEffort): void => {
       const ownerGeneration = captureAccountOwnerGeneration();
       if (!ownerGeneration) return;
-      if (nextValue !== "xhigh") {
+      if (nextValue !== modelReasoningEffortMaxUnlockLevel(target.capability)) {
         clearMaxEffortOverdrive();
       }
       const normalized = normalizeModelReasoningEffortPreference(nextValue);
@@ -52041,9 +52161,8 @@ function HomeContent(): React.JSX.Element {
           );
           setMaxEffortTargetKey(
             enabled &&
-              ordinaryEffort === "xhigh" &&
-              target.capability.mode === "native" &&
-              target.capability.supportsMax
+              ordinaryEffort ===
+                modelReasoningEffortMaxUnlockLevel(target.capability)
               ? modelReasoningEffortPreferenceKey(
                   target.provider,
                   target.modelId,
@@ -75600,9 +75719,16 @@ function HomeContent(): React.JSX.Element {
             },
           };
         }
+        // Whodunnit's Premium picker means the frozen ElevenLabs voice even
+        // when the account's English engine is the built-in one: its local
+        // clip is already prepared, so a Premium take is only ElevenLabs.
+        const whodunnitPremiumTake =
+          playbackSurface === "debate" && debateFormat === "whodunnit";
         const effectiveEngine: EnglishVoiceEngine = offlineOnly
           ? "builtin"
-          : voiceSelection.englishVoiceEngine;
+          : whodunnitPremiumTake
+            ? "elevenlabs"
+            : voiceSelection.englishVoiceEngine;
         const signalVoiceContinuityKey = `${message.episodeId}:${botSummary.id}`;
         const pinnedSignalEngine = playbackSurface === "signal"
           ? (signalVoiceEngineByEpisodeParticipantRef.current.get(
@@ -75620,15 +75746,31 @@ function HomeContent(): React.JSX.Element {
           ? preparedClip
           : null;
         if (!clip && !controller.signal.aborted) {
-          clip = await requestBotcastEnglishClipWithFallback(
-            message,
-            profile,
-            !offlineOnly && botSummary.online_enabled !== 0,
-            effectiveEngine,
-            controller.signal,
-            playbackSurface,
-            pinnedSignalEngine,
-          );
+          const onlineVoiceEnabled =
+            !offlineOnly && botSummary.online_enabled !== 0;
+          if (whodunnitPremiumTake) {
+            // A Premium miss hands the line back to its prepared local clip
+            // instead of synthesizing a second local take here.
+            if (!onlineVoiceEnabled) return false;
+            clip = await requestBotcastEnglishClip(
+              message,
+              profile,
+              true,
+              "elevenlabs",
+              controller.signal,
+              playbackSurface,
+            );
+          } else {
+            clip = await requestBotcastEnglishClipWithFallback(
+              message,
+              profile,
+              onlineVoiceEnabled,
+              effectiveEngine,
+              controller.signal,
+              playbackSurface,
+              pinnedSignalEngine,
+            );
+          }
         }
         if (!clip || controller.signal.aborted) return false;
         if (playbackSurface === "signal") {
@@ -75739,6 +75881,7 @@ function HomeContent(): React.JSX.Element {
     },
     [
       bots,
+      requestBotcastEnglishClip,
       requestBotcastEnglishClipWithFallback,
       settings?.prismDefaultBotAudioVoiceProfile,
       settings?.voiceEffectsEnabled,
@@ -82728,6 +82871,9 @@ function HomeContent(): React.JSX.Element {
       debateWhodunnitSpeechType: normalizeWhodunnitSpeechType(
         d.settings.debateWhodunnitSpeechType,
       ),
+      debateWhodunnitPerspective: normalizeWhodunnitInvestigationPerspective(
+        d.settings.debateWhodunnitPerspective,
+      ),
       modelEffortPreferences: Array.isArray(d.settings.modelEffortPreferences)
         ? d.settings.modelEffortPreferences
         : [],
@@ -86150,10 +86296,6 @@ function HomeContent(): React.JSX.Element {
     });
   }
 
-  function refreshPrismFromNavbar(): void {
-    reloadPrismPage(typeof window === "undefined" ? null : window.location);
-  }
-
   function consumeDeprecatedRefreshCommand(
     trimmedLine: string,
     source: "chat" | "coffee",
@@ -86184,8 +86326,8 @@ function HomeContent(): React.JSX.Element {
       clearComposerDraftNow();
     }
     showLocalCommandToast(
-      "Refresh moved",
-      "Use the recycle icon in the navbar.",
+      "Refresh unavailable",
+      "The navbar refresh was withdrawn. Reload the window instead.",
     );
     return true;
   }
@@ -95582,6 +95724,43 @@ function HomeContent(): React.JSX.Element {
       if (isCurrentAccountOwnerGeneration(ownerGeneration)) setBusy(false);
     }
   }
+
+  async function persistDebateWhodunnitPerspective(
+    debateWhodunnitPerspective: WhodunnitInvestigationPerspective,
+  ) {
+    if (!settings || busy) return;
+    const ownerGeneration = captureAccountOwnerGeneration();
+    if (!ownerGeneration) return;
+    const previous = settings;
+    setSettings({ ...settings, debateWhodunnitPerspective });
+    setBusy(true);
+    setPanelError(null);
+    setPanelNotice(null);
+    try {
+      const saveResult = await runForAccountOwner(ownerGeneration, () =>
+        api("/api/settings", {
+          method: "PATCH",
+          body: JSON.stringify({ debateWhodunnitPerspective }),
+        }),
+      );
+      if (saveResult.status === "stale") return;
+      setPanelNotice(
+        debateWhodunnitPerspective === "embodied"
+          ? "Whodunnit investigations now stage your investigator beside each witness."
+          : "Whodunnit investigations now play in first person; your investigator takes the stage in Court.",
+      );
+    } catch (err) {
+      if (!isCurrentAccountOwnerGeneration(ownerGeneration)) return;
+      setSettings(previous);
+      setPanelError(
+        err instanceof Error
+          ? err.message
+          : "Could not update the Whodunnit perspective.",
+      );
+    } finally {
+      if (isCurrentAccountOwnerGeneration(ownerGeneration)) setBusy(false);
+    }
+  }
   async function persistDebateWhodunnitTextVoiceMode(
     debateWhodunnitTextVoiceMode: WhodunnitTextVoiceMode,
   ) {
@@ -95604,7 +95783,7 @@ function HomeContent(): React.JSX.Element {
       setPanelNotice(
         debateWhodunnitTextVoiceMode === "off"
           ? "Written Whodunnit dialogue is now silent."
-          : `Written Whodunnit dialogue now uses ${debateWhodunnitTextVoiceMode === "babble" ? "Babble" : "Bottish"}.`,
+          : "Written Whodunnit dialogue now uses Bottish.",
       );
     } catch (err) {
       if (!isCurrentAccountOwnerGeneration(ownerGeneration)) return;
@@ -115461,7 +115640,6 @@ function HomeContent(): React.JSX.Element {
     imageReadyChip?: React.ReactNode;
     toolStyles?: {
       memories?: React.CSSProperties;
-      refresh?: React.CSSProperties;
       voice?: React.CSSProperties;
       images?: React.CSSProperties;
       bots?: React.CSSProperties;
@@ -115557,17 +115735,6 @@ function HomeContent(): React.JSX.Element {
           disabled={actionDisabled("promptCenter")}
         >
           <SlashCommandGlyph />
-        </button>
-        <button
-          type="button"
-          className={styles.headerIconButton}
-          onClick={() => runAction(refreshPrismFromNavbar)}
-          aria-label="Refresh Prism"
-          data-glyph-tooltip={actionTooltip("refresh", "Refresh")}
-          disabled={actionDisabled("refresh")}
-          style={toolStyles.refresh}
-        >
-          <Recycle size={18} strokeWidth={2.2} aria-hidden="true" />
         </button>
         <button
           type="button"
@@ -115971,10 +116138,6 @@ function HomeContent(): React.JSX.Element {
       closeMenu();
       openRightPanel("command-center");
     };
-    const handleRefreshPage = () => {
-      closeMenu();
-      void refreshPrismFromNavbar();
-    };
     const handleEditBot = () => {
       closeMenu();
       if (navbarCustomizerBot) {
@@ -116126,13 +116289,6 @@ function HomeContent(): React.JSX.Element {
         label: "Prompt Center",
         disabled: headerActionsDisabled,
         onSelect: handleOpenCommandCenter,
-      },
-      {
-        id: "refresh",
-        icon: <Recycle />,
-        label: "Refresh",
-        disabled: headerActionsDisabled,
-        onSelect: handleRefreshPage,
       },
     );
     if (showToolbarMemoriesButton) {
@@ -116509,14 +116665,6 @@ function HomeContent(): React.JSX.Element {
         disabled: actionDisabled("promptCenter"),
         disabledReason: actionDisabledReason("promptCenter"),
         onSelect: () => openRightPanel("command-center"),
-      },
-      {
-        id: "refresh",
-        icon: <Recycle />,
-        label: "Refresh",
-        disabled: actionDisabled("refresh"),
-        disabledReason: actionDisabledReason("refresh"),
-        onSelect: () => refreshPrismFromNavbar(),
       },
       {
         id: "settings",
@@ -123796,15 +123944,16 @@ function HomeContent(): React.JSX.Element {
                               label="About Whodunnit text-stream accompaniment"
                               variant="control"
                             >
-                              Player-attributed room observations use Babble
-                              whenever accompaniment is on. This choice governs
-                              other non-spoken lines while they appear;
-                              character speech keeps its configured English or
-                              Premium voice.
+                              Every written investigation line, the player&apos;s
+                              observations included, uses Bottish whenever
+                              accompaniment is on; there is no Babble in an
+                              investigation. Character speech keeps its
+                              configured English or Premium voice, and Court is
+                              unchanged.
                             </PanelSectionInfo>
                           </span>
                           <select
-                            value={settings.debateWhodunnitTextVoiceMode}
+                            value={settings.debateWhodunnitTextVoiceMode === "off" ? "off" : "bottish"}
                             aria-label="Whodunnit text voice"
                             disabled={busy}
                             onChange={(event) =>
@@ -123816,8 +123965,43 @@ function HomeContent(): React.JSX.Element {
                             }
                           >
                             <option value="off">Off</option>
-                            <option value="babble">Babble · Default</option>
-                            <option value="bottish">Bottish</option>
+                            <option value="bottish">Bottish · Default</option>
+                          </select>
+                        </label>
+                        <label
+                          className={styles.settingsFieldFull}
+                          data-tutorial-target="whodunnit-perspective-setting"
+                        >
+                          <span className={styles.controlLabelWithInfo}>
+                            <span>Investigation perspective</span>
+                            <PanelSectionInfo
+                              id="settings-control-info-debate-whodunnit-perspective"
+                              label="About the Whodunnit investigation perspective"
+                              variant="control"
+                            >
+                              Your investigator never performs a Talk question
+                              or a presented item: the button you chose is your
+                              line, and the witness answers directly. First
+                              person keeps the investigator off stage while you
+                              investigate; Embodied stages them beside each
+                              witness while they answer. Court always seats
+                              your investigator.
+                            </PanelSectionInfo>
+                          </span>
+                          <select
+                            value={settings.debateWhodunnitPerspective}
+                            aria-label="Whodunnit investigation perspective"
+                            disabled={busy}
+                            onChange={(event) =>
+                              void persistDebateWhodunnitPerspective(
+                                normalizeWhodunnitInvestigationPerspective(
+                                  event.currentTarget.value,
+                                ),
+                              )
+                            }
+                          >
+                            <option value="first_person">First person · Default</option>
+                            <option value="embodied">Embodied</option>
                           </select>
                         </label>
                       </section>
@@ -149264,6 +149448,9 @@ function HomeContent(): React.JSX.Element {
               whodunnitTextVoiceMode={normalizeWhodunnitTextVoiceMode(
                 settings?.debateWhodunnitTextVoiceMode,
               )}
+              investigationPerspective={normalizeWhodunnitInvestigationPerspective(
+                settings?.debateWhodunnitPerspective,
+              )}
               playerVoiceProfile={
                 settings?.prismDefaultBotAudioVoiceProfile ?? null
               }
@@ -149973,6 +150160,28 @@ function HomeContent(): React.JSX.Element {
                   const actor = debateBots.find((bot) => bot.id === performance.speakerBotId);
                   if (actor?.hardMuted) return Promise.resolve(false);
                   const messageId = `whodunnit:${voiceRequest.sessionId}:${performance.cacheKey}`;
+                  // A take prepared while the speaker thought plays as-is: no
+                  // second ElevenLabs request, and its alignment drives the mouth.
+                  const preparedTake = performance.preparedTake;
+                  if (preparedTake && !signalVoiceClipCacheRef.current.has(messageId)) {
+                    signalVoiceClipCacheRef.current.set(
+                      messageId,
+                      fetchAuthenticated(preparedTake.url, { signal: voiceRequest.signal })
+                        .then(async (response): Promise<BotcastEnglishVoiceMedia | null> =>
+                          response.ok
+                            ? {
+                                kind: "clip",
+                                clip: {
+                                  bytes: await response.arrayBuffer(),
+                                  alignment: preparedTake.alignment,
+                                  audioContentType: preparedTake.audioContentType,
+                                  engineUsed: "elevenlabs",
+                                },
+                              }
+                            : null)
+                        .catch(() => null),
+                    );
+                  }
                   return playDebateUtterance({
                     event: {
                       version: DEBATE_SCHEMA_VERSION,

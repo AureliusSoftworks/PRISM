@@ -180,6 +180,57 @@ export function createMysterySideRoomNamerV1(options: {
 
 interface Rect { x: number; y: number; width: number; height: number }
 
+/** One block asking for a name: a side room, or an enterable case room being renamed to
+ * the venue's own vocabulary. `size` comes from its footprint so the name can fit it. */
+export interface MysteryRoomNameRequestV1 {
+  id: string;
+  kind: "room" | "side";
+  size: MysterySideRoomSizeV1;
+  /** For a case room: the default template it stands in for, such as "rooftop-lounge". */
+  templateId?: string;
+  currentName?: string;
+}
+
+const NAME_PATTERN = /^[\p{L}\p{N} '’\-&.()/]+$/u;
+
+/** Reads a model's naming reply. A name is kept only when it is plain text of a sensible
+ * length and is not already used by another block or another name in the same reply;
+ * anything missing or rejected falls back to the caller's own namer. */
+export function normalizeMysteryRoomNameSuggestionsV1(
+  value: unknown,
+  requests: readonly MysteryRoomNameRequestV1[],
+  takenNames: readonly string[],
+  fallback: (request: MysteryRoomNameRequestV1) => string,
+): Record<string, string> {
+  const suggested = new Map<string, string>();
+  const entries = value && typeof value === "object" && Array.isArray((value as { names?: unknown }).names)
+    ? (value as { names: unknown[] }).names
+    : [];
+  for (const entry of entries) {
+    if (!entry || typeof entry !== "object") continue;
+    const candidate = entry as { id?: unknown; name?: unknown };
+    if (typeof candidate.id !== "string" || typeof candidate.name !== "string") continue;
+    const name = candidate.name.replace(/\s+/gu, " ").trim();
+    if (name.length < 3 || name.length > 60 || !NAME_PATTERN.test(name)) continue;
+    suggested.set(candidate.id, name);
+  }
+  const used = new Set(takenNames.map((name) => name.trim().toLocaleLowerCase()).filter(Boolean));
+  const resolved: Record<string, string> = {};
+  for (const request of requests) {
+    const proposed = suggested.get(request.id);
+    let name = proposed && !used.has(proposed.toLocaleLowerCase()) ? proposed : fallback(request);
+    if (used.has(name.trim().toLocaleLowerCase())) {
+      // The fallback collided too; number it rather than repeat a name on the map.
+      let attempt = 2;
+      while (used.has(`${name} ${attempt}`.toLocaleLowerCase()) && attempt < 40) attempt += 1;
+      name = `${name} ${attempt}`;
+    }
+    used.add(name.trim().toLocaleLowerCase());
+    resolved[request.id] = name;
+  }
+  return resolved;
+}
+
 /** Fills the open cells between a floor's rooms and corridors with side rooms: small,
  * believably shaped blocks that take a door from any corridor they touch. Cells outside
  * the room cluster stay open, so a vessel's hull dressing is left to the projection. */

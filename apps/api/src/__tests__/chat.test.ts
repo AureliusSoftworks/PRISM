@@ -56,17 +56,20 @@ describe("Ollama native-thinking effort", () => {
     },
   } satisfies LlmProvider;
 
-  it("keeps Default native and simulates explicit boolean-thinking stops", () => {
-    assert.equal(
-      shouldSimulateReasoningEffort({
-        provider,
-        botOverrides: { model: "nemotron-3-super:cloud" },
-        effort: "auto",
-        ollamaNativeThinking: true,
-      }),
-      false,
-    );
-    for (const effort of ["minimal", "low", "medium", "high"] as const) {
+  it("keeps Default and Minimal native and simulates higher boolean-thinking stops", () => {
+    for (const effort of ["auto", "minimal"] as const) {
+      assert.equal(
+        shouldSimulateReasoningEffort({
+          provider,
+          botOverrides: { model: "nemotron-3-super:cloud" },
+          effort,
+          ollamaNativeThinking: true,
+        }),
+        false,
+        effort,
+      );
+    }
+    for (const effort of ["low", "medium", "high"] as const) {
       assert.equal(
         shouldSimulateReasoningEffort({
           provider,
@@ -80,8 +83,8 @@ describe("Ollama native-thinking effort", () => {
     }
   });
 
-  it("uses GPT-OSS native tiers through Medium and simulates only High", () => {
-    for (const effort of ["minimal", "low", "medium"] as const) {
+  it("uses GPT-OSS native tiers through High and simulates only XHigh", () => {
+    for (const effort of ["minimal", "low", "medium", "high"] as const) {
       assert.equal(
         shouldSimulateReasoningEffort({
           provider,
@@ -97,7 +100,7 @@ describe("Ollama native-thinking effort", () => {
       shouldSimulateReasoningEffort({
         provider,
         botOverrides: { model: "gpt-oss:120b-cloud" },
-        effort: "high",
+        effort: "xhigh",
         ollamaNativeThinking: true,
       }),
       true,

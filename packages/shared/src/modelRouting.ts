@@ -326,6 +326,7 @@ export function isDisabledModelChoice(value: unknown): boolean {
 
 const COMMON_OPENAI_CHAT_MODEL_PATTERNS = [
   /^gpt-5(?:\.\d+)?(?:-(?:mini|chat-latest|sol|terra|luna))?$/,
+  /^gpt-6(?:\.\d+)?(?:-astra)?$/,
   /^gpt-4\.1(?:-mini)?$/,
   /^gpt-4o(?:-mini)?$/,
   /^chatgpt-4o-latest$/,
@@ -609,7 +610,7 @@ function routingProfile(provider: AutoModelProvider, modelId: string): {
   if (/fable|mythos/u.test(id)) {
     return { capability: 4, latency: 5, known: true };
   }
-  if (/opus|pro|sol|(?:^|-)o[345](?:-|$)/u.test(id)) {
+  if (/opus|pro|sol|astra|gpt-6|(?:^|-)o[345](?:-|$)/u.test(id)) {
     return { capability: 4, latency: 4, known: true };
   }
   if (/sonnet|terra|gpt-5|gpt-4\.1|gpt-4o/u.test(id)) {
@@ -635,7 +636,7 @@ function autoEscalationTier(
   if (/gpt-3\.5|nano|haiku|4o-mini/u.test(id)) return 1;
   if (/mini|luna/u.test(id)) return 2;
   if (/gpt-4\.1|gpt-4o|chatgpt-4o/u.test(id)) return 3;
-  if (/opus|pro|sol|(?:^|-)o[345](?:-|$)/u.test(id)) return 5;
+  if (/opus|pro|sol|astra|gpt-6|(?:^|-)o[345](?:-|$)/u.test(id)) return 5;
   if (/sonnet|terra|gpt-5/u.test(id)) return 4;
   return Math.max(1, routingProfile(provider, modelId).capability);
 }

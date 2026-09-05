@@ -3,6 +3,9 @@ import test from "node:test";
 import {
   DEBATE_MYSTERY_V2_MAX_AUTHOR_ATTEMPTS,
   DEBATE_MYSTERY_V2_PRESETS,
+  debateMysteryDeterministicDenialClaimV2,
+  debateMysteryDeterministicDenialTextV2,
+  debateMysteryStatementIsContractEchoV2,
   debateMysteryTalkTopicMirrorsRecordV2,
   debateMysteryClassifyVerdictV2,
   debateMysteryCredibilityMaximumV2,
@@ -11,6 +14,9 @@ import {
   debateMysteryMansionExteriorPromptV1,
   debateMysteryMansionExteriorScaleIsStaleV1,
   debateMysteryMansionBundleEligibleV2,
+  debateMysteryMansionHeldByArchiveV1,
+  debateMysteryVenueHeldBySessionV1,
+  debateMysteryPlayerStanceV2,
   debateMysteryPremiumAvailableV2,
   debateMysterySpectatorEvidenceReferencesV2,
   emptyDebateMysteryMutationsV2,
@@ -27,6 +33,8 @@ import {
   resolveDebateMysteryVenueProductionV1,
   resolveDebateMysteryMansionExteriorScaleClassV1,
   splitDebateMysteryStageActionTextV2,
+  stripDebateMysterySelfAddressV2,
+  stripDebateMysterySpeakerLabelV2,
   type DebateMysteryAudioManifestV1,
   type DebateMysteryDialogueGraphV2,
   type DebateMysteryDialogueNodeV2,
@@ -661,6 +669,68 @@ test("eyewitness validation requires two discoverable independent alibi supports
   assert.ok(result.errors.some((error) => error.includes("two outwardly independent")));
 });
 
+test("Defense frame validation runs only when the frame is supplied", () => {
+  const legacy = validateDebateMysteryDialogueGraphV2({
+    graph: validGraph(),
+    suspectSeatIds: ["seat-1", "seat-2"],
+    recordReferences: validationRecordReferences,
+  });
+  assert.equal(legacy.valid, true, legacy.errors.join("\n"));
+  const framed = validateDebateMysteryDialogueGraphV2({
+    graph: validGraph(),
+    suspectSeatIds: ["seat-1", "seat-2"],
+    recordReferences: validationRecordReferences,
+    defenseFrame: {
+      defendantSeatId: "seat-2",
+      frameEvidenceId: "evidence-seat-1",
+      alibiSupportDiscoveryIds: ["alibi-a", "alibi-b"],
+      investigation: true,
+    },
+  });
+  assert.equal(framed.valid, true, framed.errors.join("\n"));
+  const broken = validateDebateMysteryDialogueGraphV2({
+    graph: validGraph(),
+    suspectSeatIds: ["seat-1", "seat-2"],
+    recordReferences: validationRecordReferences,
+    defenseFrame: {
+      defendantSeatId: "seat-9",
+      frameEvidenceId: "evidence-unknown",
+      alibiSupportDiscoveryIds: ["alibi-a", "alibi-missing"],
+      investigation: true,
+    },
+  });
+  assert.equal(broken.valid, false);
+  assert.ok(broken.errors.some((error) => error.includes("not a frozen suspect")));
+  assert.ok(broken.errors.some((error) => error.includes("has no witness chapter")));
+  assert.ok(broken.errors.some((error) => error.includes("not a frozen Case File record")));
+  assert.ok(broken.errors.some((error) => error.includes("alibi-missing is not discoverable")));
+  const tooFew = validateDebateMysteryDialogueGraphV2({
+    graph: validGraph(),
+    suspectSeatIds: ["seat-1", "seat-2"],
+    recordReferences: validationRecordReferences,
+    defenseFrame: {
+      defendantSeatId: "seat-2",
+      frameEvidenceId: null,
+      alibiSupportDiscoveryIds: ["alibi-a"],
+      investigation: true,
+    },
+  });
+  assert.ok(tooFew.errors.some((error) => error.includes("two outwardly independent alibi supports for the client")));
+  // Court-only Defense cases have no investigation route to prove.
+  const courtOnly = validateDebateMysteryDialogueGraphV2({
+    graph: validGraph(),
+    suspectSeatIds: ["seat-1", "seat-2"],
+    recordReferences: validationRecordReferences,
+    defenseFrame: {
+      defendantSeatId: "seat-2",
+      frameEvidenceId: "evidence-seat-1",
+      alibiSupportDiscoveryIds: [],
+      investigation: false,
+    },
+  });
+  assert.equal(courtOnly.valid, true, courtOnly.errors.join("\n"));
+});
+
 test("local audio validation rejects missing and unreachable clips", () => {
   const graph = validGraph();
   const manifest: DebateMysteryAudioManifestV1 = {
@@ -789,6 +859,48 @@ test("difficulty, eyewitness, Premium, and verdict contracts are deterministic",
   assert.equal(debateMysteryPremiumAvailableV2("case_forge"), false);
   assert.equal(debateMysteryClassifyVerdictV2({ legalResult: "guilty", accusedIsCulprit: false, proofEstablished: true, proofSafe: true }), "wrongful_conviction");
   assert.equal(debateMysteryClassifyVerdictV2({ legalResult: "not_guilty", accusedIsCulprit: true, proofEstablished: true, proofSafe: true }), "acquittal_despite_proof");
+  assert.equal(debateMysteryClassifyVerdictV2({ legalResult: "guilty", accusedIsCulprit: true, proofEstablished: true, proofSafe: true, stance: "prosecution" }), "just_conviction");
+  assert.equal(debateMysteryClassifyVerdictV2({ legalResult: "not_guilty", accusedIsCulprit: false, proofEstablished: false, proofSafe: false }), "failed_prosecution");
+  assert.equal(debateMysteryClassifyVerdictV2({ legalResult: "guilty", accusedIsCulprit: false, proofEstablished: false, proofSafe: false, stance: "defense" }), "wrongful_conviction");
+  assert.equal(debateMysteryClassifyVerdictV2({ legalResult: "not_guilty", accusedIsCulprit: false, proofEstablished: true, proofSafe: true, stance: "defense", theoryNamedCulprit: true }), "just_acquittal");
+  assert.equal(debateMysteryClassifyVerdictV2({ legalResult: "not_guilty", accusedIsCulprit: false, proofEstablished: true, proofSafe: true, stance: "defense", theoryNamedCulprit: false }), "acquittal_without_truth");
+  assert.equal(debateMysteryClassifyVerdictV2({ legalResult: "not_guilty", accusedIsCulprit: false, proofEstablished: true, proofSafe: true, stance: "defense" }), "acquittal_without_truth");
+});
+
+test("Whodunnit V2 setup defaults the player stance to prosecution and accepts defense", () => {
+  const base = {
+    version: 2 as const,
+    preset: "compact" as const,
+    difficulty: "casual" as const,
+    artMode: "bundled" as const,
+    trialType: "bench" as const,
+    inspiration: "",
+    nonce: "stance-default",
+    suspectBotIds: ["suspect-1", "suspect-2", "suspect-3", "suspect-4"],
+    prosecutorBotId: "prosecutor",
+    rivalDefenseBotId: "defense",
+    jurorBotIds: [],
+  };
+  const prosecution = resolveDebateMysteryConfigV2(base);
+  assert.equal(prosecution.playerStance, "prosecution");
+  assert.equal(debateMysteryPlayerStanceV2(prosecution), "prosecution");
+  assert.equal(debateMysteryPlayerStanceV2(undefined), "prosecution");
+  assert.equal(debateMysteryPlayerStanceV2({}), "prosecution");
+  assert.equal(
+    resolveDebateMysteryConfigV2({ ...base, playerStance: "sideways" as never }).playerStance,
+    "prosecution",
+  );
+  const defense = resolveDebateMysteryConfigV2({
+    ...base,
+    playerStance: "defense",
+    playerRole: "spectator",
+  });
+  assert.equal(defense.playerStance, "defense");
+  assert.equal(debateMysteryPlayerStanceV2(defense), "defense");
+  // Stance never moves the frozen seats; only their roles follow it.
+  assert.equal(defense.playerRole, "spectator");
+  assert.equal(defense.prosecutorBotId, "prosecutor");
+  assert.equal(defense.rivalDefenseBotId, "defense");
 });
 
 test("new V2 mansions keep a two-floor minimum while compact stays easiest", () => {
@@ -941,6 +1053,54 @@ test("Theme, asset synthesis, and reusable mansion eligibility freeze determinis
   assert.equal(debateMysteryMansionBundleEligibleV2({ rooms: [] }), false);
 });
 
+test("holds a library venue while an unfinished Archive Whodunnit still occupies it", () => {
+  const session = {
+    id: "case-1",
+    status: "waiting_for_player",
+    completedAt: null,
+    format: "whodunnit",
+    motion: { title: "The Violet House" },
+    formatState: {
+      format: "whodunnit" as const,
+      version: 2 as const,
+      playPhase: "investigation",
+      caseTitle: "The Violet House",
+      config: {
+        mansionBundleId: "venue-a",
+        mansionSnapshot: { sourceBundleId: "venue-a" },
+      },
+    },
+  };
+  const hold = debateMysteryVenueHeldBySessionV1({ bundleId: "venue-a", session });
+  assert.deepEqual(hold, {
+    version: 1,
+    sessionId: "case-1",
+    caseTitle: "The Violet House",
+  });
+  assert.equal(debateMysteryMansionHeldByArchiveV1({ archiveHold: hold }), true);
+  assert.equal(
+    debateMysteryVenueHeldBySessionV1({
+      bundleId: "venue-a",
+      session: { ...session, formatState: { ...session.formatState, playPhase: "trial" } },
+    }),
+    null,
+  );
+  assert.equal(
+    debateMysteryVenueHeldBySessionV1({
+      bundleId: "venue-b",
+      session,
+    }),
+    null,
+  );
+  assert.equal(
+    debateMysteryVenueHeldBySessionV1({
+      bundleId: "venue-a",
+      session: { ...session, status: "cancelled" },
+    }),
+    null,
+  );
+});
+
 test("Spectator setup is preserved and its partner record selects only required physical proof", () => {
   const resolved = resolveDebateMysteryConfigV2({
     version: 2,
@@ -1049,4 +1209,41 @@ test("production capabilities speak plainly and keep ambience local while music 
   for (const capability of [...local.capabilities, ...online.capabilities]) {
     assert.doesNotMatch(capability.publicReason, /case-scoped production asset|audited at Production Readiness/u);
   }
+});
+
+test("strips a leaked speaker label from a performed line, and only the speaker's own", () => {
+  assert.equal(
+    stripDebateMysterySpeakerLabelV2("Peter Griffin: What was your working relationship like?", "Peter Griffin"),
+    "What was your working relationship like?",
+  );
+  assert.equal(stripDebateMysterySpeakerLabelV2("Sarah: Tense, obviously.", ["Sassy Sarah"]), "Tense, obviously.");
+  assert.equal(stripDebateMysterySpeakerLabelV2("Avery: get over here.", "Sassy Sarah"), "Avery: get over here.");
+  assert.equal(stripDebateMysterySpeakerLabelV2("Peter Griffin:", "Peter Griffin"), "Peter Griffin:");
+  assert.equal(stripDebateMysterySpeakerLabelV2("The clock read nine: no later.", "Bob Ross"), "The clock read nine: no later.");
+  assert.equal(stripDebateMysterySpeakerLabelV2("What was it like?", null), "What was it like?");
+  const split = splitDebateMysteryStageActionTextV2("Sassy Sarah: *Pauses for a beat* Tense, obviously.", "Sassy Sarah");
+  assert.equal(split.spokenText, "Tense, obviously.");
+  assert.ok(split.stageActionText);
+});
+
+test("strips a Prosecutor's self-address from private reasoning and keeps other vocatives", () => {
+  assert.equal(
+    stripDebateMysterySelfAddressV2("Okay, Peter, the record is a neat little nightmare.", "Peter Griffin"),
+    "Okay, the record is a neat little nightmare.",
+  );
+  assert.equal(stripDebateMysterySelfAddressV2("Peter Griffin — think about the timeline.", ["Peter Griffin"]), "Think about the timeline.");
+  assert.equal(stripDebateMysterySelfAddressV2("Lois, where were you at nine?", "Peter Griffin"), "Lois, where were you at nine?");
+  assert.equal(stripDebateMysterySelfAddressV2("The record is clear.", "Peter Griffin"), "The record is clear.");
+});
+
+test("swears a deterministic denial in plain words and still recognizes the retired contract phrasings", () => {
+  const sworn = debateMysteryDeterministicDenialTextV2({ recordTitle: "Silver Key", recordClaim: "Vale withdrew at 9:30" });
+  assert.equal(sworn, 'I know what the Silver Key is said to prove: "Vale withdrew at 9:30." That is false, and I will swear to it.');
+  assert.equal(debateMysteryDeterministicDenialClaimV2(sworn), "Vale withdrew at 9:30");
+  assert.equal(debateMysteryDeterministicDenialClaimV2("The assigned record's exact claim is false.", "the door was locked"), "the door was locked");
+  assert.equal(debateMysteryDeterministicDenialClaimV2("The assigned record's exact claim is false: the door was locked"), "the door was locked");
+  assert.equal(debateMysteryDeterministicDenialClaimV2("I was in the galley all night."), null);
+  assert.equal(debateMysteryStatementIsContractEchoV2("The assigned record's exact claim is false."), true);
+  assert.equal(debateMysteryStatementIsContractEchoV2(sworn), false);
+  assert.match(debateMysteryDeterministicDenialTextV2({ recordTitle: "Silver Key" }), /did not happen that way/u);
 });

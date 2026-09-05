@@ -310,6 +310,52 @@
   padding: 1.35rem;
 }
 
+.setupSection > .setupField {
+  display: grid;
+  gap: 0.45rem;
+  min-width: 0;
+  margin-bottom: 1.2rem;
+  color: var(--mystery-muted);
+  font-size: 0.78rem;
+}
+
+.setupSection > .setupField textarea {
+  width: 100%;
+  min-height: 6.25rem;
+  box-sizing: border-box;
+  padding: 0.75rem 0.8rem;
+  color: var(--mystery-text);
+  border: 1px solid var(--mystery-line);
+  border-radius: 0.62rem;
+  outline: none;
+  background: color-mix(in srgb, var(--mystery-panel-strong) 90%, transparent);
+  font: inherit;
+  line-height: 1.5;
+  resize: vertical;
+  transition: border-color 140ms ease, background 140ms ease, box-shadow 140ms ease;
+}
+
+.setupSection > .setupField textarea::placeholder {
+  color: color-mix(in srgb, var(--mystery-muted) 82%, transparent);
+  opacity: 1;
+}
+
+.setupSection > .setupField textarea:hover {
+  border-color: color-mix(in srgb, var(--mystery-text) 32%, var(--mystery-line));
+}
+
+.setupSection > .setupField textarea:focus-visible {
+  border-color: var(--mystery-violet);
+  outline: 2px solid color-mix(in srgb, var(--mystery-violet) 42%, transparent);
+  outline-offset: 1px;
+  background: color-mix(in srgb, var(--mystery-violet) 5%, var(--mystery-panel-strong));
+}
+
+.setupSection > .setupField > small {
+  color: var(--mystery-muted);
+  line-height: 1.45;
+}
+
 .setupSection > header,
 .inventory > header,
 .accessInventory > header,
@@ -1084,6 +1130,12 @@
 .installedMansionCopy small { color: var(--mystery-muted); font-size: 0.62rem; }
 
 .installedMansionActions { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 0.48rem; padding: 0 0.78rem 0.78rem; }
+.installedMansionActions[data-held="true"] .installedMansionSelect { grid-column: 1 / -1; }
+.installedMansionHold {
+  color: color-mix(in srgb, var(--mystery-gold) 78%, var(--mystery-muted));
+  font-weight: 760;
+}
+.installedMansionGrid > article[data-held="true"] { border-color: color-mix(in srgb, var(--mystery-gold) 42%, var(--mystery-line)); }
 .installedMansionActions button,
 .installedMansionEditor button {
   min-height: 2.25rem;
@@ -1146,6 +1198,7 @@
 .installedMansionDirection label { color: var(--mystery-text); font-size: 0.86rem; font-weight: 700; }
 .installedMansionDirection textarea { width: 100%; box-sizing: border-box; min-height: 5.4rem; padding: 0.82rem 0.88rem; color: var(--mystery-text); border: 1px solid var(--mystery-line); border-radius: 0.66rem; outline: none; background: var(--mystery-panel-strong); font: inherit; resize: vertical; }
 .installedMansionDirection textarea:focus-visible { border-color: var(--mystery-violet); outline: 2px solid color-mix(in srgb, var(--mystery-violet) 40%, transparent); outline-offset: 1px; }
+.installedMansionDirection > small { color: var(--mystery-muted); font-size: 0.78rem; line-height: 1.45; }
 .installedMansionActionRow { display: flex; flex-wrap: wrap; align-items: center; gap: 0.6rem; }
 .installedMansionEditor .installedMansionPrimaryAction { color: #10131b; border-color: color-mix(in srgb, var(--mystery-cyan) 72%, white 14%); background: linear-gradient(135deg, color-mix(in srgb, var(--mystery-cyan) 82%, white 8%), color-mix(in srgb, var(--mystery-cyan) 62%, #0f3e4a)); }
 .installedMansionMusic[data-complete="true"] { gap: 0.5rem; padding: 0.85rem 1rem; }
@@ -1196,6 +1249,13 @@
 .installedMansionEffectRow[data-state="candidate"] { border-color: color-mix(in srgb, var(--mystery-violet) 55%, var(--mystery-line)); }
 .installedMansionEffectRow[data-state="candidate"] > div:first-child span { color: var(--mystery-violet); border-color: color-mix(in srgb, var(--mystery-violet) 45%, transparent); }
 .installedMansionEffectRow[data-unsaved="true"] { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--mystery-violet) 25%, transparent); }
+/* One cue's own prompt. It spans the row so a long direction stays readable,
+   and it only appears while that cue is waiting to be synthesized. */
+.installedMansionCueDirection { grid-column: 1 / -1; width: 100%; box-sizing: border-box; margin-top: 0.1rem; padding: 0.42rem 0.6rem; color: var(--mystery-text); border: 1px dashed color-mix(in srgb, var(--mystery-line) 88%, transparent); border-radius: 0.55rem; outline: none; background: color-mix(in srgb, var(--mystery-bg) 45%, transparent); font: inherit; font-size: 0.76rem; }
+.installedMansionCueDirection::placeholder { color: color-mix(in srgb, var(--mystery-muted) 78%, transparent); }
+.installedMansionCueDirection[data-overriding="true"] { border-style: solid; border-color: color-mix(in srgb, var(--mystery-violet) 52%, var(--mystery-line)); background: color-mix(in srgb, var(--mystery-violet) 8%, transparent); }
+.installedMansionCueDirection:focus-visible { border-color: var(--mystery-violet); outline: 2px solid color-mix(in srgb, var(--mystery-violet) 36%, transparent); outline-offset: 1px; }
+.installedMansionCueDirection:disabled { opacity: 0.5; }
 .installedMansionEffectRow .installedMansionActionRow { justify-content: flex-end; flex-wrap: wrap; }
 @media (max-width: 52rem) {
   .installedMansionEffectRow { grid-template-columns: 1fr; }
@@ -6292,3 +6352,8 @@
 /* Marquee selection on the plan. */
 .mansionEditorMarquee { position: absolute; z-index: 7; border: 1px dashed var(--mystery-cyan); border-radius: 0.2rem; background: color-mix(in srgb, var(--mystery-cyan) 12%, transparent); pointer-events: none; }
 .mansionEditorCanvas[data-marquee="true"] { cursor: crosshair; }
+
+/* Free placement: a block that overlaps, floats, or is cut off is marked rather than moved back. */
+.mansionEditorCanvas > [data-invalid="true"] { border-color: #e06976 !important; box-shadow: 0 0 0 1px rgb(224 105 118 / 55%), inset 0 0 1.6rem rgb(224 105 118 / 20%), 0 0.3rem 0.8rem rgb(0 0 0 / 35%); }
+.mansionEditorCanvas > [data-invalid="true"][data-selected="true"] { box-shadow: 0 0 0 2px #e06976, inset 0 0 1.6rem rgb(224 105 118 / 24%); }
+.mansionEditorCanvas > [data-invalid="true"] > strong { color: #f0b4ba; }

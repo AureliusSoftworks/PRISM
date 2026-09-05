@@ -1,9 +1,15 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 import {
   splitLocalVoiceStreamSegments,
   splitLocalVoiceStreamText,
 } from "../local-voice-stream.ts";
+
+const serverSource = readFileSync(
+  new URL("../server.ts", import.meta.url),
+  "utf8",
+);
 
 describe("local voice streaming chunks", () => {
   it("paces the supplied Prism line at the strong stop and meaningful comma", () => {
@@ -25,6 +31,36 @@ describe("local voice streaming chunks", () => {
       "Last idea…",
       "Done now.",
     ]);
+  });
+
+  it("coalesces short punctuation chunks into a useful playback runway", () => {
+    const shortText =
+      "First thought. Second question? Third answer! Last idea… Done now.";
+    assert.deepEqual(
+      splitLocalVoiceStreamText(shortText, { minimumChunkTokens: 18 }),
+      [shortText],
+    );
+
+    const firstRunway = Array.from(
+      { length: 18 },
+      (_, index) => `first${index + 1}`,
+    ).join(" ") + ".";
+    const secondRunway = Array.from(
+      { length: 18 },
+      (_, index) => `second${index + 1}`,
+    ).join(" ") + ".";
+    assert.deepEqual(
+      splitLocalVoiceStreamText(`${firstRunway} ${secondRunway}`, {
+        minimumChunkTokens: 18,
+      }),
+      [firstRunway, secondRunway],
+    );
+    assert.deepEqual(
+      splitLocalVoiceStreamText(`${firstRunway} Done now.`, {
+        minimumChunkTokens: 18,
+      }),
+      [`${firstRunway} Done now.`],
+    );
   });
 
   it("guards meaningful clause commas and intermediate punctuation", () => {
@@ -100,6 +136,17 @@ describe("local voice streaming chunks", () => {
     assert.deepEqual(
       splitLocalVoiceStreamText(text, { punctuationPacing: false }),
       [text],
+    );
+  });
+
+  it("applies the minimum synthesis runway to every Signal local fallback", () => {
+    assert.match(
+      serverSource,
+      /const SIGNAL_LOCAL_VOICE_MINIMUM_CHUNK_TOKENS = 18;/u,
+    );
+    assert.equal(
+      serverSource.match(/minimumChunkTokens: signalMessageId/gu)?.length,
+      3,
     );
   });
 

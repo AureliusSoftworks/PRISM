@@ -913,11 +913,15 @@ describe("createDatabase bot export hash migration", () => {
       const debateWhodunnitTextVoiceModeColumn = userColumns.find(
         (column) => column.name === "debate_whodunnit_text_voice_mode"
       );
-      assert.equal(debateWhodunnitTextVoiceModeColumn?.dflt_value, "'babble'");
+      assert.equal(debateWhodunnitTextVoiceModeColumn?.dflt_value, "'bottish'");
       const debateWhodunnitSpeechTypeColumn = userColumns.find(
         (column) => column.name === "debate_whodunnit_speech_type"
       );
       assert.equal(debateWhodunnitSpeechTypeColumn?.dflt_value, "'english'");
+      const debateWhodunnitPerspectiveColumn = userColumns.find(
+        (column) => column.name === "debate_whodunnit_perspective"
+      );
+      assert.equal(debateWhodunnitPerspectiveColumn?.dflt_value, "'first_person'");
       const psychicModeColumn = userColumns.find(
         (column) => column.name === "psychic_mode_enabled"
       );

@@ -565,6 +565,15 @@ describe("API request integration", () => {
       }),
     );
     assert.equal(registered.status, 201);
+    const registeredPayload = await json(registered);
+    const registeredUserId = String(registeredPayload.user.id);
+
+    // An unrelated private setting must never be opened by authentication or
+    // the model-preparation route's narrow settings lookup.
+    db.prepare("UPDATE main.users SET theme = ? WHERE id = ?").run(
+      Buffer.from("intentionally-invalid-vault-envelope"),
+      registeredUserId,
+    );
     const response = await client.request(
       "/api/models/prepare",
       jsonInit({
@@ -578,6 +587,19 @@ describe("API request integration", () => {
     assert.equal(payload.state, "not_applicable");
     assert.equal(payload.model, "gpt-test");
     assert.equal(JSON.stringify(payload).includes(config.ollamaHost), false);
+
+    fetchRecorder.setResponse(Response.json({ models: [] }));
+    const localResponse = await client.request(
+      "/api/models/prepare",
+      jsonInit({
+        provider: "local",
+        model: "model-preparation-local",
+        experience: "signal",
+      }),
+    );
+    assert.equal(localResponse.status, 200, await localResponse.clone().text());
+    assert.equal((await json(localResponse)).state, "warming");
+    fetchRecorder.setResponse(new Response("{}", { status: 200 }));
   });
 
   it("authenticates and server-resolves auxiliary model residency warms", async () => {

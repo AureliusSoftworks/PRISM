@@ -16,6 +16,18 @@ const atlasCssSource = readFileSync(
   new URL("./PronunciationAtlas.module.css", import.meta.url),
   "utf8",
 );
+const pageCssSource = readFileSync(
+  new URL("./page.module.css", import.meta.url),
+  "utf8",
+);
+const actionSfxSource = readFileSync(
+  new URL("./coffee-action-sfx.ts", import.meta.url),
+  "utf8",
+);
+const serverSource = readFileSync(
+  new URL("../../../api/src/server.ts", import.meta.url),
+  "utf8",
+);
 const atlasMap = new URL(
   "../../public/voice/pronunciation-atlas-earth-equirectangular-v2.svg",
   import.meta.url,
@@ -287,5 +299,48 @@ describe("cross-accent local voice pronunciation controls", () => {
     assert.match(pageSource, /className=\{styles\.botAvatarVoiceTestDock\}/u);
     assert.match(pageSource, /English[\s\S]*Premium[\s\S]*Babble[\s\S]*Bottish/u);
     assert.match(pageSource, /Nothing is added to chat\./u);
+  });
+
+  it("keeps the Laugh recipe on the Accent step, above the step action", () => {
+    assert.match(pageSource, /function BotVoiceLaughRecipe\(/u);
+    assert.match(
+      pageSource,
+      /<PronunciationAtlas[\s\S]*?onContinue=\{\(\) => setActiveAdjustmentTarget\("local"\)\}[\s\S]*?<BotVoiceLaughRecipe/u,
+    );
+    assert.match(pageSource, /data-tutorial-target="avatar-local-laugh"/u);
+    // The section is authored identity, so no eligibility gate may hide it.
+    assert.doesNotMatch(pageSource, /laughControlAvailable/u);
+    assert.match(atlasSource, /\{children\}\n      \{onContinue \? \(/u);
+    assert.match(atlasSource, /children\?: ReactNode;/u);
+    assert.match(
+      pageSource,
+      /instantTtsSpeaksLaugh[\s\S]*?localVoiceSource === "portable"/u,
+    );
+    assert.match(pageSource, /Samples always play in Instant TTS\./u);
+  });
+
+  it("offers a truthful Premium laugh switch wired through every lane", () => {
+    assert.match(pageSource, /aria-label="Premium authored laugh"/u);
+    assert.match(pageSource, /data-premium-laugh-toggle="true"/u);
+    assert.match(pageSource, /premiumLaughEnabled: !premiumLaughEnabled/u);
+    assert.match(
+      pageCssSource,
+      /\.botVoiceLocalLaughLaneToggle > button\[data-active="true"\]/u,
+    );
+    // Premium speaks the authored laugh, so the pack clip must stand down.
+    assert.match(
+      actionSfxSource,
+      /profile\.premiumLaughEnabled === true[\s\S]*?elevenlabs/u,
+    );
+    // Projection rewrites the carrier, so censored and aligned takes opt out.
+    assert.match(
+      serverSource,
+      /const premiumSpeechText =\s*\n\s*boundary\.censorRanges\.length === 0 && !request\.includeAlignment/u,
+    );
+    assert.match(serverSource, /text: premiumSpeechText,/u);
+    assert.match(
+      serverSource,
+      /profile\.premiumLaughEnabled === true && Boolean\(profile\.localLaughSyllable\)/u,
+    );
   });
 });

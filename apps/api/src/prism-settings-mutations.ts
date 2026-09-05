@@ -43,6 +43,7 @@ export const PRISM_JOURNALED_SETTING_KEYS = new Set([
   "debateWhodunnitReuseSynthesizedExhibits",
   "debateWhodunnitTextVoiceMode",
   "debateWhodunnitSpeechType",
+  "debateWhodunnitPerspective",
   "psychicModeEnabled",
   "autoFallbackChain",
   "onlineAutoProviderBias",
@@ -123,6 +124,7 @@ const PERSISTED_SETTING_COLUMNS = [
   "debate_whodunnit_reuse_synthesized_exhibits",
   "debate_whodunnit_text_voice_mode",
   "debate_whodunnit_speech_type",
+  "debate_whodunnit_perspective",
   "psychic_mode_enabled",
   "auto_switch_model",
   "auto_fallback_chain",
@@ -253,6 +255,9 @@ function currentSettings(
     ),
     debateWhodunnitSpeechType: nullableString(
       row.debate_whodunnit_speech_type,
+    ),
+    debateWhodunnitPerspective: nullableString(
+      row.debate_whodunnit_perspective,
     ),
     psychicModeEnabled: Number(row.psychic_mode_enabled),
     autoSwitchModel: Number(row.auto_switch_model),
@@ -425,6 +430,7 @@ function persistedValues(
       next.debateWhodunnitReuseSynthesizedExhibits,
     debate_whodunnit_text_voice_mode: next.debateWhodunnitTextVoiceMode,
     debate_whodunnit_speech_type: next.debateWhodunnitSpeechType,
+    debate_whodunnit_perspective: next.debateWhodunnitPerspective,
     psychic_mode_enabled: next.psychicModeEnabled,
     auto_switch_model: next.autoSwitchModel,
     auto_fallback_chain: next.autoFallbackChain,

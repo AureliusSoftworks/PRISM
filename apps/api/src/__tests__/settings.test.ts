@@ -71,6 +71,7 @@ function baseline(overrides: Partial<CurrentSettings> = {}): CurrentSettings {
     debateWhodunnitReuseSynthesizedExhibits: 0,
     debateWhodunnitTextVoiceMode: "bottish",
     debateWhodunnitSpeechType: "english",
+    debateWhodunnitPerspective: "first_person",
     psychicModeEnabled: 0,
     autoSwitchModel: 0,
     autoFallbackChain: null,
@@ -833,7 +834,8 @@ describe("resolveNextSettings — debateWhodunnitTextVoiceMode", () => {
         { debateWhodunnitTextVoiceMode: "babble" },
         baseline(),
       ).debateWhodunnitTextVoiceMode,
-      "babble",
+      "bottish",
+      "Babble is no longer offered: a patch naming it resolves to Bottish",
     );
     assert.equal(
       resolveNextSettings(
@@ -847,25 +849,26 @@ describe("resolveNextSettings — debateWhodunnitTextVoiceMode", () => {
         { debateWhodunnitTextVoiceMode: "english" },
         baseline({ debateWhodunnitTextVoiceMode: null }),
       ).debateWhodunnitTextVoiceMode,
-      "babble",
+      "bottish",
     );
   });
 
   it("preserves a valid saved value when the patch omits or rejects the field", () => {
-    for (const mode of ["off", "bottish", "babble"] as const) {
+    for (const mode of ["off", "bottish"] as const) {
       assert.equal(resolveNextSettings({}, baseline({ debateWhodunnitTextVoiceMode: mode })).debateWhodunnitTextVoiceMode, mode);
     }
+    // A row saved while Babble was offered reads back as Bottish.
     const current = baseline({ debateWhodunnitTextVoiceMode: "babble" });
     assert.equal(
       resolveNextSettings({}, current).debateWhodunnitTextVoiceMode,
-      "babble",
+      "bottish",
     );
     assert.equal(
       resolveNextSettings(
         { debateWhodunnitTextVoiceMode: true },
         current,
       ).debateWhodunnitTextVoiceMode,
-      "babble",
+      "bottish",
     );
   });
 });

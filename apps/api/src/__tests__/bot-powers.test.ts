@@ -10,6 +10,7 @@ import {
   type CoffeePowerPlanV1,
 } from "@localai/shared";
 import { compileBotPowers } from "../bot-powers.ts";
+import { debatePowerInterruptionCanTargetV1 } from "../debate.ts";
 import {
   applyCoffeeHearingRepeatMoodPenalty,
   applyCoffeePowerAfterSpeech,
@@ -4103,4 +4104,120 @@ test("compiler recovers Anti-truth / Fibbing as soft anti_truth", async () => {
     { type: "address_gate", when: "question" },
   ]);
   assert.match(result.powers[0]?.compiled?.selfCue ?? "", /Anti-truth/u);
+});
+
+test("Endless Tangent compiles the floor-domination primitive without using the model", async () => {
+  let calls = 0;
+  const unusedProvider: LlmProvider = {
+    name: "local",
+    async generateResponse() {
+      calls += 1;
+      throw new Error("provider should not be needed");
+    },
+    async embedText() { return []; },
+  };
+  const result = await compileBotPowers({
+    provider: unusedProvider,
+    botName: "Sir Digress-a-lot",
+    powers: [{
+      version: 1,
+      id: "endless-tangent",
+      name: "Endless Tangent",
+      intent:
+        "Cursed to ramble on forever. This bot annoys other bots with their inability for brevity.",
+      enabled: true,
+      compileStatus: "draft",
+      compiled: null,
+    }],
+  });
+
+  assert.equal(calls, 0);
+  assert.equal(result.powers[0]?.compileStatus, "ready");
+  const effects = result.powers[0]?.compiled?.effects ?? [];
+  // Verbosity alone let peers speak the moment the turn ended. The Power is
+  // only true to its name when every eligible bot opening is taken.
+  assert.deepEqual(
+    effects.find((effect) => effect.type === "interruption"),
+    {
+      type: "interruption",
+      frequency: "frequent",
+      strength: "large",
+      targets: [{ kind: "all" }],
+      certainty: "always",
+    },
+  );
+  assert.deepEqual(
+    effects.find((effect) => effect.type === "turn_gravity"),
+    { type: "turn_gravity", direction: "more", strength: "large" },
+  );
+  // Expansive budgets stay soft; the floor is held by interruption, not padding.
+  assert.deepEqual(
+    effects.find((effect) => effect.type === "response_budget"),
+    { type: "response_budget", mode: "expansive", enforcement: "soft" },
+  );
+  assert.equal(
+    effects.filter((effect) => effect.type === "response_budget").length,
+    1,
+  );
+  assert.match(
+    result.powers[0]?.compiled?.selfCue ?? "",
+    /never interrupt protected closings, boundaries, or human-controlled speech/iu,
+  );
+  assert.match(
+    result.powers[0]?.compiled?.observerCue ?? "",
+    /Sir Digress-a-lot/u,
+  );
+  assert.ok(
+    result.powers[0]?.compiled?.ruleLabels.includes(
+      "Always interrupts eligible bot turns",
+    ),
+  );
+});
+
+test("Endless Tangent stays eligible to cut into an opposing Debate turn", async () => {
+  const result = await compileBotPowers({
+    provider: {
+      name: "local",
+      async generateResponse() {
+        throw new Error("provider should not be needed");
+      },
+      async embedText() { return []; },
+    },
+    botName: "Sir Digress-a-lot",
+    powers: [{
+      version: 1,
+      id: "endless-tangent",
+      name: "Endless Tangent",
+      intent:
+        "Cursed to ramble on forever. This bot annoys other bots with their inability for brevity.",
+      enabled: true,
+      compileStatus: "draft",
+      compiled: null,
+    }],
+  });
+  const effects = result.powers[0]?.compiled?.effects ?? [];
+  const interruption = effects.find((effect) => effect.type === "interruption");
+
+  // Debate resolves its own floor breaks rather than using the shared helper,
+  // so pin the exact shape its resolver requires: a target it can match and a
+  // certainty that skips the probability roll on every eligible opening.
+  assert.ok(
+    interruption?.type === "interruption" &&
+      interruption.targets.some((target) => target.kind === "all"),
+  );
+  assert.equal(
+    interruption?.type === "interruption" ? interruption.certainty : null,
+    "always",
+  );
+  assert.equal(debatePowerInterruptionCanTargetV1(effects, []), true);
+  // A Power-immune opponent is still off limits, exactly as elsewhere.
+  assert.equal(
+    debatePowerInterruptionCanTargetV1(effects, [{
+      type: "power_immunity",
+      scope: "holder",
+      targets: "other_bots",
+      awareness: "unnoticed",
+    }]),
+    false,
+  );
 });

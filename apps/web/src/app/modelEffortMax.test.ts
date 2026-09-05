@@ -41,8 +41,8 @@ describe("native Max effort overdrive", () => {
     assert.equal(modelEffortRequestValue(olderNative, "xhigh", true), "xhigh");
   });
 
-  it("aliases Claude 4.6 Max to XHigh but keeps newer Claude Max transient", () => {
-    const aliased = resolveModelReasoningEffortCapability({
+  it("unlocks Max above each Claude ladder's real top rung", () => {
+    const capped = resolveModelReasoningEffortCapability({
       provider: "anthropic",
       modelId: "claude-sonnet-4-6",
     });
@@ -51,16 +51,17 @@ describe("native Max effort overdrive", () => {
       modelId: "claude-opus-4-8",
     });
 
-    assert.deepEqual(modelEffortSliderLevels(aliased), [
+    assert.deepEqual(modelEffortSliderLevels(capped), [
       "auto",
       "low",
       "medium",
       "high",
-      "xhigh",
     ]);
-    assert.equal(aliased.supportsMax, false);
-    assert.equal(modelEffortRequestValue(aliased, "xhigh", true), "xhigh");
+    assert.equal(capped.supportsMax, true);
+    assert.equal(modelEffortRequestValue(capped, "high", true), "max");
+    assert.equal(modelEffortRequestValue(capped, "xhigh", true), "xhigh");
     assert.equal(distinct.supportsMax, true);
+    assert.equal(modelEffortRequestValue(distinct, "high", true), "high");
     assert.equal(modelEffortRequestValue(distinct, "xhigh", true), "max");
   });
 
@@ -70,7 +71,7 @@ describe("native Max effort overdrive", () => {
     assert.match(page, /const \[maxEffortTargetKey, setMaxEffortTargetKey\]/u);
     assert.match(
       page,
-      /if \(nextValue !== "xhigh"\)[\s\S]*clearMaxEffortOverdrive/u,
+      /if \(nextValue !== modelReasoningEffortMaxUnlockLevel\(target\.capability\)\)[\s\S]*clearMaxEffortOverdrive/u,
     );
     assert.match(page, /requestReasoningEffort === "max"/u);
     assert.match(page, /aria-pressed=\{maxEffortActive\}/u);

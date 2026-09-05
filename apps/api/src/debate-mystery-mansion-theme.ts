@@ -206,6 +206,9 @@ export function buildDebateMysteryMansionThemePromptV1(args: {
   /** Legacy prompt inputs remain accepted for existing callers and fixtures. */
   houseStyleLabel?: string;
   houseStylePromptContract?: string;
+  /** The player's Refract direction for this pass. Blank keeps the canonical
+   * prompt byte-identical, so an undirected resynthesis never drifts. */
+  direction?: string | null;
 }): string {
   const identity = args.identity ?? deriveMansionMusicIdentityV1({
     title: args.title,
@@ -222,6 +225,11 @@ export function buildDebateMysteryMansionThemePromptV1(args: {
     `Use isolated ${identity.phraseDurationSeconds.min}-${identity.phraseDurationSeconds.max} second musical phrases separated by ${identity.quietIntervalSeconds.min}-${identity.quietIntervalSeconds.max} second quiet intervals.`,
     `Keep approximately ${Math.round((identity.silenceRatio?.min ?? 0.45) * 100)}-${Math.round((identity.silenceRatio?.max ?? 0.65) * 100)} percent of the complete composition at rest or near-silence, with foreground risk below ${(identity.foregroundRiskCeiling ?? 0.18).toFixed(2)}.`,
     `Begin and end inside matching low-energy quiet windows at least ${identity.loopBoundary.quietWindowSeconds.toFixed(1)} seconds long so an equal-power ${identity.loopBoundary.crossfadeSeconds.toFixed(1)} second loop returns imperceptibly.`,
+    // The direction colors the piece; it never redefines it. It sits ahead of
+    // the closing sentence so that restraint still bounds whatever was asked for.
+    ...(compact(args.direction, "", 300)
+      ? [`Creative direction for this pass: ${compact(args.direction, "", 300)}`]
+      : []),
     "Maintain a dialogue-safe level, soft attacks, generous midrange space, infrequent motifs, unresolved crime-scene tension, and quiet dramatic restraint from beginning to end.",
   ].join(" ");
 }
@@ -343,6 +351,7 @@ async function generateTheme(args: {
   bundleId: string;
   apiKey: string;
   logicalId: string;
+  direction?: string | null;
   fetchImpl?: typeof fetch;
 }): Promise<{ assetId: string; title: string }> {
   const generationKey = `${args.userId}:${args.bundleId}`;
@@ -358,7 +367,11 @@ async function generateTheme(args: {
     });
     const generated = await requestCoffeeGroupElevenLabsMusic({
       apiKey: args.apiKey,
-      prompt: buildDebateMysteryMansionThemePromptV1({ title: bundle.name, identity }),
+      prompt: buildDebateMysteryMansionThemePromptV1({
+        title: bundle.name,
+        identity,
+        direction: args.direction,
+      }),
       durationMs: MANSION_SOUNDTRACK_DURATION_MS,
       maxBytes: MANSION_SOUNDTRACK_MAX_BYTES,
       unavailableMessage: "ElevenLabs Music is unavailable; the current mansion music is unchanged.",
@@ -427,6 +440,8 @@ export async function stageDebateMysteryMansionThemeV1(args: {
   bundleId: string;
   responseMode: "local" | "online";
   apiKey: string | null;
+  /** Optional player Refract direction for this synthesis pass. */
+  direction?: string | null;
   fetchImpl?: typeof fetch;
 }): Promise<DebateMysteryMansionThemeResultV1> {
   if (args.responseMode !== "online") {

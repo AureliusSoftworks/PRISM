@@ -476,6 +476,7 @@ export function modelSupportsTurboMode(
   }
   if (provider !== "openai") return false;
   return [
+    "gpt-6-astra",
     "gpt-5.6",
     "gpt-5.6-sol",
     "gpt-5.6-terra",
@@ -510,7 +511,48 @@ export interface ModelReasoningEffortCapabilityV1 {
   supportsNone: boolean;
   /** Request-only native Max overdrive; deliberately absent from `levels`. */
   supportsMax: boolean;
+  /**
+   * Lowest rung that adds Prism's simulated preparation passes. Rungs below it
+   * are the provider's own reasoning; absent when no rung is simulated.
+   */
+  simulatedFrom?: ModelReasoningEffortPreference;
   disabledReason?: string;
+}
+
+export type ModelReasoningEffortRungProvenance =
+  | "native"
+  | "hybrid"
+  | "simulated";
+
+/**
+ * Filled glyphs are provider-native; hollow glyphs are Prism's own passes.
+ * `hybrid` stacks those passes above a model's native thinking.
+ */
+export function modelReasoningEffortRungProvenance(
+  capability: ModelReasoningEffortCapabilityV1,
+  level: ProviderReasoningEffort,
+): ModelReasoningEffortRungProvenance {
+  if (
+    level === "auto" ||
+    level === "none" ||
+    level === "max" ||
+    !capability.simulatedFrom
+  ) {
+    return "native";
+  }
+  const order = MODEL_REASONING_EFFORT_PREFERENCE_VALUES as readonly string[];
+  if (order.indexOf(level) < order.indexOf(capability.simulatedFrom)) {
+    return "native";
+  }
+  return capability.mode === "native-thinking" ? "hybrid" : "simulated";
+}
+
+/** Ordinary rung that unlocks the request-only Max overdrive, if any. */
+export function modelReasoningEffortMaxUnlockLevel(
+  capability: ModelReasoningEffortCapabilityV1,
+): ModelReasoningEffortPreference | null {
+  if (capability.mode !== "native" || !capability.supportsMax) return null;
+  return capability.levels.at(-1) ?? null;
 }
 
 const OPENAI_BASE_REASONING_LEVELS = [
@@ -540,6 +582,13 @@ const OPENAI_GPT_5_1_REASONING_LEVELS = [
   "low",
   "medium",
   "high",
+] as const satisfies readonly ModelReasoningEffortPreference[];
+/** GPT-6 Astra cannot switch reasoning off: its floor is provider Low. */
+const OPENAI_GPT_6_REASONING_LEVELS = [
+  "low",
+  "medium",
+  "high",
+  "xhigh",
 ] as const satisfies readonly ModelReasoningEffortPreference[];
 const ANTHROPIC_REASONING_LEVELS = [
   "low",
@@ -577,11 +626,25 @@ const OLLAMA_REQUIRED_THINKING_LEVELS = [
 const OLLAMA_OPTIONAL_NATIVE_ONLY_LEVELS = [
   "none",
 ] as const satisfies readonly ModelReasoningEffortPreference[];
-/** GPT-OSS has three provider-native tiers when simulation is unavailable. */
-const OLLAMA_TIERED_NATIVE_ONLY_LEVELS = [
+/** Required-thinking boolean models keep only their native trace (Minimal). */
+const OLLAMA_REQUIRED_NATIVE_ONLY_LEVELS = [
   "minimal",
+] as const satisfies readonly ModelReasoningEffortPreference[];
+/**
+ * GPT-OSS exposes three provider-native tiers under their own names. With
+ * simulation available, XHigh is the one hollow rung: native High beneath
+ * Prism's preparation passes.
+ */
+const OLLAMA_TIERED_THINKING_LEVELS = [
   "low",
   "medium",
+  "high",
+  "xhigh",
+] as const satisfies readonly ModelReasoningEffortPreference[];
+const OLLAMA_TIERED_NATIVE_ONLY_LEVELS = [
+  "low",
+  "medium",
+  "high",
 ] as const satisfies readonly ModelReasoningEffortPreference[];
 
 function normalizedOllamaModelId(modelId: string): string {
@@ -670,7 +733,12 @@ export function openAiModelSupportsReasoningEffort(modelId: string): boolean {
   if (normalized.includes("-search-api")) return false;
   if (normalized.endsWith("-chat-latest")) return false;
   if (/^(?:o1|o3|o4|o5)(?:-|$)/.test(normalized)) return true;
-  return normalized.startsWith("gpt-5");
+  return normalized.startsWith("gpt-5") || openAiModelIsGpt6(normalized);
+}
+
+/** GPT-6 family (Astra): native Low through XHigh plus request-only Max. */
+function openAiModelIsGpt6(modelId: string): boolean {
+  return /^gpt-6(?:\.\d+)?(?:-|$)/.test(modelId.trim().toLowerCase());
 }
 
 function openAiGpt5MinorVersion(modelId: string): number | null {
@@ -690,7 +758,7 @@ export function openAiModelSupportsMaxReasoningEffort(
   return (
     openAiModelSupportsReasoningEffort(modelId) &&
     !openAiModelIsFixedHigh(modelId) &&
-    openAiGpt5MinorVersion(modelId) === 6
+    (openAiGpt5MinorVersion(modelId) === 6 || openAiModelIsGpt6(modelId))
   );
 }
 
@@ -699,6 +767,7 @@ export function openAiReasoningEffortLevels(
 ): readonly ModelReasoningEffortPreference[] {
   if (!openAiModelSupportsReasoningEffort(modelId)) return [];
   if (openAiModelIsFixedHigh(modelId)) return [];
+  if (openAiModelIsGpt6(modelId)) return OPENAI_GPT_6_REASONING_LEVELS;
   const minor = openAiGpt5MinorVersion(modelId);
   if (minor === 1) return OPENAI_GPT_5_1_REASONING_LEVELS;
   if (minor === 6) return OPENAI_GPT_5_6_REASONING_LEVELS;
@@ -824,17 +893,28 @@ export function resolveModelReasoningEffortCapability(args: {
   if (args.provider === "local" || args.provider === "ollama_cloud") {
     if (ollamaNativeThinking) {
       const requiredThinking = ollamaModelRequiresThinking(args.modelId);
+      const tieredThinking = ollamaModelUsesTieredThinking(args.modelId);
+      const levels = tieredThinking
+        ? simulatedEnabled
+          ? OLLAMA_TIERED_THINKING_LEVELS
+          : OLLAMA_TIERED_NATIVE_ONLY_LEVELS
+        : requiredThinking
+          ? simulatedEnabled
+            ? OLLAMA_REQUIRED_THINKING_LEVELS
+            : OLLAMA_REQUIRED_NATIVE_ONLY_LEVELS
+          : simulatedEnabled
+            ? OLLAMA_OPTIONAL_THINKING_LEVELS
+            : OLLAMA_OPTIONAL_NATIVE_ONLY_LEVELS;
+      // Minimal is the model's own trace alone, and GPT-OSS's native tiers run
+      // through High, so only the rungs above those stack preparation passes.
+      const simulatedFrom: ModelReasoningEffortPreference | undefined =
+        simulatedEnabled ? (tieredThinking ? "xhigh" : "low") : undefined;
       return {
         mode: "native-thinking",
-        levels: simulatedEnabled
-          ? requiredThinking
-            ? OLLAMA_REQUIRED_THINKING_LEVELS
-            : OLLAMA_OPTIONAL_THINKING_LEVELS
-          : requiredThinking
-            ? OLLAMA_TIERED_NATIVE_ONLY_LEVELS
-            : OLLAMA_OPTIONAL_NATIVE_ONLY_LEVELS,
+        levels,
         supportsNone: !requiredThinking,
         supportsMax: false,
+        ...(simulatedFrom ? { simulatedFrom } : {}),
       };
     }
     if (simulatedEnabled) {
@@ -843,6 +923,7 @@ export function resolveModelReasoningEffortCapability(args: {
         levels: LOCAL_SIMULATED_REASONING_LEVELS,
         supportsNone: true,
         supportsMax: false,
+        simulatedFrom: "minimal",
       };
     }
     return {
@@ -876,6 +957,7 @@ export function resolveModelReasoningEffortCapability(args: {
               levels: LOCAL_SIMULATED_REASONING_LEVELS,
               supportsNone: true,
               supportsMax: false,
+              simulatedFrom: "minimal",
             }
           : {
               mode: "unavailable",
@@ -893,14 +975,16 @@ export function resolveModelReasoningEffortCapability(args: {
     const supportsNativeMax = anthropicModelSupportsMaxReasoningEffort(
       args.modelId,
     );
-    const levels = supportsNativeXHigh || supportsNativeMax
+    // Label-faithful: XHigh appears only where Claude has a native xhigh, and
+    // Max stays a request-only overdrive above the model's top ordinary rung.
+    const levels = supportsNativeXHigh
       ? ANTHROPIC_XHIGH_REASONING_LEVELS
       : ANTHROPIC_REASONING_LEVELS;
     return {
       mode: "native",
       levels,
       supportsNone: false,
-      supportsMax: supportsNativeXHigh && supportsNativeMax,
+      supportsMax: supportsNativeMax,
     };
   }
   return simulatedEnabled
@@ -909,6 +993,7 @@ export function resolveModelReasoningEffortCapability(args: {
         levels: LOCAL_SIMULATED_REASONING_LEVELS,
         supportsNone: true,
         supportsMax: false,
+        simulatedFrom: "minimal",
       }
     : {
         mode: "unavailable",
@@ -946,9 +1031,9 @@ export function anthropicReasoningEffortForRequest(
   }
   const effort = reasoningEffortForRequest(value);
   if (!effort || effort === "none") return null;
+  // Stale or lane-level stops outside the model's ladder clamp to its nearest
+  // real rung; they never escalate into the Max overdrive.
   if (effort === "minimal") return "low";
   if (effort !== "xhigh") return effort;
-  if (anthropicModelSupportsXHighReasoningEffort(modelId)) return "xhigh";
-  if (anthropicModelSupportsMaxReasoningEffort(modelId)) return "max";
-  return "high";
+  return anthropicModelSupportsXHighReasoningEffort(modelId) ? "xhigh" : "high";
 }

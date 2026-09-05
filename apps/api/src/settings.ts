@@ -5,6 +5,7 @@ import type {
   VoiceMode,
   WhodunnitTextVoiceMode,
   WhodunnitSpeechType,
+  WhodunnitInvestigationPerspective,
 } from "@localai/shared";
 import {
   DEFAULT_PRISM_MOOD_SENSITIVITY,
@@ -22,6 +23,7 @@ import {
   normalizeSpeechTypeVoiceMode,
   normalizeWhodunnitTextVoiceMode,
   normalizeWhodunnitSpeechType,
+  normalizeWhodunnitInvestigationPerspective,
   parseStoredAutoFallbackChain,
   parseStoredBotAudioVoiceProfileV1,
   normalizeAutoFallbackChain,
@@ -203,6 +205,7 @@ export interface CurrentSettings {
   debateWhodunnitReuseSynthesizedExhibits: number;
   debateWhodunnitTextVoiceMode: string | null;
   debateWhodunnitSpeechType: string | null;
+  debateWhodunnitPerspective: string | null;
   psychicModeEnabled: number;
   /** @deprecated Import/backup compatibility only; runtime routing ignores it. */
   autoSwitchModel: number;
@@ -293,6 +296,7 @@ export interface NextSettings {
   debateWhodunnitReuseSynthesizedExhibits: number;
   debateWhodunnitTextVoiceMode: WhodunnitTextVoiceMode;
   debateWhodunnitSpeechType: WhodunnitSpeechType;
+  debateWhodunnitPerspective: WhodunnitInvestigationPerspective;
   psychicModeEnabled: number;
   autoSwitchModel: number;
   autoFallbackChain: string | null;
@@ -1062,6 +1066,10 @@ export function resolveNextSettings(
     body.debateWhodunnitSpeechType,
     normalizeWhodunnitSpeechType(current.debateWhodunnitSpeechType),
   );
+  const debateWhodunnitPerspective = normalizeWhodunnitInvestigationPerspective(
+    body.debateWhodunnitPerspective,
+    normalizeWhodunnitInvestigationPerspective(current.debateWhodunnitPerspective),
+  );
   const psychicModeEnabled =
     typeof body.psychicModeEnabled === "boolean"
       ? Number(body.psychicModeEnabled)
@@ -1500,6 +1508,7 @@ export function resolveNextSettings(
     debateWhodunnitReuseSynthesizedExhibits,
     debateWhodunnitTextVoiceMode,
     debateWhodunnitSpeechType,
+    debateWhodunnitPerspective,
     psychicModeEnabled,
     autoSwitchModel,
     autoFallbackChain,

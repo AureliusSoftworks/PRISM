@@ -66,6 +66,9 @@ export interface BottishPlaybackTiming {
 const MEDIA_PLAY_START_TIMEOUT_MS = 1500;
 const BOTTISH_SAMPLE_RATE = 24_000;
 const MAX_ROBOT_VOICE_COMPRESSION_RATE = 1.24;
+/** Baked note amplitude. Keep this well below speech-bus unity so the
+ * square/triangle robot carrier does not jump in front of English or Premium. */
+export const BOTTISH_NOTE_GAIN = 0.08;
 
 const BOTTISH_ACTION_PATTERNS = {
   laugh: "ha ha ",
@@ -257,7 +260,7 @@ export function buildBottishPlan(
       durationMs: noteMs,
       frequencyHz: Math.round(frequencyHz * 10) / 10,
       endFrequencyHz: Math.round(frequencyHz * (1 + glide) * 10) / 10,
-      gain: 0.3,
+      gain: BOTTISH_NOTE_GAIN,
       waveform,
       lowpassHz: Math.max(4800, Math.min(10_000, toneLowpass)),
     });

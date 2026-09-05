@@ -308,8 +308,9 @@ export function initializeDatabase(
       experimental_all_model_effort_enabled INTEGER NOT NULL DEFAULT 0,
       coffee_experimental_table_angle_enabled INTEGER NOT NULL DEFAULT 0,
       debate_whodunnit_reuse_synthesized_exhibits INTEGER NOT NULL DEFAULT 0,
-      debate_whodunnit_text_voice_mode TEXT NOT NULL DEFAULT 'babble',
+      debate_whodunnit_text_voice_mode TEXT NOT NULL DEFAULT 'bottish',
       debate_whodunnit_speech_type TEXT NOT NULL DEFAULT 'english',
+      debate_whodunnit_perspective TEXT NOT NULL DEFAULT 'first_person',
       psychic_mode_enabled INTEGER NOT NULL DEFAULT 0,
       comfyui_host TEXT,
       comfyui_workflows TEXT NOT NULL DEFAULT '[]',
@@ -777,6 +778,12 @@ export function initializeDatabase(
       FOREIGN KEY(message_id) REFERENCES messages(id) ON DELETE SET NULL,
       FOREIGN KEY(bot_id) REFERENCES bots(id) ON DELETE SET NULL
     );
+    CREATE TABLE IF NOT EXISTS developer_transcript_vault_migrations (
+      user_id TEXT PRIMARY KEY,
+      migration_version INTEGER NOT NULL CHECK(migration_version = 1),
+      completed_at TEXT NOT NULL,
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+    ) WITHOUT ROWID;
     CREATE TABLE IF NOT EXISTS memories (
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL,
@@ -2675,6 +2682,32 @@ export function initializeDatabase(
                last_used_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
          WHERE cache_key = OLD.cache_key AND user_id = OLD.user_id;
       END;
+    CREATE TABLE IF NOT EXISTS debate_mystery_premium_takes (
+      session_id TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      line_id TEXT NOT NULL,
+      cache_key TEXT NOT NULL,
+      text_hash TEXT NOT NULL,
+      voice_profile_hash TEXT NOT NULL,
+      alignment_json TEXT,
+      created_at TEXT NOT NULL,
+      PRIMARY KEY(session_id, line_id),
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY(session_id) REFERENCES debate_sessions(id) ON DELETE CASCADE,
+      FOREIGN KEY(user_id, cache_key)
+        REFERENCES debate_mystery_audio_cache(user_id, cache_key)
+        ON UPDATE CASCADE ON DELETE RESTRICT
+    ) WITHOUT ROWID;
+    CREATE INDEX IF NOT EXISTS idx_debate_mystery_premium_takes_cache
+      ON debate_mystery_premium_takes(user_id, cache_key);
+    CREATE TRIGGER IF NOT EXISTS debate_mystery_premium_take_deleted
+      AFTER DELETE ON debate_mystery_premium_takes
+      BEGIN
+        UPDATE debate_mystery_audio_cache
+           SET ref_count = MAX(0, ref_count - 1),
+               last_used_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+         WHERE cache_key = OLD.cache_key AND user_id = OLD.user_id;
+      END;
     CREATE TABLE IF NOT EXISTS debate_mystery_actions (
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL,
@@ -3841,13 +3874,19 @@ export function initializeDatabase(
     (column) => column.name === "debate_whodunnit_text_voice_mode",
   );
   if (!hasDebateWhodunnitTextVoiceMode) {
-    addPrivateUserColumn("debate_whodunnit_text_voice_mode", "TEXT NOT NULL DEFAULT 'babble'");
+    addPrivateUserColumn("debate_whodunnit_text_voice_mode", "TEXT NOT NULL DEFAULT 'bottish'");
   }
   const hasDebateWhodunnitSpeechType = userColumns.some(
     (column) => column.name === "debate_whodunnit_speech_type",
   );
   if (!hasDebateWhodunnitSpeechType) {
     addPrivateUserColumn("debate_whodunnit_speech_type", "TEXT NOT NULL DEFAULT 'english'");
+  }
+  const hasDebateWhodunnitPerspective = userColumns.some(
+    (column) => column.name === "debate_whodunnit_perspective",
+  );
+  if (!hasDebateWhodunnitPerspective) {
+    addPrivateUserColumn("debate_whodunnit_perspective", "TEXT NOT NULL DEFAULT 'first_person'");
   }
   const hasPsychicModeEnabled = userColumns.some(
     (column) => column.name === "psychic_mode_enabled",

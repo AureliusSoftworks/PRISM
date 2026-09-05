@@ -5,7 +5,12 @@ export type MysteryItemTextRepairActionV1 = "repair_evidence_name" | "repair_evi
 /** Remove only implementation boilerplate and exact repeated observations.
  * Distinct public facts, including negations and measurements, stay intact. */
 export function cleanMysteryItemDescriptionV1(value: string): string {
-  const sentences = value.replace(/\s+/gu, " ").trim().split(/(?<=[.!?])\s+/u);
+  const sentences = value.replace(/\s+/gu, " ").trim()
+    // Forge templates can echo a title's first word as its own adjective ("the
+    // stained Stained Glass Fragment"); a repeat that differs only by case goes.
+    .replace(/\b(\p{L}+) (\p{Lu}\p{L}*)\b/gu, (whole: string, first: string, second: string) =>
+      first.toLocaleLowerCase() === second.toLocaleLowerCase() ? second : whole)
+    .split(/(?<=[.!?])\s+/u);
   const seen = new Set<string>();
   return sentences.map((part) => part.trim()).filter((part) => {
     if (/\bPRISM\b.*\b(?:fallback|archetype|bundled|generic prop)\b|\b(?:fallback|bundled)\b.*\b(?:asset|artwork|sprite|prop identity)\b/iu.test(part)) return false;

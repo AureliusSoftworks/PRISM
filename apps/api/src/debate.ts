@@ -23099,6 +23099,10 @@ export interface DebateExhibitAssetRowV1 {
   assetSetId: string | null;
   magentaPassCount: number;
   magentaUndoAvailable: boolean;
+  /** A Whodunnit exhibit whose sprite is the case's sealed evidence asset (a venue
+   * prop or a case synthesis) rather than an image-library image. Only a revealed,
+   * ready asset is exposed; the file route serves nothing else. */
+  sealedSpriteUrl?: string | null;
 }
 
 /**
@@ -23115,6 +23119,27 @@ export function listDebateSessionExhibitAssets(
   if (session.status === "cancelled") {
     throw new HttpError(409, "That Debate is no longer available.");
   }
+  // Whodunnit evidence usually carries its sprite as a sealed case asset (the venue's
+  // prop, or a case synthesis), not as an image-library image; the desk shows it.
+  const sealedSpriteUrlByEvidenceId = new Map<string, string>();
+  const formatState = session.formatState as {
+    format?: unknown;
+    version?: unknown;
+    record?: Array<{
+      reference?: { kind?: unknown; id?: unknown };
+      sealedAsset?: { status?: unknown; revealed?: unknown } | null;
+    }>;
+  };
+  if (formatState.format === "whodunnit" && formatState.version === 2) {
+    for (const item of formatState.record ?? []) {
+      if (item.reference?.kind !== "evidence" || typeof item.reference.id !== "string") continue;
+      if (item.sealedAsset?.status !== "ready" || item.sealedAsset.revealed !== true) continue;
+      sealedSpriteUrlByEvidenceId.set(
+        item.reference.id,
+        `/api/debates/${encodeURIComponent(sessionId)}/mystery-assets/evidence/${encodeURIComponent(item.reference.id)}/file`,
+      );
+    }
+  }
   return (session.evidence.exhibits ?? []).map((exhibit) => {
     const asset =
       exhibit.imageId != null
@@ -23125,6 +23150,7 @@ export function listDebateSessionExhibitAssets(
       assetSetId: asset?.id ?? null,
       magentaPassCount: asset?.magentaPassCount ?? 0,
       magentaUndoAvailable: asset?.magentaUndoAvailable ?? false,
+      sealedSpriteUrl: exhibit.imageId == null ? sealedSpriteUrlByEvidenceId.get(exhibit.id) ?? null : null,
     };
   });
 }

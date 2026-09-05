@@ -138,6 +138,12 @@ type ImagePrice = {
 };
 
 const TEXT_PRICING: Record<string, TextPrice> = {
+  "gpt-6-astra": {
+    inputUsdPerMillion: 10,
+    outputUsdPerMillion: 50,
+    source: "builtin",
+    note: "Estimated OpenAI API text pricing catalog.",
+  },
   "gpt-5.6-sol": {
     inputUsdPerMillion: 5,
     outputUsdPerMillion: 30,

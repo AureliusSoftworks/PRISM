@@ -82,6 +82,16 @@ describe("mode tutorials", () => {
     }
   });
 
+  it("documents Archive venue holds while a case is unfinished", () => {
+    const step = MODE_TUTORIALS.debate.steps.find(
+      (candidate) => candidate.heading === "Investigate a Whodunnit",
+    );
+    assert.ok(step);
+    assert.match(step.body, /Keep these venue updates for future cases/u);
+    assert.match(step.body, /unavailable for new cases and library edits/u);
+    assert.match(step.body, /Work on a copy and export remain available/u);
+  });
+
   it("covers the complete Whodunnit investigation and trial loop", () => {
     const step = MODE_TUTORIALS.debate.steps.find(
       (candidate) => candidate.heading === "Investigate a Whodunnit",
@@ -114,7 +124,8 @@ describe("mode tutorials", () => {
     assert.match(step.body, /Grand investigation can still use six suspects/u);
     assert.match(step.body, /stern left, bow right, port at the top, starboard at the bottom/u);
     assert.match(step.body, /D1, D2, and D3 controls keep each full semantic deck name visible/u);
-    assert.match(step.body, /Production Readiness with exact counts/u);
+    assert.match(step.body, /accepts the disclosed fallback automatically and records the exact counts in Archive/u);
+    assert.doesNotMatch(step.body, /opens Production Readiness/u);
     assert.match(step.body, /case-scoped and never overwrite an installed Mystery Venue/u);
     assert.match(step.body, /This attempt separately from Total/u);
     assert.match(step.body, /white in Light mode or black in Dark mode/u);
@@ -192,9 +203,11 @@ describe("mode tutorials", () => {
     assert.match(step.body, /Move map keeps this presentation switch disabled/u);
     assert.match(step.body, /LOCAL never sends a room to a remote generator/u);
     assert.match(step.body, /original Mosaic remains instantly recoverable/u);
-    assert.match(step.body, /Save venue level preserves the layout/u);
-    assert.match(step.body, /You can save before completing the investigation/u);
-    assert.match(step.body, /saving does not unlock rooms, review examination points, or finish the case/u);
+    assert.match(step.body, /Keep these venue updates for future cases/u);
+    assert.match(step.body, /Checking it overwrites the original installed venue/u);
+    assert.match(step.body, /Leaving it unchecked leaves the original venue unchanged/u);
+    assert.match(step.body, /unavailable for new cases and library edits/u);
+    assert.match(step.body, /Work on a copy and export remain available/u);
     assert.match(step.body, /Continue without voices/u);
     assert.match(step.body, /no Actions or token economy/u);
     assert.match(step.body, /Move returns to PRISM’s shallow-isometric venue/u);

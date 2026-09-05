@@ -50,7 +50,9 @@ export function debateMysteryTextVoiceModeForPresentation(args: {
   playerObservation: boolean;
 }): WhodunnitTextVoiceMode {
   if (args.configuredMode === "off") return "off";
-  return args.playerObservation ? "babble" : args.configuredMode;
+  // An investigation is Bottish all the way to Court: the player's
+  // observations and every other written line alike.
+  return "bottish";
 }
 
 type DebateMysteryRestoredPlaybackStateV2 = {
@@ -508,4 +510,83 @@ export async function playDebateMysterySfx(args: {
     }, voice.delayMs);
   }
   return playVoice(first, volume);
+}
+
+export interface DebateMysteryVocalCueEntryV2 {
+  id: string;
+  kind: "lead_in" | "listening";
+  url: string;
+  durationMs: number;
+}
+
+/** A lead-in is the investigator's own short voice before their Bottish
+ * line, so it carries near speaking volume. */
+export const DEBATE_MYSTERY_VOCAL_LEAD_IN_VOLUME_RATIO = 0.8;
+/** A listening reaction stays under the line it answers. */
+export const DEBATE_MYSTERY_VOCAL_LISTENING_VOLUME_RATIO = 0.5;
+/** A lead-in never holds the Bottish line longer than this, whatever the clip. */
+export const DEBATE_MYSTERY_VOCAL_LEAD_IN_MAX_WAIT_MS = 900;
+
+export function mysteryVocalSeedUnitV2(seed: string): number {
+  let hash = 2_166_136_261;
+  for (let index = 0; index < seed.length; index += 1) {
+    hash ^= seed.charCodeAt(index);
+    hash = Math.imul(hash, 16_777_619);
+  }
+  return (hash >>> 0) / 4_294_967_296;
+}
+
+/** Picks one cue of a kind, stable for a given line so replay and re-render
+ * agree, or null when the voice recorded none of that kind. */
+export function pickMysteryVocalCueV2(
+  entries: readonly DebateMysteryVocalCueEntryV2[],
+  kind: DebateMysteryVocalCueEntryV2["kind"],
+  seed: string,
+): DebateMysteryVocalCueEntryV2 | null {
+  const candidates = entries.filter((entry) => entry.kind === kind);
+  if (!candidates.length) return null;
+  return candidates[Math.min(candidates.length - 1, Math.floor(mysteryVocalSeedUnitV2(seed) * candidates.length))] ?? null;
+}
+
+/** When a listener reacts during a typed line: past the opening beat, inside
+ * the stretch the line takes to appear, stable per line. */
+export function mysteryListeningReactionDelayMsV2(seed: string, lineLength: number): number {
+  const window = Math.max(400, Math.min(1_800, lineLength * 22));
+  return Math.round(450 + mysteryVocalSeedUnitV2(`${seed}:delay`) * window);
+}
+
+/** Plays one short cue and resolves when it ends, errors, is aborted, or the
+ * wait cap passes, so a stuck clip never holds what follows it. */
+export function playDebateMysteryVocalCueV2(args: {
+  url: string;
+  volume: number;
+  signal?: AbortSignal;
+  maxWaitMs?: number;
+}): Promise<void> {
+  return new Promise((resolve) => {
+    if (args.signal?.aborted || args.volume <= 0 || typeof Audio === "undefined") {
+      resolve();
+      return;
+    }
+    const audio = new Audio(args.url);
+    audio.volume = Math.min(1, Math.max(0, args.volume));
+    let settled = false;
+    let cap: number | null = null;
+    const finish = (): void => {
+      if (settled) return;
+      settled = true;
+      if (cap !== null) window.clearTimeout(cap);
+      args.signal?.removeEventListener("abort", stop);
+      resolve();
+    };
+    const stop = (): void => {
+      audio.pause();
+      finish();
+    };
+    audio.addEventListener("ended", finish);
+    audio.addEventListener("error", finish);
+    args.signal?.addEventListener("abort", stop);
+    if (args.maxWaitMs !== undefined) cap = window.setTimeout(finish, args.maxWaitMs);
+    void audio.play().catch(finish);
+  });
 }

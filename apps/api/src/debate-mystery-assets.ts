@@ -1,10 +1,11 @@
 import { createHash, randomUUID } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 import sharp from "sharp";
-import type {
-  DebateMysterySealedAssetKindV1,
-  DebateMysterySealedAssetRefV1,
-  DebateMysterySealedAssetStatusV1,
+import {
+  normalizeDebateMysteryExteriorEntryTargetV1,
+  type DebateMysterySealedAssetKindV1,
+  type DebateMysterySealedAssetRefV1,
+  type DebateMysterySealedAssetStatusV1,
 } from "@localai/shared";
 import {
   buildGeneratedImageRelativePath,
@@ -653,8 +654,12 @@ export function setDebateMysteryAssetEntryTargetV1(
   sessionId: string,
   kind: DebateMysterySealedAssetKindV1,
   subjectId: string,
-  entryTarget: { x: number; y: number },
+  entryTarget: unknown,
 ): DebateMysterySealedAssetRefV1 {
+  const normalizedTarget = normalizeDebateMysteryExteriorEntryTargetV1(entryTarget);
+  if (!normalizedTarget) {
+    throw new HttpError(400, "Entrance placement requires finite numeric x and y coordinates.");
+  }
   protectRefractionAsset(db, userId, sessionId, kind, subjectId);
   const row = assetRow(db, userId, sessionId, kind, subjectId);
   if (!row) throw new HttpError(404, "That scene visual was not found.");
@@ -669,7 +674,7 @@ export function setDebateMysteryAssetEntryTargetV1(
         SET review_json = ?, updated_at = ?
       WHERE id = ? AND user_id = ? AND session_id = ?`,
   ).run(
-    JSON.stringify({ ...review, entryTarget }),
+    JSON.stringify({ ...review, entryTarget: normalizedTarget }),
     new Date().toISOString(),
     row.id,
     userId,

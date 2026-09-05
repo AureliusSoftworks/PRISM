@@ -16,9 +16,12 @@ export type EnglishVoiceEngine = "builtin" | "elevenlabs";
 /** Presentation voice for written, non-TTS Whodunnit dialogue. This remains
  * separate from the account-wide speech type so English character dialogue
  * and the Casekeeper's text accompaniment can coexist. */
+/** Written Whodunnit dialogue accompaniment. Investigations are Bottish all
+ * the way to Court; "babble" remains only so older saved rows still parse,
+ * and it resolves to Bottish. */
 export type WhodunnitTextVoiceMode = "off" | "babble" | "bottish";
 export const DEFAULT_WHODUNNIT_TEXT_VOICE_MODE: WhodunnitTextVoiceMode =
-  "babble";
+  "bottish";
 
 /** Whodunnit spoken dialogue engine, chosen from the applet's navbar. English
  * is the built-in local voice; Premium is the ElevenLabs voice frozen with the
@@ -26,6 +29,14 @@ export const DEFAULT_WHODUNNIT_TEXT_VOICE_MODE: WhodunnitTextVoiceMode =
  * Speech Type and English engine stay untouched. */
 export type WhodunnitSpeechType = "english" | "premium";
 export const DEFAULT_WHODUNNIT_SPEECH_TYPE: WhodunnitSpeechType = "english";
+/** Who the player is while investigating a Whodunnit. First person keeps the
+ * chosen investigator off-stage until Court: a Talk question or Present prompt
+ * reads as a caption above the witness's answer and only the witness speaks.
+ * Embodied stages the investigator beside the witness and performs the
+ * question in their voice. Court always seats the investigator. */
+export type WhodunnitInvestigationPerspective = "first_person" | "embodied";
+export const DEFAULT_WHODUNNIT_INVESTIGATION_PERSPECTIVE: WhodunnitInvestigationPerspective =
+  "first_person";
 
 export const VOICE_EFFECTS = [
   "clean",
@@ -702,6 +713,9 @@ export interface BotAudioVoiceProfileV2 {
   ttsPronunciationEnabled?: boolean;
   /** Apply the saved Accent Map pronunciation through Premium ElevenLabs. */
   premiumPronunciationEnabled?: boolean;
+  /** Speak the authored laugh recipe through Premium ElevenLabs as well as
+   * Instant TTS. Absent means Premium keeps its own provider laughter. */
+  premiumLaughEnabled?: boolean;
   /** Word-side twin of the Accent pin: shapes what the bot writes, never how
    * text is pronounced. Authored identity; absent means plain speech. */
   vernacularId?: BotVernacularId | null;
@@ -907,6 +921,9 @@ export interface BotPremiumVoiceProfileV1 {
   nativeAccentHint?: string | null;
   /** Whether this Premium lane applies the saved Accent Map pronunciation. */
   pronunciationEnabled?: boolean;
+  /** Whether Premium speaks the authored laugh recipe instead of the
+   * provider's own laughter. The recipe itself is lane-neutral. */
+  laughEnabled?: boolean;
   /** Premium-only pitch transform applied after ElevenLabs synthesis. */
   pitch: number;
   /** Premium-only tempo. Pace is the only Feel control that changes duration. */
@@ -1585,6 +1602,7 @@ export const DEFAULT_BOT_AUDIO_VOICE_PROFILE_V2: Readonly<BotAudioVoiceProfileV2
     pronunciationBase: "follow-voice",
     ttsPronunciationEnabled: false,
     premiumPronunciationEnabled: false,
+    premiumLaughEnabled: false,
     speechprintInfluence: "none",
     speechprintStrength: "balanced",
     speechprintVariationSeed: "natural-v1",
@@ -1627,6 +1645,7 @@ export const DEFAULT_BOT_AUDIO_VOICE_PROFILE_V3: Readonly<BotAudioVoiceProfileV3
     },
     premium: {
       pronunciationEnabled: false,
+      laughEnabled: false,
       pitch: 0,
       pace: 0,
       lilt: 0,
@@ -1825,9 +1844,9 @@ export function normalizeWhodunnitTextVoiceMode(
   value: unknown,
   fallback: WhodunnitTextVoiceMode = DEFAULT_WHODUNNIT_TEXT_VOICE_MODE,
 ): WhodunnitTextVoiceMode {
-  return value === "off" || value === "babble" || value === "bottish"
-    ? value
-    : fallback;
+  // A row saved when Babble was offered now means Bottish.
+  if (value === "babble") return "bottish";
+  return value === "off" || value === "bottish" ? value : fallback;
 }
 
 export function normalizeWhodunnitSpeechType(
@@ -1835,6 +1854,13 @@ export function normalizeWhodunnitSpeechType(
   fallback: WhodunnitSpeechType = DEFAULT_WHODUNNIT_SPEECH_TYPE,
 ): WhodunnitSpeechType {
   return value === "english" || value === "premium" ? value : fallback;
+}
+
+export function normalizeWhodunnitInvestigationPerspective(
+  value: unknown,
+  fallback: WhodunnitInvestigationPerspective = DEFAULT_WHODUNNIT_INVESTIGATION_PERSPECTIVE,
+): WhodunnitInvestigationPerspective {
+  return value === "first_person" || value === "embodied" ? value : fallback;
 }
 
 /** Account Speech Type is always audible; `mute` remains valid only for
@@ -2096,6 +2122,7 @@ function flattenBotAudioVoiceProfileV3Record(
     ttsPronunciationEnabled: pronunciation.ttsPronunciationEnabled,
     accentPronunciationEnabled: pronunciation.accentPronunciationEnabled,
     premiumPronunciationEnabled: premium.pronunciationEnabled,
+    premiumLaughEnabled: premium.laughEnabled,
     accentDefinitionId:
       pronunciation.accentDefinitionId ?? value.accentDefinitionId,
     vernacularId: pronunciation.vernacularId ?? value.vernacularId,
@@ -2230,6 +2257,10 @@ export function normalizeBotAudioVoiceProfileV1(
     typeof record.premiumPronunciationEnabled === "boolean"
       ? record.premiumPronunciationEnabled
       : accentPronunciationEnabled;
+  const premiumLaughEnabled =
+    typeof record.premiumLaughEnabled === "boolean"
+      ? record.premiumLaughEnabled
+      : fallbackProfile.premiumLaughEnabled === true;
   const hasEnginePronunciationGate =
     typeof record.ttsPronunciationEnabled === "boolean" ||
     typeof record.premiumPronunciationEnabled === "boolean";
@@ -2303,6 +2334,7 @@ export function normalizeBotAudioVoiceProfileV1(
     ),
     ttsPronunciationEnabled,
     premiumPronunciationEnabled,
+    premiumLaughEnabled,
     ...( !hasEnginePronunciationGate &&
     (typeof record.accentPronunciationEnabled === "boolean" ||
     accentPronunciationEnabled)
@@ -2577,6 +2609,7 @@ export function normalizeBotAudioVoiceProfileV3(
         ? { nativeAccentHint: profile.elevenLabsNativeAccentHint }
         : {}),
       pronunciationEnabled: profile.premiumPronunciationEnabled === true,
+      laughEnabled: profile.premiumLaughEnabled === true,
       ...(direction ? { direction } : {}),
       ...(profile.elevenLabsStability === undefined
         ? {}

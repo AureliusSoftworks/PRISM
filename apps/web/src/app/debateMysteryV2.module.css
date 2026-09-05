@@ -551,6 +551,17 @@
   background-color: #05070d;
 }
 
+.titleCoverPlane {
+  position: absolute;
+  z-index: 0;
+  top: 50%;
+  left: 50%;
+  width: max(100%, 177.777778dvh);
+  aspect-ratio: 16 / 9;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+
 .titleCoverMedia {
   position: absolute;
   z-index: 0;
@@ -561,6 +572,114 @@
   background-repeat: no-repeat;
   background-size: cover;
   pointer-events: none;
+}
+
+.titleCoverPlane .titleCoverMedia {
+  background-size: 100% 100%;
+}
+
+.titleCoverPlane[data-entry-placement="true"] {
+  pointer-events: auto;
+}
+
+.exteriorEntryPlacementSurface {
+  appearance: none;
+  position: absolute;
+  z-index: 3;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border: 1px solid rgba(188, 232, 255, 0.72);
+  border-radius: 0;
+  background: rgba(100, 205, 255, 0.035);
+  box-shadow: inset 0 0 4rem rgba(105, 207, 255, 0.09);
+  cursor: crosshair;
+  pointer-events: auto;
+}
+
+.exteriorEntryPlacementSurface:focus-visible {
+  outline: 2px solid rgba(238, 249, 255, 0.92);
+  outline-offset: -3px;
+}
+
+.exteriorEntryPlacementHud {
+  position: absolute;
+  z-index: 6;
+  top: clamp(1rem, 4vh, 2.5rem);
+  left: 50%;
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  width: min(38rem, calc(100vw - 2rem));
+  box-sizing: border-box;
+  padding: 0.85rem 0.9rem 0.85rem 1.05rem;
+  color: #f5f9ff;
+  border: 1px solid rgba(190, 225, 255, 0.42);
+  border-radius: 0.9rem;
+  background: rgba(4, 9, 18, 0.86);
+  box-shadow: 0 1rem 3rem rgba(0, 0, 0, 0.4), 0 0 2rem rgba(109, 199, 255, 0.12);
+  text-align: left;
+  transform: translateX(-50%);
+  backdrop-filter: blur(14px);
+}
+
+.exteriorEntryPlacementHud > div {
+  display: grid;
+  flex: 1;
+  gap: 0.15rem;
+}
+
+.exteriorEntryPlacementHud p,
+.exteriorEntryPlacementHud strong,
+.exteriorEntryPlacementHud span,
+.exteriorEntryPlacementHud small {
+  margin: 0;
+}
+
+.exteriorEntryPlacementHud strong {
+  font-size: 1rem;
+}
+
+.exteriorEntryPlacementHud span,
+.exteriorEntryPlacementHud small {
+  color: rgba(230, 239, 250, 0.76);
+  font-size: 0.78rem;
+}
+
+.exteriorEntryPlacementHud small[role="alert"] {
+  color: #ffb6c6;
+}
+
+.exteriorEntryPlacementHud button {
+  flex: 0 0 auto;
+  padding: 0.55rem 0.72rem;
+  color: inherit;
+  border: 1px solid rgba(220, 235, 255, 0.28);
+  border-radius: 0.65rem;
+  background: rgba(255, 255, 255, 0.08);
+  cursor: pointer;
+}
+
+.titleCard[data-theme="light"] .exteriorEntryPlacementHud {
+  color: #101923;
+  border-color: rgba(28, 66, 94, 0.24);
+  background: rgba(247, 251, 255, 0.9);
+  box-shadow: 0 1rem 3rem rgba(25, 44, 59, 0.18), 0 0 2rem rgba(61, 153, 208, 0.1);
+}
+
+.titleCard[data-theme="light"] .exteriorEntryPlacementHud span,
+.titleCard[data-theme="light"] .exteriorEntryPlacementHud small {
+  color: rgba(16, 25, 35, 0.72);
+}
+
+.titleCard[data-theme="light"] .exteriorEntryPlacementHud small[role="alert"] {
+  color: #9e2745;
+}
+
+.titleCard[data-theme="light"] .exteriorEntryPlacementHud button {
+  border-color: rgba(28, 66, 94, 0.22);
+  background: rgba(41, 91, 126, 0.08);
 }
 
 .titleCard[data-first-person-exterior="true"] {
@@ -848,6 +967,8 @@
 .titleCardContent > p:not(.eyebrow) { color: var(--v2-muted); }
 .titleMetadata { display: flex; flex-wrap: wrap; justify-content: center; gap: 0.5rem; margin: 1.3rem; }
 .titleMetadata span { padding: 0.45rem 0.65rem; border: 1px solid var(--v2-edge); border-radius: 99px; color: #d7d0e9; font-size: 0.76rem; }
+/* Defense stance: the opposing Prosecutor's surface case, read before the door opens. */
+.titleCaseSummary { max-width: 34rem; margin: 0 auto 1.2rem; color: #d7d0e9; font-size: 0.92rem; line-height: 1.5; text-align: center; opacity: 0.88; }
 
 .primaryAction {
   border: 1px solid rgba(255, 255, 255, 0.22);
@@ -880,6 +1001,7 @@
   background:
     radial-gradient(circle, rgba(255, 255, 255, 0.2), rgba(126, 220, 255, 0.09) 28%, rgba(196, 142, 255, 0.045) 52%, transparent 74%);
   cursor: pointer;
+  pointer-events: auto;
   transform: translate(-50%, -50%);
   transition: filter 220ms ease, opacity 220ms ease, transform 220ms ease;
   animation: titleDoorArrival 720ms cubic-bezier(.2, .78, .2, 1) 380ms both;
@@ -1015,6 +1137,21 @@
 .arrivalCard[data-theme="light"]::backdrop { background: #f6f3fc; }
 .arrivalCard[data-theme="light"] .titleCoverMedia { opacity: 0.35; }
 .arrivalCard[data-leaving="true"], .arrivalCard[data-leaving="true"]::backdrop { opacity: 0; pointer-events: none; }
+
+/* Arrival: Start and Resume prepare the investigator's spoken line behind the
+   loading screen, then they speak it alone before the blurred venue. The
+   exterior clears to the door on dismissal. */
+.titleCard[data-entry-stage] .titleCoverPlane { transition: filter 640ms ease; }
+.titleCard[data-entry-stage="speaking"] .titleCoverPlane { filter: blur(18px) saturate(0.85) brightness(0.72); }
+.titleCard[data-entry-stage="loading"] .titleDoor, .titleCard[data-entry-stage="speaking"] .titleDoor { opacity: 0; pointer-events: none; }
+.entryArrival { position: absolute; inset: 0; z-index: 5; display: grid; align-content: end; justify-items: center; padding: 0 1.25rem clamp(1.4rem, 5vh, 4rem); box-sizing: border-box; cursor: pointer; animation: roomActorReveal 320ms ease-out both; }
+.entryArrivalActor { --actor-color: #72d7ff; display: grid; justify-items: center; width: min(30rem, 44vw); margin-bottom: -1.25rem; filter: drop-shadow(0 1.5rem 2rem rgba(0, 0, 0, 0.56)); pointer-events: none; }
+.entryArrivalBox { --dialogue-accent: #a98cff; position: relative; width: min(38rem, calc(100vw - 2.5rem)); box-sizing: border-box; padding: 1rem 1.15rem 1.6rem; color: var(--v2-text); border: 1px solid color-mix(in srgb, var(--dialogue-accent), transparent 42%); border-radius: 0.85rem; background: linear-gradient(90deg, color-mix(in srgb, var(--dialogue-accent), transparent 88%), transparent 46%), rgba(7, 9, 18, 0.96); box-shadow: inset 3px 0 0 color-mix(in srgb, var(--dialogue-accent), white 14%), 0 1rem 3rem rgba(0, 0, 0, 0.64), 0 0 2.4rem color-mix(in srgb, var(--dialogue-accent), transparent 82%); backdrop-filter: blur(16px); }
+.entryArrivalBox p { position: relative; margin: 0.45rem 0 0; font-size: 1.02rem; line-height: 1.55; }
+.entryArrivalBox .dialogueContinueHint { position: absolute; right: 1rem; bottom: 0.4rem; }
+.titleCard[data-theme="light"] .entryArrivalBox { background: linear-gradient(90deg, color-mix(in srgb, var(--dialogue-accent), transparent 86%), transparent 46%), rgba(255, 255, 255, 0.9); }
+@media (max-width: 720px) { .entryArrivalActor { width: min(18rem, 60vw); } }
+@media (prefers-reduced-motion: reduce) { .entryArrival { animation: none; } .titleCard[data-entry-stage] .titleCoverPlane { transition: none; } }
 .arrivalCardContent { position: relative; z-index: 1; display: grid; justify-items: center; width: min(38rem, calc(100vw - 2.5rem)); box-sizing: border-box; padding: clamp(1.4rem, 3vw, 2.5rem); border: 1px solid rgba(208, 194, 255, 0.2); border-radius: 1.2rem; text-align: center; background: rgba(5, 7, 15, 0.58); box-shadow: 0 2rem 6rem rgba(0, 0, 0, 0.48); backdrop-filter: blur(12px); animation: titleCardSettle 720ms cubic-bezier(0.22, 1, 0.36, 1) both; }
 .arrivalCard[data-theme="light"] .arrivalCardContent { border-color: rgba(103, 65, 170, 0.22); background: rgba(255, 255, 255, 0.72); }
 .arrivalCard h1 { margin: 0.2rem 0 0.6rem; font-size: clamp(1.9rem, 4.5vw, 3.4rem); letter-spacing: -0.03em; }
@@ -1445,8 +1582,7 @@
  * dressed the structure outside the room cluster go; blocks between rooms stay. */
 .mansionCanvas[data-deck-plan="true"] .mansionRoom { background: linear-gradient(150deg, rgba(47, 49, 59, 0.62), rgba(20, 24, 31, 0.7)); }
 .mansionCanvas[data-deck-plan="true"] .mansionCorridor { background: repeating-linear-gradient(90deg, rgba(229, 199, 137, 0.05) 0 0.35rem, transparent 0.35rem 0.7rem), linear-gradient(145deg, rgba(33, 35, 44, 0.5), rgba(13, 16, 22, 0.58)); }
-.mansionCanvas[data-deck-plan="true"] .mansionAmbientSpace { --ambient-floor-top: rgba(41, 43, 52, 0.5); --ambient-floor-bottom: rgba(18, 21, 28, 0.58); }
-.mansionCanvas[data-deck-plan="true"] .mansionAmbientSpace[data-exterior="true"] { display: none; }
+.mansionCanvas[data-deck-plan="true"] .mansionAmbientSpace { display: none; }
 .mansionPlanAdjust { margin-left: 0.4rem; padding: 0.3rem 0.65rem; border: 1px solid rgba(102, 229, 234, 0.38); border-radius: 999px; background: rgba(8, 10, 17, 0.7); color: var(--mystery-cyan); font-size: 0.66rem; font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase; cursor: pointer; }
 .mansionPlanAdjust:disabled { opacity: 0.5; cursor: default; }
 .investigation[data-theme="light"] .mansionPlanAdjust { background: var(--v2-field, #fff); }
@@ -1837,16 +1973,23 @@
 .foundItemVisualsPanel > div > button:hover:not(:disabled),
 .foundItemVisualsPanel > div > button:focus-visible { border-color: var(--v2-accent); outline: none; }
 .foundItemVisualsPanel > div > button:disabled { opacity: 0.55; cursor: not-allowed; }
-.saveMansionButton {
-  min-height: 2.2rem;
-  padding: 0.45rem 0.7rem;
-  color: #e9fff9;
-  border: 1px solid rgba(107, 231, 201, 0.46);
-  border-radius: 0.65rem;
-  background: rgba(32, 111, 94, 0.28);
+.keepVenueUpdates {
+  display: flex;
+  gap: 0.65rem;
+  align-items: flex-start;
+  padding: 0.85rem 0.9rem;
+  border: 1px solid color-mix(in srgb, var(--v2-accent) 28%, var(--v2-edge));
+  border-radius: 0.7rem;
+  background: rgba(150, 116, 255, 0.1);
   cursor: pointer;
 }
-.saveMansionButton[data-state="saved"] { border-color: rgba(107, 231, 201, 0.72); background: rgba(32, 111, 94, 0.48); }
+.keepVenueUpdates input { margin-block-start: 0.18rem; flex: 0 0 auto; }
+.keepVenueUpdates span { display: grid; gap: 0.22rem; min-width: 0; }
+.keepVenueUpdates strong { color: var(--v2-text); font-size: 0.86rem; font-weight: 800; }
+.keepVenueUpdates small { color: var(--v2-muted); font-size: 0.74rem; font-weight: 600; line-height: 1.4; }
+.keepVenueUpdates:has(input:disabled) { opacity: 0.62; cursor: default; }
+.caseFile .keepVenueUpdates { margin: 0.35rem 0 0.9rem; }
+.theoryBoardFields > .keepVenueUpdates { color: inherit; font-weight: 600; }
 .mansionHint { position: absolute; left: max(1.55rem, calc((100% - 102rem) / 2)); bottom: 5.45rem; margin: 0; color: var(--mystery-muted); font-size: 0.7rem; opacity: 0.66; }
 
 .roomVisualDialogBackdrop {
@@ -2008,6 +2151,7 @@
   cursor: pointer;
 }
 .sceneRepairOptions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.7rem; }
+.sceneRepairOptions[data-layout="three"] { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .sceneRepairOptions[data-hidden="true"] { display: none; }
 .sceneRepairItemList, .sceneRepairEmojiPicker { display: grid; gap: 0.55rem; }
 .sceneRepairItemList > small, .sceneRepairEmojiPicker > small { color: var(--v2-muted, #b9b3c6); font-size: 0.78rem; }
@@ -2037,6 +2181,9 @@
 .sceneRepairOptions button:focus-visible { border-color: var(--v2-accent, #a98cff); outline: none; background: color-mix(in srgb, var(--v2-accent, #a98cff) 10%, var(--v2-field, rgba(255, 255, 255, 0.055))); }
 .sceneRepairOptions strong { font-size: 0.87rem; }
 .sceneRepairOptions span { color: var(--v2-muted, #b9b3c6); font-size: 0.72rem; line-height: 1.35; }
+@media (max-width: 620px) {
+  .sceneRepairOptions[data-layout="three"] { grid-template-columns: 1fr; }
+}
 .sceneRepairDialog footer { padding-top: 0.1rem; border-top: 1px solid var(--v2-edge, rgba(255, 255, 255, 0.16)); }
 .sceneRepairDialog footer small { color: var(--v2-muted, #b9b3c6); line-height: 1.45; }
 
@@ -2149,42 +2296,74 @@
 .roomScene {
   position: relative;
   overflow: hidden;
-  min-height: calc(100dvh - var(--app-shell-top-nav-height, 50px));
+  /* The stage takes the art's own shape: page-wide until the viewport runs out
+   * of height, then as tall as the viewport allows and centered. The fitted
+   * art frame fills it edge to edge, so nothing is left to letterbox or
+   * pillarbox in black; the page shows beneath or beside the stage instead. */
+  --room-stage-height-limit: calc(100dvh - var(--app-shell-top-nav-height, 50px));
+  width: min(100%, calc(var(--room-stage-height-limit) * var(--room-art-aspect, 1.7777778)));
+  aspect-ratio: var(--room-art-aspect, 1.7777778);
+  margin: 0 auto;
   opacity: 1;
   transform: none;
   background: #000;
+  container-type: size;
 }
+.roomScene::before {
+  position: absolute;
+  z-index: 0;
+  inset: -2rem;
+  content: "";
+  background-color: #000;
+  background-image: var(--room-image);
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: cover;
+  filter: blur(28px) saturate(0.72) brightness(0.42);
+  opacity: 0.72;
+  transform: scale(1.04);
+  pointer-events: none;
+}
+/* The room introduction plays on the same stage; it never regrows to the viewport. */
 .roomScene[data-room-introduction] {
-  min-height: calc(100dvh - var(--app-shell-top-nav-height, 50px));
+  aspect-ratio: var(--room-art-aspect, 1.7777778);
 }
 .roomSecuring { position: absolute; z-index: 20; inset: 0; display: grid; place-content: center; justify-items: center; gap: 0.35rem; padding: 2rem; text-align: center; background: radial-gradient(circle, rgba(38, 32, 55, 0.9), rgba(7, 9, 16, 0.98)); }
 .roomSecuring strong { font-size: clamp(1.35rem, 4vw, 2.4rem); }
 .roomSecuring span { color: #b9b1c8; }
 
+.roomArtFrame {
+  position: absolute;
+  inset: 0;
+  width: min(100cqw, calc(100cqh * var(--room-art-aspect)));
+  height: min(100cqh, calc(100cqw * var(--room-art-inverse-aspect)));
+  margin: auto;
+  overflow: hidden;
+  background: #000;
+}
 .roomBackdropImage {
   display: block;
   position: absolute;
   z-index: 1;
   inset: 0;
-  width: 100vw;
-  height: 100dvh;
-  object-fit: cover;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
   filter: blur(0);
   transform: none;
-  transition: filter 220ms ease, transform 220ms ease;
+  transition: filter 220ms ease;
   pointer-events: none;
   user-select: none;
 }
 .roomBackdropImage[data-blurred="true"] {
   filter: blur(12px);
-  transform: scale(1.04);
 }
 .roomBackdropImage[data-art-style="mosaic"] {
   image-rendering: pixelated;
 }
 .roomBackdropImage[data-upgrade-layer="true"] {
   opacity: 0;
-  transition: opacity 180ms ease, filter 220ms ease, transform 220ms ease;
+  transition: opacity 180ms ease, filter 220ms ease;
 }
 .roomBackdropImage[data-upgrade-layer="true"][data-loaded="true"][data-active="true"] {
   opacity: 1;
@@ -2220,24 +2399,24 @@
   filter: drop-shadow(0 1.5rem 2rem rgba(0, 0, 0, 0.56));
   transform: translateX(-50%);
   pointer-events: none;
-  animation: roomActorReveal 320ms ease-out both;
+  animation: none;
   transition: left 420ms cubic-bezier(0.2, 0.8, 0.2, 1), transform 420ms cubic-bezier(0.2, 0.8, 0.2, 1), opacity 260ms ease, filter 220ms ease;
 }
+.roomScene[data-room-introduction="persona"] .roomActor { animation: roomActorReveal 320ms ease-out both; }
 @keyframes roomActorReveal { from { opacity: 0; } to { opacity: 1; } }
 .roomActor[data-prosecutor-speaking="true"]:not(.roomProsecutorActor) { opacity: 0.78; transform: translateX(-40%) translateY(0.4rem) scale(0.9); }
 .roomProsecutorActor { z-index: 4; }
 /* Talk / Present two-shot: the suspect steps right, the investigator slides in
    from the left, and whoever is not speaking sits back a touch. */
 .roomActor[data-staging="two-shot"]:not(.roomProsecutorActor) { left: 60%; transform: translateX(-50%) scale(0.94); }
-.roomProsecutorActor[data-staging="two-shot"] { left: 25%; transform: translateX(-50%) scale(0.9); animation: prosecutorSlideIn 420ms cubic-bezier(0.2, 0.85, 0.25, 1) both; }
-.roomActor[data-staging="two-shot"][data-interrogation-phase="prosecutor_entrance"],
-.roomActor[data-staging="two-shot"][data-interrogation-phase="suspect_entrance"] { animation-name: roomActorReveal; }
+.roomProsecutorActor[data-staging="two-shot"] { left: 25%; transform: translateX(-50%) scale(0.9); }
+.roomProsecutorActor[data-staging="two-shot"][data-first-entry="true"] { animation: prosecutorSlideIn 420ms cubic-bezier(0.2, 0.85, 0.25, 1) both; }
 .roomActor[data-staging="two-shot"][data-thinking="true"] { filter: drop-shadow(0 1.5rem 2rem rgba(0, 0, 0, 0.56)) drop-shadow(0 0 1.1rem color-mix(in srgb, var(--actor-color), transparent 55%)); }
 @keyframes prosecutorSlideIn { from { opacity: 0; transform: translateX(-130%) scale(0.9); } to { opacity: 1; transform: translateX(-50%) scale(0.9); } }
 /* Present drag: the suspect lights up as a drop target. */
 .roomActor[data-drop-target="armed"] { filter: drop-shadow(0 1.5rem 2rem rgba(0, 0, 0, 0.56)) drop-shadow(0 0 1.2rem rgba(192, 165, 255, 0.5)); }
 .roomActor[data-drop-target="hover"] { filter: drop-shadow(0 1.5rem 2rem rgba(0, 0, 0, 0.56)) drop-shadow(0 0 2rem rgba(192, 165, 255, 0.95)) brightness(1.08); }
-.roomActor[data-interrogation-phase="prosecutor_entrance"], .roomActor[data-interrogation-phase="suspect_entrance"] { animation: interrogationEntrance 420ms cubic-bezier(0.2, 0.85, 0.25, 1) both; }
+.roomActor[data-staging="two-shot"][data-first-entry="true"]:not(.roomProsecutorActor) { animation: interrogationEntrance 420ms cubic-bezier(0.2, 0.85, 0.25, 1) both; }
 @keyframes interrogationEntrance { from { opacity: 0; transform: translateX(-50%) translateY(1.4rem) scale(0.94); } to { opacity: 1; transform: translateX(-50%) scale(1); } }
 
 .roomActorDrift {
@@ -2748,6 +2927,11 @@
 .itemTile > span[aria-hidden] { font-size: 2.2rem; line-height: 3.5rem; }
 .itemTile strong { font-size: 0.78rem; line-height: 1.25; }
 .itemTile small { color: #817b8b; font-size: 0.62rem; font-weight: 750; letter-spacing: 0.06em; text-transform: uppercase; }
+/* An item this suspect has already seen keeps its place on the shelf with a check, so the next choice is deliberate. */
+.itemTile { position: relative; }
+.itemTile[data-presented="true"] { border-color: rgba(111, 211, 154, 0.42); background: rgba(111, 211, 154, 0.07); }
+.itemTile[data-presented="true"] small { color: #7fd7a4; }
+.itemTileShown { position: absolute; top: 0.35rem; right: 0.35rem; display: grid; width: 1.15rem; height: 1.15rem; place-items: center; border-radius: 50%; background: #6fd39a; color: #06130c; font-size: 0.7rem; font-style: normal; font-weight: 850; line-height: 1; box-shadow: 0 0.1rem 0.4rem rgba(0, 0, 0, 0.35); }
 .itemBlurb { display: grid; gap: 0.55rem; margin-top: 0.8rem; padding: 0.85rem; border: 1px solid rgba(192, 165, 255, 0.34); border-radius: 0.8rem; background: rgba(169, 140, 255, 0.08); }
 .itemBlurb h3 { margin: 0; font-size: 1rem; }
 .itemBlurb p { margin: 0; color: #cfc9dc; font-size: 0.86rem; line-height: 1.45; }
@@ -2843,6 +3027,10 @@
 .roomScene[data-suspended="true"] .hotspots { display: none; }
 .roomScene[data-suspended="true"] * { animation-play-state: paused !important; }
 .caseFileContents { min-width: 0; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding-right: 0.2rem; }
+.caseFileVoiceStatus { display: flex; flex-wrap: wrap; align-items: center; gap: 0.6rem; }
+.caseFileVoiceStatus button { padding: 0.35rem 0.7rem; border: 1px solid rgba(192, 165, 255, 0.5); border-radius: 0.55rem; background: rgba(169, 140, 255, 0.14); color: inherit; font: inherit; font-size: 0.78rem; cursor: pointer; }
+.caseFileVoiceStatus button:hover { border-color: #c0a5ff; }
+.caseFileVoiceStatus button:disabled { cursor: progress; opacity: 0.6; }
 .caseFileContents section { display: grid; gap: 0.45rem; margin: 1.3rem 0; }
 .caseFileContents section:first-child { margin-top: 0.2rem; }
 .caseFile h3 { margin: 0; color: #a59dbb; font-size: 0.72rem; letter-spacing: 0.12em; text-transform: uppercase; }
@@ -3015,6 +3203,40 @@
   transform-origin: bottom;
 }
 
+/* The public gallery behind the bench: the jury and the suspects not on the stand or in the dock. */
+.courtGallery { position: absolute; z-index: 2; inset: 0; pointer-events: none; }
+.courtGallerySeat {
+  --court-presence-color: #a98cff;
+  position: absolute;
+  bottom: 46%;
+  left: var(--court-seat-x, 50%);
+  display: grid;
+  width: clamp(3.4rem, 6.2vw, 6rem);
+  justify-items: center;
+  opacity: 0;
+  filter: grayscale(0.6) brightness(0.62) drop-shadow(0 0.6rem 1rem rgba(0, 0, 0, 0.55));
+  transform: translate(calc(-50% + var(--court-seat-walk, 0%)), 0.6rem) scale(0.92);
+  transition: opacity 520ms ease, transform 640ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.courtGallerySeat[data-row="1"] { bottom: 50.5%; width: clamp(3rem, 5.4vw, 5.2rem); filter: grayscale(0.7) brightness(0.55) drop-shadow(0 0.5rem 0.9rem rgba(0, 0, 0, 0.55)); }
+.courtGallerySeat[data-side="left"] { --court-seat-walk: -6%; }
+.courtGallerySeat[data-side="right"] { --court-seat-walk: 6%; }
+.courtGallerySeat[data-arrived="true"] { opacity: 0.78; transform: translate(-50%, 0) scale(1); }
+.courtGallerySeat > :not(small) { max-width: 100%; max-height: 5.2rem; }
+.courtGallerySeat small { margin-top: 0.15rem; padding: 0.12rem 0.32rem; border-bottom: 1px solid var(--court-presence-color); background: rgba(6, 8, 14, 0.72); color: #cfc9dc; font-size: 0.48rem; letter-spacing: 0.08em; text-transform: uppercase; white-space: nowrap; }
+.courtArrivalChrome { position: absolute; z-index: 9; top: 1.1rem; left: 50%; display: grid; grid-template-columns: auto auto; gap: 0.15rem 0.7rem; align-items: baseline; padding: 0.55rem 0.9rem 0.65rem; border: 1px solid rgba(213, 202, 255, 0.24); border-radius: 0.8rem; background: rgba(7, 9, 18, 0.86); color: #f3eefc; transform: translateX(-50%); backdrop-filter: blur(14px); pointer-events: none; }
+.courtArrivalChrome span { color: #aaa5b7; font-size: 0.6rem; letter-spacing: 0.1em; text-transform: uppercase; }
+.courtArrivalChrome strong { font-size: 0.82rem; }
+.courtArrivalChrome i { grid-column: 1 / -1; display: block; height: 0.22rem; border-radius: 99px; background: rgba(255, 255, 255, 0.1); overflow: hidden; }
+.courtArrivalChrome i::before { content: ""; display: block; width: calc(var(--court-arrival-progress, 0) * 100%); height: 100%; border-radius: inherit; background: linear-gradient(90deg, #ff5c9a, #af72ff); transition: width 160ms linear; }
+/* While the Court assembles, testimony and the console wait; the room is the whole scene. */
+.court[data-arrival="true"] :is(.testimony, .courtReaction, .courtActions, .credibility, .choiceTray) { visibility: hidden; }
+/* Think is the Prosecutor's private reasoning, not an address to the Court. */
+.courtReaction[data-thought="true"] { font-style: italic; border-style: dashed; }
+.courtReaction[data-thought="true"] strong { font-style: normal; }
+/* The witness stand takes an item dragged from the drawer, as the suspect does in the room. */
+.witnessAvatar[data-drop-target="armed"] { filter: drop-shadow(0 2rem 3rem rgba(0, 0, 0, 0.62)) drop-shadow(0 0 1.4rem rgba(255, 114, 182, 0.35)); }
+.witnessAvatar[data-drop-target="hover"] { filter: drop-shadow(0 2rem 3rem rgba(0, 0, 0, 0.62)) drop-shadow(0 0 2.2rem rgba(255, 114, 182, 0.7)); }
 .counselComposition { position: absolute; z-index: 7; inset: 0; pointer-events: none; }
 .counselSeat {
   --counsel-color: #a98cff;
@@ -3988,7 +4210,7 @@
   .titleCardContent[data-door-threshold="true"] .titlePrism { display: none; }
   .titleCardContent[data-door-threshold="true"] h1 { font-size: clamp(1.8rem, 10vw, 3.2rem); }
   .titleCardContent[data-door-threshold="true"] .titleMetadata span:nth-child(n + 3) { display: none; }
-  .titleDoor { top: 62%; left: 52%; width: clamp(7rem, 28vw, 10rem); }
+  .titleDoor { width: clamp(7rem, 28vw, 10rem); }
   .caseOpeningJourney {
     width: calc(100vw - 1rem);
     height: min(78dvh, 42rem);
@@ -4136,8 +4358,8 @@
   .roomBackdrop, .roomBackdrop[data-blurred="true"] { transform: scale(1.025); transition: opacity 180ms ease; }
   .roomActor[data-prosecutor-speaking="true"] { opacity: 1; transform: translateX(-50%); }
   .roomActor,
-  .roomActor[data-interrogation-phase] { animation: none; }
-  .roomProsecutorActor[data-staging="two-shot"] { animation: none; }
+  .roomActor[data-first-entry] { animation: none; }
+  .roomProsecutorActor[data-staging="two-shot"][data-first-entry="true"] { animation: none; }
   .itemDrawer { animation: none; }
   .roomActorDrift { animation: none; transform: none; will-change: auto; }
   .dialogueContinueHint { animation: none; }

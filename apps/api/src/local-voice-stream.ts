@@ -83,6 +83,8 @@ const CLAUSE_SUBJECT_WORDS = new Set([
 export interface LocalVoiceStreamSplitOptions {
   /** Restrained punctuation boundaries are for Kokoro / PRISM Voice Pack only. */
   punctuationPacing?: boolean;
+  /** Keeps punctuation chunks long enough to cover synthesis of the next one. */
+  minimumChunkTokens?: number;
 }
 
 type PunctuationBoundaryKind = "comma" | "clause" | "strong";
@@ -205,6 +207,9 @@ export function splitLocalVoiceStreamText(
   let current: string[] = [];
   let chunkStart = 0;
   const punctuationPacing = options.punctuationPacing ?? true;
+  const minimumChunkTokens = Number.isFinite(options.minimumChunkTokens)
+    ? Math.max(1, Math.trunc(options.minimumChunkTokens ?? 1))
+    : 1;
 
   const commit = (nextWordIndex: number) => {
     const value = current.join(" ").trim();
@@ -225,7 +230,16 @@ export function splitLocalVoiceStreamText(
         commaIsMeaningfulClauseBoundary({ words, index, chunkStart })) ||
       (boundaryKind === "clause" &&
         clauseMarkIsMeaningfulBoundary({ words, index, chunkStart }));
-    if (punctuationBoundary || current.length >= CONTINUATION_MAX_TOKENS) {
+    const remainingTokens = words.length - index - 1;
+    // Do not trade a mid-line pause for a tiny trailing synthesis request.
+    const punctuationBoundaryHasRunway =
+      punctuationBoundary &&
+      current.length >= minimumChunkTokens &&
+      (remainingTokens === 0 || remainingTokens >= minimumChunkTokens);
+    if (
+      punctuationBoundaryHasRunway ||
+      current.length >= CONTINUATION_MAX_TOKENS
+    ) {
       commit(index + 1);
     }
   }

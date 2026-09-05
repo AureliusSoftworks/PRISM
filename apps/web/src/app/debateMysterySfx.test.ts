@@ -21,6 +21,10 @@ import {
   debateMysterySfxCueForAction,
   debateMysterySfxVoices,
   debateMysteryTextVoiceModeForPresentation,
+  DEBATE_MYSTERY_VOCAL_LEAD_IN_VOLUME_RATIO,
+  DEBATE_MYSTERY_VOCAL_LISTENING_VOLUME_RATIO,
+  mysteryListeningReactionDelayMsV2,
+  pickMysteryVocalCueV2,
   debateMysteryTextVoiceShouldStart,
   debateMysteryTextVoiceShouldStop,
   playDebateMysteryTextVoice,
@@ -180,15 +184,15 @@ test("starts the selected text voice once and never replaces anonymous Casekeepe
   assert.equal(DEBATE_MYSTERY_TEXT_VOICE_VOLUME_RATIO, 0.28);
 });
 
-test("uses player Babble for observations while preserving an explicit Off choice", () => {
+test("keeps every written investigation line Bottish while preserving an explicit Off choice", () => {
   assert.equal(debateMysteryTextVoiceModeForPresentation({
     configuredMode: "bottish",
     playerObservation: true,
-  }), "babble");
+  }), "bottish");
   assert.equal(debateMysteryTextVoiceModeForPresentation({
     configuredMode: "babble",
     playerObservation: true,
-  }), "babble");
+  }), "bottish", "a legacy Babble choice never babbles in an investigation");
   assert.equal(debateMysteryTextVoiceModeForPresentation({
     configuredMode: "off",
     playerObservation: true,
@@ -491,4 +495,22 @@ test("keeps every Whodunnit cue behind the shared Audio controls", async () => {
     }),
     false,
   );
+});
+
+test("vocal cues pick deterministically by kind and react inside the typed line's window", () => {
+  const bank = [
+    { id: "hm", kind: "lead_in" as const, url: "/hm", durationMs: 300 },
+    { id: "right", kind: "lead_in" as const, url: "/right", durationMs: 320 },
+    { id: "mm-hm", kind: "listening" as const, url: "/mm-hm", durationMs: 280 },
+  ];
+  const first = pickMysteryVocalCueV2(bank, "lead_in", "case:line-1");
+  assert.equal(first, pickMysteryVocalCueV2(bank, "lead_in", "case:line-1"), "the same line picks the same cue");
+  assert.equal(first?.kind, "lead_in");
+  assert.equal(pickMysteryVocalCueV2(bank, "listening", "case:line-1")?.id, "mm-hm");
+  assert.equal(pickMysteryVocalCueV2([], "lead_in", "case:line-1"), null, "a voice with no cues stays silent");
+  const delay = mysteryListeningReactionDelayMsV2("case:line-1", 120);
+  assert.ok(delay >= 450 && delay <= 450 + 1_800, `reaction lands inside the line: ${delay}`);
+  assert.equal(delay, mysteryListeningReactionDelayMsV2("case:line-1", 120));
+  assert.equal(DEBATE_MYSTERY_VOCAL_LEAD_IN_VOLUME_RATIO, 0.8);
+  assert.equal(DEBATE_MYSTERY_VOCAL_LISTENING_VOLUME_RATIO, 0.5);
 });

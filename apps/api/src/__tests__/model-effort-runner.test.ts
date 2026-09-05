@@ -78,6 +78,23 @@ describe("simulated model effort runner", () => {
       }),
       true,
     );
+    // GPT-OSS's native tiers own Low through High; XHigh alone is hollow.
+    assert.equal(
+      shouldPrepareMessagesWithSimulatedEffort({
+        provider: "local",
+        model: "gpt-oss:20b",
+        effort: "high",
+      }),
+      false,
+    );
+    assert.equal(
+      shouldPrepareMessagesWithSimulatedEffort({
+        provider: "local",
+        model: "gpt-oss:20b",
+        effort: "xhigh",
+      }),
+      true,
+    );
     assert.equal(
       shouldPrepareMessagesWithSimulatedEffort({
         provider: "openai",

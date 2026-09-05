@@ -75,12 +75,20 @@ function cleanupUnreferencedSfxAssets(db: DatabaseSync, userId: string): void {
 export function buildDebateMysteryMansionSfxPromptV1(args: {
   cueId: WhodunnitSfxCueIdV1;
   houseStyle: Pick<DebateMysteryHouseStyleV2, "label" | "promptContract" | "acousticThemePaletteId">;
+  /** The player's Refract direction for this pass. Blank keeps the canonical
+   * prompt byte-identical, so an undirected resynthesis never drifts. */
+  direction?: string | null;
 }): string {
   const cue = WHODUNNIT_SFX_CUES_V1[args.cueId];
+  const direction = compact(typeof args.direction === "string" ? args.direction : "", 300);
   return [
     cue.prompt,
     `Setting: ${compact(args.houseStyle.label, 60) || "a mystery venue"}.`,
     `Materials and era: ${compact(args.houseStyle.promptContract, 150)}.`,
+    // The direction colors the cue; it never redefines it. It sits ahead of the
+    // closing constraint so that sentence still bounds every clip to one short
+    // dry one-shot, whatever the player asked for.
+    ...(direction ? [`Creative direction for this pass: ${direction}`] : []),
     "One short dry user-interface sound effect, close and clean, quick start, natural tail, no music bed, no voices, no room reverb wash.",
   ].join(" ");
 }
@@ -147,6 +155,8 @@ export async function stageDebateMysteryMansionSfxCueV1(args: {
   cueId: WhodunnitSfxCueIdV1;
   responseMode: "local" | "online";
   apiKey: string | null;
+  /** Optional player Refract direction for this synthesis pass. */
+  direction?: string | null;
   fetchImpl?: typeof fetch;
 }): Promise<{ assetId: string; cueId: WhodunnitSfxCueIdV1 }> {
   if (args.responseMode !== "online") {
@@ -162,7 +172,11 @@ export async function stageDebateMysteryMansionSfxCueV1(args: {
     const mansion = getDebateMysteryMansionBundleV2(args.db, args.userId, args.bundleId);
     const generated = await requestWhodunnitVenueSfxClip({
       apiKey: args.apiKey,
-      prompt: buildDebateMysteryMansionSfxPromptV1({ cueId: args.cueId, houseStyle: mansion.houseStyle }),
+      prompt: buildDebateMysteryMansionSfxPromptV1({
+        cueId: args.cueId,
+        houseStyle: mansion.houseStyle,
+        direction: args.direction,
+      }),
       durationSeconds: WHODUNNIT_SFX_CUES_V1[args.cueId].durationSeconds,
       fetchImpl: args.fetchImpl,
     });

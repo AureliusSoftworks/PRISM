@@ -288,9 +288,31 @@ describe("sealed Whodunnit asset vault", () => {
       "case-1",
       "room",
       "mansion-exterior-v1",
+      { x: 1.2, y: -0.1 },
+    );
+    assert.deepEqual(calibrated.entryTarget, { x: 1, y: 0 });
+    assert.throws(
+      () => setDebateMysteryAssetEntryTargetV1(
+        db,
+        "user-1",
+        "case-1",
+        "room",
+        "mansion-exterior-v1",
+        { x: "0.6", y: 0.71 },
+      ),
+      /finite numeric x and y coordinates/u,
+    );
+    assert.deepEqual(
+      setDebateMysteryAssetEntryTargetV1(
+        db,
+        "user-1",
+        "case-1",
+        "room",
+        "mansion-exterior-v1",
+        { x: 0.6, y: 0.71 },
+      ).entryTarget,
       { x: 0.6, y: 0.71 },
     );
-    assert.deepEqual(calibrated.entryTarget, { x: 0.6, y: 0.71 });
 
     const snapshots = snapshotDebateMysteryAssetsForSceneRepairV1(
       db,

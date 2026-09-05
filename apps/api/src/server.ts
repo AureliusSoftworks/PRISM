@@ -75,6 +75,7 @@ import {
   setUsageTripEnabled,
 } from "./usage.ts";
 import {
+  developerTranscriptVaultMigrationIsCompleteV1,
   migrateDeveloperTranscriptPayloadsForOwnerV1,
   openDeveloperTranscriptPayloadV1,
 } from "./developer-transcript-vault.ts";
@@ -357,6 +358,13 @@ import {
   cleanupUnreferencedDebateMysteryAudioV2,
   ensureDebateMysteryPlayReadyV2,
   getDebateMysteryAudioClipV2,
+  prepareDebateMysteryLineAudioV2,
+  awaitMysteryLineAudioPreparationV2,
+  enableDebateMysteryVoicesV2,
+  prepareDebateMysteryArrivalLineV2,
+  readDebateMysteryArrivalLineAudioV2,
+  prepareDebateMysteryVocalBankV2,
+  readDebateMysteryVocalEntryV2,
   getDebateMysterySpokenPerformanceV2,
   getDebateMysteryAudioStorageSummaryV2,
   getDebateMysteryCompilationStatusV2,
@@ -387,6 +395,7 @@ import { tuneDebateMysteryRoomLightingV1, validateRoomLightTuneSheetV1 } from ".
 import {
   generateDebateMysteryDeckPlanV1,
   parseMansionMapBoardCellsV1,
+  resolveDebateMysteryMansionOverheadIdentityV1,
   saveDebateMysteryMapOverheadPlacementV1,
   undoDebateMysteryMansionDeckPlanV1,
   type MansionMapBoardCellsV1,
@@ -446,6 +455,9 @@ import {
   updateDebateMysteryMansionLibraryV1,
   updateDebateMysteryMansionTopologyV1,
 } from "./debate-mystery-mansion-bundles.ts";
+import {
+  assertDebateMysteryMansionNotHeldByOngoingCaseV1,
+} from "./debate-mystery-mansion-archive-hold.ts";
 import {
   beginDebateMysteryMansionPropVariantAttemptV1,
   ensureDebateMysteryMansionPropVariantsV1,
@@ -511,6 +523,7 @@ import {
   stageDebateMysteryMansionSfxCueV1,
   undoDebateMysteryMansionSfxCueV1,
 } from "./debate-mystery-mansion-sfx.ts";
+import { readDebateMysteryPremiumTakeV1 } from "./debate-mystery-premium-takes.ts";
 import {
   acceptMansionRoomArtCandidateV2,
   discardMansionRoomArtCandidateV2,
@@ -532,7 +545,13 @@ import {
   isWhodunnitSfxCueIdV1,
   createMysteryVenueProposalV1,
   deriveMysteryVenueIntentV1,
+  normalizeDebateMysteryExteriorEntryTargetV1,
+  createMysterySideRoomNamerV1,
+  debateMysteryRoomFootprint,
+  mysterySideRoomSizeForAreaV1,
+  normalizeMysteryRoomNameSuggestionsV1,
   parseMysteryVenueCreativeDraftV1,
+  type MysteryRoomNameRequestV1,
   debateMysteryHouseStyleV2,
   debateMysteryMansionExteriorPromptV1,
   resolveDebateMysteryMansionExteriorScaleClassV1,
@@ -1298,6 +1317,7 @@ import {
   botLocalLaughIntensityForCue,
   botLocalLaughSynthesisText,
   projectLocalWrittenLaughterForSynthesis,
+  projectPremiumLaughterForSynthesis,
   localVoicePronunciationOverrideIsActive,
   normalizeLocalVoiceSpeechprintV1,
   localVoiceSpeechprintIsActive,
@@ -1309,6 +1329,7 @@ import {
   normalizeSpeechTypeVoiceMode,
   normalizeWhodunnitTextVoiceMode,
   normalizeWhodunnitSpeechType,
+  normalizeWhodunnitInvestigationPerspective,
   applyBotNamePronunciations,
   applyPlayerNamePronunciation,
   expandSpeechText,
@@ -1387,6 +1408,7 @@ import {
   normalizeProviderReasoningEffort,
   resolveBotFoundryGenerationContextForBriefV1,
   modelSupportsTurboMode,
+  modelReasoningEffortMaxUnlockLevel,
   resolveModelReasoningEffortCapability,
   parseBuiltInPromptWildcardReference,
   parseStoredManualAskQuestionPayload,
@@ -2821,6 +2843,32 @@ function localLaughProjectedText(
   );
 }
 
+/** Premium speaks the authored laugh only when the bot opted that lane in
+ * and a syllable is actually authored. The recipe itself is lane-neutral. */
+function premiumLaughProjectionIsEligible(
+  profileValue: BotAudioVoiceProfileV1,
+): boolean {
+  const profile = normalizeBotAudioVoiceProfileV1(profileValue);
+  return (
+    profile.premiumLaughEnabled === true && Boolean(profile.localLaughSyllable)
+  );
+}
+
+function premiumLaughProjectedText(
+  text: string,
+  profileValue: BotAudioVoiceProfileV1,
+): string {
+  if (!premiumLaughProjectionIsEligible(profileValue)) return text;
+  const profile = normalizeBotAudioVoiceProfileV1(profileValue);
+  return (
+    projectPremiumLaughterForSynthesis(
+      text,
+      profile.localLaughSyllable,
+      profile.localLaughDelimiter,
+    ) || text
+  );
+}
+
 function setVoicePronunciationHeaders(
   response: ServerResponse,
   pronunciation: ResolvedLocalVoicePronunciationV1 | undefined,
@@ -2927,6 +2975,8 @@ function sendVoiceWave(
   response.end(wave);
 }
 
+const SIGNAL_LOCAL_VOICE_MINIMUM_CHUNK_TOKENS = 18;
+
 async function sendLocalVoiceWaveStream(args: {
   response: ServerResponse;
   text: string;
@@ -2948,6 +2998,8 @@ async function sendLocalVoiceWaveStream(args: {
   localLaughProjectionEnabled?: boolean;
   /** Enables restrained punctuation orchestration for Kokoro, never system TTS. */
   punctuationPacing?: boolean;
+  /** Ensures each streamed phrase provides useful synthesis runway. */
+  minimumChunkTokens?: number;
   /** Signal opts into raw framed WAV bytes to keep base64/JSON off its UI thread. */
   binaryFrames?: boolean;
 }): Promise<void> {
@@ -2974,7 +3026,10 @@ async function sendLocalVoiceWaveStream(args: {
         ...splitLocalVoiceStreamSegments(
           segment.text,
           segment.sourceStart,
-          { punctuationPacing: args.punctuationPacing === true },
+          {
+            punctuationPacing: args.punctuationPacing === true,
+            minimumChunkTokens: args.minimumChunkTokens,
+          },
         ).map((chunk) => ({
           kind: "speech" as const,
           ...chunk,
@@ -2983,9 +3038,14 @@ async function sendLocalVoiceWaveStream(args: {
     }
   } else {
     streamItems.push(
-      ...splitLocalVoiceStreamSegments(args.text, 0, {
-        punctuationPacing: args.punctuationPacing === true,
-      }).map((chunk) => ({
+      ...splitLocalVoiceStreamSegments(
+        args.text,
+        0,
+        {
+          punctuationPacing: args.punctuationPacing === true,
+          minimumChunkTokens: args.minimumChunkTokens,
+        },
+      ).map((chunk) => ({
         kind: "speech" as const,
         ...chunk,
       })),
@@ -3442,6 +3502,7 @@ interface UserDbRow {
   debate_whodunnit_reuse_synthesized_exhibits: number;
   debate_whodunnit_text_voice_mode: string | null;
   debate_whodunnit_speech_type: string | null;
+  debate_whodunnit_perspective: string | null;
   psychic_mode_enabled: number;
   comfyui_host: string | null;
   preferred_local_image_model: string | null;
@@ -3598,6 +3659,12 @@ function requireAuth(ctx: RequestContext): string {
   ctx.userId = session.userId;
   touchUserActivity(session.userId);
   return session.userId;
+}
+
+function requireWritableInstalledMysteryMansion(ctx: RequestContext): string {
+  const userId = requireAuth(ctx);
+  assertDebateMysteryMansionNotHeldByOngoingCaseV1(db, userId, ctx.params.id);
+  return userId;
 }
 
 function asTurnPreparationHttpError(error: unknown): never {
@@ -3844,8 +3911,9 @@ function getOrCreateLocalOwnerUser(): string {
       createdAt,
       initialPrivateValues: {
         theme: "system",
-        debate_whodunnit_text_voice_mode: "babble",
+        debate_whodunnit_text_voice_mode: "bottish",
         debate_whodunnit_speech_type: "english",
+        debate_whodunnit_perspective: "first_person",
         preferred_provider: "local",
         auto_memory: 1,
         prism_default_bot_face_mouth_coffee_pucker:
@@ -3899,7 +3967,7 @@ function liveBakePlannedSynthesisEngineForUser(
 function getUserRow(userId: string): UserDbRow {
   const row = db
     .prepare(
-      "SELECT id, email, display_name, password_hash, password_salt, wrapped_user_key, wrapped_user_key_iv, wrapped_user_key_tag, theme, atmosphere_style, hub_atmosphere_enabled, hub_atmosphere_image_id, hub_atmosphere_image_style, startup_preference, preferred_provider, ephemeral_chat_provider_preferences, preferred_image_provider, provider_locked, auto_memory, memory_learn_about_player, memory_learn_about_bots, memory_acquisition_sensitivity, memory_short_term_days, memory_long_term_threshold, memory_inferred_min_evidence, memory_inferred_threshold, composer_writing_assist, experimental_dual_ollama_enabled, experimental_all_model_effort_enabled, coffee_experimental_table_angle_enabled, debate_whodunnit_reuse_synthesized_exhibits, debate_whodunnit_text_voice_mode, debate_whodunnit_speech_type, psychic_mode_enabled, auto_switch_model, auto_fallback_chain, online_auto_provider_bias, hidden_bot_model_ids, hidden_global_picker_model_ids, hidden_comfyui_workflow_ids, model_visibility_defaults_version, preferred_local_model, preferred_online_model, lenient_local_fallback_model, lenient_local_image_fallback_model, secondary_ollama_host, comfyui_host, comfyui_workflows, preferred_local_image_model, preferred_openai_image_model, preferred_zen_wallpaper_local_image_model, preferred_zen_wallpaper_openai_image_model, preferred_home_atmosphere_image_model, preferred_home_atmosphere_image_provider, zen_wallpaper_opacity, zen_wallpaper_text_mask_enabled, zen_wallpaper_grayscale_enabled, zen_wallpaper_blurred_edges_enabled, zen_wallpaper_style_notes, zen_session_idle_gap_ms, zen_fresh_start_gap_ms, zen_recent_context_messages, zen_wallpaper_regen_message_interval, zen_mood_sensitivity, zen_canvas_typing_speed, zen_message_font_min_px, zen_message_font_max_px, zen_ask_question_patience_enabled, zen_ask_question_patience_ms, zen_autonomy_enabled, zen_persona_transition_choice, prism_default_bot_name, prism_default_bot_system_prompt, prism_default_bot_color, prism_default_bot_glyph, prism_default_bot_face_eyes_font, prism_default_bot_face_eye_character, prism_default_bot_face_eye_animation, prism_default_bot_face_mouth_font, prism_default_bot_face_mouth_character, prism_default_bot_face_mouth_animation, prism_default_bot_face_mouth_coffee_pucker, prism_default_bot_face_font_weight, prism_default_bot_face_eye_scale, prism_default_bot_face_eye_offset_x, prism_default_bot_face_eye_offset_y, prism_default_bot_face_eye_rotation_deg, prism_default_bot_face_eye_count, prism_default_bot_face_mouth_scale, prism_default_bot_face_mouth_offset_x, prism_default_bot_face_mouth_offset_y, prism_default_bot_face_mouth_rotation_deg, prism_default_bot_face_blink_bar, prism_default_bot_face_blink_count, prism_default_bot_face_blink_scale, prism_default_bot_face_blink_offset_x, prism_default_bot_face_blink_offset_y, prism_default_bot_face_blink_rotation_deg, prism_default_bot_face_thinking_frames, prism_default_bot_face_thinking_scale, prism_default_bot_face_thinking_offset_x, prism_default_bot_face_thinking_offset_y, prism_default_bot_audio_voice_profile, prism_default_bot_temperature, prism_default_bot_max_tokens, prism_default_bot_top_p, prism_default_bot_top_k, prism_default_bot_repetition_penalty, prism_default_llm_model, prism_image_tool_llm_model, prism_refract_local_model, prism_refract_online_model, dev_memories_enabled, dev_memories_text, openai_key_ciphertext, openai_key_iv, openai_key_tag, anthropic_key_ciphertext, anthropic_key_iv, anthropic_key_tag, ollama_cloud_key_ciphertext, ollama_cloud_key_iv, ollama_cloud_key_tag, elevenlabs_key_ciphertext, elevenlabs_key_iv, elevenlabs_key_tag, brave_search_key_ciphertext, brave_search_key_iv, brave_search_key_tag, voice_mode, voice_effects_enabled, voice_volume, operating_system_voices_enabled, english_voice_engine, default_system_voice_name, default_elevenlabs_voice_id, elevenlabs_voice_bank, elevenlabs_voice_model, elevenlabs_voice_collection_id, zen_player_voice_enabled, player_audio_voice_profile, player_name_pronunciation, created_at, last_active_at FROM users WHERE id = ?",
+      "SELECT id, email, display_name, password_hash, password_salt, wrapped_user_key, wrapped_user_key_iv, wrapped_user_key_tag, theme, atmosphere_style, hub_atmosphere_enabled, hub_atmosphere_image_id, hub_atmosphere_image_style, startup_preference, preferred_provider, ephemeral_chat_provider_preferences, preferred_image_provider, provider_locked, auto_memory, memory_learn_about_player, memory_learn_about_bots, memory_acquisition_sensitivity, memory_short_term_days, memory_long_term_threshold, memory_inferred_min_evidence, memory_inferred_threshold, composer_writing_assist, experimental_dual_ollama_enabled, experimental_all_model_effort_enabled, coffee_experimental_table_angle_enabled, debate_whodunnit_reuse_synthesized_exhibits, debate_whodunnit_text_voice_mode, debate_whodunnit_speech_type, debate_whodunnit_perspective, psychic_mode_enabled, auto_switch_model, auto_fallback_chain, online_auto_provider_bias, hidden_bot_model_ids, hidden_global_picker_model_ids, hidden_comfyui_workflow_ids, model_visibility_defaults_version, preferred_local_model, preferred_online_model, lenient_local_fallback_model, lenient_local_image_fallback_model, secondary_ollama_host, comfyui_host, comfyui_workflows, preferred_local_image_model, preferred_openai_image_model, preferred_zen_wallpaper_local_image_model, preferred_zen_wallpaper_openai_image_model, preferred_home_atmosphere_image_model, preferred_home_atmosphere_image_provider, zen_wallpaper_opacity, zen_wallpaper_text_mask_enabled, zen_wallpaper_grayscale_enabled, zen_wallpaper_blurred_edges_enabled, zen_wallpaper_style_notes, zen_session_idle_gap_ms, zen_fresh_start_gap_ms, zen_recent_context_messages, zen_wallpaper_regen_message_interval, zen_mood_sensitivity, zen_canvas_typing_speed, zen_message_font_min_px, zen_message_font_max_px, zen_ask_question_patience_enabled, zen_ask_question_patience_ms, zen_autonomy_enabled, zen_persona_transition_choice, prism_default_bot_name, prism_default_bot_system_prompt, prism_default_bot_color, prism_default_bot_glyph, prism_default_bot_face_eyes_font, prism_default_bot_face_eye_character, prism_default_bot_face_eye_animation, prism_default_bot_face_mouth_font, prism_default_bot_face_mouth_character, prism_default_bot_face_mouth_animation, prism_default_bot_face_mouth_coffee_pucker, prism_default_bot_face_font_weight, prism_default_bot_face_eye_scale, prism_default_bot_face_eye_offset_x, prism_default_bot_face_eye_offset_y, prism_default_bot_face_eye_rotation_deg, prism_default_bot_face_eye_count, prism_default_bot_face_mouth_scale, prism_default_bot_face_mouth_offset_x, prism_default_bot_face_mouth_offset_y, prism_default_bot_face_mouth_rotation_deg, prism_default_bot_face_blink_bar, prism_default_bot_face_blink_count, prism_default_bot_face_blink_scale, prism_default_bot_face_blink_offset_x, prism_default_bot_face_blink_offset_y, prism_default_bot_face_blink_rotation_deg, prism_default_bot_face_thinking_frames, prism_default_bot_face_thinking_scale, prism_default_bot_face_thinking_offset_x, prism_default_bot_face_thinking_offset_y, prism_default_bot_audio_voice_profile, prism_default_bot_temperature, prism_default_bot_max_tokens, prism_default_bot_top_p, prism_default_bot_top_k, prism_default_bot_repetition_penalty, prism_default_llm_model, prism_image_tool_llm_model, prism_refract_local_model, prism_refract_online_model, dev_memories_enabled, dev_memories_text, openai_key_ciphertext, openai_key_iv, openai_key_tag, anthropic_key_ciphertext, anthropic_key_iv, anthropic_key_tag, ollama_cloud_key_ciphertext, ollama_cloud_key_iv, ollama_cloud_key_tag, elevenlabs_key_ciphertext, elevenlabs_key_iv, elevenlabs_key_tag, brave_search_key_ciphertext, brave_search_key_iv, brave_search_key_tag, voice_mode, voice_effects_enabled, voice_volume, operating_system_voices_enabled, english_voice_engine, default_system_voice_name, default_elevenlabs_voice_id, elevenlabs_voice_bank, elevenlabs_voice_model, elevenlabs_voice_collection_id, zen_player_voice_enabled, player_audio_voice_profile, player_name_pronunciation, created_at, last_active_at FROM users WHERE id = ?",
     )
     .get(userId) as UserDbRow | undefined;
   if (!row) {
@@ -3975,6 +4043,26 @@ function getUserRow(userId: string): UserDbRow {
     row.preferred_provider === "local"
       ? row.prism_local_llm_model
       : row.prism_cloud_llm_model?.trim() || row.prism_local_llm_model;
+  return row;
+}
+
+type ModelPreparationUserRow = Pick<
+  UserDbRow,
+  | "preferred_local_model"
+  | "secondary_ollama_host"
+  | "experimental_dual_ollama_enabled"
+>;
+
+function getModelPreparationUserRow(userId: string): ModelPreparationUserRow {
+  const row = db
+    .prepare(
+      `SELECT preferred_local_model, secondary_ollama_host,
+              experimental_dual_ollama_enabled
+         FROM users
+        WHERE id = ?`,
+    )
+    .get(userId) as ModelPreparationUserRow | undefined;
+  if (!row) throw new Error("User not found.");
   return row;
 }
 
@@ -4576,7 +4664,19 @@ function toUserProfile(row: UserDbRow): Record<string, unknown> {
 }
 
 function decryptUserKey(userId: string): Buffer {
-  const row = getUserRow(userId);
+  const row = db
+    .prepare(
+      `SELECT wrapped_user_key, wrapped_user_key_iv, wrapped_user_key_tag
+         FROM main.users
+        WHERE id = ?`,
+    )
+    .get(userId) as
+    | Pick<
+        UserDbRow,
+        "wrapped_user_key" | "wrapped_user_key_iv" | "wrapped_user_key_tag"
+      >
+    | undefined;
+  if (!row) throw new Error("User not found.");
   const userKeyBase64 = decryptText(
     {
       ciphertext: row.wrapped_user_key,
@@ -4589,6 +4689,7 @@ function decryptUserKey(userId: string): Buffer {
 }
 
 function sealLegacyDeveloperTranscriptsForOwner(userId: string): void {
+  if (developerTranscriptVaultMigrationIsCompleteV1({ db, userId })) return;
   const userKey = decryptUserKey(userId);
   try {
     migrateDeveloperTranscriptPayloadsForOwnerV1({ db, userId, userKey });
@@ -7540,13 +7641,11 @@ async function contextualTextRuntimeForUser<
     if (
       !explicitModelOverride ||
       resolved.autoRoute ||
-      storedReasoningEffort !== "xhigh" ||
-      capability.mode !== "native" ||
-      !capability.supportsMax
+      storedReasoningEffort !== modelReasoningEffortMaxUnlockLevel(capability)
     ) {
       throw new HttpError(
         400,
-        "Max reasoning requires an explicitly selected compatible native model with saved Effort set to XHigh.",
+        "Max reasoning requires an explicitly selected compatible native model with saved Effort set to its top ordinary level.",
       );
     }
   }
@@ -8537,7 +8636,9 @@ function createSession(userId: string): { token: string; expiresAt: string } {
 }
 
 function touchUserActivity(userId: string): void {
-  db.prepare("UPDATE users SET last_active_at = ? WHERE id = ?").run(
+  // `last_active_at` is public lifecycle metadata. Updating the physical table
+  // avoids opening and resealing every private account field on each request.
+  db.prepare("UPDATE main.users SET last_active_at = ? WHERE id = ?").run(
     new Date().toISOString(),
     userId,
   );
@@ -11827,6 +11928,36 @@ const DEBATE_MYSTERY_SCENE_REPAIR_ACTIONS_V1 = new Set<import("@localai/shared")
   "regenerate_ambience",
 ]);
 
+/** Resolves one explicit overhead redraw from the current Mansion Library
+ * identity. A declared-but-unreadable cover is never silently discarded. */
+function currentMansionOverheadGenerationInputV1(
+  userId: string,
+  userKey: Buffer,
+  bundleId: string,
+) {
+  const mansion = getDebateMysteryMansionBundleV2(db, userId, bundleId);
+  const identity =
+    resolveDebateMysteryMansionOverheadIdentityV1(mansion);
+  if (!identity.coverAssetId) {
+    return { mansion, identity, exteriorBytes: null };
+  }
+  try {
+    const exteriorBytes = getDebateMysteryMansionAssetFileV1(
+      db,
+      userKey,
+      userId,
+      bundleId,
+      identity.coverAssetId,
+    ).bytes;
+    return { mansion, identity, exteriorBytes };
+  } catch {
+    throw new HttpError(
+      409,
+      "The current Library cover could not be read. PRISM kept the existing overhead; restore or change the cover before redrawing.",
+    );
+  }
+}
+
 async function repairDebateMysterySceneV1(args: {
   userId: string;
   sessionId: string;
@@ -11839,6 +11970,8 @@ async function repairDebateMysterySceneV1(args: {
   expectedRevision?: number;
   /** For set_evidence_emoji: the player's chosen symbol. */
   emoji?: unknown;
+  /** For align_exterior_door: the player's normalized click on the cover. */
+  entryTarget?: unknown;
   /** For refresh_room_lights previews: receives what each detection pass saw. */
   detectionTrace?: RoomLightDetectionTraceV1;
   /** For generate_map_plan: which deck to draw. */
@@ -11889,6 +12022,65 @@ async function repairDebateMysterySceneV1(args: {
       action: args.action, subjectId: args.subjectId, expectedRevision: args.expectedRevision,
     }, runtime);
   }
+  const state = session.formatState;
+  if (args.action === "align_exterior_door") {
+    const entryTarget = normalizeDebateMysteryExteriorEntryTargetV1(args.entryTarget);
+    if (!entryTarget) {
+      throw new HttpError(
+        400,
+        "Click the visible exterior to place its entrance.",
+      );
+    }
+    const subjectId = DEBATE_MYSTERY_MANSION_EXTERIOR_SUBJECT_ID_V1;
+    const snapshots = snapshotDebateMysteryAssetsForSceneRepairV1(
+      db,
+      args.userId,
+      args.sessionId,
+      "room",
+      [subjectId],
+    );
+    try {
+      if (!getDebateMysterySealedAssetRefV1(
+        db,
+        args.userId,
+        args.sessionId,
+        "room",
+        subjectId,
+      )) {
+        setDebateMysteryAssetFallbackV1(db, {
+          userId: args.userId,
+          sessionId: args.sessionId,
+          kind: "room",
+          subjectId,
+          mimeType: "image/webp",
+          reason: "player-placed exterior entrance",
+        });
+      }
+      const calibrated = setDebateMysteryAssetEntryTargetV1(
+        db,
+        args.userId,
+        args.sessionId,
+        "room",
+        subjectId,
+        entryTarget,
+      );
+      return commitDebateMysterySceneRepairV1(db, args.userId, args.sessionId, {
+        action: args.action,
+        expectedRevision: args.expectedRevision,
+        assetSubjects: snapshots,
+        mansionExterior: calibrated,
+      });
+    } catch (error) {
+      restoreDebateMysteryAssetsFromSceneRepairV1(
+        db,
+        args.userId,
+        args.sessionId,
+        "room",
+        snapshots,
+      );
+      throw error;
+    }
+  }
   const audioAction = args.action === "regenerate_music" || args.action === "regenerate_ambience";
   const localPixelRepair = args.action === "reduce_evidence_magenta";
   if ((userBlocksOnlineCapabilities(getUserRow(args.userId)) || args.liveSelection?.responseMode === "local") && !localPixelRepair) {
@@ -11902,7 +12094,6 @@ async function repairDebateMysterySceneV1(args: {
   if (!audioAction && !localPixelRepair && !apiKey) {
     throw new HttpError(409, "An OpenAI image key is required for this repair.");
   }
-  const state = session.formatState;
   const room = args.roomId
     ? state.rooms.find((candidate) => candidate.id === args.roomId) ?? null
     : null;
@@ -12085,26 +12276,17 @@ async function repairDebateMysterySceneV1(args: {
     const layout = state.config.mansionSnapshot?.layoutV2;
     if (!bundleId || !layout) throw new HttpError(409, "This case has no venue layout to draw from.");
     if (layout.entities.length === 0) throw new HttpError(409, "This venue has no structure to draw.");
-    // The overhead is this venue's own exterior seen from above: prefer the case's
-    // establishing shot, then the bundle thumbnail, else describe it from the style.
-    let exteriorBytes: Buffer | null = null;
-    try {
-      exteriorBytes = getDebateMysteryAssetFileForPreparationV1(
-        db, userKey, args.userId, args.sessionId, "room", DEBATE_MYSTERY_MANSION_EXTERIOR_SUBJECT_ID_V1,
-      ).bytes;
-    } catch {
-      const thumbnailAssetId = state.config.mansionSnapshot?.presentation.thumbnailAssetId ?? null;
-      if (thumbnailAssetId) {
-        try {
-          exteriorBytes = getDebateMysteryMansionAssetFileV1(db, userKey, args.userId, bundleId, thumbnailAssetId).bytes;
-        } catch {
-          exteriorBytes = null;
-        }
-      }
-    }
+    // Explicit redraws use the current Library identity and cover. The case's
+    // frozen layout supplies only the geometry that the new plate must fit.
+    const { identity, exteriorBytes } =
+      currentMansionOverheadGenerationInputV1(
+        args.userId,
+        userKey,
+        bundleId,
+      );
     // One exterior view for the whole venue; every floor shows the same roof or deck.
     await generateDebateMysteryDeckPlanV1({
-      db, userKey, userId: args.userId, bundleId, layout, exteriorBytes, apiKey: apiKey!,
+      db, userKey, userId: args.userId, bundleId, layout, identity, exteriorBytes, apiKey: apiKey!,
       model: getUserRow(args.userId).preferred_openai_image_model,
       board: args.board,
     });
@@ -12173,45 +12355,6 @@ async function repairDebateMysterySceneV1(args: {
       action: args.action,
       subjectId: args.action === "regenerate_music" ? "music" : "ambience",
       mansionPresentation: freshSnapshot.presentation,
-    });
-  }
-
-  if (args.action === "align_exterior_door") {
-    const subjectId = DEBATE_MYSTERY_MANSION_EXTERIOR_SUBJECT_ID_V1;
-    const snapshots = snapshotDebateMysteryAssetsForSceneRepairV1(
-      db,
-      args.userId,
-      args.sessionId,
-      "room",
-      [subjectId],
-    );
-    const exterior = getDebateMysteryAssetFileForPreparationV1(
-      db,
-      userKey,
-      args.userId,
-      args.sessionId,
-      "room",
-      subjectId,
-    );
-    const profile = state.config.mansionSnapshot?.layoutV2?.venueProfile;
-    const target = await observeDebateMysteryExteriorDoorTargetV1({
-      apiKey: apiKey!,
-      bytes: exterior.bytes,
-      placeNoun: profile?.placeNoun ?? "mansion",
-      entryAction: profile?.presentation?.entryAction ?? "enter the venue",
-    });
-    const calibrated = setDebateMysteryAssetEntryTargetV1(
-      db,
-      args.userId,
-      args.sessionId,
-      "room",
-      subjectId,
-      target,
-    );
-    return commitDebateMysterySceneRepairV1(db, args.userId, args.sessionId, {
-      action: args.action,
-      assetSubjects: snapshots,
-      mansionExterior: calibrated,
     });
   }
 
@@ -13492,6 +13635,36 @@ function mapElevenLabsLibraryError(error: ElevenLabsVoiceError): HttpError {
 function buildRoutes(
   vaultMaintenanceGate: AccountVaultMaintenanceGate,
 ): RouteDefinition[] {
+  // The take follows the account's Speech Type: Premium (ONLINE, with a
+  // key) speaks in each character's ElevenLabs voice; English keeps the
+  // local engine. LOCAL never leaves this machine.
+  const mysteryPremiumTakesForActor = (
+    userId: string,
+    responseMode: string,
+  ): { apiKey: string; model: unknown } | null => {
+    const actor = getUserRow(userId);
+    if (
+      normalizeWhodunnitSpeechType(actor.debate_whodunnit_speech_type) !== "premium" ||
+      responseMode === "local"
+    ) return null;
+    const apiKey =
+      getElevenLabsApiKeyForUser(userId, decryptUserKey(userId)) ??
+      config.elevenLabsApiKey;
+    return apiKey ? { apiKey, model: actor.elevenlabs_voice_model } : null;
+  };
+  const mysteryVocalBankForPlayer = (
+    sessionId: string,
+    bank: Awaited<ReturnType<typeof prepareDebateMysteryVocalBankV2>>,
+  ): Record<string, Array<{ id: string; kind: string; url: string; durationMs: number }>> =>
+    Object.fromEntries(Object.entries(bank).map(([botId, entries]) => [
+      botId,
+      entries.map((entry) => ({
+        id: entry.id,
+        kind: entry.kind,
+        url: `/api/debates/${encodeURIComponent(sessionId)}/mystery-vocal/${encodeURIComponent(botId)}/${encodeURIComponent(entry.id)}`,
+        durationMs: entry.durationMs,
+      })),
+    ]));
   return [
     route("GET", "/api/setup/ollama-status", async (ctx) => {
       requireLoopback(ctx);
@@ -13639,8 +13812,9 @@ function buildRoutes(
           createdAt,
           initialPrivateValues: {
             theme: requestedTheme,
-            debate_whodunnit_text_voice_mode: "babble",
+            debate_whodunnit_text_voice_mode: "bottish",
             debate_whodunnit_speech_type: "english",
+            debate_whodunnit_perspective: "first_person",
             preferred_provider: "local",
             auto_memory: 1,
             prism_default_bot_face_mouth_coffee_pucker:
@@ -19786,13 +19960,12 @@ function buildRoutes(
         if (
           !explicitModelOverride ||
           resolvedAuto.autoRoute ||
-          storedReasoningEffort !== "xhigh" ||
-          maxCapability.mode !== "native" ||
-          !maxCapability.supportsMax
+          storedReasoningEffort !==
+            modelReasoningEffortMaxUnlockLevel(maxCapability)
         ) {
           throw new HttpError(
             400,
-            "Max reasoning requires an explicitly selected compatible native model with saved Effort set to XHigh.",
+            "Max reasoning requires an explicitly selected compatible native model with saved Effort set to its top ordinary level.",
           );
         }
       }
@@ -21826,8 +21999,8 @@ function buildRoutes(
     route("POST", "/api/debates/:id/mystery-scene-repair", async (ctx) => {
       const userId = requireAuth(ctx);
       const body = (ctx.body ?? {}) as Record<string, unknown>;
-      if (Object.keys(body).some((key) => !["action", "roomId", "subjectId", "artStyle", "emoji", "floor", "board", "expectedRevision", "preferredProvider", "modelOverride", "responseMode", "reasoningEffort", "turbo"].includes(key))) {
-        throw new HttpError(400, "Scene repair accepts only an action, room, found item, emoji, deck, and current art style.");
+      if (Object.keys(body).some((key) => !["action", "roomId", "subjectId", "artStyle", "emoji", "entryTarget", "floor", "board", "expectedRevision", "preferredProvider", "modelOverride", "responseMode", "reasoningEffort", "turbo"].includes(key))) {
+        throw new HttpError(400, "Scene repair accepts only an action, room, found item, emoji, entrance target, deck, and current art style.");
       }
       const action = typeof body.action === "string" &&
           DEBATE_MYSTERY_SCENE_REPAIR_ACTIONS_V1.has(
@@ -21836,6 +22009,9 @@ function buildRoutes(
         ? body.action as import("@localai/shared").DebateMysterySceneRepairActionV1
         : null;
       if (!action) throw new HttpError(400, "Choose a supported scene repair.");
+      if (body.entryTarget !== undefined && action !== "align_exterior_door") {
+        throw new HttpError(400, "Only entrance placement accepts an entrance target.");
+      }
       const session = await repairDebateMysterySceneV1({
         userId,
         sessionId: ctx.params.id,
@@ -21850,6 +22026,7 @@ function buildRoutes(
           : null,
         artStyle: body.artStyle === "upgraded" ? "upgraded" : "mosaic",
         emoji: body.emoji,
+        entryTarget: body.entryTarget,
         floor: typeof body.floor === "number" && Number.isInteger(body.floor) ? body.floor : undefined,
         board: parseMansionMapBoardCellsV1(body.board),
       });
@@ -22197,7 +22374,7 @@ function buildRoutes(
       });
     }),
     route("POST", "/api/debates/mystery-mansions/:id/prop-theme/generate", async (ctx) => {
-      const userId = requireAuth(ctx);
+      const userId = requireWritableInstalledMysteryMansion(ctx);
       const user = getUserRow(userId);
       const body = (ctx.body ?? {}) as Record<string, unknown>;
       if (body.responseMode !== "online" || userBlocksOnlineCapabilities(user)) {
@@ -22217,7 +22394,7 @@ function buildRoutes(
       });
     }),
     route("POST", "/api/debates/mystery-mansions/:id/prop-theme/:archetypeId/retry", async (ctx) => {
-      const userId = requireAuth(ctx);
+      const userId = requireWritableInstalledMysteryMansion(ctx);
       const user = getUserRow(userId);
       const body = (ctx.body ?? {}) as Record<string, unknown>;
       if (body.responseMode !== "online" || userBlocksOnlineCapabilities(user)) {
@@ -22249,7 +22426,7 @@ function buildRoutes(
     // Refract writes a fresh identity from the venue's style on the selected
     // lane, and stays LOCAL in LOCAL like every other written repair.
     route("POST", "/api/debates/mystery-mansions/:id/prop-theme/:archetypeId/refract-identity", async (ctx) => {
-      const userId = requireAuth(ctx);
+      const userId = requireWritableInstalledMysteryMansion(ctx);
       const body = (ctx.body ?? {}) as Record<string, unknown>;
       if (Object.keys(body).some((key) => !["responseMode", "preferredProvider", "modelOverride", "reasoningEffort", "turbo"].includes(key))) {
         throw new HttpError(400, "Refracting a prop identity accepts only the current routing.");
@@ -22273,7 +22450,7 @@ function buildRoutes(
     }),
     // Save writes a refracted identity; the client never composes one itself.
     route("PATCH", "/api/debates/mystery-mansions/:id/prop-theme/:archetypeId", async (ctx) => {
-      const userId = requireAuth(ctx);
+      const userId = requireWritableInstalledMysteryMansion(ctx);
       const body = (ctx.body ?? {}) as Record<string, unknown>;
       if (Object.keys(body).some((key) => key !== "displayName" && key !== "appearanceDescription")) {
         throw new HttpError(400, "A themed prop accepts only a name and a description.");
@@ -22289,9 +22466,11 @@ function buildRoutes(
       });
     }),
     route("POST", "/api/debates/mystery-mansions/:id/prop-theme/:archetypeId/accept-candidate", async (ctx) => {
-      const userId = requireAuth(ctx);
+      const userId = requireWritableInstalledMysteryMansion(ctx);
       const body = (ctx.body ?? {}) as Record<string, unknown>;
-      if (Object.keys(body).length > 0) throw new HttpError(400, "Using a redraw does not take client-authored fields.");
+      if (Object.keys(body).some((key) => key !== "responseMode")) {
+        throw new HttpError(400, "Using a redraw does not take client-authored fields.");
+      }
       const archetypeId = WHODUNNIT_PROP_ARCHETYPE_IDS_V1.find(
         (candidate) => candidate === ctx.params.archetypeId,
       );
@@ -22303,9 +22482,11 @@ function buildRoutes(
       });
     }),
     route("POST", "/api/debates/mystery-mansions/:id/prop-theme/:archetypeId/discard-candidate", async (ctx) => {
-      const userId = requireAuth(ctx);
+      const userId = requireWritableInstalledMysteryMansion(ctx);
       const body = (ctx.body ?? {}) as Record<string, unknown>;
-      if (Object.keys(body).length > 0) throw new HttpError(400, "Discarding a redraw does not take client-authored fields.");
+      if (Object.keys(body).some((key) => key !== "responseMode")) {
+        throw new HttpError(400, "Discarding a redraw does not take client-authored fields.");
+      }
       const archetypeId = WHODUNNIT_PROP_ARCHETYPE_IDS_V1.find(
         (candidate) => candidate === ctx.params.archetypeId,
       );
@@ -22317,7 +22498,7 @@ function buildRoutes(
       });
     }),
     route("POST", "/api/debates/mystery-mansions/:id/prop-theme/:archetypeId/regenerate", async (ctx) => {
-      const userId = requireAuth(ctx);
+      const userId = requireWritableInstalledMysteryMansion(ctx);
       const user = getUserRow(userId);
       const body = (ctx.body ?? {}) as Record<string, unknown>;
       if (body.responseMode !== "online" || userBlocksOnlineCapabilities(user)) {
@@ -22515,7 +22696,7 @@ function buildRoutes(
       json(ctx.res, 201, { ok: true, mansion });
     }),
     route("PATCH", "/api/debates/mystery-mansions/:id/topology", async (ctx) => {
-      const userId = requireAuth(ctx);
+      const userId = requireWritableInstalledMysteryMansion(ctx);
       const body = (ctx.body ?? {}) as Record<string, unknown>;
       const mansion = updateDebateMysteryMansionTopologyV1(
         db,
@@ -22526,7 +22707,7 @@ function buildRoutes(
       json(ctx.res, 200, { ok: true, mansion });
     }),
     route("POST", "/api/debates/mystery-mansions/:id/room-art/:roomId/generate", async (ctx) => {
-      const userId = requireAuth(ctx);
+      const userId = requireWritableInstalledMysteryMansion(ctx);
       const body = (ctx.body ?? {}) as Record<string, unknown>;
       if (Object.keys(body).some((key) => key !== "responseMode")) {
         throw new HttpError(400, "Mansion room art accepts only the current response mode.");
@@ -22553,7 +22734,7 @@ function buildRoutes(
       });
     }),
     route("POST", "/api/debates/mystery-mansions/:id/room-art/:roomId/accept", async (ctx) => {
-      const userId = requireAuth(ctx);
+      const userId = requireWritableInstalledMysteryMansion(ctx);
       const body = (ctx.body ?? {}) as Record<string, unknown>;
       if (Object.keys(body).length > 0) {
         throw new HttpError(400, "Accepting room art does not take client-authored fields.");
@@ -22594,7 +22775,7 @@ function buildRoutes(
       });
     }),
     route("POST", "/api/debates/mystery-mansions/:id/room-art/:roomId/discard", async (ctx) => {
-      const userId = requireAuth(ctx);
+      const userId = requireWritableInstalledMysteryMansion(ctx);
       const body = (ctx.body ?? {}) as Record<string, unknown>;
       if (Object.keys(body).length > 0) {
         throw new HttpError(400, "Discarding room art does not take client-authored fields.");
@@ -22606,7 +22787,7 @@ function buildRoutes(
       });
     }),
     route("POST", "/api/debates/mystery-mansions/:id/room-art/:roomId/regenerate", async (ctx) => {
-      const userId = requireAuth(ctx);
+      const userId = requireWritableInstalledMysteryMansion(ctx);
       const body = (ctx.body ?? {}) as Record<string, unknown>;
       if (Object.keys(body).length > 0) {
         throw new HttpError(400, "Regenerating a room asset does not take client-authored fields.");
@@ -22622,7 +22803,7 @@ function buildRoutes(
     // author never has to enter a case to get what the field tools offer.
     // Results are draft-only: the Venue Editor saves them with the venue plan.
     route("POST", "/api/debates/mystery-mansions/:id/room-art/:roomId/detect-lights", async (ctx) => {
-      const userId = requireAuth(ctx);
+      const userId = requireWritableInstalledMysteryMansion(ctx);
       const body = (ctx.body ?? {}) as Record<string, unknown>;
       if (Object.keys(body).length > 0) {
         throw new HttpError(400, "Light detection does not take client-authored fields.");
@@ -22651,7 +22832,7 @@ function buildRoutes(
       json(ctx.res, 200, { ok: true, lights });
     }),
     route("POST", "/api/debates/mystery-mansions/:id/room-art/:roomId/detect-anchors", async (ctx) => {
-      const userId = requireAuth(ctx);
+      const userId = requireWritableInstalledMysteryMansion(ctx);
       const body = (ctx.body ?? {}) as Record<string, unknown>;
       if (Object.keys(body).length > 0) {
         throw new HttpError(400, "Anchor detection does not take client-authored fields.");
@@ -22684,8 +22865,135 @@ function buildRoutes(
       });
       json(ctx.res, 200, { ok: true, placementAnchors: observed.placementAnchors ?? [] });
     }),
-    route("POST", "/api/debates/mystery-mansions/:id/overhead/generate", async (ctx) => {
+    route("POST", "/api/debates/mystery-mansions/:id/room-names", async (ctx) => {
       const userId = requireAuth(ctx);
+      const body = (ctx.body ?? {}) as Record<string, unknown>;
+      if (Object.keys(body).some((key) => key !== "requests" && key !== "responseMode")) {
+        throw new HttpError(400, "Naming rooms accepts only the blocks to name and the current response mode.");
+      }
+      const mansion = getDebateMysteryMansionBundleV2(db, userId, ctx.params.id);
+      const layout = mansion.layoutV2;
+      if (!layout) throw new HttpError(409, "This venue has no layout to name rooms in.");
+      const byId = new Map(layout.entities.map((entity) => [entity.id, entity]));
+      const requests: MysteryRoomNameRequestV1[] = (Array.isArray(body.requests) ? body.requests : [])
+        .slice(0, 24)
+        .flatMap((value): MysteryRoomNameRequestV1[] => {
+          const candidate = (value ?? {}) as Record<string, unknown>;
+          const entity = typeof candidate.id === "string" ? byId.get(candidate.id) : undefined;
+          if (!entity || entity.kind === "corridor") return [];
+          const footprint = entity.kind === "room"
+            ? debateMysteryRoomFootprint(entity.templateId)
+            : { width: entity.width, height: entity.height };
+          return [{
+            id: entity.id,
+            kind: entity.kind === "room" ? "room" : "side",
+            size: mysterySideRoomSizeForAreaV1(footprint.width * footprint.height),
+            ...(entity.kind === "room" ? { templateId: entity.templateId, currentName: entity.name } : {}),
+            ...(entity.kind === "infill" && entity.name ? { currentName: entity.name } : {}),
+          }];
+        });
+      if (!requests.length) throw new HttpError(400, "Name at least one room or side room.");
+      const requestedIds = new Set(requests.map((request) => request.id));
+      // Every other name already on the map, so a suggestion never repeats one.
+      const takenNames = layout.entities.flatMap((entity) => {
+        if (requestedIds.has(entity.id)) return [];
+        if (entity.kind === "room") return [entity.name];
+        return entity.kind === "infill" && entity.name ? [entity.name] : [];
+      });
+      const profile = layout.venueProfile;
+      const namer = createMysterySideRoomNamerV1({
+        seed: `${mansion.id}:${randomUUID()}`,
+        archetype: profile?.intent?.archetype ?? null,
+        kind: profile?.kind ?? null,
+      });
+      const fallback = (request: MysteryRoomNameRequestV1): string =>
+        request.kind === "side"
+          ? namer(request.size === "tiny" ? 1 : request.size === "small" ? 2 : request.size === "medium" ? 4 : 6)
+          : request.currentName?.trim() || namer(6);
+      let parsed: unknown = null;
+      try {
+        const user = getUserRow(userId);
+        const requestedResponseMode = body.responseMode === "local" ? "local" : "online";
+        const runtime = await contextualTextRuntimeForUser({
+          userId,
+          user,
+          requestedResponseMode,
+          requestedProvider: requestedResponseMode === "local" ? "local" : undefined,
+          routingContext: {
+            surface: "whodunnit",
+            inputText: profile?.environmentSummary ?? mansion.name,
+            outputTokens: 500,
+            structuredOutput: true,
+          },
+        });
+        const provider = selectProvider(
+          runtime.provider,
+          runtime.openAiApiKey,
+          user.secondary_ollama_host,
+          runtime.anthropicApiKey,
+          runtime.ollamaCloudApiKey,
+        );
+        const response = await provider.generateResponse([
+          {
+            role: "system",
+            content: [
+              "Name spaces inside one murder-mystery venue. Return JSON only, shaped {\"names\":[{\"id\",\"name\"}]}.",
+              "Every name must belong to this exact setting and era. Never borrow vocabulary from a different kind of place.",
+              "Size the name to the space: tiny is a closet or locker, small a store or office, medium a working room, large a hall or bay.",
+              "kind \"side\" is an ordinary space nobody enters during the case. kind \"room\" is a real room of the case being renamed to this venue's own words; keep its purpose recognizable.",
+              "Never reuse a name from takenNames, and never repeat a name within your reply.",
+              "No case facts, victims, suspects, or clues. Two to four words each.",
+            ].join("\n"),
+          },
+          {
+            role: "user",
+            content: JSON.stringify({
+              venue: {
+                title: mansion.name,
+                kind: profile?.kindLabel ?? mansion.houseStyle?.label ?? "venue",
+                placeNoun: profile?.placeNoun ?? "building",
+                era: profile?.intent?.era ?? "unspecified",
+                setting: profile?.environmentSummary ?? "",
+              },
+              takenNames,
+              requests: requests.map((request) => ({
+                id: request.id,
+                kind: request.kind,
+                size: request.size,
+                ...(request.templateId ? { standsInFor: request.templateId } : {}),
+                ...(request.currentName ? { currentName: request.currentName } : {}),
+              })),
+            }),
+          },
+        ], {
+          model: runtime.model,
+          reasoningEffort: runtime.reasoningEffort,
+          turbo: runtime.turbo,
+          temperature: 0.9,
+          maxTokens: 500,
+          jsonMode: true,
+          usagePurpose: "chat_reply",
+          allowFinalLocalFallback: true,
+          signal: AbortSignal.timeout(requestedResponseMode === "online" ? 30_000 : 20_000),
+          generationWork: {
+            workflow: "whodunnit_venue_room_names",
+            stage: "name",
+            privacyMode: runtime.responseMode,
+            outputClass: "connective",
+          },
+        });
+        parsed = JSON.parse(response);
+      } catch {
+        // The venue's own catalog is the bounded fallback below.
+      }
+      ctx.res.setHeader("cache-control", "private, no-store");
+      json(ctx.res, 200, {
+        ok: true,
+        names: normalizeMysteryRoomNameSuggestionsV1(parsed, requests, takenNames, fallback),
+      });
+    }),
+    route("POST", "/api/debates/mystery-mansions/:id/overhead/generate", async (ctx) => {
+      const userId = requireWritableInstalledMysteryMansion(ctx);
       const body = (ctx.body ?? {}) as Record<string, unknown>;
       if (Object.keys(body).some((key) => key !== "responseMode")) {
         throw new HttpError(400, "Drawing the overhead plate accepts only the current response mode.");
@@ -22696,22 +23004,16 @@ function buildRoutes(
       if (userBlocksOnlineCapabilities(user) || body.responseMode === "local" || !apiKey) {
         throw new HttpError(409, "Drawing the overhead plate needs ONLINE and an OpenAI image key.");
       }
-      const mansion = getDebateMysteryMansionBundleV2(db, userId, ctx.params.id);
+      const { mansion, identity, exteriorBytes } =
+        currentMansionOverheadGenerationInputV1(
+          userId,
+          userKey,
+          ctx.params.id,
+        );
       const layout = mansion.layoutV2;
       if (!layout) throw new HttpError(409, "This venue has no layout to draw from.");
-      // The overhead is this venue seen from above: the library cover is the
-      // establishing shot, else PRISM describes the structure from its style.
-      let exteriorBytes: Buffer | null = null;
-      const thumbnailAssetId = mansion.library?.overrides.thumbnailAssetId ?? mansion.library?.defaults.thumbnailAssetId ?? null;
-      if (thumbnailAssetId) {
-        try {
-          exteriorBytes = getDebateMysteryMansionAssetFileV1(db, userKey, userId, ctx.params.id, thumbnailAssetId).bytes;
-        } catch {
-          exteriorBytes = null;
-        }
-      }
       await generateDebateMysteryDeckPlanV1({
-        db, userKey, userId, bundleId: ctx.params.id, layout, exteriorBytes, apiKey,
+        db, userKey, userId, bundleId: ctx.params.id, layout, identity, exteriorBytes, apiKey,
         model: user.preferred_openai_image_model,
       });
       json(ctx.res, 201, {
@@ -22720,7 +23022,7 @@ function buildRoutes(
       });
     }),
     route("PATCH", "/api/debates/mystery-mansions/:id", async (ctx) => {
-      const userId = requireAuth(ctx);
+      const userId = requireWritableInstalledMysteryMansion(ctx);
       const body = (ctx.body ?? {}) as Record<string, unknown>;
       const mansion = await updateDebateMysteryMansionLibraryV1(
         db,
@@ -22765,11 +23067,11 @@ function buildRoutes(
       ctx.res.end(bytes);
     }),
     route("POST", "/api/debates/mystery-mansions/:id/theme/generate", async (ctx) => {
-      const userId = requireAuth(ctx);
+      const userId = requireWritableInstalledMysteryMansion(ctx);
       const body = (ctx.body ?? {}) as Record<string, unknown>;
-      const allowedKeys = new Set(["responseMode"]);
+      const allowedKeys = new Set(["responseMode", "direction"]);
       if (Object.keys(body).some((key) => !allowedKeys.has(key))) {
-        throw new HttpError(400, "Mansion music synthesis accepts only the current response mode.");
+        throw new HttpError(400, "Mansion music synthesis accepts only the current response mode and a Refract direction.");
       }
       const responseMode = body.responseMode === "online" ? "online" : "local";
       const userKey = decryptUserKey(userId);
@@ -22779,6 +23081,7 @@ function buildRoutes(
         userId,
         bundleId: ctx.params.id,
         responseMode,
+        direction: normalizePrismRefractDirection(body.direction),
         apiKey: getElevenLabsApiKeyForUser(userId, userKey) ?? config.elevenLabsApiKey ?? null,
       });
       json(ctx.res, 201, {
@@ -22788,12 +23091,12 @@ function buildRoutes(
       });
     }),
     route("POST", "/api/debates/mystery-mansions/:id/theme/accept", async (ctx) => {
-      const userId = requireAuth(ctx);
+      const userId = requireWritableInstalledMysteryMansion(ctx);
       acceptDebateMysteryMansionThemeV1(db, userId, ctx.params.id);
       json(ctx.res, 200, { ok: true, mansion: getDebateMysteryMansionBundleV2(db, userId, ctx.params.id) });
     }),
     route("POST", "/api/debates/mystery-mansions/:id/theme/validate", async (ctx) => {
-      const userId = requireAuth(ctx);
+      const userId = requireWritableInstalledMysteryMansion(ctx);
       const body = (ctx.body ?? {}) as Record<string, unknown>;
       if (Object.keys(body).some((key) => key !== "loop")) {
         throw new HttpError(400, "Mansion music validation accepts only decoded loop measurements.");
@@ -22811,20 +23114,20 @@ function buildRoutes(
       });
     }),
     route("POST", "/api/debates/mystery-mansions/:id/theme/discard", async (ctx) => {
-      const userId = requireAuth(ctx);
+      const userId = requireWritableInstalledMysteryMansion(ctx);
       discardDebateMysteryMansionThemeV1(db, userId, ctx.params.id);
       json(ctx.res, 200, { ok: true, mansion: getDebateMysteryMansionBundleV2(db, userId, ctx.params.id) });
     }),
     route("POST", "/api/debates/mystery-mansions/:id/theme/undo", async (ctx) => {
-      const userId = requireAuth(ctx);
+      const userId = requireWritableInstalledMysteryMansion(ctx);
       undoDebateMysteryMansionThemeV1(db, userId, ctx.params.id);
       json(ctx.res, 200, { ok: true, mansion: getDebateMysteryMansionBundleV2(db, userId, ctx.params.id) });
     }),
     route("POST", "/api/debates/mystery-mansions/:id/atmosphere/generate", async (ctx) => {
-      const userId = requireAuth(ctx);
+      const userId = requireWritableInstalledMysteryMansion(ctx);
       const body = (ctx.body ?? {}) as Record<string, unknown>;
-      if (Object.keys(body).some((key) => key !== "responseMode")) {
-        throw new HttpError(400, "Mansion atmosphere synthesis accepts only the current response mode.");
+      if (Object.keys(body).some((key) => key !== "responseMode" && key !== "direction")) {
+        throw new HttpError(400, "Mansion atmosphere synthesis accepts only the current response mode and a Refract direction.");
       }
       const responseMode = body.responseMode === "online" ? "online" : "local";
       const userKey = decryptUserKey(userId);
@@ -22834,6 +23137,7 @@ function buildRoutes(
         userId,
         bundleId: ctx.params.id,
         responseMode,
+        direction: normalizePrismRefractDirection(body.direction),
         apiKey: getElevenLabsApiKeyForUser(userId, userKey) ?? config.elevenLabsApiKey ?? null,
       });
       json(ctx.res, 201, {
@@ -22843,27 +23147,27 @@ function buildRoutes(
       });
     }),
     route("POST", "/api/debates/mystery-mansions/:id/atmosphere/accept", async (ctx) => {
-      const userId = requireAuth(ctx);
+      const userId = requireWritableInstalledMysteryMansion(ctx);
       acceptDebateMysteryMansionAtmosphereV1(db, userId, ctx.params.id);
       json(ctx.res, 200, { ok: true, mansion: getDebateMysteryMansionBundleV2(db, userId, ctx.params.id) });
     }),
     route("POST", "/api/debates/mystery-mansions/:id/atmosphere/discard", async (ctx) => {
-      const userId = requireAuth(ctx);
+      const userId = requireWritableInstalledMysteryMansion(ctx);
       discardDebateMysteryMansionAtmosphereV1(db, userId, ctx.params.id);
       json(ctx.res, 200, { ok: true, mansion: getDebateMysteryMansionBundleV2(db, userId, ctx.params.id) });
     }),
     route("POST", "/api/debates/mystery-mansions/:id/atmosphere/undo", async (ctx) => {
-      const userId = requireAuth(ctx);
+      const userId = requireWritableInstalledMysteryMansion(ctx);
       undoDebateMysteryMansionAtmosphereV1(db, userId, ctx.params.id);
       json(ctx.res, 200, { ok: true, mansion: getDebateMysteryMansionBundleV2(db, userId, ctx.params.id) });
     }),
     // Venue effects pack: one short clip per Whodunnit cue. Synthesis lands as
     // a candidate; accept, discard, and undo mirror music and atmosphere.
     route("POST", "/api/debates/mystery-mansions/:id/sfx/:cueId/generate", async (ctx) => {
-      const userId = requireAuth(ctx);
+      const userId = requireWritableInstalledMysteryMansion(ctx);
       const body = (ctx.body ?? {}) as Record<string, unknown>;
-      if (Object.keys(body).some((key) => key !== "responseMode")) {
-        throw new HttpError(400, "Venue effect synthesis accepts only the current response mode.");
+      if (Object.keys(body).some((key) => key !== "responseMode" && key !== "direction")) {
+        throw new HttpError(400, "Venue effect synthesis accepts only the current response mode and a Refract direction.");
       }
       if (!isWhodunnitSfxCueIdV1(ctx.params.cueId)) throw new HttpError(404, "That effect cue does not exist.");
       const responseMode = body.responseMode === "online" ? "online" : "local";
@@ -22875,6 +23179,7 @@ function buildRoutes(
         bundleId: ctx.params.id,
         cueId: ctx.params.cueId,
         responseMode,
+        direction: normalizePrismRefractDirection(body.direction),
         apiKey: getElevenLabsApiKeyForUser(userId, userKey) ?? config.elevenLabsApiKey ?? null,
       });
       json(ctx.res, 201, {
@@ -22884,19 +23189,19 @@ function buildRoutes(
       });
     }),
     route("POST", "/api/debates/mystery-mansions/:id/sfx/:cueId/accept", async (ctx) => {
-      const userId = requireAuth(ctx);
+      const userId = requireWritableInstalledMysteryMansion(ctx);
       if (!isWhodunnitSfxCueIdV1(ctx.params.cueId)) throw new HttpError(404, "That effect cue does not exist.");
       acceptDebateMysteryMansionSfxCueV1(db, userId, ctx.params.id, ctx.params.cueId);
       json(ctx.res, 200, { ok: true, mansion: getDebateMysteryMansionBundleV2(db, userId, ctx.params.id) });
     }),
     route("POST", "/api/debates/mystery-mansions/:id/sfx/:cueId/discard", async (ctx) => {
-      const userId = requireAuth(ctx);
+      const userId = requireWritableInstalledMysteryMansion(ctx);
       if (!isWhodunnitSfxCueIdV1(ctx.params.cueId)) throw new HttpError(404, "That effect cue does not exist.");
       discardDebateMysteryMansionSfxCueV1(db, userId, ctx.params.id, ctx.params.cueId);
       json(ctx.res, 200, { ok: true, mansion: getDebateMysteryMansionBundleV2(db, userId, ctx.params.id) });
     }),
     route("POST", "/api/debates/mystery-mansions/:id/sfx/:cueId/undo", async (ctx) => {
-      const userId = requireAuth(ctx);
+      const userId = requireWritableInstalledMysteryMansion(ctx);
       if (!isWhodunnitSfxCueIdV1(ctx.params.cueId)) throw new HttpError(404, "That effect cue does not exist.");
       undoDebateMysteryMansionSfxCueV1(db, userId, ctx.params.id, ctx.params.cueId);
       json(ctx.res, 200, { ok: true, mansion: getDebateMysteryMansionBundleV2(db, userId, ctx.params.id) });
@@ -23124,7 +23429,13 @@ function buildRoutes(
       const frozen = getDebateSession(db, userId, ctx.params.id);
       if (frozen.formatState.format === "whodunnit" && frozen.formatState.version === 2) {
         let runtime: DebateAiRuntime | null = null;
-        if (body.action === "advance_room_introduction") {
+        if (
+          body.action === "advance_room_introduction" ||
+          body.action === "observe_interest" ||
+          body.action === "talk" ||
+          body.action === "present_to_suspect" ||
+          body.action === "press_statement"
+        ) {
           try {
             runtime = await debateAiRuntimeForUser(
               userId,
@@ -23136,10 +23447,29 @@ function buildRoutes(
               debateAutoRoutingContext(frozen, body),
             );
           } catch {
-            // The first room line is optional polish. Provider configuration
+            // Persona performance is optional polish. Provider configuration
             // or availability must never block the frozen canonical line.
           }
         }
+        // The Speech picker decides which take is prepared while the speaker
+        // thinks: Premium (ONLINE, with a key) synthesizes the ElevenLabs take
+        // during the action; English keeps the local clip.
+        const actor = getUserRow(userId);
+        const premiumTakes =
+          normalizeWhodunnitSpeechType(actor.debate_whodunnit_speech_type) === "premium" &&
+          frozen.responseMode !== "local"
+            ? (() => {
+                const apiKey =
+                  getElevenLabsApiKeyForUser(userId, decryptUserKey(userId)) ??
+                  config.elevenLabsApiKey;
+                return apiKey ? { apiKey, model: actor.elevenlabs_voice_model } : null;
+              })()
+            : null;
+        // First person keeps the investigator off-stage: their Talk question
+        // is a caption, so only the witness's answer is prepared.
+        const perspective = normalizeWhodunnitInvestigationPerspective(
+          actor.debate_whodunnit_perspective,
+        );
         const session = await runWithUsageSession(
           {
             db,
@@ -23154,6 +23484,7 @@ function buildRoutes(
             ctx.params.id,
             body as unknown as Parameters<typeof applyDebateMysteryActionV2>[3],
             runtime,
+            { premiumTakes, perspective },
           ),
         );
         if (body.action !== "check_case") queueDebateMysteryV2RoomAssetBackground(userId, session.id);
@@ -23399,16 +23730,135 @@ function buildRoutes(
       const performance = getDebateMysterySpokenPerformanceV2(
         db, userId, ctx.params.id, ctx.params.lineId,
       );
-      json(ctx.res, 200, { ok: true, performance });
+      // A Premium take prepared while the speaker thought plays as-is; one
+      // still preparing behind the previous line is waited for, not missed.
+      await awaitMysteryLineAudioPreparationV2(userId, ctx.params.id, ctx.params.lineId);
+      const take = readDebateMysteryPremiumTakeV1(db, userId, ctx.params.id, performance);
+      json(ctx.res, 200, {
+        ok: true,
+        performance: {
+          ...performance,
+          preparedTake: take
+            ? {
+                url: `/api/debates/${encodeURIComponent(ctx.params.id)}/mystery-premium-take/${encodeURIComponent(ctx.params.lineId)}`,
+                alignment: take.alignment,
+                audioContentType: take.mimeType,
+                durationMs: take.durationMs,
+              }
+            : null,
+        },
+      });
+    }),
+    route("GET", "/api/debates/:id/mystery-premium-take/:lineId", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const performance = getDebateMysterySpokenPerformanceV2(
+        db, userId, ctx.params.id, ctx.params.lineId,
+      );
+      const take = readDebateMysteryPremiumTakeV1(db, userId, ctx.params.id, performance);
+      if (!take) throw new HttpError(404, "No prepared Premium take for this line.");
+      streamReplayFile(ctx, {
+        absolutePath: take.absolutePath,
+        contentType: take.mimeType,
+        sizeBytes: take.byteSize,
+      }, { range: true });
+    }),
+    route("GET", "/api/debates/:id/mystery-vocal-bank", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const frozen = getDebateSession(db, userId, ctx.params.id);
+      const premiumTakes = mysteryPremiumTakesForActor(userId, frozen.responseMode);
+      const bank = await prepareDebateMysteryVocalBankV2(db, userId, ctx.params.id, { premiumTakes })
+        .catch(() => ({}));
+      ctx.res.setHeader("cache-control", "private, no-store");
+      json(ctx.res, 200, { ok: true, vocalBank: mysteryVocalBankForPlayer(ctx.params.id, bank) });
+    }),
+    route("GET", "/api/debates/:id/mystery-vocal/:botId/:cueId", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const entry = readDebateMysteryVocalEntryV2(userId, ctx.params.id, ctx.params.botId, ctx.params.cueId);
+      if (!entry) throw new HttpError(404, "No prepared vocal cue for this voice.");
+      streamReplayFile(ctx, {
+        absolutePath: entry.absolutePath,
+        contentType: entry.mimeType,
+        sizeBytes: entry.byteSize,
+      }, { range: true });
+    }),
+    route("POST", "/api/debates/:id/mystery-arrival-line", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const frozen = getDebateSession(db, userId, ctx.params.id);
+      let runtime: DebateAiRuntime | null = null;
+      try {
+        runtime = await debateAiRuntimeForUser(
+          userId,
+          frozen.provider,
+          frozenDebateModelOverride(frozen),
+          frozen.responseMode,
+          frozen.generationChain,
+          frozen.autoCandidateAllowlist,
+          debateAutoRoutingContext(frozen, (ctx.body ?? {}) as Record<string, unknown>),
+        );
+      } catch {
+        // The words are flavour: a plain line stands in when no provider answers.
+      }
+      const premiumTakes = mysteryPremiumTakesForActor(userId, frozen.responseMode);
+      // The loading screen covers the arrival line and every cast voice's
+      // vocal cues together, so nothing records later, mid-scene.
+      const [line, vocalBank] = await runWithUsageSession(
+        { db, userId, privacyScope: "private", mode: "debate", surface: "debate" },
+        () => Promise.all([
+          prepareDebateMysteryArrivalLineV2(db, userId, ctx.params.id, runtime, { premiumTakes }),
+          prepareDebateMysteryVocalBankV2(db, userId, ctx.params.id, { premiumTakes }).catch(() => ({})),
+        ]),
+      );
+      ctx.res.setHeader("cache-control", "private, no-store");
+      json(ctx.res, 200, {
+        ok: true,
+        vocalBank: mysteryVocalBankForPlayer(ctx.params.id, vocalBank),
+        line: line
+          ? {
+              text: line.text,
+              audio: line.audio
+                ? {
+                    url: `/api/debates/${encodeURIComponent(ctx.params.id)}/mystery-arrival-line/audio?revision=${frozen.revision}`,
+                    contentType: line.audio.mimeType,
+                    durationMs: line.audio.durationMs,
+                  }
+                : null,
+            }
+          : null,
+      });
+    }),
+    route("GET", "/api/debates/:id/mystery-arrival-line/audio", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const audio = readDebateMysteryArrivalLineAudioV2(userId, ctx.params.id);
+      if (!audio) throw new HttpError(404, "No prepared arrival line for this case.");
+      streamReplayFile(ctx, {
+        absolutePath: audio.absolutePath,
+        contentType: audio.mimeType,
+        sizeBytes: audio.byteSize,
+      }, { range: true });
+    }),
+    route("POST", "/api/debates/:id/mystery-voices/enable", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const session = enableDebateMysteryVoicesV2(db, userId, ctx.params.id);
+      ctx.res.setHeader("cache-control", "private, no-store");
+      json(ctx.res, 200, { ok: true, session: debateSessionForPlayer(session) });
     }),
     route("GET", "/api/debates/:id/mystery-audio/:lineId", async (ctx) => {
       const userId = requireAuth(ctx);
-      const file = getDebateMysteryAudioClipV2(
+      const readClip = () => getDebateMysteryAudioClipV2(
         db,
         userId,
         ctx.params.id,
         ctx.params.lineId,
       );
+      let file: ReturnType<typeof readClip>;
+      try {
+        file = readClip();
+      } catch (error) {
+        // A missing clip is prepared right here rather than left silent.
+        if (!(error instanceof HttpError) || error.statusCode !== 404) throw error;
+        await prepareDebateMysteryLineAudioV2(db, userId, ctx.params.id, ctx.params.lineId);
+        file = readClip();
+      }
       streamReplayFile(ctx, {
         absolutePath: file.absolutePath,
         contentType: file.mimeType,
@@ -34437,6 +34887,9 @@ function buildRoutes(
               punctuationPacing:
                 localDelivery.localEngine.resolved === "instant" &&
                 !localDelivery.usingSystemVoice,
+              minimumChunkTokens: signalMessageId
+                ? SIGNAL_LOCAL_VOICE_MINIMUM_CHUNK_TOKENS
+                : undefined,
               binaryFrames: binaryVoiceChunkStreamRequested,
             });
             return;
@@ -34544,6 +34997,9 @@ function buildRoutes(
               punctuationPacing:
                 localDelivery.localEngine.resolved === "instant" &&
                 !localDelivery.usingSystemVoice,
+              minimumChunkTokens: signalMessageId
+                ? SIGNAL_LOCAL_VOICE_MINIMUM_CHUNK_TOKENS
+                : undefined,
               binaryFrames: binaryVoiceChunkStreamRequested,
             });
             return;
@@ -34593,6 +35049,17 @@ function buildRoutes(
       const providerVoiceSeed = elevenLabsVoiceIsolationSeed(
         sourceBotId ?? request.seed ?? request.messageId ?? voiceId,
       );
+      // Projecting the authored laugh rewrites the Premium carrier, so the
+      // censor ranges and provider alignment indices already published for
+      // the unprojected string would land on the wrong characters. Both
+      // paths keep the provider's own laughter rather than mis-time a take.
+      const premiumSpeechText =
+        boundary.censorRanges.length === 0 && !request.includeAlignment
+          ? premiumLaughProjectedText(
+              boundary.elevenLabsText,
+              boundary.profile,
+            )
+          : boundary.elevenLabsText;
       try {
         if (request.includeAlignment) {
           const timestamped = await requestElevenLabsSpeechWithTimestamps({
@@ -34650,7 +35117,7 @@ function buildRoutes(
           privacyMode: "online",
           voiceId,
           model: normalizeElevenLabsTtsModel(user.elevenlabs_voice_model),
-          text: boundary.elevenLabsText,
+          text: premiumSpeechText,
           profile: boundary.profile,
           deliveryMood: request.deliveryMood,
           protectedPhrases: speechprintProtectedPhrases,
@@ -34757,6 +35224,9 @@ function buildRoutes(
                 punctuationPacing:
                   localDelivery.localEngine.resolved === "instant" &&
                   !localDelivery.usingSystemVoice,
+                minimumChunkTokens: signalMessageId
+                  ? SIGNAL_LOCAL_VOICE_MINIMUM_CHUNK_TOKENS
+                  : undefined,
                 binaryFrames: binaryVoiceChunkStreamRequested,
               });
               return;
@@ -35424,6 +35894,9 @@ function buildRoutes(
           debateWhodunnitSpeechType: normalizeWhodunnitSpeechType(
             user.debate_whodunnit_speech_type,
           ),
+          debateWhodunnitPerspective: normalizeWhodunnitInvestigationPerspective(
+            user.debate_whodunnit_perspective,
+          ),
           psychicModeEnabled: user.psychic_mode_enabled === 1,
           autoModeEnabled: user.auto_switch_model === 1,
           autoFallbackChain: parseStoredAutoFallbackChain(
@@ -35704,7 +36177,6 @@ function buildRoutes(
     }),
     route("POST", "/api/models/prepare", async (ctx) => {
       const userId = requireAuth(ctx);
-      const user = getUserRow(userId);
       const body = ctx.body as Record<string, unknown>;
       const provider =
         body.provider === "local" ||
@@ -35743,6 +36215,8 @@ function buildRoutes(
         typeof body.liveSessionId === "string"
           ? body.liveSessionId.trim()
           : "";
+      let user: ModelPreparationUserRow =
+        getModelPreparationUserRow(userId);
       let requestedModel =
         (typeof body.model === "string" ? body.model.trim() : "") ||
         user.preferred_local_model?.trim() ||
@@ -35751,9 +36225,11 @@ function buildRoutes(
         // Ownership validation also prevents arbitrary clients from reserving
         // a lane under another account's session id.
         getCoffeeConversationTranscript(db, userId, liveSessionId);
+        const coffeeUser = getUserRow(userId);
+        user = coffeeUser;
         const runtime = await contextualTextRuntimeForUser({
           userId,
-          user,
+          user: coffeeUser,
           requestedProvider: provider,
           requestedResponseMode: body.responseMode,
           modelOverride: body.model,
@@ -36172,6 +36648,9 @@ function buildRoutes(
             debateWhodunnitSpeechType: normalizeWhodunnitSpeechType(
               committedUser.debate_whodunnit_speech_type,
             ),
+            debateWhodunnitPerspective: normalizeWhodunnitInvestigationPerspective(
+              committedUser.debate_whodunnit_perspective,
+            ),
             hasOpenAiApiKey: Boolean(committedUser.openai_key_ciphertext),
             hasAnthropicApiKey: Boolean(committedUser.anthropic_key_ciphertext),
             hasOllamaCloudApiKey: Boolean(
@@ -36255,6 +36734,8 @@ function buildRoutes(
           user.debate_whodunnit_text_voice_mode,
         debateWhodunnitSpeechType:
           user.debate_whodunnit_speech_type,
+        debateWhodunnitPerspective:
+          user.debate_whodunnit_perspective,
         psychicModeEnabled: user.psychic_mode_enabled,
         autoSwitchModel: user.auto_switch_model,
         autoFallbackChain: user.auto_fallback_chain,
@@ -36410,7 +36891,7 @@ function buildRoutes(
         `
         UPDATE users
         SET display_name = ?, theme = ?, graphics_quality = ?, crt_focus = ?, typography_scale = ?, atmosphere_style = ?, hub_atmosphere_enabled = ?, startup_preference = ?, preferred_provider = ?, ephemeral_chat_provider_preferences = ?, preferred_image_provider = ?, provider_locked = ?, auto_memory = ?, composer_writing_assist = ?, hidden_bot_model_ids = ?, hidden_global_picker_model_ids = ?, hidden_comfyui_workflow_ids = ?, model_visibility_defaults_version = ?,
-            experimental_dual_ollama_enabled = ?, experimental_all_model_effort_enabled = ?, coffee_experimental_table_angle_enabled = ?, debate_whodunnit_reuse_synthesized_exhibits = ?, debate_whodunnit_text_voice_mode = ?, debate_whodunnit_speech_type = ?, psychic_mode_enabled = ?, auto_switch_model = ?, auto_fallback_chain = ?, online_auto_provider_bias = ?, online_auto_provider_weights = ?, online_auto_quality_posture = ?, preferred_local_model = ?, preferred_online_model = ?, lenient_local_image_fallback_model = ?, secondary_ollama_host = ?, comfyui_host = ?,
+            experimental_dual_ollama_enabled = ?, experimental_all_model_effort_enabled = ?, coffee_experimental_table_angle_enabled = ?, debate_whodunnit_reuse_synthesized_exhibits = ?, debate_whodunnit_text_voice_mode = ?, debate_whodunnit_speech_type = ?, debate_whodunnit_perspective = ?, psychic_mode_enabled = ?, auto_switch_model = ?, auto_fallback_chain = ?, online_auto_provider_bias = ?, online_auto_provider_weights = ?, online_auto_quality_posture = ?, preferred_local_model = ?, preferred_online_model = ?, lenient_local_image_fallback_model = ?, secondary_ollama_host = ?, comfyui_host = ?,
             preferred_local_image_model = ?, preferred_openai_image_model = ?, preferred_zen_wallpaper_local_image_model = ?, preferred_zen_wallpaper_openai_image_model = ?, preferred_home_atmosphere_image_model = ?, preferred_home_atmosphere_image_provider = ?, zen_wallpaper_opacity = ?, zen_wallpaper_text_mask_enabled = ?, zen_wallpaper_grayscale_enabled = ?, zen_wallpaper_blurred_edges_enabled = ?, zen_wallpaper_style_notes = ?,
             zen_session_idle_gap_ms = ?, zen_fresh_start_gap_ms = ?, zen_recent_context_messages = ?, zen_wallpaper_regen_message_interval = ?, zen_mood_sensitivity = ?, zen_canvas_typing_speed = ?, zen_message_font_min_px = ?, zen_message_font_max_px = ?, zen_ask_question_patience_enabled = ?, zen_ask_question_patience_ms = ?, zen_autonomy_enabled = ?, zen_persona_transition_choice = ?,
             comfyui_workflows = ?, prism_default_llm_model = ?, prism_cloud_llm_model = ?, prism_image_tool_llm_model = ?, text_model_display_names = ?,
@@ -36448,6 +36929,7 @@ function buildRoutes(
         next.debateWhodunnitReuseSynthesizedExhibits,
         next.debateWhodunnitTextVoiceMode,
         next.debateWhodunnitSpeechType,
+        next.debateWhodunnitPerspective,
         next.psychicModeEnabled,
         next.autoSwitchModel,
         next.autoFallbackChain,
@@ -36550,6 +37032,7 @@ function buildRoutes(
             next.debateWhodunnitReuseSynthesizedExhibits === 1,
           debateWhodunnitTextVoiceMode: next.debateWhodunnitTextVoiceMode,
           debateWhodunnitSpeechType: next.debateWhodunnitSpeechType,
+          debateWhodunnitPerspective: next.debateWhodunnitPerspective,
           psychicModeEnabled: next.psychicModeEnabled === 1,
           autoModeEnabled: next.autoSwitchModel === 1,
           autoFallbackChain: parseStoredAutoFallbackChain(
@@ -39670,13 +40153,12 @@ function buildRoutes(
         if (
           !explicitModelOverride ||
           resolved.autoRoute ||
-          storedReasoningEffort !== "xhigh" ||
-          resolvedEffortCapability.mode !== "native" ||
-          !resolvedEffortCapability.supportsMax
+          storedReasoningEffort !==
+            modelReasoningEffortMaxUnlockLevel(resolvedEffortCapability)
         ) {
           throw new HttpError(
             400,
-            "Max reasoning requires an explicitly selected compatible native model with saved Effort set to XHigh.",
+            "Max reasoning requires an explicitly selected compatible native model with saved Effort set to its top ordinary level.",
           );
         }
       }
@@ -42004,6 +42486,9 @@ if (process.env.PRISM_API_DISABLE_AUTOSTART !== "1") {
   for (const user of db.prepare("SELECT id FROM users").all() as Array<{
     id: string;
   }>) {
+    // Finish the one-time legacy scan before opening the listener. The desktop
+    // splash can honestly wait here; authenticated requests must stay lean.
+    sealLegacyDeveloperTranscriptsForOwner(user.id);
     try {
       reconcileAssetCleanupRecoveryForUser(db, user.id);
     } catch {

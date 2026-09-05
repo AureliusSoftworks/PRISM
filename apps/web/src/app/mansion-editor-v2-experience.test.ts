@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 
 const editorSource = readFileSync(new URL("./MansionEditorDialog.tsx", import.meta.url), "utf8");
+const overheadEditorSource = readFileSync(new URL("./MapOverheadEditorDialog.tsx", import.meta.url), "utf8");
 const mysteryCss = readFileSync(new URL("./debateMystery.module.css", import.meta.url), "utf8");
 const debateSource = readFileSync(new URL("./DebateExperience.tsx", import.meta.url), "utf8");
 
@@ -88,6 +89,18 @@ describe("Mansion Editor V2 experience", () => {
       editorSource,
       /function candidateAssetUrl[\s\S]{0,220}whodunnitMansionRoomArtUrl\(mansion\.id, assetId, "mosaic"\)/u,
     );
+  });
+
+  it("explains that an overhead redraw uses current Library identity and preserves rejected art", () => {
+    assert.match(editorSource, /current Library cover, title, description, and venue style/u);
+    assert.match(editorSource, /If the setting does not match, this plate stays/u);
+    assert.match(editorSource, /function mansionOverheadBoardTransformV1/u);
+    assert.match(editorSource, /MANSION_MAP_BOARD_V1/u);
+    assert.match(editorSource, /left: overheadBoardTransform\.x\(MANSION_OVERHEAD_FRAME_V1\.left\)/u);
+    assert.match(editorSource, /width: overheadBoardTransform\.width\(MANSION_OVERHEAD_FRAME_V1\.columns\)/u);
+    assert.match(overheadEditorSource, /current Library identity/u);
+    assert.match(overheadEditorSource, /a rejected one leaves this picture unchanged/u);
+    assert.match(overheadEditorSource, /current picture stays unless the new one passes its setting check/u);
   });
 
   it("opens the existing editor from new venue creation and validates its map under a blocker", () => {

@@ -14,6 +14,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import {
+  debateMysteryInterestNodeIdV2,
   BOT_IDENTITY_PRESENTATION_TRANSITION_MS,
   DEBATE_MYSTERY_MANSION_EXTERIOR_SUBJECT_ID_V1,
   DEBATE_SCHEMA_VERSION,
@@ -21,8 +22,11 @@ import {
   MANSION_LAYOUT_V2_ROWS,
   botIdentityPresentationTransitionActiveV1,
   debateMysteryMansionBundleEligibleV2,
+  debateMysteryClientSeatIdV2,
+  debateMysteryCounselSeatsV2,
   debateMysteryTheoryAccusedSeatIdsV2,
   debateMysteryTheoryWithAccusedSeatIdsV2,
+  type DebateMysteryVerdictClassificationV2,
   normalizeAccentForTheme,
   normalizeBotIdentityColor,
   normalizeDebateMysteryV2ForgeProgressMessage,
@@ -58,6 +62,7 @@ import {
   type MansionLightBlendModeV1,
   type MansionTraversalRouteV1,
   type WhodunnitTextVoiceMode,
+  type WhodunnitInvestigationPerspective,
 } from "@localai/shared";
 import { SessionAtmosphereLayer } from "./SessionAtmosphereLayer";
 import {
@@ -95,6 +100,13 @@ import {
   debateMysteryPreparedAudioShouldStart,
   debateMysteryRoomCompletionCueShouldStart,
   debateMysteryTextVoiceModeForPresentation,
+  DEBATE_MYSTERY_VOCAL_LEAD_IN_MAX_WAIT_MS,
+  DEBATE_MYSTERY_VOCAL_LEAD_IN_VOLUME_RATIO,
+  DEBATE_MYSTERY_VOCAL_LISTENING_VOLUME_RATIO,
+  mysteryListeningReactionDelayMsV2,
+  pickMysteryVocalCueV2,
+  playDebateMysteryVocalCueV2,
+  type DebateMysteryVocalCueEntryV2,
   debateMysteryTextVoiceShouldStart,
   debateMysteryTextVoiceShouldStop,
   playDebateMysterySfx,
@@ -103,6 +115,7 @@ import {
   type DebateMysterySfxCue,
 } from "./debateMysterySfx";
 import { mysteryVenueSfxUrlsV1 } from "./debateMysteryVenueSfx";
+import { mysteryCourtPresentedRecordKeysV1, mysteryPresentedRecordKeysV1 } from "./debateMysteryPresented";
 import { teardownBottishVoiceImmediately } from "./bottishVoice";
 import { cancelWhodunnitDialogueAudioImmediately } from "./debateMysteryDialogueAudio";
 import { mysteryMapOccupantPosition } from "./debateMysteryRoomWalk";
@@ -110,9 +123,9 @@ import { mysteryAmbientRooms } from "./debateMysteryAmbientRooms";
 import {
   DEBATE_MYSTERY_V2_EXAMINE_GRID_COLUMNS,
   DEBATE_MYSTERY_V2_EXAMINE_GRID_ROWS,
-  debateMysteryV2ExaminationCompletesRoom,
   debateMysteryV2ExamineGridCellIndexes,
   debateMysteryV2HotspotAccessiblePoint,
+  debateMysteryV2ImagePointFromClientPoint,
   debateMysteryV2LensClickTarget,
   debateMysteryV2RoomComplete,
   resolveDebateMysteryV2Lens,
@@ -132,6 +145,7 @@ import {
   nextWhodunnitInterrogationPhase,
   startWhodunnitInterrogation,
   whodunnitInterrogationEntrancePhaseForEntry,
+  whodunnitInterrogationFirstEntryState,
   whodunnitActorDriftTiming,
   whodunnitCaptionRevealIsPending,
   whodunnitCaptionSpeechText,
@@ -151,6 +165,10 @@ import {
   whodunnitInterrogationFinishDecision,
   whodunnitInterrogationMayStartAudio,
   whodunnitInterrogationTerminalWitnessShouldHold,
+  whodunnitPlayerCharacterStagingActive,
+  whodunnitStageWitnessExchange,
+  whodunnitPreparedVoicePending,
+  WHODUNNIT_PREPARED_VOICE_WAIT_MS,
   type WhodunnitInterrogationPhase,
 } from "./debateMysteryInterrogation";
 import { SignalVoiceActionText } from "./SignalVoiceActionText";
@@ -160,6 +178,8 @@ import { createWhodunnitSpeechTimingLoop } from "./debateMysterySpeechTimingLoop
 import {
   resolveWhodunnitCourtCamera,
   whodunnitCourtCameraLabel,
+  whodunnitCourtArrivalProgress,
+  whodunnitCourtGallerySeats,
 } from "./debateMysteryCourtStage";
 import {
   debateMysteryRoomCasekeeperNarrationTextV2,
@@ -212,6 +232,7 @@ import MapOverheadEditorDialog from "./MapOverheadEditorDialog";
 import RoomLightEditorDialog from "./RoomLightEditorDialog";
 import { mysteryRoomUsesTemplateLightGeometryV1 } from "./debateMysteryRoomCinematography";
 import {
+  debateMysteryExteriorEntryTargetFromClientPointV1,
   debateMysteryMansionDoorTargetV1,
   debateMysteryMansionExteriorFallbackV1,
 } from "./debateMysteryMansionExterior";
@@ -222,6 +243,7 @@ type WhodunnitPresentDragState = { active: boolean; overSuspect: boolean };
 
 /** How long the "..." entry beat lingers before the Casekeeper tableau reveals itself. */
 const WHODUNNIT_ROOM_ENTRY_BEAT_MS = 900;
+const WHODUNNIT_ROOM_ART_DEFAULT_ASPECT = 16 / 9;
 
 /** Present as a drawer of physical items: click one to read its blurb, or pick
  * it up and drop it on the suspect to ask about it. A drop resolves to the
@@ -230,6 +252,8 @@ const WHODUNNIT_ROOM_ENTRY_BEAT_MS = 900;
 function WhodunnitPresentDrawer(props: {
   suspectName: string;
   items: readonly DebateMysteryPublicRecordItemV2[];
+  /** Items this suspect has already been shown, as kind:id keys. */
+  presentedKeys: ReadonlySet<string>;
   assetUrlFor: (item: DebateMysteryPublicRecordItemV2) => string | null;
   disabled: boolean;
   suspectTarget: React.RefObject<HTMLDivElement | null>;
@@ -237,8 +261,19 @@ function WhodunnitPresentDrawer(props: {
   onClose: () => void;
   onDragStateChange: (state: WhodunnitPresentDragState) => void;
   playSfx: (cue: "clip" | "paper" | "navigate") => void;
+  /** Court reuses the drawer to object; its verbs differ from the room's. */
+  copy?: { eyebrow: string; title: string; help: string; action: string; again: string; seen: string; drag: string };
 }): React.JSX.Element {
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  const copy = props.copy ?? {
+    eyebrow: "Present",
+    title: `Show ${props.suspectName}`,
+    help: `Click an item to read it. Drag it onto ${props.suspectName} to ask about it.`,
+    action: `Ask ${props.suspectName} about this`,
+    again: `Ask ${props.suspectName} again`,
+    seen: `${props.suspectName} has already seen this. Drag it onto them again, or`,
+    drag: `Drag it onto ${props.suspectName}, or`,
+  };
   const [drag, setDrag] = useState<{ key: string; x: number; y: number } | null>(null);
   const pointerRef = useRef<{
     key: string;
@@ -261,12 +296,13 @@ function WhodunnitPresentDrawer(props: {
   };
   return (
     <div className={`${styles.choiceTray} ${styles.itemDrawer}`} data-dragging={drag ? "true" : undefined}>
-      <header><div><p className={styles.eyebrow}>Present</p><h2>Show {props.suspectName}</h2></div><button type="button" onClick={props.onClose}>Close</button></header>
-      <p className={styles.itemDrawerHelp}>Click an item to read it. Drag it onto {props.suspectName} to ask about it.</p>
+      <header><div><p className={styles.eyebrow}>{copy.eyebrow}</p><h2>{copy.title}</h2></div><button type="button" onClick={props.onClose}>Close</button></header>
+      <p className={styles.itemDrawerHelp}>{copy.help}</p>
       <div className={styles.itemShelf}>
         {props.items.map((item) => {
           const key = itemKey(item);
           const assetUrl = props.assetUrlFor(item);
+          const presented = props.presentedKeys.has(key);
           return (
             <button
               key={key}
@@ -275,6 +311,8 @@ function WhodunnitPresentDrawer(props: {
               disabled={props.disabled}
               data-selected={selectedKey === key ? "true" : undefined}
               data-dragging={drag?.key === key ? "true" : undefined}
+              data-presented={presented ? "true" : undefined}
+              title={presented ? `Already shown to ${props.suspectName}` : undefined}
               aria-pressed={selectedKey === key}
               onPointerDown={(event) => {
                 if (props.disabled || event.button !== 0) return;
@@ -321,7 +359,8 @@ function WhodunnitPresentDrawer(props: {
                   </>
                 : <span aria-hidden="true">{item.emoji}</span>}
               <strong>{item.title}</strong>
-              <small>{item.reference.kind === "testimony" ? "Testimony" : "Evidence"}</small>
+              <small>{presented ? "Shown · " : ""}{item.reference.kind === "testimony" ? "Testimony" : "Evidence"}</small>
+              {presented ? <i className={styles.itemTileShown} aria-hidden="true">✓</i> : null}
             </button>
           );
         })}
@@ -331,8 +370,8 @@ function WhodunnitPresentDrawer(props: {
         <div className={styles.itemBlurb} role="region" aria-live="polite">
           <h3>{selected.title}</h3>
           <p>{selected.description}</p>
-          <small>Drag it onto {props.suspectName}, or</small>
-          <button type="button" disabled={props.disabled} onClick={() => props.onPresent(selected.reference)}>Ask {props.suspectName} about this</button>
+          <small>{props.presentedKeys.has(itemKey(selected)) ? copy.seen : copy.drag}</small>
+          <button type="button" disabled={props.disabled} onClick={() => props.onPresent(selected.reference)}>{props.presentedKeys.has(itemKey(selected)) ? copy.again : copy.action}</button>
         </div>
       ) : null}
       {drag && dragged && typeof document !== "undefined"
@@ -524,6 +563,9 @@ interface V2SharedProps {
   /** Prism's default voice: the player's audible stand-in when the chosen
    * investigator carries no voice of its own. */
   playerVoiceProfile?: BotAudioVoiceProfileV1 | null;
+  /** First person (default) keeps the investigator off stage while
+   * investigating; embodied stages them beside each witness. */
+  investigationPerspective?: WhodunnitInvestigationPerspective;
   playMysteryTextVoice?: (args: {
     instant?: boolean;
     mode: Exclude<WhodunnitTextVoiceMode, "off">;
@@ -733,6 +775,15 @@ const FORGE_TIPS = [
   "Every suspect takes the stand. A minor witness now may become the key contradiction later.",
 ] as const;
 
+/** Upper bound on the arrival-line loader before the door opens without a line. */
+const WHODUNNIT_ARRIVAL_LINE_WAIT_MS = 45_000;
+
+/** Defense stance adds the one tip that changes what the player is looking for. */
+const WHODUNNIT_DEFENSE_FORGE_TIPS = [
+  ...FORGE_TIPS,
+  "Your client is innocent. The case against them is the frame you must break.",
+] as const;
+
 const CALLOUT_COPY = {
   hold_it: "HOLD IT!",
   objection: "OBJECTION!",
@@ -911,9 +962,9 @@ const MYSTERY_SCENE_REPAIR_COPY: Record<
   },
   align_exterior_door: {
     issue: "The door is misplaced",
-    action: "Observe image and place the entrance",
-    loader: "Finding the real entrance",
-    detail: "PRISM is observing the accepted exterior and aligning the threshold to the visible doorway or gangway.",
+    action: "Place the entrance yourself",
+    loader: "Marking the threshold",
+    detail: "PRISM is saving the exact entrance point you marked on the exterior.",
   },
   regenerate_room_mosaic: {
     issue: "The room looks wrong",
@@ -1019,12 +1070,34 @@ const MYSTERY_SCENE_REPAIR_COPY: Record<
   },
 };
 
+const CASE_FILE_ITEM_REPAIR_ACTIONS = [
+  "set_evidence_emoji",
+  "reroll_evidence_description",
+  "rename_evidence_from_description",
+  "regenerate_evidence_asset",
+] as const satisfies readonly DebateMysterySceneRepairActionV1[];
+type CaseFileItemRepairAction = (typeof CASE_FILE_ITEM_REPAIR_ACTIONS)[number];
+type CaseFileItemRepairMenu = "categories" | "information";
+interface SceneRepairItemPick {
+  action: CaseFileItemRepairAction;
+  subjectId: string | null;
+  backTo: CaseFileItemRepairMenu;
+}
+
 const CASE_FILE_REPAIR_ACTIONS: readonly DebateMysterySceneRepairActionV1[] = [
-  "set_evidence_emoji", "reroll_evidence_description", "rename_evidence_from_description", "clean_case_file",
+  ...CASE_FILE_ITEM_REPAIR_ACTIONS,
+  "clean_case_file",
+];
+const CASE_FILE_ROOT_REPAIR_ACTIONS: readonly DebateMysterySceneRepairActionV1[] = [
+  "clean_case_file",
 ];
 const LOCAL_TEXT_REPAIR_ACTIONS: readonly DebateMysterySceneRepairActionV1[] = [
   "repair_evidence_name", "repair_evidence_description", "set_evidence_emoji", "reroll_evidence_description",
   "rename_evidence_from_description", "clean_case_file",
+];
+const PROVIDER_FREE_SCENE_REPAIR_ACTIONS: readonly DebateMysterySceneRepairActionV1[] = [
+  "align_exterior_door",
+  "reduce_evidence_magenta",
 ];
 
 interface MansionRoomPlacement {
@@ -1183,9 +1256,58 @@ function pendingSpeechTiming(text: string): V2SpeechTiming {
 
 function mysteryProsecutorOpeningText(text: string): string {
   return text.replace(
-    /\bYou are the lead investigator\b/giu,
-    "I am the lead investigator",
+    /\bYou are (the lead investigator|counsel for the defense)\b/giu,
+    "I am $1",
   );
+}
+
+/** Player-facing names for every verdict outcome; the raw enum never reaches the screen. */
+const WHODUNNIT_VERDICT_CLASSIFICATION_COPY: Record<
+  DebateMysteryVerdictClassificationV2,
+  { title: string; detail: string }
+> = {
+  just_conviction: {
+    title: "Just conviction",
+    detail: "The accused was responsible, and the admitted record proved it safely.",
+  },
+  unsafe_conviction: {
+    title: "Unsafe conviction",
+    detail: "The accused was responsible, but the record did not prove it safely.",
+  },
+  wrongful_conviction: {
+    title: "Wrongful conviction",
+    detail: "The court convicted someone who was not responsible.",
+  },
+  acquittal_despite_proof: {
+    title: "Acquittal despite proof",
+    detail: "The record proved the case, but the court did not convict.",
+  },
+  failed_prosecution: {
+    title: "Failed prosecution",
+    detail: "The prosecution did not carry its case.",
+  },
+  just_acquittal: {
+    title: "Just acquittal",
+    detail: "Your client walks free, and your theory named who was really responsible.",
+  },
+  acquittal_without_truth: {
+    title: "Acquittal without the truth",
+    detail: "Your client walks free, but your theory did not name who was really responsible.",
+  },
+};
+
+function whodunnitVerdictClassificationCopy(
+  classification: DebateMysteryVerdictClassificationV2,
+  stance: "prosecution" | "defense",
+): { title: string; detail: string } {
+  const copy = WHODUNNIT_VERDICT_CLASSIFICATION_COPY[classification] ?? {
+    title: classification.replaceAll("_", " "),
+    detail: "",
+  };
+  if (stance === "defense" && classification === "wrongful_conviction") {
+    return { ...copy, detail: "Your client was convicted of something they did not do." };
+  }
+  return copy;
 }
 
 function mysteryExteriorInvestigationThought(
@@ -1247,13 +1369,18 @@ function mysteryDialogueGestureOriginIsInteractive(target: EventTarget | null): 
 }
 
 function emptyTheory(
-  state: Pick<DebateWhodunnitFormatStateV2, "theory" | "suspects" | "caseCharge">,
+  state: Pick<DebateWhodunnitFormatStateV2, "theory" | "suspects" | "caseCharge" | "config">,
 ): DebateMysteryTheoryV1 {
+  // Defense stance pins the client, so the board seeds with the first
+  // suspect the player may actually accuse.
+  const clientSeatId = debateMysteryClientSeatIdV2(state);
+  const firstAccusable =
+    state.suspects.find((suspect) => suspect.seatId !== clientSeatId)?.seatId ?? null;
   return state.theory ?? {
-    accusedSeatIds: state.suspects[0]?.seatId ? [state.suspects[0].seatId] : [],
+    accusedSeatIds: firstAccusable ? [firstAccusable] : [],
     incidentId: state.caseCharge?.incidentId,
     claim: state.caseCharge?.accusationPrompt,
-    culpritSeatId: state.suspects[0]?.seatId ?? null,
+    culpritSeatId: firstAccusable,
     method: "",
     motive: "",
     opportunity: "",
@@ -1420,6 +1547,10 @@ export function DebateMysteryV2CompilationResume(
   const needsAttention = compilation.stage === "needs_attention";
   const compilationActive = debateMysteryForgeStageIsActive(compilation.stage);
   const spectatorForge = state.config.playerRole === "spectator";
+  const forgeTips: readonly string[] =
+    debateMysteryCounselSeatsV2(state.config).stance === "defense"
+      ? WHODUNNIT_DEFENSE_FORGE_TIPS
+      : FORGE_TIPS;
   useEffect(() => {
     if (!compilationActive) return;
     setClockNowMs(Date.now());
@@ -1429,10 +1560,10 @@ export function DebateMysteryV2CompilationResume(
   useEffect(() => {
     if (!compilationActive || reducedMotion) return;
     const timer = window.setInterval(() => {
-      setForgeTipIndex((current) => (current + 1) % FORGE_TIPS.length);
+      setForgeTipIndex((current) => (current + 1) % forgeTips.length);
     }, 9_000);
     return () => window.clearInterval(timer);
-  }, [compilationActive, reducedMotion]);
+  }, [compilationActive, forgeTips.length, reducedMotion]);
   const updatedAtMs = Date.parse(compilation.updatedAt);
   const liveClockDeltaMs = compilationActive && Number.isFinite(updatedAtMs)
     ? Math.max(0, clockNowMs - updatedAtMs)
@@ -1567,7 +1698,7 @@ export function DebateMysteryV2CompilationResume(
           {forgeVenueLabel} exterior · {forgeVenueProfile?.physicalScaleClass ?? state.config.scaleClass}
         </p>
         <p className={styles.eyebrow}>Case Forge</p>
-        <h2 className={styles.forgeStatusHeading}>{needsAttention ? "Case preparation stopped" : spectatorForge ? "Preparing your mystery to watch." : "Preparing a prosecution turnabout"}</h2>
+        <h2 className={styles.forgeStatusHeading}>{needsAttention ? "Case preparation stopped" : spectatorForge ? "Preparing your mystery to watch." : debateMysteryCounselSeatsV2(state.config).stance === "defense" ? "Preparing a defense turnabout" : "Preparing a prosecution turnabout"}</h2>
         {!spectatorForge ? <p className={styles.forgeMessage}>{spoilerSafeProgressMessage}</p> : null}
         {compilationActive ? (
           <p className={styles.forgeBackgroundNote}>
@@ -1647,7 +1778,7 @@ export function DebateMysteryV2CompilationResume(
         {!spectatorForge && compilationActive ? (
           <aside className={styles.forgeTip} aria-label="Case Forge tip">
             <span aria-hidden="true">Forge note</span>
-            <p key={forgeTipIndex}>{FORGE_TIPS[forgeTipIndex]}</p>
+            <p key={forgeTipIndex}>{forgeTips[forgeTipIndex % forgeTips.length]}</p>
           </aside>
         ) : null}
         {!spectatorForge ? <div className={styles.localVoiceNotice}>
@@ -1977,7 +2108,15 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
   const [error, setError] = useState<string | null>(null);
   const [command, setCommand] = useState<"move" | "examine" | "talk" | "present" | null>(null);
   const suspectActorRef = useRef<HTMLDivElement | null>(null);
+  const roomArtFrameRef = useRef<HTMLDivElement | null>(null);
   const [presentDrag, setPresentDrag] = useState<WhodunnitPresentDragState>({ active: false, overSuspect: false });
+  // The Court assembles before anyone speaks: the gallery walks in on the wide
+  // shot, the judge calls order, then the stand goes live. Presentation only.
+  const [courtArrival, setCourtArrival] = useState<{ chapterId: string; startedAt: number; nowMs: number } | null>(null);
+  // Who is thinking while a Court action runs: the witness after Press or an
+  // objection, the Prosecutor after Think.
+  const [courtBusyAction, setCourtBusyAction] = useState<"press" | "object" | "think" | null>(null);
+  const courtWitnessStandRef = useRef<HTMLDivElement | null>(null);
   // The occupant's opening exchange is prepared while the player reads the
   // Casekeeper tableau and adopted only by the gesture that dismisses it.
   const [pendingRoomIntroduction, setPendingRoomIntroduction] = useState<{
@@ -2008,11 +2147,14 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
     proximity: 0,
     hotspotId: null,
   });
+  const [examinationPointerInside, setExaminationPointerInside] = useState(false);
+  const [examinationKeyboardFocusActive, setExaminationKeyboardFocusActive] = useState(false);
   const [completionCueRoomId, setCompletionCueRoomId] = useState<string | null>(null);
   const completionCuePlaybackRoomIdRef = useRef<string | null>(null);
   const [mansionSaveState, setMansionSaveState] = useState<
     "idle" | "saving" | "saved" | "failed"
   >("idle");
+  const [keepVenueUpdates, setKeepVenueUpdates] = useState(false);
   const [caseExportState, setCaseExportState] = useState<
     "idle" | "exporting" | "exported" | "failed"
   >("idle");
@@ -2035,7 +2177,10 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
   >(null);
   const roomUpgradeSynthesisJobIdRef = useRef<string | null>(null);
   const [sceneRepairOpen, setSceneRepairOpen] = useState<"exterior" | string | null>(null);
-  const [sceneRepairItemPick, setSceneRepairItemPick] = useState<{ action: "set_evidence_emoji" | "reroll_evidence_description" | "rename_evidence_from_description"; subjectId: string | null } | null>(null);
+  const [exteriorEntryPlacementOpen, setExteriorEntryPlacementOpen] = useState(false);
+  const titleCoverPlaneRef = useRef<HTMLDivElement | null>(null);
+  const [sceneRepairItemMenu, setSceneRepairItemMenu] = useState<CaseFileItemRepairMenu | null>(null);
+  const [sceneRepairItemPick, setSceneRepairItemPick] = useState<SceneRepairItemPick | null>(null);
   const [sceneRepairEmojiQuery, setSceneRepairEmojiQuery] = useState("");
   const [lightEditorRoomId, setLightEditorRoomId] = useState<string | null>(null);
   const [dismissedSceneRepairUndoId, setDismissedSceneRepairUndoId] = useState<string | null>(null);
@@ -2075,9 +2220,32 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
   const [exteriorEntryPresentation, setExteriorEntryPresentation] =
     useState<MysteryMansionTravelPresentationV1 | null>(null);
   const [visitingExterior, setVisitingExterior] = useState(false);
+  // Every entry begins outside. Start and Resume both lead to the venue door
+  // by way of a loading screen, where the investigator speaks an arrival line
+  // in their own voice before the exterior clears to the entrance.
+  const returningToVenue =
+    state.playPhase === "investigation" &&
+    state.config.investigationMode === "full" &&
+    state.config.playerRole !== "spectator";
+  const [entryStage, setEntryStage] = useState<"idle" | "loading" | "speaking" | "door">("idle");
+  const [arrivalLine, setArrivalLine] = useState<{
+    text: string;
+    audioUrl: string | null;
+    revealed: number;
+    playing: boolean;
+  } | null>(null);
+  const arrivalAudioRef = useRef<HTMLAudioElement | null>(null);
+  // Every cast voice's short vocalisations, recorded once at case load: a
+  // lead-in before the investigator's Bottish observation, and a listening
+  // reaction from whoever is on stage while another line types out.
+  const [vocalBank, setVocalBank] = useState<Record<string, DebateMysteryVocalCueEntryV2[]>>({});
+  const vocalBankRequestedRef = useRef(false);
+  const [vocalReactingBotId, setVocalReactingBotId] = useState<string | null>(null);
+  const vocalReactionPlayedRef = useRef<string | null>(null);
   const [exteriorRoomReveal, setExteriorRoomReveal] = useState(false);
   // Resuming a case shows its cover while the scene loads underneath; Start
-  // fades the cover away, and the fade's end unmounts it.
+  // fades the cover away, and the fade's end unmounts it. A full
+  // investigation's Start goes outside to the venue door instead.
   const [arrivalGate, setArrivalGate] = useState<"card" | "leaving" | "done">(() =>
     state.playPhase === "investigation" || state.playPhase === "theory" ? "card" : "done");
   useEffect(() => {
@@ -2466,7 +2634,118 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
   const [overheadEditorOpen, setOverheadEditorOpen] = useState(false);
   const [selectedMansionRoomId, setSelectedMansionRoomId] = useState(() => currentRoom?.id ?? state.rooms[0]?.id ?? "");
   const [revealedCasekeeperNarrationKey, setRevealedCasekeeperNarrationKey] = useState<string | null>(null);
+  // `prosecutorBot` is the player's counsel seat in every stance; only its
+  // role words follow the chosen chair.
   const prosecutorBot = presentMysteryBot(botById.get(state.config.prosecutorBotId) ?? null);
+  const counsel = debateMysteryCounselSeatsV2(state.config);
+  const clientSeatId = debateMysteryClientSeatIdV2(state);
+  const client = clientSeatId
+    ? state.suspects.find((suspect) => suspect.seatId === clientSeatId) ?? null
+    : null;
+  // First person keeps the investigator off stage until Court; embodied
+  // stages them beside each witness while the witness answers. Neither
+  // performs the investigator's question.
+  const firstPersonInvestigation = (props.investigationPerspective ?? "first_person") === "first_person";
+  // Start and Resume prepare the arrival line and its take behind a loading
+  // screen; the investigator then speaks it over the blurred exterior.
+  const beginVenueArrival = useCallback((): void => {
+    setEntryStage("loading");
+    setArrivalLine(null);
+    // The arrival request records the line, its take, and every cast voice's
+    // cues. A slow local engine must never strand the player behind the
+    // loader: past the bound the door opens without a line, and the vocal
+    // bank is fetched again once the investigation begins.
+    let timer: number | null = null;
+    const bounded = new Promise<never>((_resolve, reject) => {
+      timer = window.setTimeout(
+        () => reject(new Error("The arrival line took too long to prepare.")),
+        WHODUNNIT_ARRIVAL_LINE_WAIT_MS,
+      );
+    });
+    void Promise.race([
+      props.request<{
+        line: { text: string; audio: { url: string; contentType: string; durationMs: number } | null } | null;
+        vocalBank?: Record<string, DebateMysteryVocalCueEntryV2[]>;
+      }>(
+        `/api/debates/${encodeURIComponent(props.session.id)}/mystery-arrival-line`,
+        mutationBody({ version: 2 }),
+      ),
+      bounded,
+    ]).finally(() => {
+      if (timer !== null) window.clearTimeout(timer);
+    }).then((result) => {
+      if (result.vocalBank) {
+        vocalBankRequestedRef.current = true;
+        setVocalBank(result.vocalBank);
+      }
+      const text = result.line?.text?.replace(/\s+/gu, " ").trim();
+      if (!text) {
+        setEntryStage("door");
+        return;
+      }
+      setArrivalLine({ text, audioUrl: result.line?.audio?.url ?? null, revealed: 0, playing: false });
+      setEntryStage("speaking");
+    }).catch(() => setEntryStage("door"));
+  }, [props.request, props.session.id]);
+  useEffect(() => {
+    // A case opened straight into a room still gets its bank; the cues are
+    // already recorded, so this is a read unless a voice changed.
+    if (state.playPhase !== "investigation" || vocalBankRequestedRef.current) return;
+    vocalBankRequestedRef.current = true;
+    void props.request<{ vocalBank: Record<string, DebateMysteryVocalCueEntryV2[]> }>(
+      `/api/debates/${encodeURIComponent(props.session.id)}/mystery-vocal-bank`,
+    ).then((result) => {
+      if (result.vocalBank) setVocalBank(result.vocalBank);
+    }).catch(() => undefined);
+  }, [props.request, props.session.id, state.playPhase]);
+  const arrivalAudioUrl = arrivalLine?.audioUrl ?? null;
+  const arrivalAudible = Boolean(arrivalAudioUrl) && props.audioEnabled && props.audioVolume > 0;
+  useEffect(() => {
+    // The take drives the caption: the words reveal as they are spoken.
+    if (entryStage !== "speaking" || !arrivalAudioUrl || !arrivalAudible) return;
+    const audio = new Audio(arrivalAudioUrl);
+    audio.volume = Math.min(1, Math.max(0, props.audioVolume));
+    arrivalAudioRef.current = audio;
+    let frame: number | null = null;
+    const settle = (): void => {
+      if (frame !== null) window.cancelAnimationFrame(frame);
+      frame = null;
+      setArrivalLine((current) => current ? { ...current, revealed: current.text.length, playing: false } : current);
+    };
+    const follow = (): void => {
+      if (audio.paused || !Number.isFinite(audio.duration) || audio.duration <= 0) {
+        frame = window.requestAnimationFrame(follow);
+        return;
+      }
+      const progress = Math.min(1, audio.currentTime / audio.duration);
+      setArrivalLine((current) => current
+        ? { ...current, revealed: Math.max(current.revealed, Math.min(current.text.length, Math.round(current.text.length * progress))) }
+        : current);
+      frame = window.requestAnimationFrame(follow);
+    };
+    audio.addEventListener("ended", settle);
+    audio.addEventListener("error", settle);
+    setArrivalLine((current) => current ? { ...current, playing: true } : current);
+    void audio.play().then(() => { frame = window.requestAnimationFrame(follow); }).catch(settle);
+    return () => {
+      if (frame !== null) window.cancelAnimationFrame(frame);
+      audio.removeEventListener("ended", settle);
+      audio.removeEventListener("error", settle);
+      audio.pause();
+      if (arrivalAudioRef.current === audio) arrivalAudioRef.current = null;
+    };
+  }, [arrivalAudible, arrivalAudioUrl, entryStage, props.audioVolume]);
+  useEffect(() => {
+    // Without a take, or with sound off, the line types out on its own clock.
+    if (entryStage !== "speaking" || !arrivalLine || arrivalLine.playing || arrivalAudible) return;
+    if (arrivalLine.revealed >= arrivalLine.text.length) return;
+    const timer = window.setTimeout(() => {
+      setArrivalLine((current) => current && current.revealed < current.text.length
+        ? { ...current, revealed: current.revealed + 1 }
+        : current);
+    }, reducedMotion ? 0 : 34);
+    return () => window.clearTimeout(timer);
+  }, [arrivalAudible, arrivalLine, entryStage, reducedMotion]);
   const playerCharacterName = prosecutorBot?.name ?? props.playerName ?? "Investigator";
   const playerCharacterColor = normalizeAccentForTheme(
     normalizeBotIdentityColor(prosecutorBot?.color) ??
@@ -2515,6 +2794,12 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
   const displayedDialogue = queuedDialogue ?? heldDialogue ?? (
     state.playPhase === "trial" ? null : lastDialogue
   );
+  const interrogationFirstEntryState = whodunnitInterrogationFirstEntryState({
+    entries: dialoguePlaybackQueue,
+    index: dialoguePlaybackIndex,
+    prosecutorBotId: state.config.prosecutorBotId,
+    suspectSeatId: currentSuspect?.seatId ?? "",
+  });
   const dialogueBot = presentMysteryBot(botForDialogue(props, state, displayedDialogue));
   const roomDisplayedDialogue = queuedDialogue ?? heldDialogue ?? roomIntroductionDialogue ?? (
     roomDialogueBaseline.contextKey === roomContextKey &&
@@ -2528,14 +2813,15 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
   });
   const roomDialogueBot = presentMysteryBot(botForDialogue(props, state, roomDisplayedDialogue));
   const roomProsecutorActive = roomDisplayedDialogue?.speakerBotId === state.config.prosecutorBotId;
-  // Talk, Present, and a room's opening exchange stage a two-shot: the
-  // suspect yields the centre and steps right while the player's investigator
-  // slides in from the left, and both stay on stage for the whole exchange.
-  const interrogationStagingActive = Boolean(
-    currentSuspect && prosecutorBot && (
-      command === "talk" || command === "present" || interrogationPhase !== null
-    ),
-  );
+  // First contact belongs to the suspect alone. The player's investigator
+  // joins the two-shot only after Talk or Present deliberately begins.
+  const interrogationStagingActive = whodunnitPlayerCharacterStagingActive({
+    command,
+    hasPlayerCharacter: prosecutorBot !== null && !firstPersonInvestigation,
+    hasSuspect: currentSuspect !== null,
+    interrogationPhase,
+    roomIntroductionActive,
+  });
   const roomActorEligible = Boolean(
     currentBot &&
       command !== "examine" &&
@@ -2632,7 +2918,17 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
       ? { "--dialogue-accent": roomDialoguePersonaColor } as CSSProperties
       : undefined;
   const dialoguePerformanceActive = queuedDialogue !== null;
-  const interrogationAudioMayStart = whodunnitInterrogationMayStartAudio(interrogationPhase);
+  // The seat count alone paces the assembling Court; nothing speaks until it is seated.
+  const courtGallerySeatCount = state.config.jurorBotIds.length + Math.max(0, state.suspects.length - 1);
+  const courtArrivalProgress = courtArrival
+    ? whodunnitCourtArrivalProgress({
+        seatCount: courtGallerySeatCount,
+        elapsedMs: courtArrival.nowMs - courtArrival.startedAt,
+        reducedMotion,
+      })
+    : null;
+  const courtArrivalActive = courtArrivalProgress !== null && !courtArrivalProgress.complete;
+  const interrogationAudioMayStart = whodunnitInterrogationMayStartAudio(interrogationPhase) && !courtArrivalActive;
   const audioMouthActive = whodunnitInterrogationAudioOwnsMouth({
     phase: interrogationPhase,
     audible: speechTiming?.audible === true,
@@ -2656,6 +2952,12 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
     }).length;
   const theoryAccusedSeatIds = debateMysteryTheoryAccusedSeatIdsV2(theory);
   const mansionCanBeSaved = debateMysteryMansionBundleEligibleV2(state);
+  const canKeepVenueUpdates = mansionCanBeSaved
+    && state.config.playerRole !== "spectator"
+    && state.config.investigationMode !== "court_only";
+  const keepVenueUpdatesOverwritesOriginal = Boolean(
+    state.config.mansionSnapshot?.sourceBundleId?.trim(),
+  );
   const roomVisualDialogRoom = roomVisualDialogId
     ? state.rooms.find((room) => room.id === roomVisualDialogId) ?? null
     : null;
@@ -2670,13 +2972,14 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
         : whodunnitRoomVisualReadiness(roomVisualDialogRoom, roomArtUpgradeStatus)
     : null;
 
-  const saveMansion = async (): Promise<void> => {
-    if (!mansionCanBeSaved || mansionSaveState === "saving") return;
+  const saveMansion = async (): Promise<boolean> => {
+    if (!mansionCanBeSaved || mansionSaveState === "saving") return false;
     setMansionSaveState("saving");
     setError(null);
     try {
       await props.onSaveMansion();
       setMansionSaveState("saved");
+      return true;
     } catch (caught) {
       setMansionSaveState("failed");
       setError(
@@ -2684,7 +2987,17 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
           ? caught.message
           : "This Mystery Venue could not be saved.",
       );
+      return false;
     }
+  };
+  const concludeInvestigation = async (
+    action: "file_theory" | "check_case",
+  ): Promise<boolean> => {
+    if (keepVenueUpdates && canKeepVenueUpdates) {
+      const saved = await saveMansion();
+      if (!saved) return false;
+    }
+    return sendAction({ action, theory });
   };
   const generateRoomVisual = async (room: DebateMysteryRoomV2): Promise<void> => {
     if (roomVisualJob || liveResponseMode === "local") return;
@@ -2981,7 +3294,11 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
     action: DebateMysterySceneRepairActionV1,
     room: DebateMysteryRoomV2 | null = null,
     item: DebateMysteryPublicRecordItemV2 | null = null,
-    extra: { emoji?: string } = {},
+    extra: {
+      emoji?: string;
+      entryTarget?: { x: number; y: number };
+      onSuccess?: () => void;
+    } = {},
   ): Promise<void> => {
     if (sceneRepairJob) return;
     if (action === "regenerate_evidence_asset") {
@@ -2989,7 +3306,8 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
       return;
     }
     const textRepair = LOCAL_TEXT_REPAIR_ACTIONS.includes(action);
-    if (liveResponseMode === "local" && !textRepair && action !== "reduce_evidence_magenta") return;
+    const providerFreeRepair = PROVIDER_FREE_SCENE_REPAIR_ACTIONS.includes(action);
+    if (liveResponseMode === "local" && !textRepair && !providerFreeRepair) return;
     const run = sceneRepairRunOwner.begin();
     let success = false;
     setSceneRepairJob({
@@ -3013,10 +3331,11 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
           ...(room ? { roomId: room.id, artStyle: currentRoomArtStyle } : {}),
           ...(item?.reference.kind === "evidence" ? { subjectId: item.reference.id } : {}),
           ...(extra.emoji ? { emoji: extra.emoji } : {}),
+          ...(extra.entryTarget ? { entryTarget: extra.entryTarget } : {}),
           ...(action === "generate_map_plan" ? { floor: mansionFloor, board: mansionVisibleBoard } : {}),
         }), signal: run.signal },
       ));
-      if (action === "regenerate_exterior" || action === "align_exterior_door") {
+      if (action === "regenerate_exterior") {
         evictExteriorObjectUrl();
       }
       if (room && (action === "regenerate_room_mosaic" ||
@@ -3042,11 +3361,29 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
       setRoomArtUpgradeStatus(result.roomArtUpgrade);
       props.onSessionChange(result.session);
       success = true;
+      extra.onSuccess?.();
     } catch (caught) {
       if (!run.isCurrent()) return;
       setError(caught instanceof Error ? caught.message : "PRISM could not repair this scene.");
     } finally {
       if (run.finish(success)) setSceneRepairJob(null);
+    }
+  };
+  const [voicesEnabling, setVoicesEnabling] = useState(false);
+  const enableCaseVoices = async (): Promise<void> => {
+    if (voicesEnabling) return;
+    setVoicesEnabling(true);
+    setError(null);
+    try {
+      const result = await props.request<{ session: DebateSessionV1 }>(
+        `/api/debates/${encodeURIComponent(props.session.id)}/mystery-voices/enable`,
+        mutationBody({}),
+      );
+      props.onSessionChange(result.session);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Voices could not be enabled for this case.");
+    } finally {
+      setVoicesEnabling(false);
     }
   };
   const undoSceneRepair = async (): Promise<void> => {
@@ -3067,7 +3404,7 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
         `/api/debates/${encodeURIComponent(props.session.id)}/mystery-scene-repair/undo`,
         mutationBody({}),
       );
-      if (previousAction === "regenerate_exterior" || previousAction === "align_exterior_door") {
+      if (previousAction === "regenerate_exterior") {
         evictExteriorObjectUrl();
       } else if (previousAction === "regenerate_evidence_asset" ||
         previousAction === "reduce_evidence_magenta") {
@@ -3140,6 +3477,18 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
   const judgeBot = presentMysteryBot(botById.get(state.config.judgeBotId) ?? null);
   const defendant = state.suspects.find((entry) => entry.seatId === state.court?.defendantSeatId) ?? null;
   const defendantBot = presentMysteryBot(defendant ? botById.get(defendant.botId) ?? null : null);
+  // The public gallery: the jury and every suspect neither on the stand nor in the dock.
+  const courtGallerySeats = whodunnitCourtGallerySeats({
+    jurors: state.config.jurorBotIds.flatMap((botId) => {
+      const bot = presentMysteryBot(botById.get(botId) ?? null);
+      return bot ? [bot] : [];
+    }),
+    suspects: state.suspects.flatMap((suspect) => {
+      const bot = presentMysteryBot(botById.get(suspect.botId) ?? null);
+      return bot ? [bot] : [];
+    }),
+    excludeBotIds: new Set([courtPresentedWitnessBot?.id, defendantBot?.id].filter((id): id is string => Boolean(id))),
+  });
   const prosecutorDialogueActive = displayedDialogue?.speakerBotId === state.config.prosecutorBotId;
   const defenseDialogueActive = displayedDialogue?.speakerBotId === state.config.rivalDefenseBotId;
   const judgeDialogueActive = displayedDialogue?.speakerKind === "judge" ||
@@ -3148,6 +3497,7 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
     defendant && displayedDialogue?.speakerSeatId === defendant.seatId,
   );
   const courtCamera = resolveWhodunnitCourtCamera({
+    arrival: courtArrivalActive,
     defenseDialogueActive,
     defendantDialogueActive,
     establishingWitness: Boolean(
@@ -3171,8 +3521,30 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
     );
     return () => window.clearTimeout(timer);
   }, [courtEstablishedWitnessSeatId, courtPresentationActive, courtPresentedWitnessSeatId, reducedMotion]);
+  const courtChapterId = state.court?.activeChapterId ?? null;
+  useEffect(() => {
+    if (!courtPresentationActive || courtChapterId === null) {
+      setCourtArrival(null);
+      return;
+    }
+    // A new witness chapter assembles the Court again: the next witness is called.
+    setCourtArrival((current) => current?.chapterId === courtChapterId
+      ? current
+      : { chapterId: courtChapterId, startedAt: Date.now(), nowMs: Date.now() });
+  }, [courtChapterId, courtPresentationActive]);
+  useEffect(() => {
+    if (!courtArrivalActive) return;
+    const timer = window.setInterval(
+      () => setCourtArrival((current) => current ? { ...current, nowMs: Date.now() } : current),
+      120,
+    );
+    return () => window.clearInterval(timer);
+  }, [courtArrivalActive]);
+  useEffect(() => {
+    if (!busy) setCourtBusyAction(null);
+  }, [busy]);
   const defenseFocusBot = defendantDialogueActive && defendantBot ? defendantBot : defenseBot;
-  const defenseFocusRole = defendantDialogueActive ? "Defendant" : "Defense Counsel";
+  const defenseFocusRole = defendantDialogueActive ? "Defendant" : counsel.opposingRoleLabel;
   const presentedCourtRecordItem = presentedCourtRecord
     ? state.record.find((item) => recordKey(item.reference) === recordKey(presentedCourtRecord)) ?? null
     : null;
@@ -3314,6 +3686,7 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
       clickCount,
       filledByGesture,
       streaming: presentation.streaming,
+      voicePending: roomDialogueVoicePending,
     });
     if (decision === "ignore") return true;
     if (decision === "advance") {
@@ -3354,6 +3727,26 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
   const preparedAudioStatusForPlayback = preparedAudioStatus.key === playbackPerformanceKey
     ? preparedAudioStatus.status
     : "idle";
+  // A queued spoken line waits for its voice: the entrance beat, then the
+  // Premium take or the prepared local clip loading. Its speaker keeps
+  // thinking through that wait, and a gesture cannot cut it into silent text.
+  const roomDialogueVoicePending = whodunnitPreparedVoicePending({
+    queued: queuedDialogue !== null && !dialogueIsTextOnly,
+    preparedAudioExpected,
+    preparedAudioStatus: preparedAudioStatusForPlayback,
+    phase: interrogationPhase,
+  });
+  // Court thinking: the counsel forms a press or a thought while the request
+  // runs and until their voice sounds; the witness thinks after an objection
+  // and while their answer's voice loads.
+  const courtProsecutorThinking = Boolean(
+    (busy && (courtBusyAction === "press" || courtBusyAction === "think")) ||
+    (queuedDialogue && prosecutorDialogueActive && roomDialogueVoicePending),
+  );
+  const courtWitnessThinking = Boolean(
+    (busy && courtBusyAction === "object") ||
+    (queuedDialogue && courtPresentedWitnessDialogueActive && roomDialogueVoicePending),
+  );
   const spectatorBeat = spectator && state.playPhase === "trial"
     ? `${props.session.revision}:${playbackLineId ?? "text-only"}`
     : null;
@@ -3461,25 +3854,6 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
     top: mansionMinY - mansionOffsetY / mansionScale,
     columns: mansionDrawingWidth / mansionScale,
     rows: mansionDrawingHeight / mansionScale,
-  };
-  // Ambient blocks outside the room cluster only dress the structure; once a real exterior
-  // is on the board they go, while blocks between rooms stay.
-  const mansionClusterBounds = (() => {
-    const blocks = [...mansionPlacements, ...mansionCorridors, ...mansionSideRooms];
-    if (!blocks.length) return null;
-    return {
-      minX: Math.min(...blocks.map((block) => block.x)),
-      minY: Math.min(...blocks.map((block) => block.y)),
-      maxX: Math.max(...blocks.map((block) => block.x + block.width)),
-      maxY: Math.max(...blocks.map((block) => block.y + block.height)),
-    };
-  })();
-  const mansionAmbientIsExterior = (space: { x: number; y: number; width: number; height: number }): boolean => {
-    if (!mansionClusterBounds) return false;
-    const centerX = space.x + space.width / 2;
-    const centerY = space.y + space.height / 2;
-    return centerX < mansionClusterBounds.minX || centerX > mansionClusterBounds.maxX ||
-      centerY < mansionClusterBounds.minY || centerY > mansionClusterBounds.maxY;
   };
   const savedOverheadPlacement = mansionLayout?.overheadPlacement ?? null;
   const overheadPlacement = savedOverheadPlacement ?? MANSION_OVERHEAD_PLACEMENT_IDENTITY_V1;
@@ -3613,7 +3987,7 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
   // Written accompaniment (Babble or Bottish) ducks the room bed exactly as a
   // spoken line does, so a player observation is heard over music and ambience.
   const dialogueTextVoiceExpected = props.audioEnabled && props.audioVolume > 0 &&
-    (props.whodunnitTextVoiceMode ?? "babble") !== "off" &&
+    (props.whodunnitTextVoiceMode ?? "bottish") !== "off" &&
     dialogueSfxDelivery === "text_only" && dialogueSfxStreaming === true && dialogueSfxAudible !== true;
   // The venue's own effects pack, frozen with the case: cues the venue owns
   // replace the bundled palette while this case is on screen.
@@ -3660,7 +4034,7 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
 
   useEffect(() => {
     const textVoiceMode = debateMysteryTextVoiceModeForPresentation({
-      configuredMode: props.whodunnitTextVoiceMode ?? "babble",
+      configuredMode: props.whodunnitTextVoiceMode ?? "bottish",
       playerObservation: roomPlayerObservationActive,
     });
     const started = dialogueTextVoiceRef.current;
@@ -3704,7 +4078,7 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
       key: dialogueSfxKey,
       mode: textVoiceMode,
     };
-    void playDebateMysteryTextVoice({
+    const startTextVoice = (): Promise<unknown> => playDebateMysteryTextVoice({
       enabled: true,
       instant: roomPlayerObservationActive,
       mode: textVoiceMode,
@@ -3720,6 +4094,22 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
         : undefined,
       play: props.playMysteryTextVoice,
     });
+    // The investigator's own short voice leads their Bottish observation, as
+    // a villager's grunt leads the speech bubble; the line follows at once
+    // when the voice recorded no cues.
+    const leadIn = roomPlayerObservationActive
+      ? pickMysteryVocalCueV2(vocalBank[state.config.prosecutorBotId] ?? [], "lead_in", `${props.session.id}:${dialogueSfxKey}`)
+      : null;
+    if (leadIn) {
+      void playDebateMysteryVocalCueV2({
+        url: leadIn.url,
+        volume: props.audioVolume * DEBATE_MYSTERY_VOCAL_LEAD_IN_VOLUME_RATIO,
+        signal: controller.signal,
+        maxWaitMs: DEBATE_MYSTERY_VOCAL_LEAD_IN_MAX_WAIT_MS,
+      }).then(() => (controller.signal.aborted ? undefined : startTextVoice()));
+    } else {
+      void startTextVoice();
+    }
   }, [
     dialogueSfxAudible,
     dialogueSfxDelivery,
@@ -3737,8 +4127,10 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
     prosecutorBot?.voiceProfile,
     currentRoomAcoustics?.voice,
     roomPlayerObservationActive,
+    state.config.prosecutorBotId,
     state.playPhase,
     roomView,
+    vocalBank,
   ]);
 
   useEffect(() => () => {
@@ -3767,6 +4159,7 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
               nextEntry,
               state.config.prosecutorBotId,
               currentSuspect?.seatId ?? "",
+              dialoguePlaybackQueue.slice(0, dialoguePlaybackIndex + 1),
             )
           : current);
         return;
@@ -3779,17 +4172,44 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
   const currentRoomUnexaminedHotspots = currentRoom?.hotspots.filter(
     (hotspot) => hotspot.unlocked && !hotspot.examined,
   ) ?? [];
+  const currentRoomInterests = currentRoom?.pointsOfInterest ?? [];
+  // Interest regions join the lens as ordinary targets. A smaller case hotspot
+  // inside one still wins the point, so evidence never hides behind flavour.
+  const currentRoomLensRegions = useMemo(() => [
+    ...(currentRoom?.hotspots ?? []),
+    ...(currentRoom?.pointsOfInterest ?? []).map((interest) => ({
+      id: `interest:${interest.id}`,
+      label: interest.label,
+      polygon: interest.polygon,
+      unlocked: true,
+      examined: false,
+    })),
+  ], [currentRoom]);
   const currentRoomHotspotFocusPoints = useMemo(() => new Map(
-    (currentRoom?.hotspots ?? []).map((hotspot) => [hotspot.id, debateMysteryV2HotspotAccessiblePoint(hotspot, currentRoom?.hotspots ?? [])]),
-  ), [currentRoom]);
+    currentRoomLensRegions.map((region) => [region.id, debateMysteryV2HotspotAccessiblePoint(region, currentRoomLensRegions)]),
+  ), [currentRoomLensRegions]);
   const currentRoomHotspotStateKey = currentRoom?.hotspots
     .map((hotspot) => `${hotspot.id}:${hotspot.unlocked ? 1 : 0}:${hotspot.examined ? 1 : 0}`)
     .join("|") ?? "";
-  const roomComplete = currentRoom !== null && debateMysteryV2RoomComplete(currentRoom.hotspots);
+  // The server clears a room once every clue-bearing point is examined; a case
+  // compiled before that flag existed still needs every point.
+  const roomComplete = currentRoom !== null &&
+    (currentRoom.cleared ?? debateMysteryV2RoomComplete(currentRoom.hotspots));
+  // Leftover points and points of interest stay examinable after a room
+  // clears: optional colour, never a requirement.
+  const examineTargetsRemain = currentRoomUnexaminedHotspots.length > 0 || currentRoomInterests.length > 0;
+  const roomClearedRef = useRef<{ roomId: string | null; cleared: boolean }>({ roomId: null, cleared: false });
+  useEffect(() => {
+    // The completion cue fires on the examination that cleared the room.
+    const previous = roomClearedRef.current;
+    roomClearedRef.current = { roomId: currentRoom?.id ?? null, cleared: roomComplete };
+    if (!currentRoom || previous.roomId !== currentRoom.id || previous.cleared || !roomComplete) return;
+    if (command === "examine") setCompletionCueRoomId(currentRoom.id);
+  }, [command, currentRoom, roomComplete]);
   // The region being analysed: from the click until its observation has
   // finished streaming, so the scan can resolve into the dialogue box.
   const examiningHotspot = examiningHotspotId && currentRoom
-    ? currentRoom.hotspots.find((hotspot) => hotspot.id === examiningHotspotId) ?? null
+    ? currentRoomLensRegions.find((region) => region.id === examiningHotspotId) ?? null
     : null;
   const examinationStreaming = Boolean(
     dialoguePerformanceActive && roomDialogueIsTextOnly && roomDisplayedDialogue,
@@ -3804,7 +4224,7 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
     setInvestigationLens((lens) => resolveDebateMysteryV2Lens(
       lens.x,
       lens.y,
-      currentRoom.hotspots,
+      currentRoomLensRegions,
     ));
   }, [currentRoom, currentRoomHotspotStateKey]);
 
@@ -3873,6 +4293,7 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
         nextEntry,
         state.config.prosecutorBotId,
         currentSuspect?.seatId ?? "",
+        dialoguePlaybackQueue.slice(0, dialoguePlaybackIndex + 1),
       ));
       return;
     }
@@ -3924,7 +4345,13 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
       setInterrogationPhase(null);
       setPresentedCourtRecord(null);
     }
-    const exchange = nextState.dialogueHistory.slice(previousDialogueCount);
+    // The investigator's question is never performed: the chosen button is
+    // the player's line, and the witness alone takes the stage in either
+    // perspective.
+    const exchange = whodunnitStageWitnessExchange(
+      nextState.dialogueHistory.slice(previousDialogueCount),
+      nextState.config.prosecutorBotId,
+    );
     if (exchange.length) {
       setHeldDialogue(null);
       setSpeechTiming(null);
@@ -4236,7 +4663,7 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
     const deferred = await requestDeferredAction({ action: "move", roomId: toRoom.id });
     if (!deferred) return;
     const seed = `${props.session.id}:${props.session.revision}:${currentRoom.id}:${toRoom.id}`;
-    if (toRoom.visited || reducedMotion) {
+    if (reducedMotion) {
       playCompactTravelBridge(route, currentRoom, toRoom, seed);
       setMansionFloor(toRoom.floor);
       finishDeferredAction(deferred);
@@ -4618,6 +5045,21 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
     roomPlayerObservationActive,
   ]);
 
+  // A prepared voice that has not sounded within the wait releases the line
+  // to its caption clock, so a take that never starts cannot hold the
+  // exchange; a take that arrives later still takes the caption over.
+  useEffect(() => {
+    if (!roomDialogueVoicePending || !preparedAudioExpected) return;
+    const key = playbackPerformanceKey;
+    const timer = window.setTimeout(() => {
+      setPreparedAudioStatus((current) =>
+        current.key === key && current.status === "started"
+          ? current
+          : { key, status: "unavailable" });
+    }, WHODUNNIT_PREPARED_VOICE_WAIT_MS);
+    return () => window.clearTimeout(timer);
+  }, [playbackPerformanceKey, preparedAudioExpected, roomDialogueVoicePending]);
+
   useEffect(() => {
     if (!spectatorBeat || completedSpectatorBeat !== spectatorBeat || busy) return;
     const timer = window.setTimeout(
@@ -4642,9 +5084,10 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
       theory: state.theory,
       suspects: state.suspects,
       caseCharge: state.caseCharge,
+      config: state.config,
     }));
     if (state.playPhase === "theory") setTheoryOpen(true);
-  }, [state.caseCharge, state.playPhase, state.theory, state.suspects]);
+  }, [state.caseCharge, state.config, state.playPhase, state.theory, state.suspects]);
 
   useEffect(() => {
     if (roomView !== "mansion") return;
@@ -4710,34 +5153,6 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
     event.preventDefault();
     event.stopPropagation();
   };
-
-  const renderRecordButtons = (onChoose: (reference: DebateMysteryRecordReferenceV2) => void): React.JSX.Element => (
-    <div className={styles.recordGrid}>
-      {admittedRecord.map((item) => {
-        const assetUrl = item.reference.kind === "evidence"
-          ? sealedMysteryAssetObjectUrl(
-              sealedAssetObjectUrls,
-              "evidence",
-              item.reference.id,
-              item.sealedAsset,
-            )
-          : null;
-        return (
-          <button key={recordKey(item.reference)} type="button" disabled={busy || dialoguePerformanceActive} onClick={() => onChoose(item.reference)}>
-            {assetUrl
-              ? <>
-                  {/* Direct delivery preserves the sealed route's no-store boundary. */}
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img className={styles.recordAssetImage} src={assetUrl} alt="" />
-                </>
-              : <span aria-hidden="true">{item.emoji}</span>}
-            <strong>{item.title}</strong><small>{item.description}</small>
-          </button>
-        );
-      })}
-      {admittedRecord.length === 0 ? <p>No admitted record items yet.</p> : null}
-    </div>
-  );
 
   const calloutStyle = callout?.actorColor
     ? ({ "--mystery-callout-color": callout.actorColor } as CSSProperties)
@@ -4861,6 +5276,41 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
   const currentRoomImageUrl = currentRoomArtStyle === "illustrated"
     ? currentRoomUpgradeAssetUrl ?? currentRoomAcceptedUpgradeUrl ?? currentRoomMosaicUrl
     : currentRoomMosaicUrl;
+  useEffect(() => {
+    if (!travelPresentation) return;
+    const room = travelPresentation.toRoom;
+    const snapshot = state.config.mansionSnapshot;
+    const bundleId = snapshot?.sourceBundleId ?? null;
+    const illustratedSubjectId = whodunnitIllustratedRoomSubjectId(room.id);
+    const hasUpgrade = Boolean(
+      roomArtUpgradeStatus?.readyRoomIds.includes(room.id) && !failedUpgradeRoomIds.has(room.id),
+    );
+    const layoutEntity = mansionLayout?.entities.find(
+      (entity) => entity.kind === "room" && entity.id === room.id,
+    ) ?? null;
+    const acceptedMosaicAssetId = layoutEntity?.kind === "room" ? layoutEntity.acceptedRoomAssetId : null;
+    const illustratedAssetId = snapshot?.presentation.assets.find(
+      (asset) => asset.role === "room" && asset.logicalId === illustratedSubjectId,
+    )?.id ?? null;
+    // The same candidates the room itself will try on arrival, best first.
+    const candidates = [
+      hasUpgrade ? whodunnitSealedRoomArtUrl({ sessionId: props.session.id, subjectId: illustratedSubjectId, style: "illustrated" }) : null,
+      hasUpgrade && illustratedAssetId && bundleId ? whodunnitMansionRoomArtUrl(bundleId, illustratedAssetId, "illustrated") : null,
+      room.sealedAsset?.revealed && room.sealedAsset.status === "ready"
+        ? whodunnitSealedRoomArtUrl({ sessionId: props.session.id, subjectId: room.id, style: "mosaic", mosaicGrid: "visible" })
+        : null,
+      acceptedMosaicAssetId && bundleId ? whodunnitMansionRoomArtUrl(bundleId, acceptedMosaicAssetId, "mosaic", "visible") : null,
+      room.imageId ? whodunnitSavedRoomArtUrl(room.imageId, "mosaic", "visible") : null,
+      whodunnitBundledRoomArtPathForRoom(room, "mosaic", "visible"),
+    ].filter((url): url is string => Boolean(url) && !failedMosaicUrls.has(url as string));
+    // Deliberately uncancelled: the fetches are the point, and the walk is short.
+    for (const url of new Set(candidates)) {
+      const image = new Image();
+      image.decoding = "async";
+      image.src = url;
+    }
+  }, [failedMosaicUrls, failedUpgradeRoomIds, mansionLayout, props.session.id, roomArtUpgradeStatus, state.config.mansionSnapshot, travelPresentation]);
+
   const currentRoomEntryKey = currentRoom && roomView === "room" &&
       (state.playPhase === "investigation" || state.playPhase === "theory") &&
       !visitingExterior && !spectatorTheory && !courtPresentationActive
@@ -4872,9 +5322,8 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
   const mosaicBackdropRef = useRef<HTMLImageElement | null>(null);
   const upgradeBackdropRef = useRef<HTMLImageElement | null>(null);
   const [readyRoomBackdropKey, setReadyRoomBackdropKey] = useState<string | null>(null);
-  // The intrinsic frame of the plate actually painted for this backdrop key. The live
-  // light canvas adopts it so plate and lights cover the viewport identically; the
-  // Lights & FX editor sizes its stage from the same natural aspect.
+  // The intrinsic frame of the accepted plate. Live art, lights, effects, and
+  // examination geometry share this fitted frame; Lights & FX uses the same aspect.
   const [roomBackdropAspect, setRoomBackdropAspect] = useState<{ key: string; aspect: number } | null>(null);
   const currentRoomBackdropReady = Boolean(
     currentRoomBackdropKey && readyRoomBackdropKey === currentRoomBackdropKey,
@@ -4952,12 +5401,69 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
   const roomEntryLoading = currentRoomEntryKey !== null && !roomEntryRevealed;
   const roomActorsReady = roomEntryRevealed && roomActorEntryKey === currentRoomEntryKey && currentRoomImageUrl !== null;
   const roomActorVisible = roomActorEligible && roomActorsReady;
-  const roomProsecutorVisible = (roomProsecutorActive || interrogationStagingActive) && roomActorsReady;
+  const roomProsecutorVisible = interrogationStagingActive && roomActorsReady;
   // After a Talk or Present choice the investigator forms the question while
-  // the request runs; the suspect thinks during the handoff beat before answering.
-  const playerThinking = interrogationStagingActive && busy && !dialoguePerformanceActive;
-  const suspectThinking = interrogationStagingActive && interrogationPhase === "handoff";
-  const roomBackdropBlurred = roomActorVisible || roomProsecutorVisible;
+  // the request runs, then keeps thinking until their voice actually sounds;
+  // the suspect thinks through the handoff beat and their own voice's wait.
+  const playerThinking = interrogationStagingActive && (
+    (busy && !dialoguePerformanceActive) ||
+    (roomProsecutorActive && roomDialogueVoicePending)
+  );
+  const suspectThinking = (interrogationStagingActive && (
+    interrogationPhase === "handoff" ||
+    (roomPersonaDialogueActive && roomDialogueVoicePending)
+  )) || (
+    // First person has no investigator on stage: the witness alone carries
+    // the beat from the player's choice until the answer sounds.
+    firstPersonInvestigation && currentSuspect !== null && (
+      ((command === "talk" || command === "present") && busy && !dialoguePerformanceActive) ||
+      (roomPersonaDialogueActive && roomDialogueVoicePending)
+    )
+  );
+  const roomBackdropBlurred = roomIntroductionActive || roomActorVisible || roomProsecutorVisible;
+  useEffect(() => {
+    // Whoever listens on stage answers a typed line with a short vocalisation
+    // of their own: the witness while the investigator's observation types
+    // out, the embodied investigator while the witness answers. Once per line.
+    if (!props.audioEnabled || props.audioVolume <= 0 || !roomDisplayedDialogue || roomDialogueSettled) return;
+    const listenerBotId = roomPlayerObservationActive && roomActorVisible && currentBot
+      ? currentBot.id
+      : roomPersonaDialogueActive && roomProsecutorVisible && prosecutorBot
+        ? prosecutorBot.id
+        : null;
+    if (!listenerBotId) return;
+    const seed = `${props.session.id}:${roomDisplayedDialogue.nodeId}:${roomDisplayedDialogue.occurredAt}:${listenerBotId}`;
+    if (vocalReactionPlayedRef.current === seed) return;
+    const cue = pickMysteryVocalCueV2(vocalBank[listenerBotId] ?? [], "listening", seed);
+    if (!cue) return;
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => {
+      vocalReactionPlayedRef.current = seed;
+      setVocalReactingBotId(listenerBotId);
+      void playDebateMysteryVocalCueV2({
+        url: cue.url,
+        volume: props.audioVolume * DEBATE_MYSTERY_VOCAL_LISTENING_VOLUME_RATIO,
+        signal: controller.signal,
+      }).finally(() => setVocalReactingBotId((current) => (current === listenerBotId ? null : current)));
+    }, mysteryListeningReactionDelayMsV2(seed, roomDisplayedDialogue.visibleText.length));
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [
+    currentBot,
+    props.audioEnabled,
+    props.audioVolume,
+    props.session.id,
+    prosecutorBot,
+    roomActorVisible,
+    roomDialogueSettled,
+    roomDisplayedDialogue,
+    roomPersonaDialogueActive,
+    roomPlayerObservationActive,
+    roomProsecutorVisible,
+    vocalBank,
+  ]);
   // While the Case File is open nothing behind its blur runs: lights and
   // effects are withdrawn so the treatment draws nothing and stops its clock.
   const currentRoomLights = useMemo<readonly MansionDynamicLightV2[]>(
@@ -4984,15 +5490,19 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
   const investigationAvatarPresentation = whodunnitInvestigationAvatarPresentation(
     currentRoomArtStyle,
   );
+  const currentRoomFittedAspect =
+    currentRoomArtAspect ?? WHODUNNIT_ROOM_ART_DEFAULT_ASPECT;
   const roomSceneStyle = {
     "--room-image": currentRoomImageUrl ? `url(${currentRoomImageUrl})` : "none",
+    "--room-art-aspect": currentRoomFittedAspect,
+    "--room-art-inverse-aspect": 1 / currentRoomFittedAspect,
     "--room-parallax-x": `${roomParallax.x}px`,
     "--room-parallax-y": `${roomParallax.y}px`,
     "--room-parallax-scale": roomParallax.x || roomParallax.y ? "1.012" : "1",
   } as CSSProperties;
   const lensActive = Boolean(
     command === "examine" &&
-      currentRoomUnexaminedHotspots.length > 0 &&
+      (currentRoomUnexaminedHotspots.length > 0 || currentRoomInterests.length > 0) &&
       !busy &&
       !examinationStreaming &&
       !roomDisplayedDialogue &&
@@ -5006,8 +5516,9 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
     command === "examine";
   // Visuals mode edits assets on the map; movement waits until it is closed.
   const backToRoomDisabled = busy || dialoguePerformanceActive || travelPresentation !== null || roomVisualsMode;
-  const examinationIlluminatedCells = lensActive && currentRoom
-    ? new Set(debateMysteryV2ExamineGridCellIndexes(investigationLens, currentRoom.hotspots))
+  const examinationGridTrackingActive = examinationPointerInside || examinationKeyboardFocusActive;
+  const examinationIlluminatedCells = lensActive && currentRoom && examinationGridTrackingActive
+    ? new Set(debateMysteryV2ExamineGridCellIndexes(investigationLens, currentRoomLensRegions))
     : new Set<number>();
   const examinationGridStyle = {
     "--examine-grid-cell-width": `${100 / DEBATE_MYSTERY_V2_EXAMINE_GRID_COLUMNS}%`,
@@ -5097,13 +5608,8 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
   );
   const examineHotspot = async (hotspotId: string): Promise<void> => {
     if (!currentRoom || !lensActive) return;
-    const completesRoom = debateMysteryV2ExaminationCompletesRoom(
-      currentRoom.hotspots,
-      hotspotId,
-    );
     setExaminingHotspotId(hotspotId);
-    const completed = await sendAction({ action: "examine", roomId: currentRoom.id, hotspotId });
-    if (completed && completesRoom) setCompletionCueRoomId(currentRoom.id);
+    await sendAction({ action: "examine", roomId: currentRoom.id, hotspotId });
   };
   // The "..." beat is presentation: reveal the tableau on its own after a
   // moment (a gesture still skips ahead) instead of asking for a click.
@@ -5142,6 +5648,26 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
       finishDeferredAction(pending.deferred);
     }
   }, [currentRoom?.id, finishDeferredAction, pendingRoomIntroduction, roomIntroductionPhase]);
+  /** A point of interest is flavour: the first look asks the investigator for
+   * an aside, later looks replay the stored one without a request. */
+  const observeInterest = async (interestId: string): Promise<void> => {
+    if (!currentRoom || !lensActive) return;
+    const interest = currentRoomInterests.find((entry) => entry.id === interestId);
+    if (!interest) return;
+    const nodeId = debateMysteryInterestNodeIdV2(currentRoom.id, interest.id);
+    const noted = state.dialogueHistory.findLast((entry) => entry.nodeId === nodeId) ?? null;
+    if (noted) {
+      cancelActiveDialogueAudio();
+      setHeldDialogue(null);
+      setSpeechTiming(null);
+      setInterrogationPhase(null);
+      setDialoguePlaybackQueue([noted]);
+      setDialoguePlaybackIndex(0);
+      return;
+    }
+    setExaminingHotspotId(`interest:${interest.id}`);
+    await sendAction({ action: "observe_interest", roomId: currentRoom.id, interestId: interest.id });
+  };
   const advanceVisibleRoomDialogue = (): void => {
     const roomIntroductionGesture = debateMysteryRoomIntroductionGestureV2({
       casekeeperNarrationVisible: roomCasekeeperNarrationVisible,
@@ -5234,35 +5760,49 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
       return;
     }
     if (!lensActive) return;
-    const bounds = event.currentTarget.getBoundingClientRect();
+    const bounds = roomArtFrameRef.current?.getBoundingClientRect();
+    if (!bounds) return;
+    const point = debateMysteryV2ImagePointFromClientPoint(event, bounds);
+    if (!point) return;
     const lens = resolveDebateMysteryV2Lens(
-      ((event.clientX - bounds.left) / Math.max(1, bounds.width)) * 100,
-      ((event.clientY - bounds.top) / Math.max(1, bounds.height)) * 100,
-      currentRoom.hotspots,
+      point.x,
+      point.y,
+      currentRoomLensRegions,
     );
     setInvestigationLens(lens);
     const hotspotId = debateMysteryV2LensClickTarget(lens);
-    if (hotspotId) void examineHotspot(hotspotId);
+    if (hotspotId?.startsWith("interest:")) void observeInterest(hotspotId.slice("interest:".length));
+    else if (hotspotId) void examineHotspot(hotspotId);
   };
   const handleRoomPointerMove = (event: React.PointerEvent<HTMLElement>): void => {
-    const bounds = event.currentTarget.getBoundingClientRect();
-    const normalizedX = ((event.clientX - bounds.left) / Math.max(1, bounds.width)) * 100;
-    const normalizedY = ((event.clientY - bounds.top) / Math.max(1, bounds.height)) * 100;
+    const bounds = roomArtFrameRef.current?.getBoundingClientRect();
+    const point = bounds
+      ? debateMysteryV2ImagePointFromClientPoint(event, bounds)
+      : null;
+    if (!point) {
+      setExaminationPointerInside(false);
+      if (roomParallaxEnabled) setRoomParallax({ x: 0, y: 0 });
+      return;
+    }
     if (lensActive && currentRoom) {
+      setExaminationPointerInside(true);
       setInvestigationLens(resolveDebateMysteryV2Lens(
-        normalizedX,
-        normalizedY,
-        currentRoom.hotspots,
+        point.x,
+        point.y,
+        currentRoomLensRegions,
       ));
     }
     if (roomParallaxEnabled && !(event.target instanceof Element && event.target.closest("button"))) {
       setRoomParallax({
-        x: (normalizedX / 100 - 0.5) * 8,
-        y: (normalizedY / 100 - 0.5) * 6,
+        x: (point.x / 100 - 0.5) * 8,
+        y: (point.y / 100 - 0.5) * 6,
       });
     }
   };
-  const handleRoomPointerLeave = (): void => setRoomParallax({ x: 0, y: 0 });
+  const handleRoomPointerLeave = (): void => {
+    setExaminationPointerInside(false);
+    setRoomParallax({ x: 0, y: 0 });
+  };
 
   useEffect(() => {
     if (!completionCueRoomId) return;
@@ -5329,7 +5869,7 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
       data-theme={props.theme}
     >
       <p className={styles.eyebrow}>{state.caseTitle}</p>
-      <strong>{spectatorTheory ? "Prosecutor Findings" : "Investigation"}</strong>
+      <strong>{spectatorTheory ? `${counsel.playerRoleLabel} Findings` : "Investigation"}</strong>
     </div>
   );
   const renderInvestigationHeaderActions = (
@@ -5408,7 +5948,7 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
     const actions: DebateMysterySceneRepairActionV1[] = context === "exterior"
       ? ["regenerate_exterior", "align_exterior_door", "regenerate_music", "regenerate_ambience"]
       : context === "casefile"
-        ? [...CASE_FILE_REPAIR_ACTIONS]
+        ? [...CASE_FILE_ROOT_REPAIR_ACTIONS]
       : context === "item"
         ? [
             "repair_evidence_name",
@@ -5455,6 +5995,23 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
     const emojiResults = pickedItem && sceneRepairItemPick?.action === "set_evidence_emoji"
       ? searchDebateEvidenceEmojis(sceneRepairEmojiQuery || pickedItem.title, 12)
       : [];
+    const resetSceneRepairItemFlow = (): void => {
+      setSceneRepairItemMenu(null);
+      setSceneRepairItemPick(null);
+      setSceneRepairEmojiQuery("");
+    };
+    const closeSceneRepairDialog = (): void => {
+      resetSceneRepairItemFlow();
+      setSceneRepairOpen(null);
+    };
+    const openSceneRepairItemPicker = (
+      action: CaseFileItemRepairAction,
+      backTo: CaseFileItemRepairMenu,
+    ): void => {
+      setSceneRepairItemMenu(null);
+      setSceneRepairItemPick({ action, subjectId: null, backTo });
+      setSceneRepairEmojiQuery("");
+    };
     return (
       <>
         <div className={styles.sceneRepairControl} data-undo={undoApplies ? "true" : undefined}>
@@ -5471,8 +6028,7 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
                 void undoSceneRepair();
                 return;
               }
-              setSceneRepairItemPick(null);
-              setSceneRepairEmojiQuery("");
+              resetSceneRepairItemFlow();
               setSceneRepairOpen(contextKey);
             }}
           >
@@ -5506,7 +6062,7 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
               type="button"
               className={styles.sceneRepairBackdrop}
               aria-label="Close scene repair"
-              onClick={(event) => { event.stopPropagation(); setSceneRepairOpen(null); }}
+              onClick={(event) => { event.stopPropagation(); closeSceneRepairDialog(); }}
             />
             <section
               className={styles.sceneRepairDialog}
@@ -5522,29 +6078,93 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
                     Repair this {contextLabel}
                   </h2>
                 </div>
-                <button type="button" onClick={() => setSceneRepairOpen(null)}>Close</button>
+                <button type="button" onClick={closeSceneRepairDialog}>Close</button>
               </header>
               <p>
                 Choose what looks wrong. PRISM changes presentation only—case facts,
                 discoveries, doors, and action costs stay frozen.
               </p>
-              {sceneRepairItemPick && !pickedItem ? (
+              {sceneRepairItemMenu === "categories" ? (
+                <div className={styles.sceneRepairItemList} role="group" aria-label="Choose what to repair about an item">
+                  <small>What about the item needs repair?</small>
+                  <div className={styles.sceneRepairOptions} data-layout="three">
+                    <button
+                      type="button"
+                      disabled={foundItems.length === 0}
+                      onClick={() => openSceneRepairItemPicker("set_evidence_emoji", "categories")}
+                    >
+                      <strong>Emoji</strong>
+                      <span>Choose a more accurate symbol for a found item.</span>
+                    </button>
+                    <button
+                      type="button"
+                      disabled={foundItems.length === 0}
+                      onClick={() => setSceneRepairItemMenu("information")}
+                    >
+                      <strong>Item information</strong>
+                      <span>Repair a found item&apos;s name or description.</span>
+                    </button>
+                    <button
+                      type="button"
+                      disabled={foundItems.length === 0 || liveResponseMode === "local"}
+                      title={liveResponseMode === "local" ? "Item asset synthesis requires ONLINE." : undefined}
+                      onClick={() => openSceneRepairItemPicker("regenerate_evidence_asset", "categories")}
+                    >
+                      <strong>Asset</strong>
+                      <span>Synthesize or resynthesize a found item&apos;s visual asset.</span>
+                    </button>
+                  </div>
+                  <button type="button" onClick={() => setSceneRepairItemMenu(null)}>Back</button>
+                </div>
+              ) : sceneRepairItemMenu === "information" ? (
+                <div className={styles.sceneRepairItemList} role="group" aria-label="Choose item information to repair">
+                  <small>Which information needs repair?</small>
+                  <div className={styles.sceneRepairOptions}>
+                    <button
+                      type="button"
+                      onClick={() => openSceneRepairItemPicker("rename_evidence_from_description", "information")}
+                    >
+                      <strong>Name</strong>
+                      <span>Rename the item from its existing description.</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => openSceneRepairItemPicker("reroll_evidence_description", "information")}
+                    >
+                      <strong>Description</strong>
+                      <span>Rewrite its description without adding new observations.</span>
+                    </button>
+                  </div>
+                  <button type="button" onClick={() => setSceneRepairItemMenu("categories")}>Back</button>
+                </div>
+              ) : sceneRepairItemPick && !pickedItem ? (
                 <div className={styles.sceneRepairItemList} role="group" aria-label="Choose a found item">
                   <small>{MYSTERY_SCENE_REPAIR_COPY[sceneRepairItemPick.action].action}. Which item?</small>
-                  {foundItems.map((entry) => (
-                    <button key={entry.reference.id} type="button" disabled={Boolean(sceneRepairJob)} onClick={() => {
-                      if (sceneRepairItemPick.action === "reroll_evidence_description" || sceneRepairItemPick.action === "rename_evidence_from_description") {
-                        setSceneRepairItemPick(null);
-                        void repairScene(sceneRepairItemPick.action, null, entry);
-                      } else {
+                  {foundItems.map((entry) => {
+                    const assetAlreadyQueued = sceneRepairItemPick.action === "regenerate_evidence_asset" &&
+                      itemSynthesisJobs.some((job) =>
+                        job.subjectId === entry.reference.id &&
+                        (job.status === "queued" || job.status === "generating"));
+                    return (
+                      <button key={entry.reference.id} type="button" disabled={Boolean(sceneRepairJob) || assetAlreadyQueued} onClick={() => {
+                        if (sceneRepairItemPick.action !== "set_evidence_emoji") {
+                          const action = sceneRepairItemPick.action;
+                          resetSceneRepairItemFlow();
+                          void repairScene(action, null, entry);
+                          return;
+                        }
                         setSceneRepairEmojiQuery("");
                         setSceneRepairItemPick({ ...sceneRepairItemPick, subjectId: entry.reference.id });
-                      }
-                    }}>
-                      <span aria-hidden="true">{entry.emoji}</span><strong>{entry.title}</strong>
-                    </button>
-                  ))}
-                  <button type="button" onClick={() => setSceneRepairItemPick(null)}>Back</button>
+                      }}>
+                        <span aria-hidden="true">{entry.emoji}</span><strong>{entry.title}</strong>
+                      </button>
+                    );
+                  })}
+                  <button type="button" onClick={() => {
+                    const backTo = sceneRepairItemPick.backTo;
+                    setSceneRepairItemPick(null);
+                    setSceneRepairItemMenu(backTo);
+                  }}>Back</button>
                 </div>
               ) : pickedItem && sceneRepairItemPick?.action === "set_evidence_emoji" ? (
                 <div className={styles.sceneRepairEmojiPicker} role="group" aria-label={`Choose an emoji for ${pickedItem.title}`}>
@@ -5557,22 +6177,37 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
                       const custom = normalizeDebateEvidenceEmojiChoice(event.currentTarget.value, "");
                       if (custom && !/[\p{L}\p{N}]/u.test(custom)) {
                         event.preventDefault();
-                        setSceneRepairItemPick(null);
+                        resetSceneRepairItemFlow();
                         void repairScene("set_evidence_emoji", null, pickedItem, { emoji: custom });
                       }
                     }} /></label>
                   <div className={styles.sceneRepairEmojiResults} aria-live="polite">
                     {emojiResults.map((result) => (
                       <button key={result.emoji} type="button" disabled={Boolean(sceneRepairJob)} aria-label={`Use ${result.label} emoji ${result.emoji}`}
-                        onClick={() => { setSceneRepairItemPick(null); void repairScene("set_evidence_emoji", null, pickedItem, { emoji: result.emoji }); }}>
+                        onClick={() => { resetSceneRepairItemFlow(); void repairScene("set_evidence_emoji", null, pickedItem, { emoji: result.emoji }); }}>
                         <span aria-hidden="true">{result.emoji}</span><small>{result.label}</small>
                       </button>
                     ))}
                   </div>
-                  <button type="button" onClick={() => setSceneRepairItemPick({ action: "set_evidence_emoji", subjectId: null })}>Back</button>
+                  <button type="button" onClick={() => setSceneRepairItemPick((current) =>
+                    current ? { ...current, subjectId: null } : current
+                  )}>Back</button>
                 </div>
               ) : null}
-              <div className={styles.sceneRepairOptions} data-hidden={sceneRepairItemPick ? "true" : undefined}>
+              <div
+                className={styles.sceneRepairOptions}
+                data-hidden={sceneRepairItemMenu || sceneRepairItemPick ? "true" : undefined}
+              >
+                {context === "casefile" ? (
+                  <button
+                    type="button"
+                    disabled={foundItems.length === 0}
+                    onClick={() => setSceneRepairItemMenu("categories")}
+                  >
+                    <strong>An item isn&apos;t accurate</strong>
+                    <span>Repair its emoji, information, or visual asset.</span>
+                  </button>
+                ) : null}
                 {actions.map((action) => {
                   const copy = MYSTERY_SCENE_REPAIR_COPY[action];
                   const issue = action === "regenerate_room_mosaic" && hasUpgrade
@@ -5592,17 +6227,22 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
                         Boolean(sceneRepairJob) ||
                         itemGenerationAlreadyQueued ||
                         (context === "casefile" && action !== "clean_case_file" && foundItems.length === 0) ||
-                        (liveResponseMode === "local" && !LOCAL_TEXT_REPAIR_ACTIONS.includes(action) && action !== "reduce_evidence_magenta" && action !== "refresh_room_lights")
+                        (liveResponseMode === "local" &&
+                          !LOCAL_TEXT_REPAIR_ACTIONS.includes(action) &&
+                          !PROVIDER_FREE_SCENE_REPAIR_ACTIONS.includes(action) &&
+                          action !== "refresh_room_lights")
                       }
                       onClick={() => {
-                        if (action === "refresh_room_lights" && room) {
+                        if (action === "align_exterior_door") {
+                          setSceneRepairOpen(null);
+                          setError(null);
+                          setExteriorEntryPlacementOpen(true);
+                        } else if (action === "refresh_room_lights" && room) {
                           setSceneRepairOpen(null);
                           setLightEditorRoomId(room.id);
                         } else if (action === "generate_map_plan") {
                           setSceneRepairOpen(null);
                           setOverheadEditorOpen(true);
-                        } else if (context === "casefile" && (action === "set_evidence_emoji" || action === "reroll_evidence_description" || action === "rename_evidence_from_description")) {
-                          setSceneRepairItemPick({ action, subjectId: null });
                         } else void repairScene(action, room, item);
                       }}
                     >
@@ -5615,15 +6255,19 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
               {liveResponseMode === "local" &&
                 actions.some((action) => action !== "reduce_evidence_magenta") ? (
                 <p className={styles.roomVisualOnlineNotice}>
-                  {actions.includes("reduce_evidence_magenta")
+                  {actions.includes("align_exterior_door")
+                    ? "Entrance placement works in LOCAL. Exterior generation, music, and ambience require ONLINE."
+                    : actions.includes("reduce_evidence_magenta")
                     ? "Image generation and image-aware repair require ONLINE. Text repair and magenta cleanup work in LOCAL."
+                    : context === "casefile"
+                      ? "Emoji and item information repairs work in LOCAL. Item asset synthesis requires ONLINE."
                     : "Image generation, image-aware repair, music, and ambience require ONLINE. Item text repair works in LOCAL."}
                 </p>
               ) : null}
               <footer>
                 <small>
                   No undiscovered room or item is previewed here. After a successful repair,
-                  this question mark becomes Undo. Save venue level keeps accepted mansion changes.
+                  this question mark becomes Undo. Venue updates can be kept when you file charges.
                 </small>
               </footer>
             </section>
@@ -5836,13 +6480,59 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
         return;
       }
       props.onExteriorIntroStart();
+      beginVenueArrival();
     };
     const enterFromExterior = (): void => {
       void beginExteriorEntry(visitingExterior);
     };
+    // The arrival line follows the dialogue contract: one click fills the
+    // line and silences the take, the next clears the exterior to the door.
+    const advanceVenueArrival = (): void => {
+      if (!arrivalLine) return;
+      if (arrivalLine.revealed < arrivalLine.text.length || arrivalLine.playing) {
+        arrivalAudioRef.current?.pause();
+        setArrivalLine({ ...arrivalLine, revealed: arrivalLine.text.length, playing: false });
+        return;
+      }
+      setEntryStage("door");
+    };
+    const handleExteriorEntryPlacement = (
+      event: React.MouseEvent<HTMLButtonElement>,
+    ): void => {
+      event.stopPropagation();
+      if (sceneRepairJob) return;
+      if (event.detail === 0) {
+        setError("Click the doorway or gangway on the exterior to mark it.");
+        return;
+      }
+      const coverPlane = titleCoverPlaneRef.current;
+      const entryTarget = coverPlane
+        ? debateMysteryExteriorEntryTargetFromClientPointV1(
+            coverPlane.getBoundingClientRect(),
+            event,
+          )
+        : null;
+      if (!entryTarget) {
+        setError("The exterior is not ready for entrance placement yet.");
+        return;
+      }
+      void repairScene("align_exterior_door", null, null, {
+        entryTarget,
+        onSuccess: () => setExteriorEntryPlacementOpen(false),
+      });
+    };
+    const cancelExteriorEntryPlacement = (
+      event: React.MouseEvent<HTMLButtonElement>,
+    ): void => {
+      event.stopPropagation();
+      setExteriorEntryPlacementOpen(false);
+      setError(null);
+    };
     const handleExteriorBackdropClick = (event: React.MouseEvent<HTMLElement>): void => {
       if (
         !firstPersonExterior ||
+        entryStage === "loading" ||
+        entryStage === "speaking" ||
         exteriorEntryPresentation ||
         mysteryDialogueGestureOriginIsInteractive(event.target)
       ) return;
@@ -5853,6 +6543,7 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
       <main
         className={styles.titleCard}
         data-theme={props.theme}
+        data-entry-stage={entryStage}
         data-first-person-exterior={firstPersonExterior ? "true" : undefined}
         data-exterior-entering={exteriorEntryPresentation ? "true" : undefined}
         onClick={handleExteriorBackdropClick}
@@ -5862,11 +6553,66 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
           "--mansion-door-y": `${mansionDoorTarget.yPercent}%`,
         } as CSSProperties}
       >
-        <span className={styles.titleCoverMedia} aria-hidden="true" />
-        <SceneMediaVignette
-          theme={props.theme}
-          style={{ "--scene-vignette-z": 1 } as CSSProperties}
-        />
+        <div
+          ref={titleCoverPlaneRef}
+          className={styles.titleCoverPlane}
+          data-entry-placement={exteriorEntryPlacementOpen ? "true" : undefined}
+        >
+          <span className={styles.titleCoverMedia} aria-hidden="true" />
+          <SceneMediaVignette
+            theme={props.theme}
+            style={{ "--scene-vignette-z": 1 } as CSSProperties}
+          />
+          {exteriorEntryPlacementOpen ? (
+            <button
+              type="button"
+              className={styles.exteriorEntryPlacementSurface}
+              disabled={Boolean(sceneRepairJob)}
+              aria-label="Place the entrance at this point"
+              onClick={handleExteriorEntryPlacement}
+            />
+          ) : firstPersonExterior && mansionDoorEntry ? (
+              <button
+                type="button"
+                className={styles.titleDoor}
+                data-tutorial-target="whodunnit-enter-mansion"
+                disabled={busy && !exteriorEntryPresentation}
+                aria-label={exteriorEntryPresentation
+                  ? visitingExterior
+                    ? `Enter ${venueEntryRoom?.name ?? "the venue entry"} now`
+                    : `${venueEntryAction} now`
+                  : venueEntryAction}
+                onClick={enterFromExterior}
+              >
+                <span className={styles.titleDoorFocus} aria-hidden="true">
+                  <span className={styles.titleDoorMark} />
+                </span>
+                <span className={styles.titleEntryAction}>{venueEntryAction}</span>
+              </button>
+          ) : null}
+        </div>
+        {exteriorEntryPlacementOpen ? (
+          <aside
+            className={styles.exteriorEntryPlacementHud}
+            role="dialog"
+            aria-label="Place the exterior entrance"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div>
+              <p className={styles.eyebrow}>Field repair</p>
+              <strong>Mark the threshold</strong>
+              <span>Click the doorway or gangway the party should enter.</span>
+              {error ? <small role="alert">{error}</small> : null}
+            </div>
+            <button
+              type="button"
+              disabled={Boolean(sceneRepairJob)}
+              onClick={cancelExteriorEntryPlacement}
+            >
+              Cancel
+            </button>
+          </aside>
+        ) : null}
         {!firstPersonExterior ? (
           <>
             <button type="button" className={styles.archiveButton} data-session-local-back="true" disabled={busy} onClick={props.onExit}>← Archive</button>
@@ -5879,8 +6625,9 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
               <h1>{state.caseTitle}</h1>
               <p>{state.fictionLabel}</p>
               <div className={styles.titleMetadata}>
-                {state.caseCharge ? <span>{state.caseCharge.title}</span> : null}<span>{state.suspects.length} witnesses</span><span>{state.config.trialType === "jury" ? "Jury Trial" : "Bench Trial"}</span>{state.config.investigationMode === "court_only" ? <span>Court act</span> : null}<span>{state.voicesEnabled ? "Local performance ready" : "Text performance"}</span>
+                {state.caseCharge ? <span>{state.caseCharge.title}</span> : null}{client ? <span>Defending: {client.name}</span> : null}<span>{state.suspects.length} witnesses</span><span>{state.config.trialType === "jury" ? "Jury Trial" : "Bench Trial"}</span>{state.config.investigationMode === "court_only" ? <span>Court act</span> : null}<span>{state.voicesEnabled ? "Local performance ready" : "Text performance"}</span>
               </div>
+              {state.prosecutionCaseSummary ? <p className={styles.titleCaseSummary}>{state.prosecutionCaseSummary}</p> : null}
               <button
                 type="button"
                 className={styles.primaryAction}
@@ -5891,26 +6638,65 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
               {error ? <p className={styles.error}>{error}</p> : null}
             </div>
           </>
-        ) : mansionDoorEntry ? (
-            <button
-              type="button"
-              className={styles.titleDoor}
-              data-tutorial-target="whodunnit-enter-mansion"
-              disabled={busy && !exteriorEntryPresentation}
-              aria-label={exteriorEntryPresentation
-                ? visitingExterior
-                  ? `Enter ${venueEntryRoom?.name ?? "the venue entry"} now`
-                  : `${venueEntryAction} now`
-                : venueEntryAction}
-              onClick={enterFromExterior}
-            >
-              <span className={styles.titleDoorFocus} aria-hidden="true">
-                <span className={styles.titleDoorMark} />
-              </span>
-              <span className={styles.titleEntryAction}>{venueEntryAction}</span>
-            </button>
         ) : null}
-        {firstPersonExterior && exteriorThoughtKey > 0 ? (
+        {entryStage === "loading" ? <WhodunnitRoomLoadingOverlay theme={props.theme} /> : null}
+        {entryStage === "speaking" && arrivalLine && prosecutorBot ? (
+          // The investigator, alone before the blurred venue, speaks the
+          // arrival line in their own voice; the exterior clears on dismissal.
+          <div
+            className={styles.entryArrival}
+            role="presentation"
+            onClick={(event) => {
+              event.stopPropagation();
+              advanceVenueArrival();
+            }}
+          >
+            <aside
+              className={styles.entryArrivalActor}
+              style={{ "--actor-color": prosecutorBot.color ?? "#72d7ff" } as CSSProperties}
+              aria-hidden="true"
+            >
+              {props.renderMysteryBotAvatar(prosecutorBot, "full", {
+                demeanor: "partner",
+                talking: arrivalLine.playing,
+                blinkEnabled: true,
+              })}
+            </aside>
+            <div
+              className={styles.entryArrivalBox}
+              role="button"
+              tabIndex={0}
+              aria-live="polite"
+              style={{ "--dialogue-accent": playerCharacterColor } as CSSProperties}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" || event.key === " ") {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  advanceVenueArrival();
+                }
+              }}
+            >
+              <small className={styles.dialogueSpeakerSignature}>
+                <i aria-hidden="true">
+                  {props.renderBotGlyph(playerCharacterGlyph ?? null, { size: 14, strokeWidth: 1.65 })}
+                </i>
+                <span>{playerCharacterName}</span>
+              </small>
+              <p>
+                <span className={styles.dialogueTextReserve} aria-hidden="true">{arrivalLine.text}</span>
+                <span className={styles.dialogueTextRevealed}>{arrivalLine.text.slice(0, arrivalLine.revealed)}</span>
+              </p>
+              <span
+                className={styles.dialogueContinueHint}
+                role="status"
+                data-pending={arrivalLine.revealed >= arrivalLine.text.length && !arrivalLine.playing ? undefined : "true"}
+              >
+                Click to continue
+              </span>
+            </div>
+          </div>
+        ) : null}
+        {firstPersonExterior && exteriorThoughtKey > 0 && entryStage !== "loading" && entryStage !== "speaking" ? (
           <aside
             key={exteriorThoughtKey}
             className={styles.exteriorInvestigationThought}
@@ -5927,7 +6713,9 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
             <p>{exteriorInvestigationThought}</p>
           </aside>
         ) : null}
-        {firstPersonExterior ? renderSceneRepairControl("exterior") : null}
+        {firstPersonExterior && !exteriorEntryPlacementOpen
+          ? renderSceneRepairControl("exterior")
+          : null}
         {renderItemSynthesisLoader()}
         {renderSceneRepairLoader()}
       </main>
@@ -6113,7 +6901,8 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
           </section>
         ) : null}
         <section className={styles.truthGrade}>
-          <h2>{state.verdict.classification.replaceAll("_", " ")}</h2>
+          <h2>{whodunnitVerdictClassificationCopy(state.verdict.classification, counsel.stance).title}</h2>
+          <p>{whodunnitVerdictClassificationCopy(state.verdict.classification, counsel.stance).detail}</p>
           <p>Truth and proof grade: <strong>{state.verdict.proofGrade}</strong></p>
           <p>The sealed truth remained fixed throughout the social verdict.</p>
         </section>
@@ -6168,7 +6957,7 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
 
   if (courtPresentationActive && state.court && activeStatement) {
     return (
-      <main className={styles.court} style={props.stageAlignmentStyle} data-theme={props.theme} data-dialogue-playback={dialoguePerformanceActive ? "active" : undefined} data-tutorial-target="mystery-v2-court">
+      <main className={styles.court} style={props.stageAlignmentStyle} data-theme={props.theme} data-dialogue-playback={dialoguePerformanceActive ? "active" : undefined} data-arrival={courtArrivalActive ? "true" : undefined} data-tutorial-target="mystery-v2-court">
         <SessionAtmosphereLayer
           sessionKey={`whodunnit-v2-court:${props.session.id}`}
           backgroundUrl="/audio/debate/courtroom-audience-murmur-loop.mp3"
@@ -6181,10 +6970,10 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
           ambientFoley={false}
         />
         {identityPresentationBlackout}
-        {callout ? <div key={callout.id} className={styles.callout} style={calloutStyle} role="status" aria-live="assertive"><span>{CALLOUT_COPY[callout.callout]}</span></div> : null}
+        {callout && !courtArrivalActive ? <div key={callout.id} className={styles.callout} style={calloutStyle} role="status" aria-live="assertive"><span>{CALLOUT_COPY[callout.callout]}</span></div> : null}
         <header className={styles.courtHeader}>
           <button type="button" data-session-local-back="true" onClick={props.onExit}>← Archive</button>
-          <div><p className={styles.eyebrow}>{state.caseTitle}</p><strong>{spectator ? `Gallery · ${prosecutorBot?.name ?? "Prosecutor"}` : `${prosecutorBot?.name ?? "Prosecutor"} · Cross-Examination`}</strong></div>
+          <div><p className={styles.eyebrow}>{state.caseTitle}</p><strong>{spectator ? `Gallery · ${prosecutorBot?.name ?? counsel.playerRoleLabel}` : `${prosecutorBot?.name ?? counsel.playerRoleLabel} · Cross-Examination`}</strong></div>
           <button type="button" onClick={() => { setCaseFileOpen(true); setCaseFileUpdate(null); }} data-tutorial-target="mystery-v2-case-file">Case File <span>{caseFileEntryCount}</span></button>
         </header>
         <div className={styles.credibility} aria-label={`${state.court.credibilityRemaining} of ${state.court.credibilityMaximum} credibility remaining`}>
@@ -6200,7 +6989,7 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
             <div className={styles.wideCourtComposition} aria-label="Courtroom establishing view">
               <article className={styles.wideCourtPresence} data-role="prosecution" data-speaking={prosecutorDialogueActive ? "true" : undefined} style={{ "--court-presence-color": prosecutorBot?.color ?? "#72d7ff" } as CSSProperties}>
                 {prosecutorBot ? props.renderMysteryBotAvatar(prosecutorBot, "mini", { demeanor: "partner", talking: speechTiming !== null && prosecutorDialogueActive, speechTiming: prosecutorDialogueActive ? speechTiming : null, blinkEnabled: true, facing: "left" }) : <span>◇</span>}
-                <small>Prosecution</small>
+                <small>{counsel.playerSideLabel}</small>
               </article>
               <article className={styles.wideCourtPresence} data-role="judge" data-speaking={judgeDialogueActive ? "true" : undefined} style={{ "--court-presence-color": judgeBot?.color ?? "#d5c8ff" } as CSSProperties}>
                 {judgeBot ? props.renderMysteryBotAvatar(judgeBot, "mini", { demeanor: "partner", talking: speechTiming !== null && judgeDialogueActive, speechTiming: judgeDialogueActive ? speechTiming : null, blinkEnabled: true }) : <span>◇</span>}
@@ -6208,8 +6997,30 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
               </article>
               <article className={styles.wideCourtPresence} data-role="defense" data-speaking={defenseDialogueActive ? "true" : undefined} style={{ "--court-presence-color": defenseBot?.color ?? "#ff7eaa" } as CSSProperties}>
                 {defenseBot ? props.renderMysteryBotAvatar(defenseBot, "mini", { demeanor: "partner", talking: speechTiming !== null && defenseDialogueActive, speechTiming: defenseDialogueActive ? speechTiming : null, blinkEnabled: true, facing: "right" }) : <span>◇</span>}
-                <small>Defense</small>
+                <small>{counsel.opposingSideLabel}</small>
               </article>
+              <div className={styles.courtGallery} aria-label="Public gallery">
+                {courtGallerySeats.map((seat, index) => (
+                  <article
+                    key={seat.bot.id}
+                    className={styles.courtGallerySeat}
+                    data-side={seat.side}
+                    data-row={seat.row}
+                    data-arrived={!courtArrivalProgress || index < courtArrivalProgress.revealedCount ? "true" : undefined}
+                    style={{ "--court-seat-x": `${seat.xPercent}%`, "--court-presence-color": seat.bot.color ?? "#a98cff" } as CSSProperties}
+                  >
+                    {props.renderMysteryBotAvatar(seat.bot, "mini", { demeanor: seat.role === "juror" ? "partner" : "suspect", talking: false, speechTiming: null, blinkEnabled: true, facing: seat.side === "left" ? "right" : "left" })}
+                    <small>{seat.role === "juror" ? "Juror" : seat.bot.name}</small>
+                  </article>
+                ))}
+              </div>
+              {courtArrivalActive && courtArrivalProgress ? (
+                <div className={styles.courtArrivalChrome} role="status" aria-live="polite" style={{ "--court-arrival-progress": courtArrivalProgress.ratio } as CSSProperties}>
+                  <span>Public gallery</span>
+                  <strong>{courtArrivalProgress.revealedCount < courtGallerySeats.length ? "Gathering" : "Court is seated"}</strong>
+                  <i aria-hidden="true" />
+                </div>
+              ) : null}
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img className={styles.wideEvidenceTable} src={`/coffee-table/table_${props.theme}.png`} alt="Evidence table" />
             </div>
@@ -6220,19 +7031,19 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
               <section className={styles.counselComposition} aria-label="Court counsel">
                 <article className={styles.counselSeat} data-side="prosecution" data-speaking={prosecutorDialogueActive ? "true" : undefined} style={{ "--counsel-color": prosecutorBot?.color ?? "#72d7ff" } as CSSProperties}>
                   {prosecutorDialogueActive && dialogueActionPresentation ? <SignalVoiceActionText key={`prosecution:${displayedDialogue?.nodeId ?? ""}:${displayedDialogue?.occurredAt ?? ""}`} {...dialogueActionPresentation} accent={prosecutorBot?.color} /> : null}
-                  <div className={styles.counselAvatar}>{prosecutorBot ? props.renderMysteryBotAvatar(prosecutorBot, "mini", { demeanor: "partner", talking: speechTiming !== null && prosecutorDialogueActive, speechTiming: prosecutorDialogueActive ? speechTiming : null, blinkEnabled: true, facing: "left" }) : <span>◇</span>}</div>
+                  <div className={styles.counselAvatar}>{prosecutorBot ? props.renderMysteryBotAvatar(prosecutorBot, "mini", { demeanor: "partner", thinking: courtProsecutorThinking, talking: speechTiming !== null && prosecutorDialogueActive, speechTiming: prosecutorDialogueActive ? speechTiming : null, blinkEnabled: true, facing: "left" }) : <span>◇</span>}</div>
                   <i className={styles.counselGlyph} aria-hidden="true">{props.renderBotGlyph(prosecutorBot?.glyph ?? null, { size: 26, strokeWidth: 1.5 })}</i>
-                  <div className={styles.counselIdentity}><small>Player Prosecutor</small><strong>{prosecutorBot?.name ?? "Prosecutor"}</strong></div>
+                  <div className={styles.counselIdentity}><small>Player {counsel.playerRoleLabel}</small><strong>{prosecutorBot?.name ?? counsel.playerRoleLabel}</strong></div>
                 </article>
                 <article className={styles.counselSeat} data-side="defense" data-speaking={defenseDialogueActive ? "true" : undefined} style={{ "--counsel-color": defenseBot?.color ?? "#ff7eaa" } as CSSProperties}>
                   {defenseDialogueActive && dialogueActionPresentation ? <SignalVoiceActionText key={`defense:${displayedDialogue?.nodeId ?? ""}:${displayedDialogue?.occurredAt ?? ""}`} {...dialogueActionPresentation} accent={defenseBot?.color} /> : null}
                   <div className={styles.counselAvatar}>{defenseBot ? props.renderMysteryBotAvatar(defenseBot, "mini", { demeanor: "partner", talking: speechTiming !== null && defenseDialogueActive, speechTiming: defenseDialogueActive ? speechTiming : null, blinkEnabled: true, facing: "right" }) : <span>◇</span>}</div>
                   <i className={styles.counselGlyph} aria-hidden="true">{props.renderBotGlyph(defenseBot?.glyph ?? null, { size: 26, strokeWidth: 1.5 })}</i>
-                  <div className={styles.counselIdentity}><small>Defense Counsel</small><strong>{defenseBot?.name ?? "Defense"}</strong></div>
+                  <div className={styles.counselIdentity}><small>{counsel.opposingRoleLabel}</small><strong>{defenseBot?.name ?? counsel.opposingSideLabel}</strong></div>
                 </article>
               </section>
               <section className={styles.witnessStand} style={{ "--witness-color": courtPresentedWitness?.color ?? "#a98cff" } as CSSProperties}>
-                <div className={styles.witnessAvatar}>{courtPresentedWitnessBot ? props.renderMysteryBotAvatar(courtPresentedWitnessBot, "full", { demeanor: "suspect", talking: speechTiming !== null && courtPresentedWitnessDialogueActive, speechTiming: courtPresentedWitnessDialogueActive ? speechTiming : null, blinkEnabled: true, facing: "left" }) : <span>◇</span>}{courtWitnessActionPresentation ? <SignalVoiceActionText key={`witness:${displayedDialogue?.nodeId ?? activeStatement?.statementId ?? ""}:${displayedDialogue?.occurredAt ?? ""}`} {...courtWitnessActionPresentation} accent={courtPresentedWitness?.color} /> : null}</div>
+                <div ref={courtWitnessStandRef} className={styles.witnessAvatar} data-drop-target={presentDrag.active ? (presentDrag.overSuspect ? "hover" : "armed") : undefined}>{courtPresentedWitnessBot ? props.renderMysteryBotAvatar(courtPresentedWitnessBot, "full", { demeanor: "suspect", thinking: courtWitnessThinking, talking: speechTiming !== null && courtPresentedWitnessDialogueActive, speechTiming: courtPresentedWitnessDialogueActive ? speechTiming : null, blinkEnabled: true, facing: "left" }) : <span>◇</span>}{courtWitnessActionPresentation ? <SignalVoiceActionText key={`witness:${displayedDialogue?.nodeId ?? activeStatement?.statementId ?? ""}:${displayedDialogue?.occurredAt ?? ""}`} {...courtWitnessActionPresentation} accent={courtPresentedWitness?.color} /> : null}</div>
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img className={styles.witnessStandAsset} src={`/debate/whodunnit-witness-foreground-${props.theme}.png`} alt="" aria-hidden="true" />
               </section>
@@ -6240,9 +7051,9 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
           ) : null}
           {courtCamera === "prosecution" && prosecutorBot ? (
             <section className={styles.courtPodiumFocus} data-side="prosecution" style={{ "--court-presence-color": prosecutorBot.color ?? "#72d7ff" } as CSSProperties}>
-              <div className={styles.courtPodiumAvatar}>{props.renderMysteryBotAvatar(prosecutorBot, "full", { demeanor: "partner", talking: speechTiming !== null && prosecutorDialogueActive, speechTiming: prosecutorDialogueActive ? speechTiming : null, blinkEnabled: true, facing: "left" })}{dialogueActionPresentation ? <SignalVoiceActionText key={`prosecution-focus:${displayedDialogue?.nodeId ?? ""}:${displayedDialogue?.occurredAt ?? ""}`} {...dialogueActionPresentation} accent={prosecutorBot.color} /> : null}</div>
+              <div className={styles.courtPodiumAvatar}>{props.renderMysteryBotAvatar(prosecutorBot, "full", { demeanor: "partner", thinking: courtProsecutorThinking, talking: speechTiming !== null && prosecutorDialogueActive, speechTiming: prosecutorDialogueActive ? speechTiming : null, blinkEnabled: true, facing: "left" })}{dialogueActionPresentation ? <SignalVoiceActionText key={`prosecution-focus:${displayedDialogue?.nodeId ?? ""}:${displayedDialogue?.occurredAt ?? ""}`} {...dialogueActionPresentation} accent={prosecutorBot.color} /> : null}</div>
               <div className={styles.courtPodiumForeground} aria-hidden="true" />
-              <div className={styles.courtPodiumIdentity}><small>Player Prosecutor</small><strong>{prosecutorBot.name}</strong></div>
+              <div className={styles.courtPodiumIdentity}><small>Player {counsel.playerRoleLabel}</small><strong>{prosecutorBot.name}</strong></div>
             </section>
           ) : null}
           {courtCamera === "defense" && defenseFocusBot ? (
@@ -6309,17 +7120,17 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
           <small>{activeStatement.pressed ? "Pressed" : "Sworn statement"}{activeStatement.version > 1 ? ` · Revision ${activeStatement.version}` : ""}</small>
         </section>
         {displayedDialogue && displayedDialogue.lineId !== activeStatement.lineId ? (
-          <aside className={styles.courtReaction} role="button" tabIndex={0} onClick={handleCourtDialogueClick} onKeyDown={handleCourtDialogueKeyDown}><strong>{dialogueBot?.name ?? "Court"}</strong><p>{revealedSpeechText(whodunnitCaptionSpeechText(displayedDialogueDelivery.spokenText), captionSpeechTiming)}</p></aside>
+          <aside className={styles.courtReaction} role="button" tabIndex={0} data-thought={displayedDialogue.nodeId.startsWith("prosecutor-strategy") ? "true" : undefined} onClick={handleCourtDialogueClick} onKeyDown={handleCourtDialogueKeyDown}><strong>{dialogueBot?.name ?? "Court"}{displayedDialogue.nodeId.startsWith("prosecutor-strategy") ? " · thinking" : ""}</strong><p>{revealedSpeechText(whodunnitCaptionSpeechText(displayedDialogueDelivery.spokenText), captionSpeechTiming)}</p></aside>
         ) : null}
-        {spectator ? <aside className={styles.courtReaction} role="status"><strong>Watch-only court</strong><p>The selected Prosecutor is conducting the examination from the frozen admissible record.</p></aside> : <nav className={styles.courtActions} aria-label="Prosecution actions" data-console-label="Prosecution console">
-          <button type="button" data-command="press" disabled={busy || dialoguePerformanceActive} onClick={() => { playControlSfx("clip"); setPresentedCourtRecord(null); void sendAction({ action: "press_statement", statementId: activeStatement.statementId }); }} data-tutorial-target="mystery-v2-press"><span>!</span>Press</button>
+        {spectator ? <aside className={styles.courtReaction} role="status"><strong>Watch-only court</strong><p>The selected {counsel.playerRoleLabel} is conducting the examination from the frozen admissible record.</p></aside> : <nav className={styles.courtActions} aria-label="Prosecution actions" data-console-label="Prosecution console">
+          <button type="button" data-command="press" disabled={busy || dialoguePerformanceActive} onClick={() => { playControlSfx("clip"); setCourtBusyAction("press"); setPresentedCourtRecord(null); void sendAction({ action: "press_statement", statementId: activeStatement.statementId }); }} data-tutorial-target="mystery-v2-press"><span>!</span>Press</button>
           <button type="button" data-command="objection" data-active={command === "present" ? "true" : undefined} aria-pressed={command === "present"} disabled={busy || dialoguePerformanceActive} onClick={() => { playControlSfx("paper"); setCommand("present"); }} data-tutorial-target="mystery-v2-present-record"><span>◇</span>Objection</button>
-          <button type="button" data-command="think" disabled={busy || dialoguePerformanceActive} onClick={() => { playControlSfx("pencil"); void sendAction({ action: "review_strategy", contextNodeId: state.activeDialogueNodeId }); }} data-tutorial-target="mystery-v2-think"><span>◈</span>Think</button>
+          <button type="button" data-command="think" disabled={busy || dialoguePerformanceActive} onClick={() => { playControlSfx("pencil"); setCourtBusyAction("think"); void sendAction({ action: "review_strategy", contextNodeId: state.activeDialogueNodeId }); }} data-tutorial-target="mystery-v2-think"><span>◈</span>Think</button>
         </nav>}
-        {!spectator && command === "present" ? <div className={styles.choiceTray}><header><h2>Object with evidence or sworn testimony</h2><button type="button" onClick={() => setCommand(null)}>Close</button></header>{renderRecordButtons((record) => { setCommand(null); setPresentedCourtRecord(record); void sendAction({ action: "object_statement", statementId: activeStatement.statementId, record }); })}</div> : null}
+        {!spectator && command === "present" && courtPresentedWitness ? <WhodunnitPresentDrawer suspectName={courtPresentedWitness.name} items={admittedRecord} presentedKeys={mysteryCourtPresentedRecordKeysV1(state, activeStatement.statementId)} copy={{ eyebrow: "Objection", title: `Confront ${courtPresentedWitness.name}`, help: `Click an item to read it. Drag it onto ${courtPresentedWitness.name} to object with it.`, action: "Object with this", again: "Object with this again", seen: `This has already been put to ${courtPresentedWitness.name}. Drag it onto them again, or`, drag: `Drag it onto ${courtPresentedWitness.name}, or` }} assetUrlFor={(item) => item.reference.kind === "evidence" ? sealedMysteryAssetObjectUrl(sealedAssetObjectUrls, "evidence", item.reference.id, item.sealedAsset) : null} disabled={busy || dialoguePerformanceActive} suspectTarget={courtWitnessStandRef} onPresent={(record) => { setPresentDrag({ active: false, overSuspect: false }); setCommand(null); setCourtBusyAction("object"); setPresentedCourtRecord(record); void sendAction({ action: "object_statement", statementId: activeStatement.statementId, record }); }} onClose={() => { setPresentDrag({ active: false, overSuspect: false }); setCommand(null); }} onDragStateChange={setPresentDrag} playSfx={playControlSfx} /> : null}
         {!spectator && state.pendingProsecutionChoice ? <div className={styles.prosecutionChoice} role="dialog" aria-modal="true" aria-labelledby="prosecution-choice-title"><p className={styles.eyebrow}>Your response</p><h2 id="prosecution-choice-title">{state.pendingProsecutionChoice.prompt}</h2>{state.pendingProsecutionChoice.options.map((option) => <button key={option.id} type="button" disabled={busy || dialoguePerformanceActive} onClick={() => void sendAction({ action: "choose_prosecution_response", choiceId: state.pendingProsecutionChoice!.id, optionId: option.id })}>{option.text}</button>)}</div> : null}
         {caseFileUpdate ? <CaseFileUpdateNotice update={caseFileUpdate} onView={() => { setCaseFileOpen(true); setCaseFileUpdate(null); }} onDismiss={() => setCaseFileUpdate(null)} /> : null}
-        {caseFileOpen ? <CaseFile state={state} playerName={playerCharacterName} playerBot={prosecutorBot} playerColor={playerCharacterColor} playerGlyph={playerCharacterGlyph ?? null} renderBotGlyph={props.renderBotGlyph} renderMysteryBotAvatar={props.renderMysteryBotAvatar} objectUrls={sealedAssetObjectUrls} onClose={() => setCaseFileOpen(false)} transcriptCopyState={props.transcriptCopyState} onCopyVerboseTranscript={props.onCopyVerboseTranscript} caseFileOverrides={state.caseFilePresentationOverrides ?? null} cleanBusy={Boolean(sceneRepairJob)} canUndoClean={state.sceneRepairUndo?.action === "clean_case_file" && !whodunnitSceneRepairUndoIsDismissed(dismissedSceneRepairUndoId, state.sceneRepairUndo.id)} onClean={() => void repairScene("clean_case_file")} onUndoClean={() => void undoSceneRepair()} /> : null}
+        {caseFileOpen ? <CaseFile state={state} playerName={playerCharacterName} playerBot={prosecutorBot} playerColor={playerCharacterColor} playerGlyph={playerCharacterGlyph ?? null} renderBotGlyph={props.renderBotGlyph} renderMysteryBotAvatar={props.renderMysteryBotAvatar} objectUrls={sealedAssetObjectUrls} onClose={() => setCaseFileOpen(false)} transcriptCopyState={props.transcriptCopyState} onCopyVerboseTranscript={props.onCopyVerboseTranscript} caseFileOverrides={state.caseFilePresentationOverrides ?? null} cleanBusy={Boolean(sceneRepairJob)} canUndoClean={state.sceneRepairUndo?.action === "clean_case_file" && !whodunnitSceneRepairUndoIsDismissed(dismissedSceneRepairUndoId, state.sceneRepairUndo.id)} onClean={() => void repairScene("clean_case_file")} onUndoClean={() => void undoSceneRepair()} voicesEnabling={voicesEnabling} onEnableVoices={() => void enableCaseVoices()} /> : null}
         {error ? (
           <WhodunnitChromeErrorNotice
             message={error}
@@ -6362,7 +7173,16 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
           witnessCount={state.suspects.length}
           ready={arrivalReady}
           leaving={arrivalGate === "leaving"}
-          onStart={() => setArrivalGate("leaving")}
+          onStart={() => {
+            if (returningToVenue) {
+              // Outside first: the door, the arrival line, then the entry.
+              setArrivalGate("done");
+              setVisitingExterior(true);
+              beginVenueArrival();
+              return;
+            }
+            setArrivalGate("leaving");
+          }}
         />
       ) : null}
       <SessionAtmosphereLayer
@@ -6413,15 +7233,15 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
       </header> : null}
       {spectatorTheory ? (
         <section className={styles.partnerFindings} aria-labelledby="prosecutor-findings-title">
-          <p className={styles.eyebrow}>Selected Prosecutor · automated</p>
+          <p className={styles.eyebrow}>Selected {counsel.playerRoleLabel} · automated</p>
           <h1 id="prosecutor-findings-title">Review the proposed conclusion</h1>
-          <p>The selected Prosecutor investigated offstage. Only the authorized physical findings in the Case File are public; revise the editable theory, then file it when it reflects the case you want carried into court.</p>
+          <p>The selected {counsel.playerRoleLabel} investigated offstage. Only the authorized physical findings in the Case File are public; revise the editable theory, then file it when it reflects the case you want carried into court.</p>
         </section>
       ) : roomView === "mansion" ? (
         <section className={styles.mansionBoard} aria-label="Mystery Venue Move map" aria-busy={travelPresentation ? "true" : undefined} data-visuals-mode={roomVisualsMode ? "true" : undefined} data-tutorial-target="mystery-v2-mansion">
           <header className={styles.mansionHeading}>
             <div><p className={styles.eyebrow}>{roomVisualsMode ? "Room visuals · editing" : "Mystery Venue"}</p><strong>{mansionFloorDisplayName}</strong></div>
-            {state.rooms.length > 0 || mansionCanBeSaved ? (
+            {state.rooms.length > 0 ? (
               <div className={styles.mansionAssetActions}>
                 <PrismRefractTarget
                   target={{
@@ -6453,24 +7273,6 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
                     </button>
                   )}
                 </PrismRefractTarget>
-                {mansionCanBeSaved ? (
-                  <button
-                    type="button"
-                    className={styles.saveMansionButton}
-                    disabled={mansionSaveState === "saving"}
-                    onClick={() => void saveMansion()}
-                    data-state={mansionSaveState}
-                    data-tutorial-target="mystery-v2-save-mansion"
-                  >
-                    {mansionSaveState === "saving"
-                      ? "Saving venue…"
-                      : mansionSaveState === "saved"
-                        ? "Venue saved"
-                        : mansionSaveState === "failed"
-                          ? "Retry save"
-                          : "Save venue level"}
-                  </button>
-                ) : null}
               </div>
             ) : null}
             <nav className={styles.mansionFloorPicker} aria-label="Venue tiers">
@@ -6630,7 +7432,6 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
                   className={styles.mansionAmbientSpace}
                   data-ambient-space-id={space.id}
                   data-pattern={space.pattern}
-                  data-exterior={mansionAmbientIsExterior(space) ? "true" : undefined}
                   style={{
                     left: `${mansionX(space.x)}%`,
                     top: `${mansionY(space.y)}%`,
@@ -6857,17 +7658,15 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
                     ? "Locked"
                     : !mansionSelectedRoomReachable
                       ? "Not adjacent"
-                      : mansionSelectedRoom.visited && !mansionSelectedRoomAdjacent
-                        ? `Teleport to ${mansionSelectedRoom.name}`
-                        : mansionSelectedRoom.visited
-                          ? `Enter ${mansionSelectedRoom.name}`
-                          : "Enter room"}
+                      : mansionSelectedRoom.visited
+                        ? `Walk to ${mansionSelectedRoom.name}`
+                        : "Enter room"}
               </button>
             </section>
           ) : null}
           <small className={styles.mansionHint} data-visuals-mode={roomVisualsMode ? "true" : undefined}>{roomVisualsMode
             ? "Visuals mode: choose a room to generate or upgrade its art. Movement resumes when you are done with visuals."
-            : "Discover through connected doors. Teleport to any visited room."}</small>
+            : "Discover through connected doors. Walk back to any visited room."}</small>
         </section>
       ) : currentRoom ? (
         <section
@@ -6890,6 +7689,11 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
               <span>Try again shortly.</span>
             </div>
           ) : null}
+          <div
+            ref={roomArtFrameRef}
+            className={styles.roomArtFrame}
+            data-room-art-frame="true"
+          >
           {currentRoomMosaicUrl ? (
             <img
               ref={mosaicBackdropRef}
@@ -6934,7 +7738,7 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
               reducedMotion={reducedMotion || caseFileOpen}
             />
           <div className={styles.roomParallaxLayer}>
-            {command === "examine" && !roomComplete ? <div className={styles.hotspots} aria-label="Examination points">{currentRoomUnexaminedHotspots.map((hotspot) => {
+            {command === "examine" && examineTargetsRemain ? <div className={styles.hotspots} aria-label="Examination points">{currentRoomUnexaminedHotspots.map((hotspot) => {
               const point = currentRoomHotspotFocusPoints.get(hotspot.id);
               return point ? <button
                 key={hotspot.id}
@@ -6943,12 +7747,39 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
                 disabled={!lensActive}
                 data-examining={examiningHotspotId === hotspot.id ? "true" : undefined}
                 style={hotspotSpotStyle(hotspot.polygon)}
-                onFocus={() => setInvestigationLens(resolveDebateMysteryV2Lens(point.x, point.y, currentRoom.hotspots))}
+                onFocus={() => {
+                  setExaminationKeyboardFocusActive(true);
+                  setInvestigationLens(resolveDebateMysteryV2Lens(point.x, point.y, currentRoomLensRegions));
+                }}
+                onBlur={() => setExaminationKeyboardFocusActive(false)}
                 onClick={(event) => {
                   if (event.detail !== 0) return;
                   event.stopPropagation();
-                  const target = resolveDebateMysteryV2Lens(point.x, point.y, currentRoom.hotspots);
+                  const target = resolveDebateMysteryV2Lens(point.x, point.y, currentRoomLensRegions);
                   if (target.hotspotId === hotspot.id) void examineHotspot(hotspot.id);
+                }}
+              /> : null;
+            })}{currentRoomInterests.map((interest) => {
+              const id = `interest:${interest.id}`;
+              const point = currentRoomHotspotFocusPoints.get(id);
+              return point ? <button
+                key={id}
+                type="button"
+                aria-label={`Look at ${interest.label}`}
+                disabled={!lensActive}
+                data-interest="true"
+                data-examining={examiningHotspotId === id ? "true" : undefined}
+                style={hotspotSpotStyle(interest.polygon)}
+                onFocus={() => {
+                  setExaminationKeyboardFocusActive(true);
+                  setInvestigationLens(resolveDebateMysteryV2Lens(point.x, point.y, currentRoomLensRegions));
+                }}
+                onBlur={() => setExaminationKeyboardFocusActive(false)}
+                onClick={(event) => {
+                  if (event.detail !== 0) return;
+                  event.stopPropagation();
+                  const target = resolveDebateMysteryV2Lens(point.x, point.y, currentRoomLensRegions);
+                  if (target.hotspotId === id) void observeInterest(interest.id);
                 }}
               /> : null;
             })}</div> : null}
@@ -6956,7 +7787,7 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
           {command !== "examine" && command !== "move" ? (
             <SceneMediaVignette theme={props.theme} style={{ "--scene-vignette-z": 2 } as CSSProperties} />
           ) : null}
-          {command === "examine" && !roomComplete ? <div className={styles.examinationGrid} data-art-style={currentRoomArtStyle} style={examinationGridStyle} aria-hidden="true">{[...examinationIlluminatedCells].map((index) => {
+          {command === "examine" && examineTargetsRemain ? <div className={styles.examinationGrid} data-art-style={currentRoomArtStyle} style={examinationGridStyle} aria-hidden="true">{[...examinationIlluminatedCells].map((index) => {
             const column = index % DEBATE_MYSTERY_V2_EXAMINE_GRID_COLUMNS;
             const row = Math.floor(index / DEBATE_MYSTERY_V2_EXAMINE_GRID_COLUMNS);
             return <i key={index} style={{
@@ -6966,15 +7797,16 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
               height: `${100 / DEBATE_MYSTERY_V2_EXAMINE_GRID_ROWS}%`,
             }} />;
           })}</div> : null}
-          {command === "examine" && !roomComplete && examiningHotspot ? <i className={styles.examinationScan} aria-hidden="true" data-phase={busy ? "scanning" : "resolved"} style={hotspotSpotStyle(examiningHotspot.polygon)} /> : null}
+          {command === "examine" && examineTargetsRemain && examiningHotspot ? <i className={styles.examinationScan} aria-hidden="true" data-phase={busy ? "scanning" : "resolved"} style={hotspotSpotStyle(examiningHotspot.polygon)} /> : null}
+          </div>
           {roomIntroductionPhase !== "casekeeper" ? <div className={styles.roomShade} /> : null}
           {!roomIntroductionActive ? <div className={styles.roomTitle}><small>{venueTierLabel(currentRoom.floor)}</small><h1>{currentRoom.name}</h1></div> : null}
-          {roomActorVisible && currentBot && !caseFileOpen ? <div ref={suspectActorRef} className={styles.roomActor} data-art-style={currentRoomArtStyle} data-interrogation-phase={interrogationPhase ?? undefined} data-staging={interrogationStagingActive ? "two-shot" : undefined} data-thinking={suspectThinking ? "true" : undefined} data-drop-target={presentDrag.active ? (presentDrag.overSuspect ? "hover" : "armed") : undefined} style={{ "--actor-color": currentBot.color ?? "#a98cff" } as CSSProperties}><div className={styles.roomActorDrift} style={mysteryRoomActorDriftStyle(`${props.session.id}:${currentBot.id}:suspect`)}>{props.renderMysteryBotAvatar(currentBot, investigationAvatarPresentation, { demeanor: "suspect", thinking: suspectThinking, talking: audioMouthActive && roomDisplayedDialogue?.speakerSeatId === currentSuspect?.seatId, speechTiming: audioMouthActive && roomDisplayedDialogue?.speakerSeatId === currentSuspect?.seatId ? speechTiming : null, blinkEnabled: true, facing: "left", speechInkVisible: roomSpeechInkVisible })}<strong>{currentBot.name}</strong>{roomSuspectStageActionText && roomActionPresentation ? <SignalVoiceActionText key={`suspect:${roomDisplayedDialogue?.nodeId ?? ""}:${roomDisplayedDialogue?.occurredAt ?? ""}`} {...roomActionPresentation} accent={currentBot.color} /> : null}</div></div> : null}
-          {roomProsecutorVisible && prosecutorBot && !caseFileOpen ? <aside className={`${styles.roomActor} ${styles.roomProsecutorActor}`} data-art-style={currentRoomArtStyle} data-prosecutor-speaking="true" data-staging={interrogationStagingActive ? "two-shot" : undefined} data-thinking={playerThinking ? "true" : undefined} data-interrogation-phase={interrogationPhase ?? undefined} style={{ "--actor-color": prosecutorBot.color ?? "#72d7ff" } as CSSProperties}>
+          {roomActorVisible && currentBot && !caseFileOpen ? <div ref={suspectActorRef} className={styles.roomActor} data-art-style={currentRoomArtStyle} data-first-entry={interrogationFirstEntryState.suspectEntered ? "true" : undefined} data-interrogation-phase={interrogationPhase ?? undefined} data-staging={interrogationStagingActive ? "two-shot" : undefined} data-thinking={suspectThinking ? "true" : undefined} data-drop-target={presentDrag.active ? (presentDrag.overSuspect ? "hover" : "armed") : undefined} style={{ "--actor-color": currentBot.color ?? "#a98cff" } as CSSProperties}><div className={styles.roomActorDrift} style={mysteryRoomActorDriftStyle(`${props.session.id}:${currentBot.id}:suspect`)}>{props.renderMysteryBotAvatar(currentBot, investigationAvatarPresentation, { demeanor: "suspect", thinking: suspectThinking, talking: (audioMouthActive && roomDisplayedDialogue?.speakerSeatId === currentSuspect?.seatId) || vocalReactingBotId === currentBot.id, speechTiming: audioMouthActive && roomDisplayedDialogue?.speakerSeatId === currentSuspect?.seatId ? speechTiming : null, blinkEnabled: true, facing: "left", speechInkVisible: roomSpeechInkVisible })}<strong>{currentBot.name}</strong>{roomSuspectStageActionText && roomActionPresentation ? <SignalVoiceActionText key={`suspect:${roomDisplayedDialogue?.nodeId ?? ""}:${roomDisplayedDialogue?.occurredAt ?? ""}`} {...roomActionPresentation} accent={currentBot.color} /> : null}</div></div> : null}
+          {roomProsecutorVisible && prosecutorBot && !caseFileOpen ? <aside className={`${styles.roomActor} ${styles.roomProsecutorActor}`} data-art-style={currentRoomArtStyle} data-first-entry={interrogationFirstEntryState.prosecutorEntered ? "true" : undefined} data-prosecutor-speaking="true" data-staging={interrogationStagingActive ? "two-shot" : undefined} data-thinking={playerThinking ? "true" : undefined} data-interrogation-phase={interrogationPhase ?? undefined} style={{ "--actor-color": prosecutorBot.color ?? "#72d7ff" } as CSSProperties}>
             <div className={styles.roomActorDrift} style={mysteryRoomActorDriftStyle(`${props.session.id}:${prosecutorBot.id}:prosecutor`)}>
               {roomProsecutorStageActionText && roomActionPresentation ? <SignalVoiceActionText key={`room-prosecutor:${roomDisplayedDialogue?.nodeId ?? ""}:${roomDisplayedDialogue?.occurredAt ?? ""}`} {...roomActionPresentation} accent={prosecutorBot.color} /> : null}
-              {props.renderMysteryBotAvatar(prosecutorBot, investigationAvatarPresentation, { demeanor: "partner", thinking: playerThinking, talking: audioMouthActive && !heldDialogue && roomProsecutorActive, speechTiming: audioMouthActive && !heldDialogue && roomProsecutorActive ? speechTiming : null, blinkEnabled: true, facing: "right", speechInkVisible: roomSpeechInkVisible })}
-              <strong>{prosecutorBot.name} · Prosecutor</strong>
+              {props.renderMysteryBotAvatar(prosecutorBot, investigationAvatarPresentation, { demeanor: "partner", thinking: playerThinking, talking: (audioMouthActive && !heldDialogue && roomProsecutorActive) || vocalReactingBotId === prosecutorBot.id, speechTiming: audioMouthActive && !heldDialogue && roomProsecutorActive ? speechTiming : null, blinkEnabled: true, facing: "right", speechInkVisible: roomSpeechInkVisible })}
+              <strong>{prosecutorBot.name} · {counsel.playerRoleLabel}</strong>
             </div>
           </aside> : null}
           {roomDisplayedDialogue && !roomEntryLoading ? (
@@ -7029,7 +7861,9 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
                           </span>
                         )
                       : roomDialogueBot
-                        ? `${roomDialogueBot.name}${roomProsecutorActive ? " · Prosecutor" : ""}`
+                        ? (roomProsecutorActive && firstPersonInvestigation
+                            ? "You"
+                            : `${roomDialogueBot.name}${roomProsecutorActive ? ` · ${counsel.playerRoleLabel}` : ""}`)
                         : "Observation"}
                 </small>
               )}
@@ -7078,7 +7912,7 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
             </div>
             </WhodunnitInvestigationDialogue>
           ) : null}
-          {completionCueVisible ? <div className={styles.roomComplete} role="status" aria-live="polite"><p>Every detail has entered the record.</p><strong>{currentRoom.name} complete</strong></div> : null}
+          {completionCueVisible ? <div className={styles.roomComplete} role="status" aria-live="polite"><p>Everything that matters here has entered the record.</p><strong>{currentRoom.name} complete</strong></div> : null}
         </section>
       ) : null}
       {!roomIntroductionActive
@@ -7122,16 +7956,16 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
         <button type="button" data-command="present" data-active={command === "present" ? "true" : undefined} aria-pressed={command === "present"} disabled={busy || dialoguePerformanceActive || !currentSuspect || admittedRecord.length === 0} onClick={() => { playControlSfx("paper"); setCommand("present"); }} data-tutorial-target="mystery-v2-present"><span>◇</span>Present</button>
       </nav> : null}
       {!spectatorTheory && !roomIntroductionActive && command === "talk" && currentSuspect && !dialoguePerformanceActive ? <div className={styles.choiceTray}><header><div><p className={styles.eyebrow}>Talk</p><h2>{currentSuspect.name}</h2></div><button type="button" onClick={() => setCommand(null)}>Close</button></header><p className={styles.topicHelp}>Ask about people, motives, alibis, or rooms. Evidence and testimony stay in Present.</p><div className={styles.topicGroups}>{groupDebateMysteryTalkTopicsV2(state.topics.filter((topic) => topic.suspectSeatId === currentSuspect.seatId)).map((group) => <section key={group.category} className={styles.topicGroup} aria-labelledby={`talk-${currentSuspect.seatId}-${group.category}`}><h3 id={`talk-${currentSuspect.seatId}-${group.category}`}>{group.label}</h3><div className={styles.topicList}>{group.topics.map((topic) => <button key={topic.nodeId} type="button" disabled={busy || dialoguePerformanceActive || !topic.unlocked} data-complete={topic.completed ? "true" : undefined} data-blocked={!topic.unlocked ? "true" : undefined} onClick={() => void sendAction({ action: "talk", suspectSeatId: currentSuspect.seatId, topicNodeId: topic.nodeId })}><span className={styles.topicIcon} aria-hidden="true">{topic.completed ? "✓" : topic.unlocked ? "?" : "×"}</span><span className={styles.topicCopy}><strong>{debateMysteryTalkTopicDisplayLabelV2(topic, state.rooms)}</strong>{!topic.unlocked ? <small>Blocked</small> : null}</span></button>)}</div></section>)}</div></div> : null}
-      {!spectatorTheory && !roomIntroductionActive && command === "present" && currentSuspect ? <WhodunnitPresentDrawer suspectName={currentSuspect.name} items={admittedRecord} assetUrlFor={(item) => item.reference.kind === "evidence" ? sealedMysteryAssetObjectUrl(sealedAssetObjectUrls, "evidence", item.reference.id, item.sealedAsset) : null} disabled={busy || dialoguePerformanceActive} suspectTarget={suspectActorRef} onPresent={(record) => { setPresentDrag({ active: false, overSuspect: false }); void sendAction({ action: "present_to_suspect", suspectSeatId: currentSuspect.seatId, record }); }} onClose={() => { setPresentDrag({ active: false, overSuspect: false }); setCommand(null); }} onDragStateChange={setPresentDrag} playSfx={playControlSfx} /> : null}
+      {!spectatorTheory && !roomIntroductionActive && command === "present" && currentSuspect ? <WhodunnitPresentDrawer suspectName={currentSuspect.name} items={admittedRecord} presentedKeys={mysteryPresentedRecordKeysV1(state, currentSuspect.seatId)} assetUrlFor={(item) => item.reference.kind === "evidence" ? sealedMysteryAssetObjectUrl(sealedAssetObjectUrls, "evidence", item.reference.id, item.sealedAsset) : null} disabled={busy || dialoguePerformanceActive} suspectTarget={suspectActorRef} onPresent={(record) => { setPresentDrag({ active: false, overSuspect: false }); void sendAction({ action: "present_to_suspect", suspectSeatId: currentSuspect.seatId, record }); }} onClose={() => { setPresentDrag({ active: false, overSuspect: false }); setCommand(null); }} onDragStateChange={setPresentDrag} playSfx={playControlSfx} /> : null}
       {!spectatorTheory && !roomIntroductionActive && state.theoryAvailable ? <button type="button" className={styles.fileChargesButton} onClick={() => { playControlSfx("theory"); setTheoryOpen(true); }} data-tutorial-target="mystery-v2-file-theory">File Charges</button> : !spectatorTheory && !roomIntroductionActive ? <small className={styles.theoryHint}>The Theory Board opens after the briefing, one interview, and one admitted record item.</small> : null}
       {caseFileUpdate ? <CaseFileUpdateNotice update={caseFileUpdate} onView={() => { setCaseFileOpen(true); setCaseFileUpdate(null); }} onDismiss={() => setCaseFileUpdate(null)} /> : null}
-      {caseFileOpen ? <CaseFile state={state} playerName={playerCharacterName} playerBot={prosecutorBot} playerColor={playerCharacterColor} playerGlyph={playerCharacterGlyph ?? null} renderBotGlyph={props.renderBotGlyph} renderMysteryBotAvatar={props.renderMysteryBotAvatar} objectUrls={sealedAssetObjectUrls} onClose={() => setCaseFileOpen(false)} transcriptCopyState={props.transcriptCopyState} onCopyVerboseTranscript={props.onCopyVerboseTranscript} caseFileOverrides={state.caseFilePresentationOverrides ?? null} cleanBusy={Boolean(sceneRepairJob)} canUndoClean={state.sceneRepairUndo?.action === "clean_case_file" && !whodunnitSceneRepairUndoIsDismissed(dismissedSceneRepairUndoId, state.sceneRepairUndo.id)} onClean={() => void repairScene("clean_case_file")} onUndoClean={() => void undoSceneRepair()} /> : null}
+      {caseFileOpen ? <CaseFile state={state} playerName={playerCharacterName} playerBot={prosecutorBot} playerColor={playerCharacterColor} playerGlyph={playerCharacterGlyph ?? null} renderBotGlyph={props.renderBotGlyph} renderMysteryBotAvatar={props.renderMysteryBotAvatar} objectUrls={sealedAssetObjectUrls} onClose={() => setCaseFileOpen(false)} transcriptCopyState={props.transcriptCopyState} onCopyVerboseTranscript={props.onCopyVerboseTranscript} caseFileOverrides={state.caseFilePresentationOverrides ?? null} cleanBusy={Boolean(sceneRepairJob)} canUndoClean={state.sceneRepairUndo?.action === "clean_case_file" && !whodunnitSceneRepairUndoIsDismissed(dismissedSceneRepairUndoId, state.sceneRepairUndo.id)} onClean={() => void repairScene("clean_case_file")} onUndoClean={() => void undoSceneRepair()} voicesEnabling={voicesEnabling} onEnableVoices={() => void enableCaseVoices()} keepVenueUpdates={canKeepVenueUpdates ? keepVenueUpdates : null} keepVenueUpdatesOverwritesOriginal={keepVenueUpdatesOverwritesOriginal} onKeepVenueUpdatesChange={setKeepVenueUpdates} keepVenueUpdatesDisabled={busy || mansionSaveState === "saving"} /> : null}
       {theoryOpen || spectatorTheory ? (
         <div className={styles.theoryBoard} role="dialog" aria-modal="true" aria-labelledby="theory-v2-title">
           <header>
             <div>
-              <p className={styles.eyebrow}>{spectatorTheory ? "Prosecutor research · editable" : "Theory Board"}</p>
-              <h2 id="theory-v2-title">{spectatorTheory ? "Review the Prosecutor conclusion" : "File the prosecution's case"}</h2>
+              <p className={styles.eyebrow}>{spectatorTheory ? `${counsel.playerRoleLabel} research · editable` : "Theory Board"}</p>
+              <h2 id="theory-v2-title">{spectatorTheory ? `Review the ${counsel.playerRoleLabel} conclusion` : counsel.stance === "defense" ? "Name who is really responsible" : "File the prosecution's case"}</h2>
             </div>
             {spectatorTheory ? null : <button type="button" onClick={() => setTheoryOpen(false)}>Close</button>}
           </header>
@@ -7142,10 +7976,16 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
               <strong>{state.caseCharge.accusationPrompt}</strong>
             </section>
           ) : null}
-          {spectatorTheory ? <p>The selected Prosecutor&apos;s conclusion is a public hypothesis built from the admitted physical findings. You may revise every field before filing it.</p> : null}
+          {spectatorTheory ? <p>The selected {counsel.playerRoleLabel}&apos;s conclusion is a public hypothesis built from the admitted physical findings. You may revise every field before filing it.</p> : null}
+          {client ? (
+            <section className={styles.caseCharge} aria-label="Client">
+              <small>Your client</small>
+              <strong>{client.name}</strong>
+            </section>
+          ) : null}
           <fieldset>
             <legend>Accused · choose one or two</legend>
-            {state.suspects.map((suspect) => {
+            {state.suspects.filter((suspect) => suspect.seatId !== clientSeatId).map((suspect) => {
               const selected = theoryAccusedSeatIds.includes(suspect.seatId);
               return (
                 <label key={suspect.seatId}>
@@ -7179,10 +8019,18 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
             ))}
           </fieldset>
           <p>Incomplete method, motive, or opportunity will weaken the case, but will not block trial.</p>
+          {canKeepVenueUpdates ? (
+            <KeepVenueUpdatesField
+              checked={keepVenueUpdates}
+              disabled={busy || mansionSaveState === "saving"}
+              overwritesOriginal={keepVenueUpdatesOverwritesOriginal}
+              onChange={setKeepVenueUpdates}
+            />
+          ) : null}
           </div>
           <footer className={styles.theoryBoardActions}>
-          <button type="button" className={styles.primaryAction} disabled={busy || theoryAccusedSeatIds.length === 0} onClick={() => { void sendAction({ action: "file_theory", theory }).then((accepted) => { if (accepted && !spectatorTheory) setTheoryOpen(false); }); }}>{spectatorTheory ? "File conclusion and watch court" : "File charges and open court"}</button>
-          {state.theoryAvailable && state.config.investigationMode !== "court_only" ? <WhodunnitCaseCheckActions busy={busy} hasAccused={theoryAccusedSeatIds.length > 0} error={error} onCheck={async () => { if (await sendAction({ action: "check_case", theory })) setTheoryOpen(false); }} /> : null}
+          <button type="button" className={styles.primaryAction} disabled={busy || mansionSaveState === "saving" || theoryAccusedSeatIds.length === 0} onClick={() => { void concludeInvestigation("file_theory").then((accepted) => { if (accepted && !spectatorTheory) setTheoryOpen(false); }); }}>{mansionSaveState === "saving" ? "Saving venue…" : spectatorTheory ? "File conclusion and watch court" : counsel.stance === "defense" ? "File the defense theory and open court" : "File charges and open court"}</button>
+          {state.theoryAvailable && state.config.investigationMode !== "court_only" ? <WhodunnitCaseCheckActions busy={busy || mansionSaveState === "saving"} hasAccused={theoryAccusedSeatIds.length > 0} error={error} onCheck={async () => { if (await concludeInvestigation("check_case")) setTheoryOpen(false); }} /> : null}
           <WhodunnitTranscriptCopyButton state={props.transcriptCopyState} onCopy={props.onCopyVerboseTranscript} />
           </footer>
         </div>
@@ -7225,7 +8073,7 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
                     : "This room is using its default Mosaic. You can add an optional Upgraded presentation while keeping the same composition."}
             </p>
             <p className={styles.roomVisualDiscoveryNotice}>
-              No room art is previewed here. You discover it only by entering the room. On the Move map, <strong>Save venue level</strong> keeps accepted room artwork, exact anchors, and dynamic lights for future <code>.mansion</code> exports. You can save before completing the investigation.
+              No room art is previewed here. You discover it only by entering the room. Accepted room artwork, exact anchors, and dynamic lights can be kept for future cases when you file charges, which overwrites the original venue.
             </p>
             {liveResponseMode === "local" && roomVisualDialogReadiness !== "upgraded" ? (
               <p className={styles.roomVisualOnlineNotice}>Room generation is ONLINE-only. LOCAL remains fully offline.</p>
@@ -7356,11 +8204,6 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
             id: block.id, label: block.name?.trim() ?? "", kind: "side" as const,
             left: mansionX(x), top: mansionY(y), width: mansionWidth(width), height: mansionHeight(height),
           })),
-          ...mansionAmbientSpaces.filter((space) => !mansionAmbientIsExterior(space)).map((space) => ({
-            id: space.id, label: "", kind: "ambient" as const,
-            left: mansionX(space.x), top: mansionY(space.y),
-            width: mansionWidth(space.width), height: mansionHeight(space.height),
-          })),
         ]}
         placement={savedOverheadPlacement}
         theme={props.theme}
@@ -7404,6 +8247,32 @@ export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
         />
       ) : null}
     </main>
+  );
+}
+
+function KeepVenueUpdatesField(props: {
+  checked: boolean;
+  disabled: boolean;
+  overwritesOriginal: boolean;
+  onChange: (checked: boolean) => void;
+}): React.JSX.Element {
+  return (
+    <label className={styles.keepVenueUpdates} data-tutorial-target="mystery-v2-keep-venue-updates">
+      <input
+        type="checkbox"
+        checked={props.checked}
+        disabled={props.disabled}
+        onChange={(event) => props.onChange(event.currentTarget.checked)}
+      />
+      <span>
+        <strong>Keep these venue updates for future cases</strong>
+        <small>
+          {props.overwritesOriginal
+            ? "This replaces the original venue in your library."
+            : "This saves this venue to your library for future cases."}
+        </small>
+      </span>
+    </label>
   );
 }
 
@@ -7451,6 +8320,13 @@ function CaseFile(props: {
   canUndoClean: boolean;
   onClean: () => void;
   onUndoClean: () => void;
+  /** A text case can be given voices in place; lines synthesize as they are heard. */
+  voicesEnabling: boolean;
+  onEnableVoices: () => void;
+  keepVenueUpdates?: boolean | null;
+  keepVenueUpdatesOverwritesOriginal?: boolean;
+  onKeepVenueUpdatesChange?: (checked: boolean) => void;
+  keepVenueUpdatesDisabled?: boolean;
 }): React.JSX.Element {
   const observations = debateMysteryCaseFileObservationsV2({
     dialogueHistory: props.state.dialogueHistory,
@@ -7502,7 +8378,7 @@ function CaseFile(props: {
         <small>Investigator</small>
       </div>
       <aside className={styles.caseFile} role="dialog" aria-modal="true" aria-labelledby="mystery-v2-case-file-title">
-        <header><div><p className={styles.eyebrow}>Prosecution record</p><h2 id="mystery-v2-case-file-title">Case File</h2></div><div className={styles.caseFileHeaderActions}><WhodunnitTranscriptCopyButton state={props.transcriptCopyState} onCopy={props.onCopyVerboseTranscript} /><button type="button" disabled={props.cleanBusy} title="Rewrite every entry to be concise and organized. Undo keeps the previous file." onClick={props.onClean}>Clean up</button><button type="button" disabled={!props.canUndoClean || props.cleanBusy} title="Undo the last clean-up (⌘Z)" onClick={props.onUndoClean}>Undo</button><button type="button" onClick={props.onClose}>Close</button></div></header>
+        <header><div><p className={styles.eyebrow}>{debateMysteryCounselSeatsV2(props.state.config).playerSideLabel} record</p><h2 id="mystery-v2-case-file-title">Case File</h2></div><div className={styles.caseFileHeaderActions}><WhodunnitTranscriptCopyButton state={props.transcriptCopyState} onCopy={props.onCopyVerboseTranscript} /><button type="button" disabled={props.cleanBusy} title="Rewrite every entry to be concise and organized. Undo keeps the previous file." onClick={props.onClean}>Clean up</button><button type="button" disabled={!props.canUndoClean || props.cleanBusy} title="Undo the last clean-up (⌘Z)" onClick={props.onUndoClean}>Undo</button><button type="button" onClick={props.onClose}>Close</button></div></header>
         <div className={styles.caseFileLayout}>
           <div className={styles.caseFileContents}>
             <section>
@@ -7568,7 +8444,26 @@ function CaseFile(props: {
                 ? <p className={styles.caseFileEmpty}>No witnesses met yet.</p>
                 : null}
             </section>
-            <small>{props.state.voicesEnabled ? "Local English performance ready · spoken lines cache on demand" : "Playing as a validated text case"}</small>
+            {props.keepVenueUpdates != null && props.onKeepVenueUpdatesChange ? (
+              <KeepVenueUpdatesField
+                checked={props.keepVenueUpdates}
+                disabled={props.keepVenueUpdatesDisabled === true}
+                overwritesOriginal={props.keepVenueUpdatesOverwritesOriginal === true}
+                onChange={props.onKeepVenueUpdatesChange}
+              />
+            ) : null}
+            <small className={styles.caseFileVoiceStatus}>
+              {props.state.voicesEnabled
+                ? "Local English performance ready · spoken lines cache on demand"
+                : (
+                    <>
+                      <span>Playing as a validated text case · the cast has no voices.</span>
+                      <button type="button" disabled={props.voicesEnabling} title="Give this case local voices. Each spoken line is synthesized the first time it is heard." onClick={props.onEnableVoices}>
+                        {props.voicesEnabling ? "Enabling voices…" : "Enable voices"}
+                      </button>
+                    </>
+                  )}
+            </small>
           </div>
         </div>
       </aside>

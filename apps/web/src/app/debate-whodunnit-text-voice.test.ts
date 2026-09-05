@@ -16,7 +16,7 @@ const tutorialSource = readFileSync(
   "utf8",
 );
 
-test("offers and persists Off, default Babble, and Bottish in Debate settings", () => {
+test("offers and persists Off and default Bottish in Debate settings; Babble is gone", () => {
   const settingsControl = pageSource.slice(
     pageSource.indexOf('id="debate-whodunnit-text-voice-settings-title"'),
     pageSource.indexOf('aria-labelledby="debate-jury-settings-title"'),
@@ -24,19 +24,21 @@ test("offers and persists Off, default Babble, and Bottish in Debate settings", 
   assert.match(settingsControl, /data-tutorial-target="whodunnit-text-voice-setting"/u);
   assert.match(settingsControl, /aria-label="Whodunnit text voice"/u);
   assert.match(settingsControl, /<option value="off">Off<\/option>/u);
-  assert.match(settingsControl, /<option value="babble">Babble · Default<\/option>/u);
-  assert.match(settingsControl, /<option value="bottish">Bottish<\/option>/u);
+  assert.match(settingsControl, /<option value="bottish">Bottish · Default<\/option>/u);
+  assert.doesNotMatch(settingsControl, /<option value="babble"/u, "Babble is not offered for investigations");
   assert.match(
     pageSource,
     /JSON\.stringify\(\{ debateWhodunnitTextVoiceMode \}\)/u,
   );
 });
 
-test("new accounts on old database schemas receive Babble without migrating deliberate preferences", () => {
+test("new accounts on old database schemas receive Bottish, and a saved Babble reads as Bottish", () => {
   const server = readFileSync(new URL("../../../api/src/server.ts", import.meta.url), "utf8");
-  assert.equal((server.match(/debate_whodunnit_text_voice_mode: "babble"/gu) ?? []).length, 2);
-  assert.match(mysterySource, /configuredMode: props\.whodunnitTextVoiceMode \?\? "babble"/u);
-  assert.match(tutorialSource, /defaults written dialogue accompaniment to Babble; saved Off or Bottish choices remain yours/u);
+  assert.equal((server.match(/debate_whodunnit_text_voice_mode: "bottish"/gu) ?? []).length, 2);
+  assert.match(mysterySource, /configuredMode: props\.whodunnitTextVoiceMode \?\? "bottish"/u);
+  assert.match(tutorialSource, /defaults written dialogue accompaniment to Bottish; a saved Off choice remains yours/u);
+  const shared = readFileSync(new URL("../../../../packages/shared/src/audioVoice.ts", import.meta.url), "utf8");
+  assert.match(shared, /if \(value === "babble"\) return "bottish";/u);
 });
 
 test("routes only written text through the selected bounded voice lifecycle", () => {
@@ -65,16 +67,18 @@ test("routes only written text through the selected bounded voice lifecycle", ()
   assert.doesNotMatch(pageSource, /preferProceduralBabble: instant === true/u);
 });
 
-test("keeps embodied player Babble and spoken character TTS distinct", () => {
+test("keeps player Bottish and spoken character TTS distinct", () => {
   assert.match(
     tutorialSource,
-    /Room observations are attributed to the player character, use Babble whenever written accompaniment is on/u,
+    /Room observations are attributed to the player character, use Bottish whenever written accompaniment is on/u,
   );
   assert.match(tutorialSource, /spoken character TTS is unchanged/u);
   assert.match(
     pageSource,
-    /Player-attributed room observations use Babble[\s\S]{0,300}character speech keeps its\s*configured English or\s*Premium voice/u,
+    /observations included, uses Bottish[\s\S]{0,300}Character speech keeps its\s*configured English or\s*Premium voice/u,
   );
+  const sfx = readFileSync(new URL("./debateMysterySfx.ts", import.meta.url), "utf8");
+  assert.match(sfx, /if \(args\.configuredMode === "off"\) return "off";[\s\S]{0,200}return "bottish";/u, "an investigation is Bottish all the way to Court");
   assert.match(
     mysterySource,
     /voiceProfile: roomPlayerObservationActive\s*\? prosecutorBot\?\.voiceProfile \?\? props\.playerVoiceProfile \?\? null\s*: null/u,

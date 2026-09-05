@@ -3,9 +3,11 @@ import test from "node:test";
 import {
   WHODUNNIT_INTERROGATION_BEAT_MS,
   WHODUNNIT_INVESTIGATION_DIALOGUE_GRACE_MS,
+  WHODUNNIT_PREPARED_VOICE_WAIT_MS,
   nextWhodunnitInterrogationPhase,
   startWhodunnitInterrogation,
   whodunnitInterrogationEntrancePhaseForEntry,
+  whodunnitInterrogationFirstEntryState,
   whodunnitActorDriftTiming,
   whodunnitCaptionRevealIsPending,
   whodunnitCaptionSpeechText,
@@ -25,7 +27,10 @@ import {
   whodunnitInterrogationFinishDecision,
   whodunnitInterrogationTerminalWitnessShouldHold,
   whodunnitInterrogationMayStartAudio,
+  whodunnitPlayerCharacterStagingActive,
+  whodunnitPreparedVoicePending,
 } from "./debateMysteryInterrogation.ts";
+import { whodunnitStageWitnessExchange } from "./debateMysteryInterrogation.ts";
 
 test("gives every caption a deliberate, uncapped typewriter clock", () => {
   assert.equal(whodunnitDialogueTypewriterDurationMs("No."), 720);
@@ -227,16 +232,101 @@ test("resolves a three-line room opening from each actual next speaker", () => {
     "prosecutor_entrance",
   );
   assert.equal(
-    whodunnitInterrogationEntrancePhaseForEntry(exchange[1]!, "prosecutor", "witness"),
+    whodunnitInterrogationEntrancePhaseForEntry(
+      exchange[1]!,
+      "prosecutor",
+      "witness",
+      exchange.slice(0, 1),
+    ),
     "suspect_entrance",
   );
   assert.equal(
-    whodunnitInterrogationEntrancePhaseForEntry(exchange[2]!, "prosecutor", "witness"),
-    "prosecutor_entrance",
+    whodunnitInterrogationEntrancePhaseForEntry(
+      exchange[2]!,
+      "prosecutor",
+      "witness",
+      exchange.slice(0, 2),
+    ),
+    "prosecutor_speaking",
   );
   assert.equal(
     whodunnitInterrogationEntrancePhaseForEntry(null, "prosecutor", "witness"),
     null,
+  );
+});
+
+test("keeps both figures staged after first entry and resets for a later exchange", () => {
+  const exchange = [
+    { speakerBotId: "prosecutor", speakerSeatId: null },
+    { speakerBotId: "witness-bot", speakerSeatId: "witness" },
+    { speakerBotId: "prosecutor", speakerSeatId: null },
+  ];
+
+  assert.deepEqual(
+    whodunnitInterrogationFirstEntryState({
+      entries: exchange,
+      index: 0,
+      prosecutorBotId: "prosecutor",
+      suspectSeatId: "witness",
+    }),
+    { prosecutorEntered: true, suspectEntered: false },
+  );
+  assert.deepEqual(
+    whodunnitInterrogationFirstEntryState({
+      entries: exchange,
+      index: 2,
+      prosecutorBotId: "prosecutor",
+      suspectSeatId: "witness",
+    }),
+    { prosecutorEntered: true, suspectEntered: true },
+  );
+  assert.equal(
+    startWhodunnitInterrogation(
+      [{ speakerBotId: "prosecutor", speakerSeatId: null }],
+      "prosecutor",
+      "witness",
+    ),
+    "prosecutor_entrance",
+  );
+});
+
+test("keeps first contact suspect-only and reserves the player stage for interrogation", () => {
+  const firstContact = {
+    command: null,
+    hasPlayerCharacter: true,
+    hasSuspect: true,
+    interrogationPhase: "suspect_speaking" as const,
+    roomIntroductionActive: true,
+  };
+  assert.equal(
+    whodunnitPlayerCharacterStagingActive(firstContact),
+    false,
+    "reused playback phases must not pull the player avatar into a room introduction",
+  );
+  assert.equal(
+    whodunnitPlayerCharacterStagingActive({
+      ...firstContact,
+      command: "talk",
+      roomIntroductionActive: false,
+    }),
+    true,
+  );
+  assert.equal(
+    whodunnitPlayerCharacterStagingActive({
+      ...firstContact,
+      command: "present",
+      roomIntroductionActive: false,
+    }),
+    true,
+  );
+  assert.equal(
+    whodunnitPlayerCharacterStagingActive({
+      ...firstContact,
+      interrogationPhase: "suspect_speaking",
+      roomIntroductionActive: false,
+    }),
+    true,
+    "the two-shot remains staged while a Talk or Present exchange finishes",
   );
 });
 
@@ -436,4 +526,66 @@ test("gives room actors stable bounded idle-motion timing", () => {
   assert.notDeepEqual(felix, meg);
   assert.ok(meg.durationMs >= 6_400 && meg.durationMs <= 8_800);
   assert.ok(meg.delayMs <= -600 && meg.delayMs >= -5_400);
+});
+
+test("ignores a gesture while a line's voice is still on its way", () => {
+  assert.equal(whodunnitDialogueGestureDecision({
+    advanceArmed: false,
+    automatedBotPlayback: false,
+    botFillArmed: false,
+    clickCount: 1,
+    filledByGesture: false,
+    streaming: true,
+    voicePending: true,
+  }), "ignore");
+  assert.equal(whodunnitDialogueGestureDecision({
+    advanceArmed: false,
+    automatedBotPlayback: true,
+    botFillArmed: false,
+    clickCount: 1,
+    filledByGesture: false,
+    streaming: true,
+    voicePending: false,
+  }), "fill");
+});
+
+test("keeps a queued speaker thinking until their prepared voice sounds", () => {
+  assert.ok(WHODUNNIT_PREPARED_VOICE_WAIT_MS >= 10_000);
+  assert.equal(whodunnitPreparedVoicePending({
+    queued: true, preparedAudioExpected: false, preparedAudioStatus: "idle", phase: "prosecutor_entrance",
+  }), true, "the entrance beat belongs to the coming line");
+  assert.equal(whodunnitPreparedVoicePending({
+    queued: true, preparedAudioExpected: true, preparedAudioStatus: "idle", phase: "prosecutor_speaking",
+  }), true);
+  assert.equal(whodunnitPreparedVoicePending({
+    queued: true, preparedAudioExpected: true, preparedAudioStatus: "pending", phase: "suspect_speaking",
+  }), true);
+  assert.equal(whodunnitPreparedVoicePending({
+    queued: true, preparedAudioExpected: true, preparedAudioStatus: "started", phase: "prosecutor_speaking",
+  }), false, "an audible take owns the line");
+  assert.equal(whodunnitPreparedVoicePending({
+    queued: true, preparedAudioExpected: true, preparedAudioStatus: "unavailable", phase: "prosecutor_speaking",
+  }), false, "a missing take releases the caption to its own clock");
+  assert.equal(whodunnitPreparedVoicePending({
+    queued: true, preparedAudioExpected: false, preparedAudioStatus: "idle", phase: "prosecutor_speaking",
+  }), false, "silent play types the line at once");
+  assert.equal(whodunnitPreparedVoicePending({
+    queued: false, preparedAudioExpected: true, preparedAudioStatus: "pending", phase: null,
+  }), false);
+});
+
+test("whodunnitStageWitnessExchange drops the investigator's answered question and keeps the witness", () => {
+  const question = { nodeId: "talk-q", occurredAt: "2026-09-04T10:00:00.000Z", speakerBotId: "prosecutor", delivery: "spoken" as const, visibleText: "Where were you at nine?" };
+  const answer = { nodeId: "talk-a", occurredAt: "2026-09-04T10:00:01.000Z", speakerBotId: "witness", delivery: "spoken" as const, visibleText: "In the kitchen." };
+  assert.deepEqual(whodunnitStageWitnessExchange([question, answer], "prosecutor"), [answer]);
+});
+
+test("whodunnitStageWitnessExchange keeps a trailing investigator line and the player's text-only observations", () => {
+  const observation = { nodeId: "examine-desk", occurredAt: "2026-09-04T10:00:00.000Z", speakerBotId: "prosecutor", delivery: "text_only" as const, visibleText: "A desk." };
+  const aside = { nodeId: "aside", occurredAt: "2026-09-04T10:00:02.000Z", speakerBotId: "prosecutor", delivery: "spoken" as const, visibleText: "Hm." };
+  assert.deepEqual(
+    whodunnitStageWitnessExchange([observation, aside], "prosecutor"),
+    [observation, aside],
+    "nothing followed the aside, so its words stay on stage",
+  );
 });

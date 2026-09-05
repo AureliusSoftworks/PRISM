@@ -338,12 +338,17 @@ export function authoredLocalLaughOwnsActionSfx(args: {
 }): boolean {
   if (args.kind !== "laugh" || !args.voiceProfile) return false;
   const profile = normalizeBotAudioVoiceProfileV1(args.voiceProfile);
+  if (!profile.localLaughSyllable) return false;
+  if (typeof args.voiceEngineUsed !== "string") return false;
+  // Premium opted the authored recipe in, so the provider take already says
+  // the laugh. Letting the pack clip fire too would laugh twice over itself.
+  if (profile.premiumLaughEnabled === true) {
+    if (/^elevenlabs(?:-|$)/u.test(args.voiceEngineUsed)) return true;
+  }
   return (
-    Boolean(profile.localLaughSyllable) &&
     profile.localVoiceSource === "portable" &&
     !profile.systemVoiceName &&
     profile.localEnginePreference !== "voice-plus" &&
-    typeof args.voiceEngineUsed === "string" &&
     /^builtin(?:-|$)/u.test(args.voiceEngineUsed) &&
     args.voiceEngineUsed !== "builtin-babble"
   );

@@ -1,9 +1,12 @@
-import type {
-  DebateMysteryMansionBundleSummaryV1,
-  DebateMysteryMansionExteriorScaleClassV1,
-  DebateMysteryMansionSnapshotV2,
+import {
+  debateMysteryMansionHeldByArchiveV1,
+  debateMysteryMansionThumbnailAssetIdV1,
+  type DebateMysteryMansionBundleSummaryV1,
+  type DebateMysteryMansionExteriorScaleClassV1,
 } from "@localai/shared";
 import { debateMysteryMansionExteriorFallbackV1 } from "./debateMysteryMansionExterior.ts";
+
+export { frozenMansionExteriorThumbnailAssetIdV1 } from "@localai/shared";
 
 const MANSION_LIBRARY_THUMBNAIL_LOGICAL_ID = "library-thumbnail-override-v1";
 
@@ -68,7 +71,7 @@ export function resolveInstalledMansionPresentationV1(
   return {
     title: titleOverride ?? defaultTitle,
     description: descriptionOverride ?? defaultDescription,
-    thumbnailAssetId: thumbnailOverrideAssetId ?? defaultThumbnailAssetId,
+    thumbnailAssetId: debateMysteryMansionThumbnailAssetIdV1(mansion),
     defaultTitle,
     defaultDescription,
     defaultThumbnailAssetId,
@@ -84,19 +87,6 @@ export function installedMansionThumbnailUrlV1(
 ): string | null {
   return assetId
     ? `/api/debates/mystery-mansions/${encodeURIComponent(mansionId)}/assets/${encodeURIComponent(assetId)}/file`
-    : null;
-}
-
-/** Legacy case snapshots could freeze the first room image as their cover.
- * Only a dedicated presentation asset is allowed to represent the exterior. */
-export function frozenMansionExteriorThumbnailAssetIdV1(
-  snapshot: DebateMysteryMansionSnapshotV2 | null | undefined,
-): string | null {
-  const assetId = snapshot?.presentation.thumbnailAssetId ?? null;
-  return assetId && snapshot?.presentation.assets.some(
-    (asset) => asset.id === assetId && asset.role === "presentation",
-  )
-    ? assetId
     : null;
 }
 
@@ -190,16 +180,18 @@ function secureRandomUint32(): number {
 }
 
 /** Avoids immediately returning the current mansion when another installed
- * option exists. The optional value pins focused tests without render-time
- * randomness. */
+ * option exists. Venues held by an unfinished Archive case are skipped.
+ * The optional value pins focused tests without render-time randomness. */
 export function randomInstalledMansionIdV1(
-  mansions: readonly Pick<DebateMysteryMansionBundleSummaryV1, "id">[],
+  mansions: readonly Pick<DebateMysteryMansionBundleSummaryV1, "id" | "archiveHold">[],
   currentId: string,
   randomUint32 = secureRandomUint32(),
 ): string | null {
-  if (mansions.length === 0) return null;
-  const candidates = mansions.length > 1
-    ? mansions.filter((mansion) => mansion.id !== currentId)
-    : [...mansions];
-  return candidates[(randomUint32 >>> 0) % candidates.length]?.id ?? null;
+  const available = mansions.filter((mansion) => !debateMysteryMansionHeldByArchiveV1(mansion));
+  if (available.length === 0) return null;
+  const candidates = available.length > 1
+    ? available.filter((mansion) => mansion.id !== currentId)
+    : [...available];
+  const pool = candidates.length > 0 ? candidates : available;
+  return pool[(randomUint32 >>> 0) % pool.length]?.id ?? null;
 }

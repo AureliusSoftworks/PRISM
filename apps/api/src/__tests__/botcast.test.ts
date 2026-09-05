@@ -9398,6 +9398,20 @@ describe("Botcast persistence and isolation", () => {
           ?.status,
         "delivered",
       );
+      assert.equal(
+        closed.episode.events.some(
+          (event) =>
+            event.kind === "power_effect" &&
+            event.payload.effect === "identity_mirror_reset" &&
+            event.payload.holderBotId === "guest-1" &&
+            event.payload.reason === "signal_host_closing",
+        ),
+        true,
+      );
+      assert.equal(
+        botcastIdentityMirrorStatesV1(closed.episode.events).has("guest-1"),
+        false,
+      );
     } finally {
       db.close();
     }

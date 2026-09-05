@@ -1135,7 +1135,7 @@ describe("LocalOllamaProvider secondary routing", () => {
     }
     assert.deepEqual(
       chatBodies.map((body) => body.think),
-      ["medium", "low", "low", "medium", "high", "high", "high"],
+      ["medium", "low", "low", "low", "medium", "high", "high"],
     );
     assert.ok(chatBodies.every((body) => typeof body.think === "string"));
   });
@@ -2418,7 +2418,7 @@ describe("AnthropicProvider request shape", () => {
     assert.deepEqual(bodies.map((body) => body.output_config), [
       { effort: "xhigh" },
       { effort: "low" },
-      { effort: "max" },
+      { effort: "high" },
       { effort: "max" },
     ]);
   });

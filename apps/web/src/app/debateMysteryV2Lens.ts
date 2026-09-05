@@ -3,6 +3,28 @@ interface MysteryLensPoint {
   y: number;
 }
 
+export interface MysteryLensSurfaceRect {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+}
+
+/**
+ * Converts a viewport point through the fitted room-art plane. Letterboxed
+ * space is intentionally inert so it cannot select an edge hotspot.
+ */
+export function debateMysteryV2ImagePointFromClientPoint(
+  point: { clientX: number; clientY: number },
+  surface: MysteryLensSurfaceRect,
+): MysteryLensPoint | null {
+  if (surface.width <= 0 || surface.height <= 0) return null;
+  const x = (point.clientX - surface.left) / surface.width;
+  const y = (point.clientY - surface.top) / surface.height;
+  if (x < 0 || x > 1 || y < 0 || y > 1) return null;
+  return { x: x * 100, y: y * 100 };
+}
+
 export interface MysteryLensHotspot {
   id: string;
   polygon: MysteryLensPoint[];
@@ -195,10 +217,15 @@ export function debateMysteryV2ExamineGridCellIndexes(
   columns: number = DEBATE_MYSTERY_V2_EXAMINE_GRID_COLUMNS,
   rows: number = DEBATE_MYSTERY_V2_EXAMINE_GRID_ROWS,
 ): number[] {
-  const target = hotspots.find((hotspot) => hotspot.id === lens.hotspotId);
-  if (!target || !target.unlocked || target.examined) return [];
-  if (resolveDebateMysteryV2Lens(lens.x, lens.y, hotspots).hotspotId !== target.id) return [];
-  if (!debateMysteryV2PointInHotspot({ x: lens.x, y: lens.y }, target.polygon)) return [];
+  // The coarse grid is continuous pointer feedback, while hotspot eligibility
+  // controls only the hand cursor and click target. A stale non-null target is
+  // still rejected so state changes cannot illuminate the wrong clue.
+  if (lens.hotspotId !== null) {
+    const target = hotspots.find((hotspot) => hotspot.id === lens.hotspotId);
+    if (!target || !target.unlocked || target.examined) return [];
+    if (resolveDebateMysteryV2Lens(lens.x, lens.y, hotspots).hotspotId !== target.id) return [];
+    if (!debateMysteryV2PointInHotspot({ x: lens.x, y: lens.y }, target.polygon)) return [];
+  }
   const column = Math.min(columns - 1, Math.max(0, Math.floor((lens.x / 100) * columns)));
   const row = Math.min(rows - 1, Math.max(0, Math.floor((lens.y / 100) * rows)));
   return [row * columns + column];

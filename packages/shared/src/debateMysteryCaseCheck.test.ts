@@ -47,3 +47,18 @@ test("both filing paths whitelist theory fields and admitted kind-specific refer
   assert.deepEqual(normalizeDebateMysteryFiledTheoryV2({ culpritSeatId: "a", testimonyIds: ["t"] },
     { ...state, config: { ...state.config, playerRole: "spectator" } }).testimonyIds, []);
 });
+
+test("filed theories reject the Defense client and accept the real culprit", () => {
+  const defense = {
+    ...state,
+    config: { ...state.config, playerStance: "defense" },
+    caseCharge: { ...state.caseCharge, defendantSeatId: "a" },
+  } as unknown as DebateWhodunnitFormatStateV2;
+  assert.throws(() => normalizeDebateMysteryFiledTheoryV2({ accusedSeatIds: ["a"] }, defense), /client/i);
+  assert.throws(() => normalizeDebateMysteryFiledTheoryV2({ accusedSeatIds: ["b", "a"] }, defense), /client/i);
+  assert.throws(() => normalizeDebateMysteryFiledTheoryV2({ culpritSeatId: "a" }, defense), /client/i);
+  assert.deepEqual(normalizeDebateMysteryFiledTheoryV2({ accusedSeatIds: ["b"] }, defense).accusedSeatIds, ["b"]);
+  // A prosecution charge never pins a client, even when a stale defendant field is present.
+  const prosecution = { ...defense, config: { ...state.config } } as unknown as DebateWhodunnitFormatStateV2;
+  assert.deepEqual(normalizeDebateMysteryFiledTheoryV2({ accusedSeatIds: ["a"] }, prosecution).accusedSeatIds, ["a"]);
+});

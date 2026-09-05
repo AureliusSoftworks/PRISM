@@ -3,8 +3,13 @@ import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { describe, it } from "node:test";
 import {
+  WHODUNNIT_COURT_ARRIVAL_MIN_MS,
+  WHODUNNIT_COURT_ARRIVAL_SEAT_MS,
+  WHODUNNIT_COURT_ARRIVAL_SETTLE_MS,
   resolveWhodunnitCourtCamera,
+  whodunnitCourtArrivalProgress,
   whodunnitCourtCameraLabel,
+  whodunnitCourtGallerySeats,
 } from "./debateMysteryCourtStage.ts";
 
 type DecodedPng = { width: number; height: number; data: Buffer };
@@ -105,5 +110,54 @@ describe("Whodunnit Court stage", () => {
         assert.equal(darkForeground.data[(y * darkForeground.width + (darkForeground.width - 1 - x)) * 4 + 3], 0, "lower-right counsel zone must stay clear");
       }
     }
+  });
+});
+
+describe("Whodunnit Court arrival", () => {
+  it("fills the gallery from the front, alternating aisles, and settles before testimony", () => {
+    const seats = whodunnitCourtGallerySeats({
+      jurors: [{ id: "j1" }, { id: "j2" }],
+      suspects: [{ id: "s1" }, { id: "s2" }, { id: "s3" }],
+      excludeBotIds: new Set(["s2"]),
+    });
+    assert.deepEqual(
+      seats.map((seat) => [seat.bot.id, seat.role, seat.side, seat.row]),
+      [["j1", "juror", "left", 0], ["j2", "juror", "right", 0], ["s1", "suspect", "left", 0], ["s3", "suspect", "right", 0]],
+    );
+    assert.ok(seats[0]!.xPercent < 50 && seats[1]!.xPercent > 50);
+    const early = whodunnitCourtArrivalProgress({ seatCount: 4, elapsedMs: 1_500, reducedMotion: false });
+    assert.equal(early.revealedCount, 2);
+    assert.equal(early.complete, false);
+    const seated = whodunnitCourtArrivalProgress({ seatCount: 4, elapsedMs: 4 * WHODUNNIT_COURT_ARRIVAL_SEAT_MS, reducedMotion: false });
+    assert.equal(seated.revealedCount, 4);
+    assert.equal(seated.complete, false, "the house settles before the judge speaks");
+    const settled = whodunnitCourtArrivalProgress({
+      seatCount: 4,
+      elapsedMs: 4 * WHODUNNIT_COURT_ARRIVAL_SEAT_MS + WHODUNNIT_COURT_ARRIVAL_SETTLE_MS,
+      reducedMotion: false,
+    });
+    assert.equal(settled.complete, true);
+    assert.equal(settled.ratio, 1);
+    assert.equal(
+      whodunnitCourtArrivalProgress({ seatCount: 0, elapsedMs: 1_000, reducedMotion: false }).complete,
+      false,
+      "an empty gallery still gives the Court its establishing beat",
+    );
+    assert.equal(whodunnitCourtArrivalProgress({ seatCount: 0, elapsedMs: WHODUNNIT_COURT_ARRIVAL_MIN_MS, reducedMotion: false }).complete, true);
+    const reduced = whodunnitCourtArrivalProgress({ seatCount: 6, elapsedMs: 700, reducedMotion: true });
+    assert.equal(reduced.revealedCount, 6);
+    assert.equal(reduced.complete, true);
+  });
+
+  it("holds the wide camera while the Court assembles", () => {
+    assert.equal(resolveWhodunnitCourtCamera({
+      arrival: true,
+      defenseDialogueActive: false,
+      defendantDialogueActive: false,
+      establishingWitness: false,
+      interrogationPhase: null,
+      judgeDialogueActive: true,
+      prosecutionDialogueActive: false,
+    }), "wide");
   });
 });

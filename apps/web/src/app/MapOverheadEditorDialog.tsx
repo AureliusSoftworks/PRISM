@@ -15,7 +15,7 @@ import styles from "./mapOverheadEditor.module.css";
 export interface MapOverheadBoardTileV1 {
   id: string;
   label: string;
-  kind: "room" | "corridor" | "ambient" | "side";
+  kind: "room" | "corridor" | "side";
   left: number;
   top: number;
   width: number;
@@ -181,7 +181,7 @@ export default function MapOverheadEditorDialog(props: Props): React.JSX.Element
   const cancelWork = (): void => {
     workToken.current += 1;
     setBusy(false); setWork(null);
-    setNotice("PRISM keeps drawing in the background; the plate appears here when it lands.");
+    setNotice("PRISM keeps drawing and checking the setting in the background. An approved plate appears here when it lands; a rejected one leaves this picture unchanged.");
   };
   const generate = async (cancelled: () => boolean): Promise<void> => {
     await props.onGenerate();
@@ -366,8 +366,8 @@ export default function MapOverheadEditorDialog(props: Props): React.JSX.Element
               <header><strong>Overhead picture</strong>{props.online ? <small className={shell.online}>Online</small> : null}</header>
               <small className={shell.hint}>
                 {hasImage
-                  ? `PRISM drew this from the ${props.placeNoun}'s exterior and set it over the rooms. Drawing again replaces the picture; your framing waits in Undo.`
-                  : `Nothing has been drawn for this ${props.placeNoun} yet.`}
+                  ? `PRISM drew this from the current Library identity and set it over the rooms. Drawing again uses the current cover, title, description, and venue style. If the setting does not match, this picture stays.`
+                  : `Nothing has been drawn for this ${props.placeNoun} yet. PRISM will use its current Library identity.`}
               </small>
               <button type="button" className={shell.place} disabled={!props.online} onClick={() => void run("generate", generate)}>
                 {hasImage ? "Draw it again" : "Draw the overhead"}
@@ -394,17 +394,17 @@ export default function MapOverheadEditorDialog(props: Props): React.JSX.Element
         placement="fullscreen"
         theme={props.theme}
         {...(work?.kind === "generate"
-          ? { operation: "refraction" as const, onCancel: cancelWork, cancelLabel: "Stop waiting", cancelConfirmTitle: "Stop waiting?", cancelConfirmDetail: "PRISM keeps drawing in the background; the picture appears when it lands." }
+          ? { operation: "refraction" as const, onCancel: cancelWork, cancelLabel: "Stop waiting", cancelConfirmTitle: "Stop waiting?", cancelConfirmDetail: "PRISM keeps drawing and checking the setting in the background. An approved picture appears when it lands; a rejected one leaves the current picture unchanged." }
           : { operation: "preparation" as const })}
         operationId={work?.startedAt}
         eyebrow="PRISM / Overhead view"
         title={work?.kind === "generate" ? `Drawing the ${props.placeNoun} from above` : "Saving the placement"}
         detail={work?.kind === "generate"
-          ? `PRISM is painting the ${props.placeNoun}'s exterior seen from directly above, then setting it over the rooms.`
+          ? `PRISM is painting the current Library ${props.placeNoun} from directly above, then checking that the setting still matches before saving it.`
           : "PRISM is writing this placement into the venue."}
         stepLabel={work?.kind === "generate" ? "Drawing the overhead" : "Saving placement"}
         startedAt={work?.startedAt ?? null}
-        footer={work?.kind === "generate" ? "Your current picture stays until the new one arrives." : "Keep this window open."}
+        footer={work?.kind === "generate" ? "Your current picture stays unless the new one passes its setting check." : "Keep this window open."}
       />
       {error ? <p className={shell.error} role="alert">{error}</p> : null}
       {!error && notice ? <p className={shell.notice} role="status">{notice}</p> : null}
