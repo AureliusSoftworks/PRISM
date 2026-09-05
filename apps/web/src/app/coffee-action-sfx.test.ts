@@ -5,8 +5,10 @@ import {
   buildBundledActionSfxPlan,
   buildCoffeeActionReactionPlan,
   buildCoffeeActionSfxPlan,
+  bundledActionSfxCueAtMs,
   coffeeActionCueTextForMessage,
   coffeeActionReactionKindForAction,
+  coffeeActionSfxDrivesOhMouth,
   coffeeActionSfxGate,
   coffeeActionSfxIsEligible,
   coffeeActionSfxKindForAction,
@@ -15,13 +17,31 @@ import {
 } from "./coffee-action-sfx.ts";
 
 describe("Coffee action sound effects", () => {
+  it("marks bodily foley kinds as default-mouth oh drivers", () => {
+    assert.equal(coffeeActionSfxDrivesOhMouth("cough"), true);
+    assert.equal(coffeeActionSfxDrivesOhMouth("burp"), true);
+    assert.equal(coffeeActionSfxDrivesOhMouth("fart"), true);
+    assert.equal(coffeeActionSfxDrivesOhMouth("nod"), false);
+    assert.equal(coffeeActionSfxDrivesOhMouth("cup_set_down"), false);
+  });
+
+  it("fades action foley instead of hard-stopping by default", () => {
+    const source = readFileSync(new URL("./coffee-action-sfx.ts", import.meta.url), "utf8");
+    assert.match(source, /COFFEE_ACTION_SFX_RELEASE_FADE_MS = 180/u);
+    assert.match(
+      source,
+      /export function stopCoffeeActionSfx\(\s*fadeMs: number = COFFEE_ACTION_SFX_RELEASE_FADE_MS/u,
+    );
+    assert.match(source, /audio\.volume = initialVolume \* \(1 - progress\)/u);
+  });
+
   it("recognizes only the small physical foley allowlist", () => {
     assert.equal(coffeeActionSfxKindForAction("pours coffee into her mug"), "coffee_pour");
     assert.equal(coffeeActionSfxKindForAction("stirs the coffee with a spoon"), "spoon_stir");
     assert.equal(coffeeActionSfxKindForAction("sets his cup down on the table"), "cup_set_down");
     assert.equal(coffeeActionSfxKindForAction("taps twice on the tabletop"), "table_knock");
     assert.equal(coffeeActionSfxKindForAction("takes a long sip"), null);
-    assert.equal(coffeeActionSfxKindForAction("laughs and whispers"), null);
+    assert.equal(coffeeActionSfxKindForAction("laughs and whispers"), "laugh");
   });
 
   it("recognizes semantic action families instead of exact keywords only", () => {
@@ -33,7 +53,7 @@ describe("Coffee action sound effects", () => {
     assert.equal(coffeeActionReactionKindForAction("passes some gas"), "fart");
     assert.equal(coffeeActionReactionKindForAction("belches into one hand"), "burp");
     assert.equal(coffeeActionReactionKindForAction("eructates loudly"), "burp");
-    assert.equal(coffeeActionReactionKindForAction("clears her throat"), "cough");
+    assert.equal(coffeeActionReactionKindForAction("clears her throat"), "throat_clear");
     assert.equal(coffeeActionReactionKindForAction("hacks twice"), "cough");
     assert.equal(coffeeActionReactionKindForAction("shakes the cocktail tin"), null);
   });
@@ -56,6 +76,26 @@ describe("Coffee action sound effects", () => {
       buildBundledActionSfxPlan("*sets the mug down on the table*"),
       null,
     );
+  });
+
+  it("places double-asterisk inline Foley after the preceding spoken word", () => {
+    const message = "I really gotta **farts** ...fart. Excuse me.";
+    assert.deepEqual(buildBundledActionSfxPlan(message), {
+      kind: "fart",
+      revealAtDisplayLength: 14,
+    });
+    const spoken = "I really gotta ...fart. Excuse me.";
+    const characters = Array.from(spoken);
+    const durationMs = characters.length * 100;
+    assert.equal(
+      bundledActionSfxCueAtMs(message, durationMs, {
+        characters,
+        characterStartTimesSeconds: characters.map((_, index) => index / 10),
+        characterEndTimesSeconds: characters.map((_, index) => (index + 1) / 10),
+      }),
+      1_400,
+    );
+    assert.equal(bundledActionSfxCueAtMs("**farts** Then I speak.", 2_000), 0);
   });
 
   it("uses the saved player-action payload as the canonical replay cue", () => {
@@ -179,6 +219,9 @@ describe("Coffee action sound effects", () => {
     assert.match(pageSource, /presentCoffeeAuthoredActionReactionOnce/u);
     assert.match(pageSource, /data-coffee-authored-action-reaction/u);
     assert.match(pageSource, /actor: message\.role === "user" \? "player" : "bot"/u);
+    assert.match(pageSource, /coffeeActionSfxDrivesOhMouth/u);
+    assert.match(pageSource, /seatFoleyOhMouth/u);
+    assert.match(pageSource, /seatFoleyOhMouth\s*\?\s*"open-small"/u);
     assert.match(
       pageSource,
       /coffeeAuthoredActionReaction\?\.actor === "player"/u,
@@ -192,12 +235,55 @@ describe("Coffee action sound effects", () => {
     assert.match(cssSource, /coffeeAuthoredActionBurp/u);
     assert.match(cssSource, /coffeeAuthoredActionCough/u);
     assert.match(
-      cssSource,
-      /coffeeReplayPlayerSeat\[data-coffee-authored-action-reaction="nod"\]/u,
+      pageSource,
+      /className=\{styles\.coffeeReplayPlayerSeat\}/u,
     );
     assert.match(
       cssSource,
       /prefers-reduced-motion:[\s\S]*data-coffee-authored-action-reaction/u,
     );
+  });
+
+  it("plays player-authored bundled Foley from every live mode", () => {
+    const pageSource = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
+    const coffeeSource = readFileSync(
+      new URL("./coffee-action-sfx.ts", import.meta.url),
+      "utf8",
+    );
+    assert.match(
+      pageSource,
+      /const playChatPlayerActionSfx = useCallback\([\s\S]{0,420}buildBundledActionSfxPlan\(messageText\)/u,
+    );
+    assert.match(
+      pageSource,
+      /playChatPlayerActionSfx\(\s*serializeComposerAction\(actionOnlySubmission, ""\)[\s\S]{0,120}requestZenSubmittedActionReaction/u,
+    );
+    const bufferedFollowupStart = pageSource.indexOf(
+      "if (zenFollowupBufferingSend)",
+    );
+    const bufferedFollowupPlayback = pageSource.indexOf(
+      "playChatPlayerActionSfx(displayTrimmed)",
+      bufferedFollowupStart,
+    );
+    const bufferedFollowupDispatch = pageSource.indexOf(
+      "scheduleZenFollowupMergedSend();",
+      bufferedFollowupStart,
+    );
+    assert.ok(bufferedFollowupStart >= 0);
+    assert.ok(bufferedFollowupPlayback > bufferedFollowupStart);
+    assert.ok(bufferedFollowupDispatch > bufferedFollowupPlayback);
+    assert.match(
+      pageSource,
+      /!options\.zenFollowupDispatch\s*\) \{\s*playChatPlayerActionSfx\(displayTrimmed\);/u,
+    );
+    assert.match(
+      pageSource,
+      /const playChatPlayerActionSfx = useCallback\([\s\S]{0,520}bundledActionSfxIsEligible\(\{[\s\S]{0,180}voiceMode: voicePlaybackSelectionRef\.current\.voiceMode/u,
+    );
+    assert.match(pageSource, /playCoffeeActionSfxOnce\(/u);
+    assert.match(pageSource, /playSignalProducerGuestActionSfx/u);
+    assert.match(pageSource, /playDebatePlayerActionSfx/u);
+    assert.match(coffeeSource, /resolveBodilyActionSfxPlayback/u);
+    assert.match(coffeeSource, /playBodilyFoleyThroughVoiceBus/u);
   });
 });

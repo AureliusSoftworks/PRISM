@@ -11,11 +11,11 @@ import {
 const pageSource = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
 
 describe("zenAtmosphereGrayscaleAmount", () => {
-  it("always desaturates persona Atmosphere wallpapers", () => {
+  it("desaturates Atmosphere wallpapers for persona bots", () => {
     assert.equal(zenAtmosphereGrayscaleAmount(true), "1");
   });
 
-  it("keeps default Prism Atmosphere wallpapers in full color", () => {
+  it("keeps Prism/default Atmosphere wallpapers in color", () => {
     assert.equal(zenAtmosphereGrayscaleAmount(false), "0");
   });
 
@@ -27,20 +27,50 @@ describe("zenAtmosphereGrayscaleAmount", () => {
     );
   });
 
-  it("does not let the stored legacy preference drive wallpaper rendering", () => {
+  it("drives grayscale and tint from the active persona", () => {
     const backdropStyleSource = pageSource.slice(
       pageSource.indexOf("const zenAtmosphereBackdropStyle ="),
-      pageSource.indexOf("const zenFirstReplyPending")
+      pageSource.indexOf("const emptyHomeHeroMounted"),
     );
 
     assert.match(
       backdropStyleSource,
-      /zenAtmosphereGrayscaleAmount\(\s*composeBotAccentId !== null/
+      /appWidePrivateMode\s*\?\s*"1"\s*:\s*zenAtmosphereGrayscaleAmount\(\s*composeBotAccentId !== null/,
     );
+    assert.match(
+      backdropStyleSource,
+      /zenAtmospherePrismColorActive[\s\S]*?\?\s*"1"\s*:\s*"0"/
+    );
+    assert.match(
+      backdropStyleSource,
+      /zenAtmosphereBotTintActive[\s\S]*?\?\s*"1"\s*:\s*"0"/
+    );
+    assert.match(backdropStyleSource, /\.\.\.zenPersonaAtmosphereAccentStyle/);
     assert.doesNotMatch(
       backdropStyleSource,
       /zenWallpaperGrayscaleEnabled/
     );
+  });
+
+  it("keeps persona wallpaper luminance grayscale under a normalized bot-color blend", () => {
+    const css = readFileSync(new URL("./page.module.css", import.meta.url), "utf8");
+    assert.match(
+      css,
+      /\.zenPersonaStartupAtmosphere\s*\{[\s\S]*?--zen-atmosphere-grayscale-amount:\s*1;/,
+    );
+    assert.match(
+      css,
+      /\.zenPersonaStartupAtmosphere::before\s*\{[\s\S]*?grayscale\(var\(--zen-atmosphere-grayscale-amount\)\)/,
+    );
+    assert.match(
+      css,
+      /\.zenAtmosphereBackdrop\[data-persona-color="true"\]::before\s*\{[\s\S]*?var\(--bot-color,\s*var\(--accent\)\)[\s\S]*?mix-blend-mode:\s*color\s*;/,
+    );
+    assert.match(
+      pageSource,
+      /zenPersonaAtmosphereAccentStyle =\s*zenPersonaBot[\s\S]*?botAccentStyle\([\s\S]*?zenPersonaBot\.color/,
+    );
+    assert.match(pageSource, /data-persona-color=\{zenPersonaBot \? "true" : undefined\}/);
   });
 });
 

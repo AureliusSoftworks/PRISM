@@ -1,25 +1,40 @@
 import {
   BOT_AUDIO_VOICE_PACE_RATE_DEPTH,
   DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
+  botcastSignalStandardCadenceDurationMs,
   normalizeBotAudioVoiceProfileV1,
   normalizeBotVoiceVolume,
+  voiceCensorPerformancePlan,
+  voicePerformancePlanFromText,
   type BotAudioVoiceProfileV1,
 } from "@localai/shared";
+import type { VoiceCensorPlanV1 } from "./voiceCensorTone.ts";
 import {
   beginVoicePlaybackProgress,
   playPreSpeechBreath,
   playRealtimeVoiceBytes,
   prepareRealtimeVoiceAudio,
-  stopRealtimeVoiceAudio,
+  prismLiveVoicePerformanceBudgetActive,
+  releaseRealtimeVoiceAudio,
+  teardownRealtimeVoiceAudioImmediately,
+  voiceReleaseGainAt,
   voiceLiltDetuneCents,
   type VoicePlaybackCharacterAlignment,
   type VoicePlaybackLifecycle,
+  type VoicePlaybackChannel,
   type VoiceRoboticPlan,
 } from "./voiceEffects.ts";
 import type { PreSpeechBreathPlan } from "./preSpeechBreath.ts";
 import type { RoomAcousticsSend } from "./roomAcoustics.ts";
 import {
+  replayAudioMasterCaptureActive,
+  routeAudioElementToPrismOutput,
+} from "./replayAudioMasterCapture.ts";
+import { publishBotVoiceLightLevel } from "./voiceLightEnvelope.ts";
+import {
+  readEnglishVoiceWaveStream,
   readEnglishVoiceSynthesisClip,
+  reportedChunkedVoiceDurationMs,
   type EnglishVoiceSynthesisClip,
 } from "./englishVoice.ts";
 
@@ -37,6 +52,7 @@ export interface BottishPlan {
   notes: BottishNote[];
   durationMs: number;
   alignment: VoicePlaybackCharacterAlignment;
+  censorPlan?: VoiceCensorPlanV1 | null;
 }
 
 export interface BottishPlaybackTiming {
@@ -50,11 +66,43 @@ export interface BottishPlaybackTiming {
 const MEDIA_PLAY_START_TIMEOUT_MS = 1500;
 const BOTTISH_SAMPLE_RATE = 24_000;
 const MAX_ROBOT_VOICE_COMPRESSION_RATE = 1.24;
-const SIGNAL_ENGLISH_WORD_DURATION_MS = 350;
-const SIGNAL_ENGLISH_STRONG_PAUSE_MS = 160;
-const SIGNAL_ENGLISH_SOFT_PAUSE_MS = 70;
-const SIGNAL_ENGLISH_MIN_UTTERANCE_MS = 720;
-const SIGNAL_ENGLISH_MAX_UTTERANCE_MS = 24_000;
+/** Baked note amplitude. Keep this well below speech-bus unity so the
+ * square/triangle robot carrier does not jump in front of English or Premium. */
+export const BOTTISH_NOTE_GAIN = 0.08;
+
+const BOTTISH_ACTION_PATTERNS = {
+  laugh: "ha ha ",
+  chuckle: "heh ",
+  sigh: "hhhh ",
+  exhale: "hhh ",
+  gasp: "ah ",
+  cough: "kh kh ",
+  "throat-clear": "ahem ",
+  snort: "hnk ",
+  groan: "ohhh ",
+  sob: "huh huh ",
+  yawn: "aaah ",
+} as const;
+
+/** Replace only explicit marked vocal actions with same-length procedural
+ * motifs so Bottish keeps canonical reveal alignment without beeping the word
+ * "laughs" as ordinary dialogue. */
+export function bottishPerformanceText(text: string): string {
+  const actions = voicePerformancePlanFromText(text).segments.filter(
+    (segment) => segment.kind === "vocal-action",
+  );
+  if (actions.length === 0) return text;
+  let output = "";
+  let cursor = 0;
+  for (const action of actions) {
+    output += text.slice(cursor, action.sourceStart);
+    const length = action.sourceEnd - action.sourceStart;
+    const pattern = BOTTISH_ACTION_PATTERNS[action.action];
+    output += pattern.repeat(Math.ceil(length / pattern.length)).slice(0, length);
+    cursor = action.sourceEnd;
+  }
+  return output + text.slice(cursor);
+}
 
 /** Keep the persisted field for profile/back-up compatibility, but do not let
  * legacy or randomized tone values change Bottish gain or processing. */
@@ -70,31 +118,13 @@ export function normalizeBottishPlaybackProfile(
   };
 }
 
-/** Estimate the neutral-tempo English window for a Signal line. Signal uses
- * this only to rein in robot modes that run materially longer than the same
- * spoken line; the hard compression ceiling keeps either mode intelligible. */
+/** Fit robot speech to Signal's shared Premium-calibrated cadence without
+ * exceeding the hard compression ceiling required for intelligibility. */
 export function signalRobotVoiceCadenceTiming(
   text: string,
 ): BottishPlaybackTiming {
-  const wordCount = Math.max(
-    1,
-    text.match(/[\p{L}\p{N}]+(?:['’-][\p{L}\p{N}]+)*/gu)?.length ?? 0,
-  );
-  const strongPauseCount = text.match(/[.!?]+/gu)?.length ?? 0;
-  const softPauseCount = text.match(/[,;:]+/gu)?.length ?? 0;
-  const targetDurationMs = Math.min(
-    SIGNAL_ENGLISH_MAX_UTTERANCE_MS,
-    Math.max(
-      SIGNAL_ENGLISH_MIN_UTTERANCE_MS,
-      Math.round(
-        wordCount * SIGNAL_ENGLISH_WORD_DURATION_MS +
-          strongPauseCount * SIGNAL_ENGLISH_STRONG_PAUSE_MS +
-          softPauseCount * SIGNAL_ENGLISH_SOFT_PAUSE_MS,
-      ),
-    ),
-  );
   return {
-    targetDurationMs,
+    targetDurationMs: botcastSignalStandardCadenceDurationMs(text),
     maximumCompressionRate: MAX_ROBOT_VOICE_COMPRESSION_RATE,
   };
 }
@@ -149,8 +179,22 @@ export function buildBottishPlan(
   rawProfile: BotAudioVoiceProfileV1,
   seed = text
 ): BottishPlan {
+  const censorPerformance = voiceCensorPerformancePlan(
+    bottishPerformanceText(text),
+  );
+  const performanceText = censorPerformance.text;
   const profile = normalizeBottishPlaybackProfile(rawProfile);
-  const voice = VOICE_BASES[profile.baseVoiceId];
+  const mappedVoice = VOICE_BASES[
+    profile.baseVoiceId as keyof typeof VOICE_BASES
+  ];
+  const portableVoiceIndex =
+    Number(profile.baseVoiceId.replace("voice-", "")) || 1;
+  const voice = mappedVoice ?? {
+    frequency: 165 + ((portableVoiceIndex * 47) % 330),
+    waveform: (["sine", "triangle", "square"] as const)[
+      portableVoiceIndex % 3
+    ]!,
+  };
   const pitchMultiplier = 2 ** ((profile.pitch * 650) / 1200);
   const tone = profile.bottishTone;
   const organicAmount = Math.max(0, -tone);
@@ -177,7 +221,7 @@ export function buildBottishPlan(
   let cursorMs = 0;
   let spokenIndex = 0;
 
-  for (const character of Array.from(text).slice(0, 1200)) {
+  for (const character of Array.from(performanceText).slice(0, 1200)) {
     const characterStartMs = cursorMs;
     if (!isSpeakableCharacter(character)) {
       if (/[.!?]/.test(character)) cursorMs += noteMs * 2.2;
@@ -216,7 +260,7 @@ export function buildBottishPlan(
       durationMs: noteMs,
       frequencyHz: Math.round(frequencyHz * 10) / 10,
       endFrequencyHz: Math.round(frequencyHz * (1 + glide) * 10) / 10,
-      gain: 0.3,
+      gain: BOTTISH_NOTE_GAIN,
       waveform,
       lowpassHz: Math.max(4800, Math.min(10_000, toneLowpass)),
     });
@@ -231,6 +275,12 @@ export function buildBottishPlan(
     notes,
     durationMs: notes.length > 0 ? Math.round(cursorMs + 50) : 0,
     alignment,
+    censorPlan: censorPerformance.ranges.length > 0
+      ? {
+          textLength: performanceText.length,
+          ranges: censorPerformance.ranges,
+        }
+      : null,
   };
 }
 
@@ -280,6 +330,7 @@ export function fitBottishPlanToDuration(
   return {
     notes,
     durationMs,
+    censorPlan: plan.censorPlan,
     alignment: {
       characters: [...plan.alignment.characters],
       characterStartTimesSeconds: plan.alignment.characterStartTimesSeconds.map(
@@ -309,6 +360,7 @@ export function scaleBottishPlanForDeliveryRate(
       durationMs: Math.max(8, Math.round(note.durationMs * scale)),
     })),
     durationMs: Math.max(1, Math.round(plan.durationMs * scale)),
+    censorPlan: plan.censorPlan,
     alignment: {
       characters: [...plan.alignment.characters],
       characterStartTimesSeconds: plan.alignment.characterStartTimesSeconds.map(
@@ -440,6 +492,52 @@ export function encodeBottishPlanWave(
 
 let activeMedia: HTMLAudioElement | null = null;
 let activeMediaUrl: string | null = null;
+const mediaOutputCleanup = new WeakMap<HTMLMediaElement, () => void>();
+
+function routeBottishMediaOutput(
+  audio: HTMLMediaElement,
+  lifecycle?: VoicePlaybackLifecycle,
+  plan?: Pick<BottishPlan, "censorPlan"> &
+    Partial<Pick<BottishPlan, "alignment" | "durationMs">>,
+): void {
+  if (mediaOutputCleanup.has(audio)) return;
+  const onLevel = lifecycle?.onLevel || lifecycle?.voiceLightTarget
+    ? (level: number) => {
+        if (lifecycle?.voiceLightTarget) {
+          publishBotVoiceLightLevel(lifecycle.voiceLightTarget, level);
+        }
+        lifecycle?.onLevel?.(level);
+      }
+    : undefined;
+  const cleanup = routeAudioElementToPrismOutput(audio, {
+    onLevel,
+    censorPlan: plan?.censorPlan,
+    censorAlignment: plan?.alignment,
+    censorDurationMs: plan?.durationMs,
+    readCensorElapsedMs: () => audio.currentTime * 1_000,
+  });
+  if (!cleanup && replayAudioMasterCaptureActive()) {
+    throw new Error("Bottish voice could not enter the faithful session mix.");
+  }
+  if (cleanup) {
+    mediaOutputCleanup.set(audio, cleanup);
+  } else if (onLevel) {
+    let active = true;
+    audio.addEventListener("playing", () => {
+      if (active) onLevel(0.22);
+    });
+    audio.addEventListener("ended", () => {
+      if (!active) return;
+      active = false;
+      onLevel(0);
+    });
+    mediaOutputCleanup.set(audio, () => {
+      if (!active) return;
+      active = false;
+      onLevel(0);
+    });
+  }
+}
 let preparedMedia: HTMLAudioElement | null = null;
 let preparedMediaUrl: string | null = null;
 let activeTimer: number | null = null;
@@ -448,6 +546,16 @@ let generation = 0;
 let queue: Promise<void> = Promise.resolve();
 
 export async function prepareBottishVoice(): Promise<void> {
+  // Live Coffee/Signal speech is worker-decoded into Web Audio. A silent
+  // HTMLMediaElement unlock still wakes Chromium's native media pipeline and
+  // can delay rendering, so keep it out of the latency-critical stage.
+  if (
+    prismLiveVoicePerformanceBudgetActive() &&
+    (await prepareRealtimeVoiceAudio({ loadRealtimeProcessing: false }))
+  ) {
+    releasePreparedMedia();
+    return;
+  }
   // A send gesture may already have authorized the fallback media element.
   // Re-preparing after the model reply arrives must reuse that element: Safari
   // will not grant a second autoplay authorization from a passive effect.
@@ -484,6 +592,7 @@ function beginMediaUnlock(): void {
   const silentPlan: BottishPlan = {
     notes: [],
     durationMs: 0,
+    censorPlan: null,
     alignment: {
       characters: [],
       characterStartTimesSeconds: [],
@@ -506,6 +615,8 @@ function beginMediaUnlock(): void {
 function releaseActiveMedia(keepElement = false): void {
   const media = activeMedia;
   if (media) {
+    mediaOutputCleanup.get(media)?.();
+    mediaOutputCleanup.delete(media);
     media.pause();
     media.removeAttribute("src");
     media.load();
@@ -529,13 +640,89 @@ function stopScheduledNodes(): void {
 }
 
 export function stopBottishVoice(
-  options: { preservePreparedMedia?: boolean } = {}
+  options: {
+    preservePreparedMedia?: boolean;
+    preserveCompletedTails?: boolean;
+  } = {},
+): void {
+  releaseBottishVoice(options);
+}
+
+/** Engine-internal teardown for media known to be silent or prepared. */
+export function teardownBottishVoiceImmediately(
+  options: {
+    preservePreparedMedia?: boolean;
+    preserveCompletedTails?: boolean;
+  } = {},
 ): void {
   generation += 1;
-  stopRealtimeVoiceAudio();
+  teardownRealtimeVoiceAudioImmediately("primary", {
+    preserveCompletedTails: options.preserveCompletedTails,
+  });
+  teardownRealtimeVoiceAudioImmediately("presence");
   stopScheduledNodes();
   if (!options.preservePreparedMedia) releasePreparedMedia();
   queue = Promise.resolve();
+}
+
+export function releaseBottishVoice(
+  options: {
+    fadeOutMs?: number;
+    preservePreparedMedia?: boolean;
+    preserveCompletedTails?: boolean;
+  } = {},
+): void {
+  generation += 1;
+  const fadeOutMs = Math.max(0, Math.round(options.fadeOutMs ?? 160));
+  releaseRealtimeVoiceAudio("primary", fadeOutMs);
+  releaseRealtimeVoiceAudio("presence", fadeOutMs);
+  const media = activeMedia;
+  if (!media) {
+    if (!options.preservePreparedMedia) releasePreparedMedia();
+    return;
+  }
+  const mediaUrl = activeMediaUrl;
+  const resolve = activeResolve;
+  const startTimer = activeTimer;
+  activeMedia = null;
+  activeMediaUrl = null;
+  activeResolve = null;
+  activeTimer = null;
+  if (startTimer !== null && typeof window !== "undefined") {
+    window.clearTimeout(startTimer);
+  }
+  if (!options.preservePreparedMedia) releasePreparedMedia();
+  const startVolume = media.volume;
+  const startedAt = Date.now();
+  let fadeTimer: number | null = null;
+  const finish = (): void => {
+    if (fadeTimer !== null && typeof window !== "undefined") {
+      window.clearTimeout(fadeTimer);
+    }
+    fadeTimer = null;
+    mediaOutputCleanup.get(media)?.();
+    mediaOutputCleanup.delete(media);
+    media.pause();
+    media.removeAttribute("src");
+    media.load();
+    if (mediaUrl) URL.revokeObjectURL(mediaUrl);
+    if (options.preservePreparedMedia && !preparedMedia) preparedMedia = media;
+    resolve?.();
+  };
+  if (fadeOutMs === 0 || media.paused || startVolume <= 0) {
+    finish();
+    return;
+  }
+  const step = (): void => {
+    const progress = (Date.now() - startedAt) / fadeOutMs;
+    media.volume = voiceReleaseGainAt(startVolume, progress);
+    if (progress >= 1) {
+      finish();
+      return;
+    }
+    fadeTimer = window.setTimeout(step, 16);
+  };
+  step();
 }
 
 async function playPlanWithMedia(
@@ -560,12 +747,29 @@ async function playPlanWithMedia(
   audio.preservesPitch = true;
   activeMedia = audio;
   activeMediaUrl = url;
+  routeBottishMediaOutput(audio, lifecycle, plan);
 
   await new Promise<void>((resolve, reject) => {
     let settled = false;
     let started = false;
     let progress: ReturnType<typeof beginVoicePlaybackProgress> | null = null;
-    const finish = (error?: Error) => {
+    const beginAudiblePlayback = () => {
+      if (started) return;
+      started = true;
+      const playbackTempo = 1 + normalizeBotAudioVoiceProfileV1(profile).pace *
+        BOT_AUDIO_VOICE_PACE_RATE_DEPTH;
+      progress = beginVoicePlaybackProgress(
+        lifecycle,
+        Math.round(plan.durationMs / playbackTempo),
+        () => audio.currentTime * 1000 / playbackTempo,
+        plan.alignment,
+      );
+      if (activeTimer !== null) {
+        window.clearTimeout(activeTimer);
+        activeTimer = null;
+      }
+    };
+    const finish = (error?: Error, completed = true) => {
       if (settled) return;
       settled = true;
       if (activeTimer !== null) {
@@ -573,40 +777,30 @@ async function playPlanWithMedia(
         activeTimer = null;
       }
       if (activeResolve === cancel) activeResolve = null;
-      if (error) progress?.cancel();
+      if (error || !completed) progress?.cancel();
       else progress?.finish();
       progress = null;
       releaseActiveMedia(!error);
-      lifecycle?.onEnd?.();
+      if (error || !completed) lifecycle?.onCancel?.();
+      else lifecycle?.onEnd?.();
       if (error) reject(error);
       else resolve();
     };
-    const cancel = () => finish();
+    const cancel = () => finish(undefined, false);
     activeResolve = cancel;
     audio.addEventListener("ended", () => finish(), { once: true });
     audio.addEventListener("error", () => finish(new Error("Bottish audio could not play.")), {
       once: true,
     });
+    audio.addEventListener("playing", beginAudiblePlayback, { once: true });
+    const playbackTempo = 1 + normalizeBotAudioVoiceProfileV1(profile).pace *
+      BOT_AUDIO_VOICE_PACE_RATE_DEPTH;
+    audio.playbackRate = playbackTempo;
     activeTimer = window.setTimeout(() => {
       if (!started) finish(new Error("Audio playback did not start. Check the browser tab's sound setting."));
     }, MEDIA_PLAY_START_TIMEOUT_MS);
     void audio.play().then(
-      () => {
-        started = true;
-        const playbackTempo = 1 + normalizeBotAudioVoiceProfileV1(profile).pace *
-          BOT_AUDIO_VOICE_PACE_RATE_DEPTH;
-        audio.playbackRate = playbackTempo;
-        progress = beginVoicePlaybackProgress(
-          lifecycle,
-          Math.round(plan.durationMs / playbackTempo),
-          () => audio.currentTime * 1000 / playbackTempo,
-          plan.alignment
-        );
-        if (activeTimer !== null) {
-          window.clearTimeout(activeTimer);
-          activeTimer = null;
-        }
-      },
+      () => undefined,
       (error: unknown) => finish(
         error instanceof Error ? error : new Error("Bottish audio could not play.")
       )
@@ -624,6 +818,7 @@ async function playPlan(
   roomAcoustics?: RoomAcousticsSend,
   preSpeechBreath?: PreSpeechBreathPlan | null,
   stereoPan?: number,
+  channel: VoicePlaybackChannel = "primary",
 ): Promise<void> {
   if (plan.durationMs <= 0 || expectedGeneration !== generation) return;
   await playPreSpeechBreath({
@@ -632,6 +827,7 @@ async function playPlan(
     roomAcoustics,
     stereoPan,
     isCurrent: () => expectedGeneration === generation,
+    onStart: lifecycle?.onPresenceStart,
   });
   if (expectedGeneration !== generation) return;
   const bytes = encodeBottishPlanWave(plan);
@@ -642,8 +838,11 @@ async function playPlan(
     effectsEnabled,
     roomAcoustics,
     stereoPan,
+    channel,
     lifecycle,
     alignment: plan.alignment,
+    censorPlan: plan.censorPlan,
+    compensateLifecycleForOutputLatency: true,
     isCurrent: () => expectedGeneration === generation,
   });
   if (!played) await playPlanWithMedia(plan, profile, expectedGeneration, lifecycle);
@@ -891,7 +1090,8 @@ async function playHybridBytesWithMedia(
   bytes: ArrayBuffer,
   profile: BotAudioVoiceProfileV1,
   expectedGeneration: number,
-  lifecycle?: VoicePlaybackLifecycle
+  lifecycle?: VoicePlaybackLifecycle,
+  censorPlan?: VoiceCensorPlanV1 | null,
 ): Promise<void> {
   if (expectedGeneration !== generation) return;
   const url = URL.createObjectURL(new Blob([bytes.slice(0)], { type: "audio/wav" }));
@@ -907,12 +1107,35 @@ async function playHybridBytesWithMedia(
   audio.preservesPitch = true;
   activeMedia = audio;
   activeMediaUrl = url;
+  routeBottishMediaOutput(audio, lifecycle, { censorPlan });
 
   await new Promise<void>((resolve, reject) => {
     let settled = false;
     let started = false;
     let progress: ReturnType<typeof beginVoicePlaybackProgress> | null = null;
-    const finish = (error?: Error) => {
+    const beginAudiblePlayback = () => {
+      if (started) return;
+      started = true;
+      const playbackTempo = 1 + normalizeBotAudioVoiceProfileV1(profile).pace *
+        BOT_AUDIO_VOICE_PACE_RATE_DEPTH;
+      const durationMs = Number.isFinite(audio.duration) && audio.duration > 0
+        ? Math.round(audio.duration * 1000 / playbackTempo)
+        : null;
+      if (durationMs) {
+        progress = beginVoicePlaybackProgress(
+          lifecycle,
+          durationMs,
+          () => audio.currentTime * 1000 / playbackTempo,
+        );
+      } else {
+        lifecycle?.onStart?.(null);
+      }
+      if (activeTimer !== null) {
+        window.clearTimeout(activeTimer);
+        activeTimer = null;
+      }
+    };
+    const finish = (error?: Error, completed = true) => {
       if (settled) return;
       settled = true;
       if (activeTimer !== null) {
@@ -920,46 +1143,30 @@ async function playHybridBytesWithMedia(
         activeTimer = null;
       }
       if (activeResolve === cancel) activeResolve = null;
-      if (error) progress?.cancel();
+      if (error || !completed) progress?.cancel();
       else progress?.finish();
       progress = null;
       releaseActiveMedia(!error);
-      lifecycle?.onEnd?.();
+      if (error || !completed) lifecycle?.onCancel?.();
+      else lifecycle?.onEnd?.();
       if (error) reject(error);
       else resolve();
     };
-    const cancel = () => finish();
+    const cancel = () => finish(undefined, false);
     activeResolve = cancel;
     audio.addEventListener("ended", () => finish(), { once: true });
     audio.addEventListener("error", () => finish(new Error("Babble voice could not play.")), {
       once: true,
     });
+    audio.addEventListener("playing", beginAudiblePlayback, { once: true });
+    const playbackTempo = 1 + normalizeBotAudioVoiceProfileV1(profile).pace *
+      BOT_AUDIO_VOICE_PACE_RATE_DEPTH;
+    audio.playbackRate = playbackTempo;
     activeTimer = window.setTimeout(() => {
       if (!started) finish(new Error("Audio playback did not start. Check the browser tab's sound setting."));
     }, MEDIA_PLAY_START_TIMEOUT_MS);
     void audio.play().then(
-      () => {
-        started = true;
-        const playbackTempo = 1 + normalizeBotAudioVoiceProfileV1(profile).pace *
-          BOT_AUDIO_VOICE_PACE_RATE_DEPTH;
-        audio.playbackRate = playbackTempo;
-        const durationMs = Number.isFinite(audio.duration) && audio.duration > 0
-          ? Math.round(audio.duration * 1000 / playbackTempo)
-          : null;
-        if (durationMs) {
-          progress = beginVoicePlaybackProgress(
-            lifecycle,
-            durationMs,
-            () => audio.currentTime * 1000 / playbackTempo,
-          );
-        } else {
-          lifecycle?.onStart?.(null);
-        }
-        if (activeTimer !== null) {
-          window.clearTimeout(activeTimer);
-          activeTimer = null;
-        }
-      },
+      () => undefined,
       (error: unknown) => finish(
         error instanceof Error ? error : new Error("Babble voice could not play.")
       )
@@ -978,15 +1185,27 @@ async function playBabble(
   roomAcoustics?: RoomAcousticsSend,
   preSpeechBreath?: PreSpeechBreathPlan | null,
   stereoPan?: number,
+  channel: VoicePlaybackChannel = "primary",
 ): Promise<void> {
   if (expectedGeneration !== generation) return;
   const normalized = normalizeBottishPlaybackProfile(profile);
+  const censorPerformance = voiceCensorPerformancePlan(
+    bottishPerformanceText(text),
+  );
+  const censorPlan: VoiceCensorPlanV1 | null =
+    censorPerformance.ranges.length > 0
+      ? {
+          textLength: censorPerformance.text.length,
+          ranges: censorPerformance.ranges,
+        }
+      : null;
   await playPreSpeechBreath({
     plan: preSpeechBreath,
     profile: normalized,
     roomAcoustics,
     stereoPan,
     isCurrent: () => expectedGeneration === generation,
+    onStart: lifecycle?.onPresenceStart,
   });
   if (expectedGeneration !== generation) return;
   const roboticPlan = buildBabbleRoboticPlan(text, normalized, seed);
@@ -998,9 +1217,12 @@ async function playBabble(
     baseLowpassHz: 20_000,
     roomAcoustics,
     stereoPan,
+    channel,
     lifecycle,
     roboticPlan,
+    censorPlan,
     cleanRoboticCarrier: true,
+    compensateLifecycleForOutputLatency: true,
     isCurrent: () => expectedGeneration === generation,
   });
   if (!played) {
@@ -1009,8 +1231,162 @@ async function playBabble(
       normalized,
       expectedGeneration,
       lifecycle,
+      censorPlan,
     );
   }
+}
+
+async function playChunkedBabbleResponse(
+  response: Response,
+  sourceText: string,
+  profile: BotAudioVoiceProfileV1,
+  expectedGeneration: number,
+  seed: string,
+  effectsEnabled: boolean,
+  globalVolume: number,
+  lifecycle?: VoicePlaybackLifecycle,
+  roomAcoustics?: RoomAcousticsSend,
+  preSpeechBreath?: PreSpeechBreathPlan | null,
+  timing?: BottishPlaybackTiming,
+  stereoPan = 0,
+  channel: VoicePlaybackChannel = "primary",
+): Promise<void> {
+  const totalCharacters = Math.max(
+    1,
+    Number(response.headers.get("x-prism-voice-characters")) || 1,
+  );
+  const estimatedDurationMs = Math.max(
+    1,
+    timing?.targetDurationMs ?? botcastSignalStandardCadenceDurationMs(sourceText),
+  );
+  let consumedCharacters = 0;
+  let playedChunks = 0;
+  let playbackStarted = false;
+  let audibleSegmentCursorMs = 0;
+
+  const remainingEstimateAfterCharacters = (charactersHeard: number): number =>
+    estimatedDurationMs *
+    Math.max(0, totalCharacters - charactersHeard) /
+    totalCharacters;
+
+  const reportLifecycleProgress = (
+    audibleElapsedMs: number,
+    remainingEstimateMs: number,
+  ): void => {
+    lifecycle?.onProgress?.(
+      Math.max(0, Math.round(audibleElapsedMs)),
+      reportedChunkedVoiceDurationMs({
+        estimatedDurationMs,
+        audibleElapsedMs,
+        remainingEstimateMs,
+      }),
+    );
+  };
+
+  for await (const chunk of readEnglishVoiceWaveStream(response)) {
+    if (expectedGeneration !== generation) return;
+    const segmentStartMs =
+      estimatedDurationMs * (consumedCharacters / totalCharacters);
+    const segmentEndMs =
+      estimatedDurationMs *
+      (Math.min(totalCharacters, consumedCharacters + chunk.characterCount) /
+        totalCharacters);
+    const segmentDurationMs = Math.max(1, segmentEndMs - segmentStartMs);
+    const remainingAfterChunk = remainingEstimateAfterCharacters(
+      consumedCharacters + chunk.characterCount,
+    );
+    const playbackProfile = {
+      ...resolveBabblePlaybackProfile(profile, chunk.bytes, {
+        deliveryRate: timing?.deliveryRate,
+        maximumCompressionRate: timing?.maximumCompressionRate,
+      }),
+      volume: normalizeBotVoiceVolume(globalVolume),
+    };
+    let actualChunkDurationMs: number | null = null;
+    let actualChunkElapsedMs = 0;
+    await playBabble(
+      chunk.bytes,
+      chunk.text ?? sourceText,
+      playbackProfile,
+      expectedGeneration,
+      `${seed}:chunk:${chunk.index}`,
+      effectsEnabled,
+      {
+        onStart: (durationMs) => {
+          actualChunkDurationMs = durationMs;
+          const chunkFloor = Math.max(1, durationMs ?? segmentDurationMs);
+          if (chunk.text) {
+            lifecycle?.onSynthesizedSpeechSegment?.({
+              text: chunk.text,
+              sourceStart: chunk.sourceStart,
+              sourceEnd: chunk.sourceEnd,
+              startMs: audibleSegmentCursorMs,
+              endMs: audibleSegmentCursorMs + chunkFloor,
+              // The local/system worker currently returns audio only. Carry
+              // the authoritative Babble transcript without pretending it
+              // also supplied character or phoneme timestamps.
+              alignment: null,
+            });
+          }
+          const reported = reportedChunkedVoiceDurationMs({
+            estimatedDurationMs,
+            audibleElapsedMs: audibleSegmentCursorMs,
+            remainingEstimateMs: chunkFloor + remainingAfterChunk,
+          });
+          if (!playbackStarted) {
+            playbackStarted = true;
+            lifecycle?.onStart?.(reported);
+          } else {
+            lifecycle?.onProgress?.(audibleSegmentCursorMs, reported);
+          }
+        },
+        onProgress: (elapsedMs) => {
+          actualChunkElapsedMs = Math.max(actualChunkElapsedMs, elapsedMs);
+          reportLifecycleProgress(
+            audibleSegmentCursorMs + elapsedMs,
+            Math.max(
+              0,
+              (actualChunkDurationMs ?? segmentDurationMs) - elapsedMs,
+            ) + remainingAfterChunk,
+          );
+        },
+        onEnd: () => undefined,
+      },
+      roomAcoustics,
+      playedChunks === 0 ? preSpeechBreath : null,
+      stereoPan,
+      channel,
+    );
+    const speechHeardMs = Math.max(
+      actualChunkElapsedMs,
+      expectedGeneration === generation
+        ? (actualChunkDurationMs ?? segmentDurationMs)
+        : 0,
+    );
+    audibleSegmentCursorMs += speechHeardMs;
+    if (expectedGeneration !== generation) return;
+    playedChunks += 1;
+    consumedCharacters += chunk.characterCount;
+    reportLifecycleProgress(
+      audibleSegmentCursorMs,
+      remainingEstimateAfterCharacters(consumedCharacters),
+    );
+  }
+
+  if (expectedGeneration !== generation) return;
+  if (playedChunks === 0 || !playbackStarted) {
+    throw new Error("Babble voice stream returned no playable audio.");
+  }
+  const finalDurationMs = reportedChunkedVoiceDurationMs({
+    estimatedDurationMs,
+    audibleElapsedMs: audibleSegmentCursorMs,
+    remainingEstimateMs: 0,
+  });
+  lifecycle?.onProgress?.(
+    Math.max(audibleSegmentCursorMs, finalDurationMs),
+    finalDurationMs,
+  );
+  lifecycle?.onEnd?.();
 }
 
 export function enqueueBabbleVoice(
@@ -1025,16 +1401,15 @@ export function enqueueBabbleVoice(
   preSpeechBreath?: PreSpeechBreathPlan | null,
   timing?: BottishPlaybackTiming,
   stereoPan = 0,
+  channel: VoicePlaybackChannel = "primary",
 ): Promise<void> {
   const expectedGeneration = generation;
   const playbackProfile = {
     ...resolveBabblePlaybackProfile(profile, bytes, timing),
     volume: normalizeBotVoiceVolume(globalVolume),
   };
-  queue = queue
-    .catch(() => undefined)
-    .then(() =>
-      playBabble(
+  const run = () =>
+    playBabble(
         bytes,
         sourceText,
         playbackProfile,
@@ -1045,8 +1420,46 @@ export function enqueueBabbleVoice(
         roomAcoustics,
         preSpeechBreath,
         stereoPan,
-      ),
-    );
+        channel,
+      );
+  if (channel !== "primary") return run();
+  queue = queue.catch(() => undefined).then(run);
+  return queue;
+}
+
+export function enqueueChunkedBabbleVoice(
+  response: Response,
+  sourceText: string,
+  profile: BotAudioVoiceProfileV1,
+  seed: string,
+  effectsEnabled = true,
+  globalVolume = 1,
+  lifecycle?: VoicePlaybackLifecycle,
+  roomAcoustics?: RoomAcousticsSend,
+  preSpeechBreath?: PreSpeechBreathPlan | null,
+  timing?: BottishPlaybackTiming,
+  stereoPan = 0,
+  channel: VoicePlaybackChannel = "primary",
+): Promise<void> {
+  const expectedGeneration = generation;
+  const run = () =>
+    playChunkedBabbleResponse(
+        response,
+        sourceText,
+        profile,
+        expectedGeneration,
+        seed,
+        effectsEnabled,
+        globalVolume,
+        lifecycle,
+        roomAcoustics,
+        preSpeechBreath,
+        timing,
+        stereoPan,
+        channel,
+      );
+  if (channel !== "primary") return run();
+  queue = queue.catch(() => undefined).then(run);
   return queue;
 }
 
@@ -1061,6 +1474,7 @@ export function enqueueBottishVoice(
   roomAcoustics?: RoomAcousticsSend,
   preSpeechBreath?: PreSpeechBreathPlan | null,
   stereoPan = 0,
+  channel: VoicePlaybackChannel = "primary",
 ): Promise<void> {
   const expectedGeneration = generation;
   const normalizedProfile = normalizeBottishPlaybackProfile(profile);
@@ -1075,10 +1489,8 @@ export function enqueueBottishVoice(
   // Pitch and lilt are baked into the procedural plan. Keeping the playback
   // transform neutral prevents a second shift after synthesis.
   const playbackProfile = { ...planProfile, pitch: 0, lilt: 0 };
-  queue = queue
-    .catch(() => undefined)
-    .then(() =>
-      playPlan(
+  const run = () =>
+    playPlan(
         plan,
         playbackProfile,
         expectedGeneration,
@@ -1088,8 +1500,10 @@ export function enqueueBottishVoice(
         roomAcoustics,
         preSpeechBreath,
         stereoPan,
-      ),
-    );
+        channel,
+      );
+  if (channel !== "primary") return run();
+  queue = queue.catch(() => undefined).then(run);
   return queue;
 }
 

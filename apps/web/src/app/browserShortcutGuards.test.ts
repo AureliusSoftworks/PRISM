@@ -136,6 +136,27 @@ test("keeps normal editing shortcuts available", () => {
   );
 });
 
+test("reserves Mod+Shift+E for the model effort HUD", () => {
+  assert.equal(
+    shouldBlockBrowserKeyboardShortcut(
+      keyEvent({ key: "e", code: "KeyE", metaKey: true, shiftKey: true }),
+    ),
+    false,
+  );
+  assert.equal(
+    shouldBlockBrowserKeyboardShortcut(
+      keyEvent({ key: "e", code: "KeyE", ctrlKey: true, shiftKey: true }),
+    ),
+    false,
+  );
+  assert.equal(
+    shouldBlockBrowserKeyboardShortcut(
+      keyEvent({ key: "e", code: "KeyE", metaKey: true }),
+    ),
+    true,
+  );
+});
+
 test("blocks history-style backspace outside editable areas", () => {
   assert.equal(shouldBlockBrowserKeyboardShortcut(keyEvent({ key: "Backspace" })), true);
 });

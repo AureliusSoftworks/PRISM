@@ -91,12 +91,13 @@ const databaseArgument = flagValue("--db");
 const userId = flagValue("--user-id");
 const workspaceBackupArgument = flagValue("--workspace-backup");
 const databaseBackupArgument = flagValue("--db-backup");
+const onlyArgument = flagValue("--only");
 const shouldApply = process.argv.includes("--apply");
 const explicitDryRun = process.argv.includes("--dry-run");
 
 if (!databaseArgument || !userId || shouldApply === explicitDryRun) {
   throw new Error(
-    "Usage: promote-marketplace-library-avatar-customizations.mjs --db /absolute/path/localai.db --user-id ID (--dry-run | --apply --workspace-backup /new/directory --db-backup /new/backup.db)",
+    "Usage: promote-marketplace-library-avatar-customizations.mjs --db /absolute/path/localai.db --user-id ID [--only id[,id...]] (--dry-run | --apply --workspace-backup /new/directory --db-backup /new/backup.db)",
   );
 }
 if (shouldApply && (!workspaceBackupArgument || !databaseBackupArgument)) {
@@ -104,6 +105,24 @@ if (shouldApply && (!workspaceBackupArgument || !databaseBackupArgument)) {
     "Applying requires explicit --workspace-backup and --db-backup paths.",
   );
 }
+
+const selectedMarketplaceIds = (() => {
+  if (!onlyArgument) return marketplaceIds;
+  const requested = onlyArgument
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean);
+  if (requested.length === 0) {
+    throw new Error("--only requires at least one Marketplace bot id.");
+  }
+  const unknown = requested.filter((id) => !marketplaceIds.has(id));
+  if (unknown.length > 0) {
+    throw new Error(
+      `Unsupported --only id(s): ${unknown.join(", ")}. Allowed: ${[...marketplaceIds].join(", ")}.`,
+    );
+  }
+  return new Set(requested);
+})();
 
 function sha256(value) {
   return createHash("sha256").update(value).digest("hex");
@@ -128,8 +147,8 @@ function readArchive(entry, explicitPath = null) {
     .trim()
     .split("\n")
     .filter(Boolean);
-  if (!entries.includes("bot.json") || !entries.includes("memories.json")) {
-    throw new Error(`${entry.name} archive is missing a required entry.`);
+  if (!entries.includes("bot.json")) {
+    throw new Error(`${entry.name} archive is missing bot.json.`);
   }
   const document = JSON.parse(
     execFileSync("unzip", ["-p", bundlePath, "bot.json"], {
@@ -147,9 +166,9 @@ function readArchive(entry, explicitPath = null) {
     entries,
     document,
     archiveSha256: sha256(readFileSync(bundlePath)),
-    memoriesSha256: sha256(
-      execFileSync("unzip", ["-p", bundlePath, "memories.json"]),
-    ),
+    memoriesSha256: entries.includes("memories.json")
+      ? sha256(execFileSync("unzip", ["-p", bundlePath, "memories.json"]))
+      : null,
   };
 }
 
@@ -324,10 +343,14 @@ function rebuildArchive(target, outputPath, revision) {
 
 const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
 const targetEntries = manifest.bots.filter((entry) =>
-  marketplaceIds.has(entry.id),
+  selectedMarketplaceIds.has(entry.id),
 );
-if (targetEntries.length !== marketplaceIds.size) {
-  throw new Error("Alan Watts or Carl Jung is missing from the Marketplace.");
+if (targetEntries.length !== selectedMarketplaceIds.size) {
+  throw new Error(
+    `Missing Marketplace bot(s) for: ${[...selectedMarketplaceIds]
+      .filter((id) => !targetEntries.some((entry) => entry.id === id))
+      .join(", ")}.`,
+  );
 }
 
 const databasePath = resolve(databaseArgument);
@@ -387,7 +410,7 @@ try {
   if (shouldApply) {
     if (missing.length > 0 || targets.length !== targetEntries.length) {
       throw new Error(
-        `Cannot apply without both saved Library sources: ${missing.join(", ")}.`,
+        `Cannot apply without saved Library source(s): ${missing.join(", ") || "unknown"}.`,
       );
     }
     workspaceBackupPath = resolve(workspaceBackupArgument);

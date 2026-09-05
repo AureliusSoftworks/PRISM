@@ -26,15 +26,25 @@ function sourceSlice(source: string, start: string, end: string): string {
 
 describe("scene audio lifecycle wiring", () => {
   it("registers every standalone PRISM audio backend", () => {
-    assert.match(lifecycleSource, /stopBottishVoice/u);
-    assert.match(lifecycleSource, /stopEnglishVoice/u);
-    assert.match(lifecycleSource, /stopReactionVoiceAudio/u);
+    assert.match(lifecycleSource, /releaseBottishVoice/u);
+    assert.match(lifecycleSource, /releaseEnglishVoice/u);
+    assert.match(lifecycleSource, /releaseReactionVoiceAudio/u);
     assert.match(lifecycleSource, /stopCoffeeActionSfx/u);
-    assert.match(lifecycleSource, /stopSignalIntroAudio/u);
+    assert.match(lifecycleSource, /stopCoffeeSoundtrackSampleAudio/u);
+    assert.match(lifecycleSource, /stopDebateIdentAudio/u);
+    assert.match(lifecycleSource, /stopSignalSoundboardAudio/u);
+    assert.match(lifecycleSource, /stopAllBotAvatarSfxAudio/u);
+    assert.match(lifecycleSource, /stopPrismCompanionGlassTapAudio/u);
+    assert.match(lifecycleSource, /releaseSignalIntroAudio/u);
     assert.match(
       atmosphereLayerSource,
-      /return \(\) => \{[\s\S]*controller\.stop\(\)/u,
+      /return \(\) => \{[\s\S]*controller\.stop\(lifecycleTransitionMs\)/u,
     );
+    assert.match(
+      atmosphereLayerSource,
+      /setPresentationSuspended\(presentationSuspended\)/u,
+    );
+    assert.match(atmosphereLayerSource, /usePrismPresentationSuspended/u);
   });
 
   it("halts and invalidates audio when changing applets", () => {
@@ -57,6 +67,29 @@ describe("scene audio lifecycle wiring", () => {
       /listenerReactionVoiceAbortRef\.current\?\.abort\(\)/u,
     );
     assert.match(lifecycle, /stopAudioForStateExit\(\)/u);
+    assert.match(
+      pageSource,
+      /const stopBotcastUtterance = useCallback\(\(\): void => \{[\s\S]{0,900}releaseReactionVoiceAudio\(\);[\s\S]{0,180}releaseRealtimeVoiceAudio\("handoff", 160\);[\s\S]{0,260}stopVoicePlaybackPreservingPreparedMode/u,
+    );
+  });
+
+  it("invalidates stale Debate voice work before every exit path", () => {
+    assert.match(
+      pageSource,
+      /if \(view === "debate"\) \{\s*debateVoiceSurfaceActiveRef\.current = false;\s*\}[\s\S]{0,180}if \(view === "coffee"\) \{\s*coffeeVoiceSurfaceActiveRef\.current = false;\s*\}[\s\S]{0,80}stopPrismSceneAudio\(\)/u,
+    );
+    assert.match(
+      pageSource,
+      /const prepareDebateUtterance = async[\s\S]{0,180}!debateVoiceSurfaceActiveRef\.current/u,
+    );
+    assert.match(
+      pageSource,
+      /const playDebateUtterance = async[\s\S]{0,180}!debateVoiceSurfaceActiveRef\.current/u,
+    );
+    assert.match(
+      pageSource,
+      /onExit=\{\(\) => \{\s*debateVoiceSurfaceActiveRef\.current = false;\s*stopBotcastUtterance\(\);\s*stopPrismSceneAudio\(\)/u,
+    );
   });
 
   it("stops Coffee speech before returning to the group overview", () => {
@@ -77,6 +110,10 @@ describe("scene audio lifecycle wiring", () => {
     assert.ok(
       coffeeExit.indexOf("stopAudioForStateExit()") <
         coffeeExit.indexOf("setCoffeeConversation(null)"),
+    );
+    assert.match(
+      pageSource,
+      /if \(view !== "coffee"\) \{\s*coffeeVoiceSurfaceActiveRef\.current = false;[\s\S]{0,180}coffeeRevealDeliveryEpochRef\.current \+= 1/u,
     );
   });
 

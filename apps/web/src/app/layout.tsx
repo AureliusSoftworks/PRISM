@@ -6,16 +6,22 @@ import {
   Geist_Mono,
   Instrument_Sans,
   Lora,
+  Macondo,
+  Noto_Sans_Mono,
   Raleway,
 } from "next/font/google";
-import localFont from "next/font/local";
 import { BlockBrowserInspection } from "./BlockBrowserInspection";
 import { ClientInstallCoach } from "./ClientInstallCoach";
+import { DisableNativeTextCorrection } from "./DisableNativeTextCorrection";
 import { DisableNativeTooltips } from "./DisableNativeTooltips";
 import { PrismIntroSequenceProvider } from "./PrismIntroSequence";
 import { PRISM_BRAND_COPY } from "./prismBrand";
 import { PrismMenuProvider } from "./PrismMenu";
+import { PRISM_DOCUMENT_THEME_BOOTSTRAP_SCRIPT } from "./prismDocumentTheme";
+import { PrismRefractionGateProvider } from "./prismRefractionGate";
 import { RenderPlatformAttribute } from "./RenderPlatformAttribute";
+import { ReplayRenderCoordinator } from "./ReplayRenderCoordinator";
+import { TextEntryLengthDefaults } from "./TextEntryLengthDefaults";
 import { TextFieldContextMenu } from "./TextFieldContextMenu";
 import "./globals.css";
 
@@ -54,10 +60,18 @@ const conciseRounded = Fredoka({
   weight: ["600", "700"],
 });
 
-const dotoDisplay = localFont({
-  src: "./fonts/Doto-Variable.ttf",
-  variable: "--font-doto-display",
-  weight: "100 900",
+const macondoFace = Macondo({
+  variable: "--font-macondo-face",
+  subsets: ["latin"],
+  weight: "400",
+  display: "swap",
+});
+
+const technicalMono = Noto_Sans_Mono({
+  variable: "--font-technical-mono",
+  // The animated face vocabulary requires native ɵ and ʘ glyphs.
+  subsets: ["latin", "latin-ext"],
+  weight: "variable",
   display: "swap",
 });
 
@@ -99,18 +113,31 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className={`${uiSans.variable} ${titleSans.variable} ${chatSerif.variable} ${formalSerif.variable} ${playfulDisplay.variable} ${conciseRounded.variable} ${dotoDisplay.variable} ${geistMono.variable}`}
+      className={`${uiSans.variable} ${titleSans.variable} ${chatSerif.variable} ${formalSerif.variable} ${playfulDisplay.variable} ${conciseRounded.variable} ${macondoFace.variable} ${technicalMono.variable} ${geistMono.variable}`}
+      spellCheck={false}
+      autoCorrect="off"
       suppressHydrationWarning
     >
-      <body>
+      <body suppressHydrationWarning>
+        <script
+          id="prism-document-theme-bootstrap"
+          dangerouslySetInnerHTML={{
+            __html: PRISM_DOCUMENT_THEME_BOOTSTRAP_SCRIPT,
+          }}
+        />
         <PrismMenuProvider>
           <PrismIntroSequenceProvider>
-            <RenderPlatformAttribute />
-            <TextFieldContextMenu />
-            <BlockBrowserInspection />
-            <DisableNativeTooltips />
-            {children}
-            <ClientInstallCoach />
+            <PrismRefractionGateProvider>
+              <RenderPlatformAttribute />
+              <DisableNativeTextCorrection />
+              <TextFieldContextMenu />
+              <TextEntryLengthDefaults />
+              <BlockBrowserInspection />
+              <DisableNativeTooltips />
+              <ReplayRenderCoordinator />
+              {children}
+              <ClientInstallCoach />
+            </PrismRefractionGateProvider>
           </PrismIntroSequenceProvider>
         </PrismMenuProvider>
       </body>

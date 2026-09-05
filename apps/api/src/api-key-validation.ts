@@ -1,6 +1,7 @@
 type FetchLike = typeof fetch;
 
 export type ApiKeyValidationProvider =
+  | "ollama_cloud"
   | "openai"
   | "anthropic"
   | "elevenlabs"
@@ -20,6 +21,7 @@ function validationSignal(): AbortSignal {
 }
 
 function providerLabel(provider: ApiKeyValidationProvider): string {
+  if (provider === "ollama_cloud") return "Ollama Cloud";
   if (provider === "openai") return "OpenAI";
   if (provider === "anthropic") return "Anthropic";
   if (provider === "brave") return "Brave Search";
@@ -29,6 +31,17 @@ function providerLabel(provider: ApiKeyValidationProvider): string {
 function validationRequest(provider: ApiKeyValidationProvider, apiKey: string): RequestInit & {
   url: string;
 } {
+  if (provider === "ollama_cloud") {
+    return {
+      url: "https://ollama.com/api/tags",
+      method: "GET",
+      headers: {
+        accept: "application/json",
+        authorization: `Bearer ${apiKey}`,
+      },
+      signal: validationSignal(),
+    };
+  }
   if (provider === "openai") {
     return {
       url: "https://api.openai.com/v1/models",

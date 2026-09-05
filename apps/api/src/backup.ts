@@ -1,4 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
+import { createHash } from "node:crypto";
+import { OWNER_CONSTRAINT_ERROR } from "./account-owner-boundaries.ts";
 import {
   decryptJson,
   decryptText,
@@ -9,20 +11,48 @@ import { normalizeMemoryTier } from "./memory.ts";
 import type { ProviderName } from "./providers.ts";
 import { normalizeVoicePreviewLine } from "./voice-preview-line.ts";
 import {
+  exportDebateMysteryV2BackupV1,
+  importDebateMysteryV2BackupV1,
+  type DebateMysteryV2BackupV1,
+} from "./debate-mystery-v2.ts";
+import {
+  exportDebateMysteryAssetVaultBackupV1,
+  importDebateMysteryAssetVaultBackupV1,
+  type DebateMysteryAssetVaultBackupV1,
+} from "./debate-mystery-assets.ts";
+import {
+  APPLET_SESSION_NOTE_ENTRY_MAX_CHARACTERS,
+  APPLET_SESSION_NOTE_MAX_CHARACTERS,
+  appletSessionBelongsToUser,
+  readAppletSessionNoteSurface,
+} from "./applet-session-notes.ts";
+import {
+  liveSessionFocusBelongsToUser,
+  readLiveSessionFocusSurface,
+  readLiveSessionFocusTransition,
+  recordLiveSessionFocusEvent,
+} from "./live-session-focus-events.ts";
+import {
   DEFAULT_BOT_FACE_BLINK_BAR,
   DEFAULT_BOT_FACE_BLINK_OFFSET_X,
   DEFAULT_BOT_FACE_BLINK_OFFSET_Y,
+  DEFAULT_BOT_FACE_BLINK_ROTATION_DEG,
   DEFAULT_BOT_FACE_BLINK_SCALE,
   DEFAULT_BOT_FACE_EYE_COUNT,
+  DEFAULT_BOT_FACE_EYE_SPACING,
   DEFAULT_BOT_FACE_GLYPH_ANIMATION,
+  DEFAULT_BOT_FACE_EYE_MOVEMENT,
+  DEFAULT_BOT_FACE_MOUTH_COFFEE_PUCKER,
   DEFAULT_BOT_FACE_THINKING_FRAMES,
   parseStoredBotAvatarDetailsV1,
   normalizeBotFaceBlinkBar,
   normalizeBotFaceBlinkOffsetX,
   normalizeBotFaceBlinkOffsetY,
+  normalizeBotFaceBlinkRotationDeg,
   normalizeBotFaceBlinkScale,
   normalizeBotFaceEyeCharacter,
   normalizeBotFaceEyeCount,
+  normalizeBotFaceEyeSpacing,
   normalizeBotFaceEyeOffsetX,
   normalizeBotFaceEyeOffsetY,
   normalizeBotFaceEyeRotationDeg,
@@ -30,28 +60,48 @@ import {
   normalizeBotFaceFontId,
   normalizeBotFaceFontWeight,
   normalizeBotFaceGlyphAnimation,
+  normalizeBotFaceEyeMovement,
   normalizeBotFaceMouthCharacter,
+  normalizeBotFaceCustomSpeechPoses,
+  parseStoredBotFaceCustomSpeechPoses,
   normalizeBotFaceMouthOffsetX,
   normalizeBotFaceMouthOffsetY,
   normalizeBotFaceMouthRotationDeg,
   normalizeBotFaceMouthScale,
+  normalizeBotFaceThinkingOffsetX,
+  normalizeBotFaceThinkingOffsetY,
+  normalizeBotFaceThinkingScale,
   parseStoredBotFaceThinkingFrames,
   serializeBotFaceThinkingFrames,
+  serializeBotFaceCustomSpeechPosesForStorage,
   serializeBotAvatarDetailsV1,
   type BotAvatarDetailsV1,
   type BotFaceBlinkBar,
   type BotFaceEyeCount,
   type BotFaceFontId,
   type BotFaceGlyphAnimation,
+  type BotFaceCustomSpeechPoses,
+  type BotFaceEyeMovement,
   type BotFaceThinkingFrames,
   normalizeBotAudioVoiceProfileV1,
   normalizeBotNamePronunciation,
+  normalizeBotIdentityColor,
   normalizeBotSelfReferral,
   normalizeBotVoiceVolume,
   normalizeEnglishVoiceEngine,
+  normalizeSpeechTypeVoiceMode,
+  normalizeWhodunnitTextVoiceMode,
+  normalizeWhodunnitSpeechType,
+  normalizeWhodunnitInvestigationPerspective,
   normalizeGraphicsQuality,
+  normalizeCrtFocus,
+  normalizePrismTypographyScale,
+  normalizeHubAtmosphereStyle,
+  normalizeModelReasoningEffortPreference,
+  normalizePrismStartupPreference,
+  normalizePrismCapabilityRevelations,
+  PRISM_CAPABILITY_IDS,
   normalizeOptionalBotAudioVoiceProfileV1,
-  normalizeVoiceMode,
   parseStoredBotAudioVoiceProfileV1,
   serializeBotAudioVoiceProfileV1,
   parseStoredBotPowersV1,
@@ -65,17 +115,43 @@ import {
   type BotcastFallbackStudioAccentVariant,
   type BotPowerV1,
   type CoffeePowerPlanV1,
+  type CoffeeSessionLifecycleState,
+  type CoffeeSessionSettings,
+  normalizeCoffeeSessionSettings,
   type EnglishVoiceEngine,
   type VoiceMode,
+  type WhodunnitTextVoiceMode,
+  type WhodunnitSpeechType,
+  type WhodunnitInvestigationPerspective,
   type AutoFallbackChainV1,
   type EphemeralChatProviderPreferences,
   type ImageProviderName,
   type GraphicsQuality,
+  type PrismTypographyScale,
+  type HubAtmosphereStyle,
+  type ModelReasoningEffortPreferenceV1,
+  type ModelTurboPreferenceV1,
+  type MemoryEcologySettings,
+  type MemoryLifecycle,
+  type PrismStartupPreference,
+  type PrismCapabilityRevelations,
+  type BotcastPersonaReviewProvenanceV1,
   parseStoredAutoFallbackChain,
+  clampOnlineAutoProviderBias,
+  parseStoredOnlineAutoProviderWeights,
+  serializeOnlineAutoProviderWeights,
+  normalizeOnlineAutoQualityPosture,
+  type OnlineAutoProviderWeightsV1,
+  type OnlineAutoQualityPosture,
   normalizeEphemeralChatProviderPreferences,
   resolveImageProviderName,
   serializeAutoFallbackChain,
 } from "@localai/shared";
+import {
+  DEFAULT_MEMORY_ECOLOGY_SETTINGS,
+  normalizeMemoryEcologySettings,
+  resolveMemoryEcologySettingsPatch,
+} from "./memory-ecology.ts";
 import {
   normalizeZenAskQuestionPatienceEnabled,
   normalizeZenAskQuestionPatienceMs,
@@ -96,27 +172,79 @@ import {
   cleanupPreparedProjectOwnedAssetFiles,
   prepareProjectOwnedAssetImport,
   stagePreparedProjectOwnedAssetFiles,
+  type PreparedProjectOwnedAssetImport,
   type ProjectOwnedAssetArchiveBundleV1,
 } from "./project-owned-assets.ts";
+import {
+  listActionSfxPackClipsForBackup,
+  restoreActionSfxPackClipsFromBackup,
+} from "./action-sfx-pack.ts";
+import {
+  listEnglishPacingProfilesForBackup,
+  restoreEnglishPacingProfilesFromBackup,
+} from "./english-pacing-profile.ts";
+import {
+  listPremiumVoiceLibrary,
+  restorePremiumVoiceLibrary,
+  type PremiumVoiceLibraryEntry,
+} from "./premium-voice-library.ts";
+import {
+  listLibraryGroups,
+  replaceLibraryGroups,
+  type LibraryGroupV1,
+} from "./library-groups.ts";
+import {
+  listModelReasoningEffortPreferences,
+  normalizeModelEffortModelId,
+  normalizeModelEffortProvider,
+  setModelReasoningEffortPreference,
+} from "./model-effort-preferences.ts";
+import {
+  listModelTurboPreferences,
+  setModelTurboPreference,
+} from "./model-turbo-preferences.ts";
+import {
+  GLOBAL_BOT_MOOD_KEYS,
+  setGlobalBotMood,
+  type GlobalBotMoodKey,
+} from "./bot-global-mood.ts";
 
 export interface BackupUserSettings {
   theme: "light" | "dark" | "system";
   graphicsQuality?: GraphicsQuality;
+  crtFocus?: number;
+  typographyScale?: PrismTypographyScale;
+  atmosphereStyle?: HubAtmosphereStyle;
+  hubAtmosphereEnabled?: boolean;
+  startupPreference?: PrismStartupPreference;
+  capabilityRevelations?: PrismCapabilityRevelations;
   preferredProvider: ProviderName;
   ephemeralChatProviderPreferences?: EphemeralChatProviderPreferences;
   preferredImageProvider?: ImageProviderName;
   providerLocked: boolean;
   autoMemory: boolean;
+  /** Memory ecology controls. Older snapshots fall back to autoMemory. */
+  memoryEcology?: MemoryEcologySettings;
   composerWritingAssist: boolean;
   experimentalDualOllamaEnabled: boolean;
   experimentalAllModelEffortEnabled?: boolean;
   coffeeExperimentalTableAngleEnabled?: boolean;
+  debateWhodunnitReuseSynthesizedExhibits?: boolean;
+  debateWhodunnitTextVoiceMode?: WhodunnitTextVoiceMode;
+  debateWhodunnitSpeechType?: WhodunnitSpeechType;
+  debateWhodunnitPerspective?: WhodunnitInvestigationPerspective;
   psychicModeEnabled?: boolean;
   autoModeEnabled?: boolean;
   autoFallbackChain?: AutoFallbackChainV1 | null;
+  /** Soft ONLINE Auto lean: -1 OpenAI … 0 balanced … +1 Anthropic. */
+  onlineAutoProviderBias?: number;
+  onlineAutoProviderWeights?: OnlineAutoProviderWeightsV1;
+  onlineAutoQualityPosture?: OnlineAutoQualityPosture;
   /** Legacy import only. New backups no longer export this display preference. */
   fallbackModelMessageStripe?: boolean;
   hiddenBotModelIds: string[];
+  /** Models hidden only from manual/global pickers; absent in legacy backups. */
+  hiddenGlobalPickerModelIds?: string[];
   hiddenComfyUiWorkflowIds: string[];
   preferredLocalModel: string;
   preferredOnlineModel: string;
@@ -141,8 +269,13 @@ export interface BackupUserSettings {
   zenAskQuestionPatienceMs: number;
   zenAutonomyEnabled: boolean;
   prismDefaultBotFaceThinkingFrames?: BotFaceThinkingFrames | null;
+  prismDefaultBotFaceMouthSpeechPoses?: BotFaceCustomSpeechPoses | null;
   prismDefaultLlmModel: string;
+  prismCloudLlmModel?: string;
   prismImageToolLlmModel: string;
+  /** Prism Refract keeps independent Auto/model choices for the LOCAL and ONLINE lanes. */
+  prismRefractLocalModel?: string;
+  prismRefractOnlineModel?: string;
   devMemoriesEnabled: boolean;
   devMemoriesText: string;
   openAiApiKey?: string;
@@ -152,6 +285,10 @@ export interface BackupUserSettings {
   voiceEffectsEnabled?: boolean;
   voiceVolume?: number;
   operatingSystemVoicesEnabled?: boolean;
+  zenPlayerVoiceEnabled?: boolean;
+  playerAudioVoiceProfile?: BotAudioVoiceProfileV1;
+  /** Private account context used only for speech synthesis. */
+  playerNamePronunciation?: string;
   prismDefaultBotAudioVoiceProfile?: BotAudioVoiceProfileV1;
   englishVoiceEngine?: EnglishVoiceEngine;
   defaultSystemVoiceName?: string | null;
@@ -167,6 +304,8 @@ export interface BackupBotSnapshot {
   namePronunciation?: string;
   selfReferral?: string;
   systemPrompt: string;
+  /** Account-owned runtime state; portable .bot and .bots exports omit it. */
+  globalMood?: GlobalBotMoodKey;
   /** Account backups preserve server-owned clone lineage as bot ids. */
   cloneFamilyId?: string | null;
   voicePreviewLine?: string | null;
@@ -185,13 +324,16 @@ export interface BackupBotSnapshot {
   topK?: number;
   repetitionPenalty?: number;
   color?: string | null;
+  accentColor?: string | null;
   glyph?: string | null;
   avatarDetails?: BotAvatarDetailsV1 | null;
   faceEyesFont?: BotFaceFontId | null;
   faceEyeCharacter?: string | null;
+  faceEyeAnimation?: BotFaceEyeMovement | BotFaceGlyphAnimation | null;
   faceMouthFont?: BotFaceFontId | null;
   faceMouthCharacter?: string | null;
   faceMouthAnimation?: BotFaceGlyphAnimation | null;
+  faceMouthSpeechPoses?: BotFaceCustomSpeechPoses | null;
   faceMouthCoffeePucker?: boolean;
   faceFontWeight?: number | null;
   faceEyeScale?: number | null;
@@ -199,15 +341,21 @@ export interface BackupBotSnapshot {
   faceEyeOffsetY?: number | null;
   faceEyeRotationDeg?: number | null;
   faceEyeCount?: BotFaceEyeCount | number | null;
+  faceEyeSpacing?: number | null;
   faceMouthScale?: number | null;
   faceMouthOffsetX?: number | null;
   faceMouthOffsetY?: number | null;
   faceMouthRotationDeg?: number | null;
   faceBlinkBar?: BotFaceBlinkBar | null;
+  faceBlinkCount?: BotFaceEyeCount | number | null;
   faceBlinkScale?: number | null;
   faceBlinkOffsetX?: number | null;
   faceBlinkOffsetY?: number | null;
+  faceBlinkRotationDeg?: number | null;
   faceThinkingFrames?: BotFaceThinkingFrames | null;
+  faceThinkingScale?: number | null;
+  faceThinkingOffsetX?: number | null;
+  faceThinkingOffsetY?: number | null;
   chatEnabled: boolean;
   visibility: "private" | "public";
   createdAt: string;
@@ -224,12 +372,52 @@ export interface BackupBotSnapshot {
  */
 export type BackupSlateRow = Record<string, string | number | null>;
 
+const BACKUP_COFFEE_GROUP_SEAT_COUNT = 5;
+const BACKUP_COFFEE_GROUP_ETHOS_MAX_LENGTH = 280;
+
+export interface BackupCoffeeGroupAtmosphere {
+  imageId: string;
+  prompt?: string;
+  revision: number;
+  updatedAt: string;
+}
+
+export interface BackupCoffeeGroupSnapshot {
+  id: string;
+  name: string;
+  seatBotIds: Array<string | null>;
+  coffeeSettings: CoffeeSessionSettings;
+  presetMode: "manual" | "auto";
+  topicSelectionMode: "manual" | "auto";
+  modelChoice: Record<string, unknown>;
+  starterTopics: Record<string, unknown>;
+  moodSummary: Record<string, unknown>;
+  ethos: string;
+  atmosphere: BackupCoffeeGroupAtmosphere | null;
+  soundtrack?: {
+    provider: "elevenlabs";
+    model: string;
+    prompt: string;
+    contentType: string;
+    audioBase64: string;
+    durationMs: number;
+    revision: number;
+    createdAt: string;
+    updatedAt: string;
+  } | null;
+  synthesis: Record<string, unknown>;
+  archivedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface BackupSlateSnapshot {
   series: BackupSlateRow[];
   projects: BackupSlateRow[];
   revisions: BackupSlateRow[];
   versions: BackupSlateRow[];
   sections: BackupSlateRow[];
+  handoffs: BackupSlateRow[];
   sectionVersions: BackupSlateRow[];
   manuscriptStates: BackupSlateRow[];
   continuitySources: BackupSlateRow[];
@@ -249,13 +437,33 @@ export interface BackupSnapshot {
   version: 1;
   exportedAt: string;
   settings?: BackupUserSettings;
+  /** Optional in older v1 snapshots. Default effort is represented by no row. */
+  modelEffortPreferences?: ModelReasoningEffortPreferenceV1[];
+  /** Optional in older v1 snapshots. Disabled Turbo is represented by no row. */
+  modelTurboPreferences?: ModelTurboPreferenceV1[];
   bots?: BackupBotSnapshot[];
+  /** Server-backed Library groups. Older browser-authored archives omit this. */
+  libraryGroups?: LibraryGroupV1[];
+  /** Optional in older v1 snapshots. Only active Coffee Groups are exported. */
+  coffeeGroups?: BackupCoffeeGroupSnapshot[];
   conversations: Array<{
     id: string;
     title: string;
     createdAt: string;
     updatedAt: string;
     coffeePowerPlan?: CoffeePowerPlanV1;
+    coffee?: {
+      /** Optional in older v1 snapshots; legacy Coffee sessions restore active. */
+      sessionState?: CoffeeSessionLifecycleState;
+      settings: CoffeeSessionSettings;
+      botGroupIds: Array<string | null>;
+      groupId: string | null;
+      durationMinutes: number | null;
+      presetId: string | null;
+      topic: string | null;
+      absentBotIds: string[];
+      teamsJson: string | null;
+    };
     messages: Array<{
       id: string;
       role: string;
@@ -276,17 +484,46 @@ export interface BackupSnapshot {
     id: string;
     conversationId?: string;
     botId?: string;
+    /** Optional; directed bot-to-bot memories target this bot. */
+    targetBotId?: string;
     confidence: number;
+    baseConfidence?: number;
     category?: "general" | "user" | "bot_relation";
     tier?: "short_term" | "long_term";
+    lifecycle?: MemoryLifecycle;
     durability?: number;
+    source?: "direct" | "inferred";
+    certainty?: number;
+    sourceMessageIds?: string[];
+    evidenceMemoryIds?: string[];
+    evidenceLineageKnown?: boolean;
+    lastReinforcedAt?: string;
     payload: Record<string, unknown>;
     createdAt: string;
+  }>;
+  /** Persistent acquisition receipts. Older snapshots omit them. */
+  memoryReceipts?: Array<{
+    id: string;
+    memoryId: string;
+    learnerBotId?: string;
+    targetBotId?: string;
+    conversationId?: string;
+    kind: "player_memory" | "bot_relation";
+    createdAt: string;
+    readAt?: string;
   }>;
   /** Optional in older v1 snapshots. This remains an account backup, not a `.slate` archive. */
   slate?: BackupSlateSnapshot;
   /** Optional in older v1 snapshots. Signal is non-canonical but its show archive is user data. */
   botcast?: {
+    /** Optional for older v1 snapshots. Named Rehearse setups belong to the account, not a show. */
+    stagePresets?: Array<{
+      id: string;
+      name: string;
+      stageJson: string;
+      createdAt: string;
+      updatedAt: string;
+    }>;
     shows: Array<{
       id: string;
       hostBotId: string;
@@ -308,6 +545,13 @@ export interface BackupSnapshot {
         revision: number;
         createdAt: string;
         updatedAt: string;
+        outdent?: {
+          prompt: string;
+          contentType: string;
+          /** Legacy v1 snapshots store audio inline; new `.prism` archives use project blobs. */
+          audioBase64?: string;
+          durationMs: number;
+        };
       };
       atmosphereAudio?: {
         provider: "elevenlabs";
@@ -332,6 +576,7 @@ export interface BackupSnapshot {
       guestKind?: "bot" | "producer";
       guestName?: string;
       guestContext?: string;
+      guestBrief?: string;
       title: string;
       topic: string;
       producerBrief: string;
@@ -355,6 +600,7 @@ export interface BackupSnapshot {
         rating: number;
         comment: string;
         createdAt: string;
+        provenance?: BotcastPersonaReviewProvenanceV1;
       } | null;
       createdAt: string;
       updatedAt: string;
@@ -387,6 +633,354 @@ export interface BackupSnapshot {
       occurredAt: string;
     }>;
   };
+  /** Optional in older v1 snapshots. Debate preserves frozen sessions and public event history. */
+  debates?: {
+    sessions: Array<{
+      id: string;
+      revision: number;
+      status: string;
+      phase: string;
+      stepKey: string;
+      playerRole: string;
+      playerSideId: string | null;
+      createIdempotencyKey: string;
+      motion: string;
+      winnerSideId: string | null;
+      sessionJson: string;
+      error: string | null;
+      createdAt: string;
+      updatedAt: string;
+      completedAt: string | null;
+    }>;
+    events: Array<{
+      id: string;
+      sessionId: string;
+      sequence: number;
+      phase: string;
+      stepKey: string;
+      kind: string;
+      eventJson: string;
+      createdAt: string;
+    }>;
+    /** Optional in earlier v1 snapshots. Preserves anti-force-quit floor authority. */
+    recessCheckpoints?: Array<{
+      sessionId: string;
+      sourceRevision: number;
+      snapshotJson: string;
+      createdAt: string;
+    }>;
+    /** Server-private Whodunnit truth. Included only in the encrypted account backup. */
+    mysteryCases?: Array<{
+      sessionId: string;
+      schemaVersion: number;
+      generatorVersion: number;
+      privateJson: string;
+      contentHash: string;
+      createdAt: string;
+      updatedAt: string;
+    }>;
+    mysteryActions?: Array<{
+      id: string;
+      sessionId: string;
+      sequence: number;
+      actionKind: string;
+      publicPayloadJson: string;
+      occurredAt: string;
+    }>;
+    mysteryNotebooks?: Array<{
+      sessionId: string;
+      revision: number;
+      documentJson: string;
+      pendingProposalJson: string | null;
+      createdAt: string;
+      updatedAt: string;
+    }>;
+    mysteryNotebookRevisions?: Array<{
+      id: string;
+      sessionId: string;
+      revision: number;
+      documentJson: string;
+      reason: string;
+      idempotencyKey: string;
+      createdAt: string;
+    }>;
+    /** Complete V2 case compiler state and referenced local performance bytes. */
+    mysteryV2?: DebateMysteryV2BackupV1;
+    /** Decrypted only inside the encrypted account archive, then re-sealed on import. */
+    mysteryAssets?: DebateMysteryAssetVaultBackupV1;
+  };
+  /** One player-authored note attached to an applet session transcript. */
+  sessionNotes?: Array<{
+    surface: "coffee" | "signal" | "debate" | "story";
+    sessionId: string;
+    body: string;
+    captures?: Array<{
+      body: string;
+      startedAt: string;
+      fps?: number;
+      committedAt: string;
+    }>;
+    createdAt: string;
+    updatedAt: string;
+  }>;
+  /** Browser-rendered FPS captured once when each applet transcript entry appeared. */
+  transcriptFrameSamples?: Array<{
+    surface: "coffee" | "signal" | "debate" | "story";
+    sessionId: string;
+    entryId: string;
+    fps: number;
+    capturedAt: string;
+  }>;
+  /** Privacy-safe PRISM foreground transitions; no external window identity. */
+  focusEvents?: Array<{
+    surface: "chat" | "zen" | "coffee" | "signal" | "debate" | "story";
+    sessionId: string;
+    transition: "away" | "returned";
+    occurredAt: string;
+  }>;
+  /** Presentation-only response cues, including only the playback state actually persisted. */
+  presenceBeats?: Array<{
+    id: string;
+    surface: "chat" | "zen" | "sandbox" | "coffee" | "signal" | "debate";
+    sessionId: string;
+    responseId: string;
+    speakerBotId: string;
+    speakerName: string;
+    trigger: "interruption" | "redirect" | "waiting";
+    source: "default" | "custom";
+    text: string;
+    heardCharacterCount: number;
+    completion: "playing" | "completed" | "interrupted" | "failed";
+    playbackStartedAtMs: number;
+    playbackEndedAtMs: number | null;
+    createdAt: string;
+    updatedAt: string;
+  }>;
+  /** Derived video bytes are excluded; these portable inputs can rebuild them. */
+  replays?: {
+    recordings: Array<{
+      id: string;
+      surface: "signal" | "coffee";
+      sourceId: string;
+      manifestVersion: number;
+      manifestJson: string;
+      manifestHash: string | null;
+      timelineJson: string | null;
+      transcriptVtt: string | null;
+      transcriptMarkdown: string | null;
+      createdAt: string;
+      updatedAt: string;
+    }>;
+    voiceTakes: Array<{
+      id: string;
+      recordingId: string;
+      sourceKey: string;
+      sourceMessageId: string | null;
+      sourceEventId: string | null;
+      snapshotJson: string;
+      createdAt: string;
+      updatedAt: string;
+    }>;
+  };
+  /**
+   * Local action Foley packs (bot + player). Not part of bot Marketplace export.
+   * Optional in older v1 snapshots.
+   */
+  actionSfxPacks?: Array<{
+    ownerKind: "bot" | "player";
+    ownerId: string;
+    kind: string;
+    variantIndex: number;
+    contentType: string;
+    audioBase64: string;
+    promptSeed: string;
+    packGenerationId: string;
+    createdAt: string;
+  }>;
+  /**
+   * Local English pacing profiles (bot + player). Not part of bot Marketplace
+   * export. Optional in older v1 snapshots.
+   */
+  englishPacingProfiles?: Array<{
+    v: 1;
+    ownerKind: "bot" | "player";
+    ownerId: string;
+    commaMs: number;
+    clauseMs: number;
+    strongMs: number;
+    calibratedAt: string;
+    source: "elevenlabs-timestamps";
+  }>;
+  /** PRISM-managed ElevenLabs shared-voice bookmarks. Older snapshots omit it. */
+  premiumVoiceLibrary?: PremiumVoiceLibraryEntry[];
+}
+
+function backupJsonObject(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+}
+
+function backupAppletSessionNoteCaptures(value: unknown): Array<{
+  body: string;
+  startedAt: string;
+  fps?: number;
+  committedAt: string;
+}> {
+  let parsed = value;
+  if (typeof value === "string") {
+    try {
+      parsed = JSON.parse(value) as unknown;
+    } catch {
+      return [];
+    }
+  }
+  if (!Array.isArray(parsed)) return [];
+  return parsed.flatMap((candidate) => {
+    if (
+      !candidate ||
+      typeof candidate !== "object" ||
+      Array.isArray(candidate)
+    ) {
+      return [];
+    }
+    const record = candidate as Record<string, unknown>;
+    const body = typeof record.body === "string" ? record.body.trim() : "";
+    const startedAt =
+      typeof record.startedAt === "string" ? record.startedAt : "";
+    const committedAt =
+      typeof record.committedAt === "string" ? record.committedAt : "";
+    const fps =
+      typeof record.fps === "number" &&
+      Number.isFinite(record.fps) &&
+      record.fps >= 1 &&
+      record.fps <= 240
+        ? Math.round(record.fps)
+        : undefined;
+    return body &&
+      body.length <= APPLET_SESSION_NOTE_ENTRY_MAX_CHARACTERS &&
+      Number.isFinite(Date.parse(startedAt)) &&
+      Number.isFinite(Date.parse(committedAt))
+      ? [
+          {
+            body,
+            startedAt: new Date(startedAt).toISOString(),
+            ...(fps === undefined ? {} : { fps }),
+            committedAt: new Date(committedAt).toISOString(),
+          },
+        ]
+      : [];
+  }).slice(-400);
+}
+
+function parseBackupJsonObject(raw: string | null | undefined): Record<string, unknown> {
+  if (!raw?.trim()) return {};
+  try {
+    return backupJsonObject(JSON.parse(raw) as unknown);
+  } catch {
+    return {};
+  }
+}
+
+function backupCoffeeGroupAtmosphere(
+  value: unknown,
+  fallbackUpdatedAt: string,
+): BackupCoffeeGroupAtmosphere | null {
+  const record = backupJsonObject(value);
+  const imageId =
+    typeof record.imageId === "string" ? record.imageId.trim() : "";
+  if (!/^[a-zA-Z0-9_-]{1,256}$/u.test(imageId)) return null;
+  const prompt =
+    typeof record.prompt === "string"
+      ? record.prompt.replace(/\s+/gu, " ").trim().slice(0, 100_000)
+      : "";
+  const revision =
+    typeof record.revision === "number" && Number.isFinite(record.revision)
+      ? Math.min(1_000_000, Math.max(1, Math.floor(record.revision)))
+      : 1;
+  const updatedAt =
+    typeof record.updatedAt === "string" && record.updatedAt.trim()
+      ? record.updatedAt.trim().slice(0, 100)
+      : fallbackUpdatedAt;
+  return {
+    imageId,
+    ...(prompt ? { prompt } : {}),
+    revision,
+    updatedAt,
+  };
+}
+
+function parseBackupCoffeeGroupAtmosphere(
+  raw: string | null | undefined,
+  fallbackUpdatedAt: string,
+): BackupCoffeeGroupAtmosphere | null {
+  if (!raw?.trim()) return null;
+  try {
+    return backupCoffeeGroupAtmosphere(
+      JSON.parse(raw) as unknown,
+      fallbackUpdatedAt,
+    );
+  } catch {
+    return null;
+  }
+}
+
+function normalizedBackupCoffeeGroupSeats(
+  value: unknown,
+  ownedBotIds?: ReadonlySet<string>,
+): Array<string | null> {
+  const source = Array.isArray(value) ? value : [];
+  return Array.from({ length: BACKUP_COFFEE_GROUP_SEAT_COUNT }, (_, index) => {
+    const botId =
+      typeof source[index] === "string" ? source[index].trim() : "";
+    return botId && (!ownedBotIds || ownedBotIds.has(botId)) ? botId : null;
+  });
+}
+
+function coffeeGroupSynthesisForRestore(args: {
+  value: unknown;
+  atmosphereWasReferenced: boolean;
+  atmosphereIsPortable: boolean;
+  updatedAt: string;
+}): Record<string, unknown> {
+  const synthesis = backupJsonObject(args.value);
+  const rawItems = synthesis.items;
+  if (!rawItems || typeof rawItems !== "object" || Array.isArray(rawItems)) {
+    return synthesis;
+  }
+  const items = { ...(rawItems as Record<string, unknown>) };
+  const interruptedError =
+    "Generation did not continue across the backup restore. Retry this item.";
+  for (const item of ["name", "ethos"] as const) {
+    const state = backupJsonObject(items[item]);
+    if (state.status !== "pending" && state.status !== "running") continue;
+    items[item] = {
+      ...state,
+      status: "failed",
+      updatedAt: args.updatedAt,
+      error: interruptedError,
+    };
+  }
+  const atmosphereState = backupJsonObject(items.atmosphere);
+  const atmosphereNeedsRetry =
+    atmosphereState.status === "pending" ||
+    atmosphereState.status === "running" ||
+    (!args.atmosphereIsPortable &&
+      (args.atmosphereWasReferenced || atmosphereState.status === "ready"));
+  if (atmosphereNeedsRetry) {
+    items.atmosphere = {
+      ...atmosphereState,
+      status: "failed",
+      updatedAt: args.updatedAt,
+      error: args.atmosphereWasReferenced && !args.atmosphereIsPortable
+        ? "The atmosphere image was not included in this backup. Generate it again."
+        : interruptedError,
+    };
+  }
+  return {
+    ...synthesis,
+    items,
+  };
 }
 
 type SlateBackupCollectionKey = keyof BackupSlateSnapshot;
@@ -397,6 +991,7 @@ type SlateBackupTable =
   | "slate_revisions"
   | "slate_versions"
   | "slate_sections"
+  | "slate_handoffs"
   | "slate_section_versions"
   | "slate_manuscript_state"
   | "slate_continuity_sources"
@@ -533,6 +1128,27 @@ const SLATE_BACKUP_TABLES: readonly SlateBackupTableSpec[] = [
       "updated_at",
     ],
     deferredFields: ["parent_section_id"],
+  },
+  {
+    key: "handoffs",
+    table: "slate_handoffs",
+    primaryKey: "id",
+    columns: [
+      "id",
+      "direction",
+      "status",
+      "source_text",
+      "source_label",
+      "source_conversation_id",
+      "source_message_id",
+      "source_project_id",
+      "source_section_id",
+      "source_selection_start",
+      "source_selection_end",
+      "target_project_id",
+      "created_at",
+      "committed_at",
+    ],
   },
   {
     key: "sectionVersions",
@@ -830,6 +1446,24 @@ const SLATE_REFERENCE_RULES: ReadonlyArray<{
     field: "parent_section_id",
     target: "sections",
     targetTable: "slate_sections",
+  },
+  {
+    source: "handoffs",
+    field: "source_project_id",
+    target: "projects",
+    targetTable: "slate_projects",
+  },
+  {
+    source: "handoffs",
+    field: "source_section_id",
+    target: "sections",
+    targetTable: "slate_sections",
+  },
+  {
+    source: "handoffs",
+    field: "target_project_id",
+    target: "projects",
+    targetTable: "slate_projects",
   },
   {
     source: "sectionVersions",
@@ -1268,25 +1902,48 @@ export function exportUserSnapshot(
   userId: string,
   userKey: Buffer,
 ): BackupSnapshot {
+  const livingShellState = db
+    .prepare(
+      "SELECT capability_revelations FROM living_shell_account_state WHERE user_id = ?",
+    )
+    .get(userId) as { capability_revelations?: string } | undefined;
   const user = db
     .prepare(
       `SELECT
          theme,
          graphics_quality,
+         crt_focus,
+         typography_scale,
+         startup_preference,
          preferred_provider,
          ephemeral_chat_provider_preferences,
          preferred_image_provider,
          provider_locked,
          auto_memory,
+         memory_learn_about_player,
+         memory_learn_about_bots,
+         memory_acquisition_sensitivity,
+         memory_short_term_days,
+         memory_long_term_threshold,
+         memory_inferred_min_evidence,
+         memory_inferred_threshold,
          composer_writing_assist,
          experimental_dual_ollama_enabled,
          experimental_all_model_effort_enabled,
          coffee_experimental_table_angle_enabled,
+         debate_whodunnit_reuse_synthesized_exhibits,
+         debate_whodunnit_text_voice_mode,
+         debate_whodunnit_speech_type,
+         debate_whodunnit_perspective,
          psychic_mode_enabled,
          auto_switch_model,
          auto_fallback_chain,
+         online_auto_provider_bias,
+         online_auto_provider_weights,
+         online_auto_quality_posture,
          fallback_model_message_stripe,
          hidden_bot_model_ids,
+         hidden_global_picker_model_ids,
          hidden_comfyui_workflow_ids,
          preferred_local_model,
          preferred_online_model,
@@ -1303,6 +1960,8 @@ export function exportUserSnapshot(
          zen_wallpaper_text_mask_enabled,
          zen_wallpaper_grayscale_enabled,
          zen_wallpaper_blurred_edges_enabled,
+         atmosphere_style,
+         hub_atmosphere_enabled,
          zen_wallpaper_style_notes,
          zen_message_font_min_px,
          zen_message_font_max_px,
@@ -1310,8 +1969,12 @@ export function exportUserSnapshot(
          zen_ask_question_patience_ms,
          zen_autonomy_enabled,
          prism_default_bot_face_thinking_frames,
+         prism_default_bot_face_mouth_speech_poses,
          prism_default_llm_model,
+         prism_cloud_llm_model,
          prism_image_tool_llm_model,
+         prism_refract_local_model,
+         prism_refract_online_model,
          dev_memories_enabled,
          dev_memories_text,
          openai_key_ciphertext,
@@ -1326,6 +1989,8 @@ export function exportUserSnapshot(
          ,voice_mode, voice_effects_enabled, voice_volume, operating_system_voices_enabled, english_voice_engine,
          default_system_voice_name, default_elevenlabs_voice_id, elevenlabs_voice_bank,
          elevenlabs_voice_model, elevenlabs_voice_collection_id,
+         zen_player_voice_enabled, player_audio_voice_profile,
+         player_name_pronunciation,
          prism_default_bot_audio_voice_profile
        FROM users
        WHERE id = ?`,
@@ -1334,20 +1999,40 @@ export function exportUserSnapshot(
     | {
         theme: "light" | "dark" | "system";
         graphics_quality: string | null;
+        crt_focus: number | null;
+        typography_scale: string | null;
+        atmosphere_style: string | null;
+        hub_atmosphere_enabled: number;
+        startup_preference: string | null;
         preferred_provider: ProviderName;
         ephemeral_chat_provider_preferences: string | null;
         preferred_image_provider: ImageProviderName;
         provider_locked: number;
         auto_memory: number;
+        memory_learn_about_player: number | null;
+        memory_learn_about_bots: number | null;
+        memory_acquisition_sensitivity: string | null;
+        memory_short_term_days: number | null;
+        memory_long_term_threshold: number | null;
+        memory_inferred_min_evidence: number | null;
+        memory_inferred_threshold: number | null;
         composer_writing_assist: number;
         experimental_dual_ollama_enabled: number;
         experimental_all_model_effort_enabled: number;
         coffee_experimental_table_angle_enabled: number;
+        debate_whodunnit_reuse_synthesized_exhibits: number;
+        debate_whodunnit_text_voice_mode: string | null;
+        debate_whodunnit_speech_type: string | null;
+        debate_whodunnit_perspective: string | null;
         psychic_mode_enabled: number;
         auto_switch_model: number;
         auto_fallback_chain: string | null;
+        online_auto_provider_bias: number;
+        online_auto_provider_weights: string | null;
+        online_auto_quality_posture: string | null;
         fallback_model_message_stripe: number;
         hidden_bot_model_ids: string | null;
+        hidden_global_picker_model_ids: string | null;
         hidden_comfyui_workflow_ids: string | null;
         preferred_local_model: string | null;
         preferred_online_model: string | null;
@@ -1371,8 +2056,12 @@ export function exportUserSnapshot(
         zen_ask_question_patience_ms: number | null;
         zen_autonomy_enabled: number | null;
         prism_default_bot_face_thinking_frames: string | null;
+        prism_default_bot_face_mouth_speech_poses: string | null;
         prism_default_llm_model: string | null;
+        prism_cloud_llm_model: string | null;
         prism_image_tool_llm_model: string | null;
+        prism_refract_local_model: string | null;
+        prism_refract_online_model: string | null;
         dev_memories_enabled: number;
         dev_memories_text: string | null;
         openai_key_ciphertext: string | null;
@@ -1394,6 +2083,9 @@ export function exportUserSnapshot(
         elevenlabs_voice_bank: string | null;
         elevenlabs_voice_model: string | null;
         elevenlabs_voice_collection_id: string | null;
+        zen_player_voice_enabled: number | null;
+        player_audio_voice_profile: string | null;
+        player_name_pronunciation: string | null;
         prism_default_bot_audio_voice_profile: string | null;
       }
     | undefined;
@@ -1401,6 +2093,17 @@ export function exportUserSnapshot(
     ? {
         theme: user.theme,
         graphicsQuality: normalizeGraphicsQuality(user.graphics_quality),
+        crtFocus: normalizeCrtFocus(user.crt_focus),
+        typographyScale: normalizePrismTypographyScale(user.typography_scale),
+        atmosphereStyle: normalizeHubAtmosphereStyle(user.atmosphere_style),
+        hubAtmosphereEnabled: user.hub_atmosphere_enabled !== 0,
+        startupPreference: normalizePrismStartupPreference(
+          user.startup_preference,
+        ),
+        capabilityRevelations: normalizePrismCapabilityRevelations(
+          livingShellState?.capability_revelations,
+          { completedFallback: true },
+        ),
         preferredProvider: user.preferred_provider,
         ephemeralChatProviderPreferences:
           normalizeEphemeralChatProviderPreferences(
@@ -1409,6 +2112,16 @@ export function exportUserSnapshot(
         preferredImageProvider: user.preferred_image_provider,
         providerLocked: user.provider_locked === 1,
         autoMemory: user.auto_memory === 1,
+        memoryEcology: normalizeMemoryEcologySettings({
+          auto_memory: user.auto_memory,
+          memory_learn_about_player: user.memory_learn_about_player,
+          memory_learn_about_bots: user.memory_learn_about_bots,
+          memory_acquisition_sensitivity: user.memory_acquisition_sensitivity,
+          memory_short_term_days: user.memory_short_term_days,
+          memory_long_term_threshold: user.memory_long_term_threshold,
+          memory_inferred_min_evidence: user.memory_inferred_min_evidence,
+          memory_inferred_threshold: user.memory_inferred_threshold,
+        }),
         composerWritingAssist: user.composer_writing_assist !== 0,
         experimentalDualOllamaEnabled:
           user.experimental_dual_ollama_enabled === 1,
@@ -1416,12 +2129,36 @@ export function exportUserSnapshot(
           user.experimental_all_model_effort_enabled === 1,
         coffeeExperimentalTableAngleEnabled:
           user.coffee_experimental_table_angle_enabled === 1,
+        debateWhodunnitReuseSynthesizedExhibits:
+          user.debate_whodunnit_reuse_synthesized_exhibits === 1,
+        debateWhodunnitTextVoiceMode: normalizeWhodunnitTextVoiceMode(
+          user.debate_whodunnit_text_voice_mode,
+        ),
+        debateWhodunnitSpeechType: normalizeWhodunnitSpeechType(
+          user.debate_whodunnit_speech_type,
+        ),
+        debateWhodunnitPerspective: normalizeWhodunnitInvestigationPerspective(
+          user.debate_whodunnit_perspective,
+        ),
         psychicModeEnabled: user.psychic_mode_enabled === 1,
         autoModeEnabled: user.auto_switch_model === 1,
         autoFallbackChain: parseStoredAutoFallbackChain(
           user.auto_fallback_chain,
         ),
+        onlineAutoProviderBias: clampOnlineAutoProviderBias(
+          user.online_auto_provider_bias,
+        ),
+        onlineAutoProviderWeights: parseStoredOnlineAutoProviderWeights(
+          user.online_auto_provider_weights,
+          user.online_auto_provider_bias,
+        ),
+        onlineAutoQualityPosture: normalizeOnlineAutoQualityPosture(
+          user.online_auto_quality_posture,
+        ),
         hiddenBotModelIds: safeParseStringArray(user.hidden_bot_model_ids),
+        hiddenGlobalPickerModelIds: safeParseStringArray(
+          user.hidden_global_picker_model_ids,
+        ),
         hiddenComfyUiWorkflowIds: safeParseStringArray(
           user.hidden_comfyui_workflow_ids,
         ),
@@ -1475,13 +2212,28 @@ export function exportUserSnapshot(
           parseStoredBotFaceThinkingFrames(
             user.prism_default_bot_face_thinking_frames,
           ) ?? DEFAULT_BOT_FACE_THINKING_FRAMES,
+        prismDefaultBotFaceMouthSpeechPoses:
+          parseStoredBotFaceCustomSpeechPoses(
+            user.prism_default_bot_face_mouth_speech_poses,
+          ),
         prismDefaultLlmModel: user.prism_default_llm_model ?? "",
+        prismCloudLlmModel: user.prism_cloud_llm_model ?? "",
         prismImageToolLlmModel: user.prism_image_tool_llm_model ?? "",
-        voiceMode: normalizeVoiceMode(user.voice_mode),
+        prismRefractLocalModel: user.prism_refract_local_model ?? "",
+        prismRefractOnlineModel: user.prism_refract_online_model ?? "",
+        voiceMode: normalizeSpeechTypeVoiceMode(user.voice_mode),
         voiceEffectsEnabled: user.voice_effects_enabled !== 0,
         voiceVolume: normalizeBotVoiceVolume(user.voice_volume),
         operatingSystemVoicesEnabled:
           user.operating_system_voices_enabled !== 0,
+        zenPlayerVoiceEnabled: user.zen_player_voice_enabled === 1,
+        playerAudioVoiceProfile:
+          parseStoredBotAudioVoiceProfileV1(
+            user.player_audio_voice_profile,
+          ) ?? normalizeBotAudioVoiceProfileV1(undefined),
+        playerNamePronunciation: normalizeBotNamePronunciation(
+          user.player_name_pronunciation,
+        ),
         prismDefaultBotAudioVoiceProfile:
           parseStoredBotAudioVoiceProfileV1(
             user.prism_default_bot_audio_voice_profile,
@@ -1565,8 +2317,9 @@ export function exportUserSnapshot(
 	         max_tokens,
 	         top_p,
 	         top_k,
-	         repetition_penalty,
+         repetition_penalty,
          color,
+         accent_color,
          glyph,
          powers_json,
          avatar_details_json,
@@ -1576,6 +2329,7 @@ export function exportUserSnapshot(
          face_mouth_font,
          face_mouth_character,
          face_mouth_animation,
+         face_mouth_speech_poses,
          face_mouth_coffee_pucker,
          face_font_weight,
          face_eye_scale,
@@ -1583,21 +2337,29 @@ export function exportUserSnapshot(
          face_eye_offset_y,
          face_eye_rotation_deg,
          face_eye_count,
+         face_eye_spacing,
          face_mouth_scale,
          face_mouth_offset_x,
          face_mouth_offset_y,
          face_mouth_rotation_deg,
          face_blink_bar,
+         face_blink_count,
          face_blink_scale,
          face_blink_offset_x,
          face_blink_offset_y,
+         face_blink_rotation_deg,
          face_thinking_frames,
+         face_thinking_scale,
+         face_thinking_offset_x,
+         face_thinking_offset_y,
          authored_audio_voice_profile,
          audio_voice_profile_override,
          chat_enabled,
          visibility,
          created_at,
-         updated_at
+         updated_at,
+         (SELECT mood_key FROM bot_global_moods AS mood
+           WHERE mood.user_id = bots.user_id AND mood.bot_id = bots.id) AS global_mood_key
        FROM bots
        WHERE user_id = ?
        ORDER BY updated_at DESC`,
@@ -1608,6 +2370,7 @@ export function exportUserSnapshot(
     name_pronunciation: string | null;
     self_referral: string | null;
     system_prompt: string;
+    global_mood_key: string | null;
     clone_family_id: string | null;
     voice_preview_line: string | null;
     export_hash: string | null;
@@ -1625,6 +2388,7 @@ export function exportUserSnapshot(
 	    top_k: number | null;
 	    repetition_penalty: number | null;
 	    color: string | null;
+    accent_color: string | null;
     glyph: string | null;
     powers_json: string | null;
     avatar_details_json: string | null;
@@ -1634,6 +2398,7 @@ export function exportUserSnapshot(
     face_mouth_font: string | null;
     face_mouth_character: string | null;
     face_mouth_animation: string | null;
+    face_mouth_speech_poses: string | null;
     face_mouth_coffee_pucker: number | null;
     face_font_weight: number | null;
     face_eye_scale: number | null;
@@ -1641,15 +2406,21 @@ export function exportUserSnapshot(
     face_eye_offset_y: number | null;
     face_eye_rotation_deg: number | null;
     face_eye_count: number | null;
+    face_eye_spacing: number | null;
     face_mouth_scale: number | null;
     face_mouth_offset_x: number | null;
     face_mouth_offset_y: number | null;
     face_mouth_rotation_deg: number | null;
     face_blink_bar: string | null;
+    face_blink_count: number | null;
     face_blink_scale: number | null;
     face_blink_offset_x: number | null;
     face_blink_offset_y: number | null;
+    face_blink_rotation_deg: number | null;
     face_thinking_frames: string | null;
+    face_thinking_scale: number | null;
+    face_thinking_offset_x: number | null;
+    face_thinking_offset_y: number | null;
     authored_audio_voice_profile: string | null;
     audio_voice_profile_override: string | null;
     chat_enabled: number;
@@ -1658,13 +2429,150 @@ export function exportUserSnapshot(
     updated_at: string;
   }>;
 
+  const coffeeGroups = db
+    .prepare(
+      `SELECT id, name, ethos, atmosphere_json, synthesis_json,
+              coffee_settings, preset_mode, coffee_topic_mode, model_choice,
+              starter_topics, mood_summary, archived_at, created_at, updated_at
+         FROM coffee_groups
+        WHERE user_id = ? AND archived_at IS NULL
+        ORDER BY created_at, id`,
+    )
+    .all(userId) as Array<{
+    id: string;
+    name: string;
+    ethos: string;
+    atmosphere_json: string;
+    synthesis_json: string;
+    coffee_settings: string;
+    preset_mode: string;
+    coffee_topic_mode: string;
+    model_choice: string;
+    starter_topics: string;
+    mood_summary: string;
+    archived_at: string | null;
+    created_at: string;
+    updated_at: string;
+  }>;
+  const coffeeGroupSoundtracks = db
+    .prepare(
+      `SELECT group_id, model, prompt, content_type, audio_bytes, duration_ms,
+              revision, created_at, updated_at
+         FROM coffee_group_soundtracks
+        WHERE user_id = ? AND audio_bytes IS NOT NULL`,
+    )
+    .all(userId) as Array<{
+      group_id: string;
+      model: string;
+      prompt: string;
+      content_type: string;
+      audio_bytes: Uint8Array;
+      duration_ms: number;
+      revision: number;
+      created_at: string;
+      updated_at: string;
+    }>;
+  const coffeeGroupSoundtrackByGroupId = new Map(
+    coffeeGroupSoundtracks.map((row) => [row.group_id, row] as const),
+  );
+  const coffeeGroupPayload = coffeeGroups.map(
+    (group): BackupCoffeeGroupSnapshot => {
+      const seatRows = db
+        .prepare(
+          `SELECT seat_index, bot_id
+             FROM coffee_group_seats
+            WHERE user_id = ? AND group_id = ?
+            ORDER BY seat_index`,
+        )
+        .all(userId, group.id) as Array<{
+        seat_index: number;
+        bot_id: string | null;
+      }>;
+      const seats: Array<string | null> = Array.from(
+        { length: BACKUP_COFFEE_GROUP_SEAT_COUNT },
+        () => null,
+      );
+      for (const seat of seatRows) {
+        if (
+          Number.isInteger(seat.seat_index) &&
+          seat.seat_index >= 0 &&
+          seat.seat_index < BACKUP_COFFEE_GROUP_SEAT_COUNT
+        ) {
+          seats[seat.seat_index] = seat.bot_id?.trim() || null;
+        }
+      }
+      let coffeeSettings: CoffeeSessionSettings;
+      try {
+        coffeeSettings = normalizeCoffeeSessionSettings(
+          JSON.parse(group.coffee_settings) as unknown,
+        );
+      } catch {
+        coffeeSettings = normalizeCoffeeSessionSettings(undefined);
+      }
+      const soundtrack = coffeeGroupSoundtrackByGroupId.get(group.id);
+      return {
+        id: group.id,
+        name: group.name,
+        seatBotIds: seats,
+        coffeeSettings,
+        presetMode: group.preset_mode === "auto" ? "auto" : "manual",
+        topicSelectionMode:
+          group.coffee_topic_mode === "auto" ? "auto" : "manual",
+        modelChoice: parseBackupJsonObject(group.model_choice),
+        starterTopics: parseBackupJsonObject(group.starter_topics),
+        moodSummary: parseBackupJsonObject(group.mood_summary),
+        ethos: typeof group.ethos === "string" ? group.ethos : "",
+        atmosphere: parseBackupCoffeeGroupAtmosphere(
+          group.atmosphere_json,
+          group.updated_at,
+        ),
+        ...(soundtrack
+          ? {
+              soundtrack: {
+              provider: "elevenlabs",
+              model: soundtrack.model,
+              prompt: soundtrack.prompt,
+              contentType: soundtrack.content_type,
+              audioBase64: Buffer.from(soundtrack.audio_bytes).toString("base64"),
+              durationMs: soundtrack.duration_ms,
+              revision: soundtrack.revision,
+              createdAt: soundtrack.created_at,
+              updatedAt: soundtrack.updated_at,
+              },
+            }
+          : {}),
+        synthesis: parseBackupJsonObject(group.synthesis_json),
+        archivedAt: group.archived_at,
+        createdAt: group.created_at,
+        updatedAt: group.updated_at,
+      };
+    },
+  );
+
   const conversations = db
     .prepare(
-      "SELECT id, title, coffee_power_plan_json, created_at, updated_at FROM conversations WHERE user_id = ? ORDER BY updated_at DESC",
+      `SELECT id, title, conversation_mode, bot_group_ids, coffee_settings,
+              coffee_session_state,
+              coffee_group_id, coffee_duration_minutes, coffee_preset_id,
+              coffee_topic, coffee_absent_bot_ids, coffee_team_mode_json,
+              coffee_power_plan_json, created_at, updated_at
+         FROM conversations
+        WHERE user_id = ?
+        ORDER BY updated_at DESC`,
     )
     .all(userId) as Array<{
     id: string;
     title: string;
+    conversation_mode: string;
+    bot_group_ids: string | null;
+    coffee_settings: string | null;
+    coffee_session_state: string | null;
+    coffee_group_id: string | null;
+    coffee_duration_minutes: number | null;
+    coffee_preset_id: string | null;
+    coffee_topic: string | null;
+    coffee_absent_bot_ids: string | null;
+    coffee_team_mode_json: string | null;
     coffee_power_plan_json: string | null;
     created_at: string;
     updated_at: string;
@@ -1707,9 +2615,37 @@ export function exportUserSnapshot(
       createdAt: conversation.created_at,
       updatedAt: conversation.updated_at,
       ...(coffeePowerPlan ? { coffeePowerPlan } : {}),
+      ...(conversation.conversation_mode === "coffee"
+        ? {
+            coffee: {
+              sessionState:
+                conversation.coffee_session_state === "closing" ||
+                conversation.coffee_session_state === "complete"
+                  ? (conversation.coffee_session_state as CoffeeSessionLifecycleState)
+                  : ("active" as CoffeeSessionLifecycleState),
+              settings: normalizeCoffeeSessionSettings(
+                conversation.coffee_settings
+                  ? JSON.parse(conversation.coffee_settings) as unknown
+                  : undefined,
+              ),
+              botGroupIds: conversation.bot_group_ids
+                ? (JSON.parse(conversation.bot_group_ids) as Array<string | null>)
+                : [],
+              groupId: conversation.coffee_group_id,
+              durationMinutes: conversation.coffee_duration_minutes,
+              presetId: conversation.coffee_preset_id,
+              topic: conversation.coffee_topic,
+              absentBotIds: conversation.coffee_absent_bot_ids
+                ? (JSON.parse(conversation.coffee_absent_bot_ids) as string[])
+                : [],
+              teamsJson: conversation.coffee_team_mode_json,
+            },
+          }
+        : {}),
       messages: messages.map((message) => {
         const provider: ProviderName | undefined =
           message.provider === "local" ||
+          message.provider === "ollama_cloud" ||
           message.provider === "openai" ||
           message.provider === "anthropic"
             ? message.provider
@@ -1751,20 +2687,69 @@ export function exportUserSnapshot(
 
   const memories = db
     .prepare(
-      "SELECT id, conversation_id, bot_id, confidence, category, tier, durability, ciphertext, iv, tag, created_at FROM memories WHERE user_id = ? ORDER BY created_at DESC",
+      `SELECT id, conversation_id, bot_id, target_bot_id, confidence,
+              base_confidence, category, tier, lifecycle, durability, source,
+              certainty, source_message_ids, evidence_lineage_known,
+              last_reinforced_at,
+              ciphertext, iv, tag, created_at
+         FROM memories
+        WHERE user_id = ?
+        ORDER BY created_at DESC`,
     )
     .all(userId) as Array<{
     id: string;
     conversation_id: string | null;
     bot_id: string | null;
+    target_bot_id: string | null;
     confidence: number;
+    base_confidence: number | null;
     category: "general" | "user" | "bot_relation";
     tier: "short_term" | "long_term";
+    lifecycle: MemoryLifecycle | null;
     durability: number | null;
+    source: "direct" | "inferred";
+    certainty: number | null;
+    source_message_ids: string | null;
+    evidence_lineage_known: number;
+    last_reinforced_at: string | null;
     ciphertext: string;
     iv: string;
     tag: string;
     created_at: string;
+  }>;
+  const memoryEvidenceIds = new Map<string, string[]>();
+  for (const link of db
+    .prepare(
+      `SELECT inferred_memory_id, evidence_memory_id
+         FROM memory_evidence_links
+        WHERE user_id = ?
+        ORDER BY created_at, evidence_memory_id`,
+    )
+    .all(userId) as Array<{
+    inferred_memory_id: string;
+    evidence_memory_id: string;
+  }>) {
+    const ids = memoryEvidenceIds.get(link.inferred_memory_id) ?? [];
+    ids.push(link.evidence_memory_id);
+    memoryEvidenceIds.set(link.inferred_memory_id, ids);
+  }
+  const memoryReceipts = db
+    .prepare(
+      `SELECT id, memory_id, learner_bot_id, target_bot_id, conversation_id,
+              kind, created_at, read_at
+         FROM memory_acquisition_receipts
+        WHERE user_id = ?
+        ORDER BY created_at`,
+    )
+    .all(userId) as Array<{
+    id: string;
+    memory_id: string;
+    learner_bot_id: string | null;
+    target_bot_id: string | null;
+    conversation_id: string | null;
+    kind: "player_memory" | "bot_relation";
+    created_at: string;
+    read_at: string | null;
   }>;
 
   const botcastShows = db
@@ -1788,6 +2773,18 @@ export function exportUserSnapshot(
     created_at: string;
     updated_at: string;
   }>;
+  const botcastStagePresets = db
+    .prepare(
+      `SELECT id, name, stage_json, created_at, updated_at
+         FROM botcast_stage_presets WHERE user_id = ? ORDER BY created_at`,
+    )
+    .all(userId) as Array<{
+      id: string;
+      name: string;
+      stage_json: string;
+      created_at: string;
+      updated_at: string;
+    }>;
   const botcastEpisodes = db
     .prepare(
     "SELECT * FROM botcast_episodes WHERE user_id = ? ORDER BY created_at",
@@ -1808,10 +2805,47 @@ export function exportUserSnapshot(
     "SELECT * FROM botcast_events WHERE user_id = ? ORDER BY episode_id, sequence",
     )
     .all(userId) as Array<Record<string, unknown>>;
+  const presenceBeats = db
+    .prepare(
+      `SELECT id, surface, session_id, response_id, speaker_bot_id,
+              speaker_name, trigger, source, text, heard_character_count,
+              completion, playback_started_at_ms, playback_ended_at_ms,
+              created_at, updated_at
+         FROM bot_presence_beats
+        WHERE user_id = ?
+        ORDER BY created_at, rowid`,
+    )
+    .all(userId) as Array<Record<string, unknown>>;
+  const sessionNotes = db
+    .prepare(
+      `SELECT surface, session_id, body, captures_json, created_at, updated_at
+       FROM applet_session_notes
+        WHERE user_id = ?
+        ORDER BY updated_at, surface, session_id`,
+    )
+    .all(userId) as Array<Record<string, unknown>>;
+  const transcriptFrameSamples = db
+    .prepare(
+      `SELECT surface, session_id, entry_id, fps, captured_at
+         FROM applet_transcript_frame_samples
+        WHERE user_id = ?
+        ORDER BY captured_at, rowid`,
+    )
+    .all(userId) as Array<Record<string, unknown>>;
+  const focusEvents = db
+    .prepare(
+      `SELECT surface, session_id, transition, occurred_at
+         FROM live_session_focus_events
+        WHERE user_id = ?
+        ORDER BY occurred_at, rowid`,
+    )
+    .all(userId) as Array<Record<string, unknown>>;
   const botcastIntroAudio = db
     .prepare(
     `SELECT show_id, provider, model, prompt, content_type, audio_bytes,
-            duration_ms, revision, created_at, updated_at
+            duration_ms, outdent_prompt, outdent_content_type,
+            outdent_audio_bytes, outdent_duration_ms, revision,
+            created_at, updated_at
        FROM botcast_show_intro_audio WHERE user_id = ?`,
     )
     .all(userId) as Array<{
@@ -1822,6 +2856,10 @@ export function exportUserSnapshot(
     content_type: string;
     audio_bytes: Uint8Array;
     duration_ms: number;
+    outdent_prompt: string | null;
+    outdent_content_type: string | null;
+    outdent_audio_bytes: Uint8Array | null;
+    outdent_duration_ms: number | null;
     revision: number;
     created_at: string;
     updated_at: string;
@@ -1839,11 +2877,113 @@ export function exportUserSnapshot(
   const botcastAtmosphereAudioByShowId = new Map(
     botcastAtmosphereAudio.map((row) => [row.show_id, row] as const),
   );
+  const replayRecordings = db
+    .prepare(
+      `SELECT id, surface, source_id, manifest_version, manifest_json,
+              manifest_hash, timeline_json, transcript_vtt,
+              transcript_markdown, created_at, updated_at
+         FROM replay_recordings
+        WHERE user_id = ? AND manifest_json IS NOT NULL
+        ORDER BY created_at`,
+    )
+    .all(userId) as Array<Record<string, string | number | null>>;
+  const replayVoiceTakes = db
+    .prepare(
+      `SELECT take.id, take.recording_id, take.source_key,
+              take.source_message_id, take.source_event_id,
+              take.snapshot_json, take.created_at, take.updated_at
+         FROM replay_voice_takes AS take
+         JOIN replay_recordings AS recording ON recording.id = take.recording_id
+        WHERE take.user_id = ? AND recording.manifest_json IS NOT NULL
+        ORDER BY take.created_at, take.rowid`,
+    )
+    .all(userId) as Array<Record<string, string | number | null>>;
+  const debateSessions = db
+    .prepare(
+      `SELECT id, revision, status, phase, step_key, player_role,
+              player_side_id, create_idempotency_key, motion, winner_side_id,
+              session_json, error, created_at, updated_at, completed_at
+         FROM debate_sessions
+        WHERE user_id = ? AND status != 'cancelled'
+        ORDER BY created_at`,
+    )
+    .all(userId) as Array<Record<string, string | number | null>>;
+  const debateEvents = db
+    .prepare(
+      `SELECT event.id, event.session_id, event.sequence, event.phase,
+              event.step_key, event.kind, event.event_json, event.created_at
+         FROM debate_events AS event
+         JOIN debate_sessions AS session ON session.id = event.session_id
+        WHERE event.user_id = ? AND session.status != 'cancelled'
+        ORDER BY event.session_id, event.sequence`,
+    )
+    .all(userId) as Array<Record<string, string | number | null>>;
+  const debateRecessCheckpoints = db
+    .prepare(
+      `SELECT checkpoint.session_id, checkpoint.source_revision,
+              checkpoint.snapshot_json, checkpoint.created_at
+         FROM debate_recess_checkpoints AS checkpoint
+         JOIN debate_sessions AS session ON session.id = checkpoint.session_id
+        WHERE checkpoint.user_id = ? AND session.status != 'cancelled'
+        ORDER BY checkpoint.created_at`,
+    )
+    .all(userId) as Array<Record<string, string | number | null>>;
+  const debateMysteryCases = db
+    .prepare(
+      `SELECT mystery.session_id, mystery.schema_version,
+              mystery.generator_version, mystery.private_json,
+              mystery.content_hash, mystery.created_at, mystery.updated_at
+         FROM debate_mystery_cases AS mystery
+         JOIN debate_sessions AS session ON session.id = mystery.session_id
+        WHERE mystery.user_id = ? AND session.status != 'cancelled'
+        ORDER BY mystery.created_at`,
+    )
+    .all(userId) as Array<Record<string, string | number | null>>;
+  const debateMysteryActions = db
+    .prepare(
+      `SELECT action.id, action.session_id, action.sequence,
+              action.action_kind, action.public_payload_json, action.occurred_at
+         FROM debate_mystery_actions AS action
+         JOIN debate_sessions AS session ON session.id = action.session_id
+        WHERE action.user_id = ? AND session.status != 'cancelled'
+        ORDER BY action.session_id, action.sequence`,
+    )
+    .all(userId) as Array<Record<string, string | number | null>>;
+  const debateMysteryNotebooks = db
+    .prepare(
+      `SELECT notebook.session_id, notebook.revision, notebook.document_json,
+              notebook.pending_proposal_json, notebook.created_at,
+              notebook.updated_at
+         FROM debate_mystery_notebooks AS notebook
+         JOIN debate_sessions AS session ON session.id = notebook.session_id
+        WHERE notebook.user_id = ? AND session.status != 'cancelled'
+        ORDER BY notebook.created_at`,
+    )
+    .all(userId) as Array<Record<string, string | number | null>>;
+  const debateMysteryNotebookRevisions = db
+    .prepare(
+      `SELECT revision.id, revision.session_id, revision.revision,
+              revision.document_json, revision.reason,
+              revision.idempotency_key, revision.created_at
+         FROM debate_mystery_notebook_revisions AS revision
+         JOIN debate_sessions AS session ON session.id = revision.session_id
+        WHERE revision.user_id = ? AND session.status != 'cancelled'
+        ORDER BY revision.session_id, revision.revision`,
+    )
+    .all(userId) as Array<Record<string, string | number | null>>;
+  const debateMysteryV2 = exportDebateMysteryV2BackupV1(db, userId);
+  const debateMysteryAssets = exportDebateMysteryAssetVaultBackupV1(
+    db,
+    userId,
+    userKey,
+  );
 
   return {
     version: 1,
     exportedAt: new Date().toISOString(),
     settings,
+    modelEffortPreferences: listModelReasoningEffortPreferences(db, userId),
+    modelTurboPreferences: listModelTurboPreferences(db, userId),
     bots: bots.map((bot) => ({
         id: bot.id,
         name: bot.name,
@@ -1858,6 +2998,11 @@ export function exportUserSnapshot(
           ? { selfReferral: normalizeBotSelfReferral(bot.self_referral) }
           : {}),
         systemPrompt: bot.system_prompt,
+        ...(GLOBAL_BOT_MOOD_KEYS.includes(
+          bot.global_mood_key as GlobalBotMoodKey,
+        ) && bot.global_mood_key !== "neutral"
+          ? { globalMood: bot.global_mood_key as GlobalBotMoodKey }
+          : {}),
         ...(bot.clone_family_id ? { cloneFamilyId: bot.clone_family_id } : {}),
         ...(normalizeVoicePreviewLine(bot.voice_preview_line)
         ? {
@@ -1882,6 +3027,7 @@ export function exportUserSnapshot(
           ? bot.repetition_penalty
           : 1.1,
         color: bot.color,
+        accentColor: normalizeBotIdentityColor(bot.accent_color),
         glyph: bot.glyph,
         ...(parseStoredBotPowersV1(bot.powers_json).length > 0
           ? { powers: parseStoredBotPowersV1(bot.powers_json) }
@@ -1889,6 +3035,7 @@ export function exportUserSnapshot(
         avatarDetails: parseStoredBotAvatarDetailsV1(bot.avatar_details_json),
         faceEyesFont: normalizeBotFaceFontId(bot.face_eyes_font),
         faceEyeCharacter: normalizeBotFaceEyeCharacter(bot.face_eye_character),
+        faceEyeAnimation: normalizeBotFaceEyeMovement(bot.face_eye_animation),
         faceMouthFont: normalizeBotFaceFontId(bot.face_mouth_font),
       faceMouthCharacter: normalizeBotFaceMouthCharacter(
         bot.face_mouth_character,
@@ -1896,6 +3043,11 @@ export function exportUserSnapshot(
       faceMouthAnimation: normalizeBotFaceGlyphAnimation(
         bot.face_mouth_animation,
       ),
+      faceMouthSpeechPoses:
+        parseStoredBotFaceCustomSpeechPoses(bot.face_mouth_speech_poses) ??
+        (bot.face_mouth_animation === "custom"
+          ? parseStoredBotFaceCustomSpeechPoses(bot.face_mouth_character)
+          : null),
         faceMouthCoffeePucker: bot.face_mouth_coffee_pucker === 1,
         faceFontWeight: normalizeBotFaceFontWeight(bot.face_font_weight),
         faceEyeScale: normalizeBotFaceEyeScale(bot.face_eye_scale),
@@ -1907,6 +3059,9 @@ export function exportUserSnapshot(
       faceEyeCount:
         normalizeBotFaceEyeCount(bot.face_eye_count) ??
         DEFAULT_BOT_FACE_EYE_COUNT,
+      faceEyeSpacing:
+        normalizeBotFaceEyeSpacing(bot.face_eye_spacing) ??
+        DEFAULT_BOT_FACE_EYE_SPACING,
         faceMouthScale: normalizeBotFaceMouthScale(bot.face_mouth_scale),
         faceMouthOffsetX: normalizeBotFaceMouthOffsetX(bot.face_mouth_offset_x),
         faceMouthOffsetY: normalizeBotFaceMouthOffsetY(bot.face_mouth_offset_y),
@@ -1916,6 +3071,12 @@ export function exportUserSnapshot(
         faceBlinkBar:
           normalizeBotFaceBlinkBar(bot.face_blink_bar) ??
           DEFAULT_BOT_FACE_BLINK_BAR,
+        faceBlinkCount:
+          normalizeBotFaceEyeCount(bot.face_blink_count) ??
+          (normalizeBotFaceEyeCharacter(bot.face_eye_character) !== null
+            ? normalizeBotFaceEyeCount(bot.face_eye_count)
+            : null) ??
+          DEFAULT_BOT_FACE_EYE_COUNT,
         faceBlinkScale:
           normalizeBotFaceBlinkScale(bot.face_blink_scale) ??
           DEFAULT_BOT_FACE_BLINK_SCALE,
@@ -1925,6 +3086,12 @@ export function exportUserSnapshot(
         faceBlinkOffsetY:
           normalizeBotFaceBlinkOffsetY(bot.face_blink_offset_y) ??
           DEFAULT_BOT_FACE_BLINK_OFFSET_Y,
+        faceBlinkRotationDeg:
+          normalizeBotFaceBlinkRotationDeg(bot.face_blink_rotation_deg) ??
+          DEFAULT_BOT_FACE_BLINK_ROTATION_DEG,
+        faceThinkingScale: normalizeBotFaceThinkingScale(bot.face_thinking_scale),
+        faceThinkingOffsetX: normalizeBotFaceThinkingOffsetX(bot.face_thinking_offset_x),
+        faceThinkingOffsetY: normalizeBotFaceThinkingOffsetY(bot.face_thinking_offset_y),
         faceThinkingFrames:
           parseStoredBotFaceThinkingFrames(bot.face_thinking_frames) ??
           DEFAULT_BOT_FACE_THINKING_FRAMES,
@@ -1939,9 +3106,18 @@ export function exportUserSnapshot(
         createdAt: bot.created_at,
         updatedAt: bot.updated_at,
       })),
+    libraryGroups: listLibraryGroups(db, userId),
+    coffeeGroups: coffeeGroupPayload,
     conversations: conversationPayload,
     slate: exportSlateSnapshot(db, userId),
     botcast: {
+      stagePresets: botcastStagePresets.map((preset) => ({
+        id: preset.id,
+        name: preset.name,
+        stageJson: preset.stage_json,
+        createdAt: preset.created_at,
+        updatedAt: preset.updated_at,
+      })),
       shows: botcastShows.map((row) => ({
         id: row.id,
         hostBotId: row.host_bot_id,
@@ -1972,6 +3148,26 @@ export function exportUserSnapshot(
                 revision: botcastIntroAudioByShowId.get(row.id)!.revision,
                 createdAt: botcastIntroAudioByShowId.get(row.id)!.created_at,
                 updatedAt: botcastIntroAudioByShowId.get(row.id)!.updated_at,
+                ...(botcastIntroAudioByShowId.get(row.id)!
+                  .outdent_audio_bytes
+                  ? {
+                      outdent: {
+                        prompt:
+                          botcastIntroAudioByShowId.get(row.id)!
+                            .outdent_prompt ?? "Signal show outdent",
+                        contentType:
+                          botcastIntroAudioByShowId.get(row.id)!
+                            .outdent_content_type ?? "audio/mpeg",
+                        audioBase64: Buffer.from(
+                          botcastIntroAudioByShowId.get(row.id)!
+                            .outdent_audio_bytes!,
+                        ).toString("base64"),
+                        durationMs:
+                          botcastIntroAudioByShowId.get(row.id)!
+                            .outdent_duration_ms ?? 4_000,
+                      },
+                    }
+                  : {}),
               },
             }
           : {}),
@@ -2009,11 +3205,15 @@ export function exportUserSnapshot(
           typeof row.guest_name === "string" ? row.guest_name : "",
         guestContext:
           typeof row.guest_context === "string" ? row.guest_context : "",
+        guestBrief:
+          typeof row.guest_brief === "string" ? row.guest_brief : "",
         title: String(row.title),
         topic: String(row.topic),
         producerBrief: String(row.producer_brief ?? ""),
         provider:
-          row.provider === "openai" || row.provider === "anthropic"
+          row.provider === "ollama_cloud" ||
+          row.provider === "openai" ||
+          row.provider === "anthropic"
             ? row.provider
             : "local",
         model: typeof row.model === "string" ? row.model : null,
@@ -2054,6 +3254,13 @@ export function exportUserSnapshot(
                 rating: row.persona_rating,
                 comment: row.persona_comment,
                 createdAt: row.persona_reviewed_at,
+                ...(typeof row.persona_review_provenance_json === "string"
+                  ? {
+                      provenance: parseBackupJsonObject(
+                        row.persona_review_provenance_json,
+                      ) as unknown as BotcastPersonaReviewProvenanceV1,
+                    }
+                  : {}),
               }
             : null,
         createdAt: String(row.created_at),
@@ -2101,14 +3308,195 @@ export function exportUserSnapshot(
         occurredAt: String(row.occurred_at),
       })),
     },
+    debates: {
+      sessions: debateSessions.map((row) => ({
+        id: String(row.id),
+        revision: Number(row.revision ?? 1),
+        status: String(row.status),
+        phase: String(row.phase),
+        stepKey: String(row.step_key),
+        playerRole: String(row.player_role),
+        playerSideId:
+          typeof row.player_side_id === "string" ? row.player_side_id : null,
+        createIdempotencyKey: String(row.create_idempotency_key),
+        motion: String(row.motion),
+        winnerSideId:
+          typeof row.winner_side_id === "string" ? row.winner_side_id : null,
+        sessionJson: String(row.session_json),
+        error: typeof row.error === "string" ? row.error : null,
+        createdAt: String(row.created_at),
+        updatedAt: String(row.updated_at),
+        completedAt:
+          typeof row.completed_at === "string" ? row.completed_at : null,
+      })),
+      events: debateEvents.map((row) => ({
+        id: String(row.id),
+        sessionId: String(row.session_id),
+        sequence: Number(row.sequence ?? 1),
+        phase: String(row.phase),
+        stepKey: String(row.step_key),
+        kind: String(row.kind),
+        eventJson: String(row.event_json),
+        createdAt: String(row.created_at),
+      })),
+      recessCheckpoints: debateRecessCheckpoints.map((row) => ({
+        sessionId: String(row.session_id),
+        sourceRevision: Number(row.source_revision ?? 1),
+        snapshotJson: String(row.snapshot_json),
+        createdAt: String(row.created_at),
+      })),
+      mysteryCases: debateMysteryCases.map((row) => ({
+        sessionId: String(row.session_id),
+        schemaVersion: Number(row.schema_version ?? 1),
+        generatorVersion: Number(row.generator_version ?? 1),
+        privateJson: String(row.private_json),
+        contentHash: String(row.content_hash),
+        createdAt: String(row.created_at),
+        updatedAt: String(row.updated_at),
+      })),
+      mysteryActions: debateMysteryActions.map((row) => ({
+        id: String(row.id),
+        sessionId: String(row.session_id),
+        sequence: Number(row.sequence ?? 1),
+        actionKind: String(row.action_kind),
+        publicPayloadJson: String(row.public_payload_json ?? "{}"),
+        occurredAt: String(row.occurred_at),
+      })),
+      mysteryNotebooks: debateMysteryNotebooks.map((row) => ({
+        sessionId: String(row.session_id),
+        revision: Number(row.revision ?? 1),
+        documentJson: String(row.document_json),
+        pendingProposalJson:
+          typeof row.pending_proposal_json === "string"
+            ? row.pending_proposal_json
+            : null,
+        createdAt: String(row.created_at),
+        updatedAt: String(row.updated_at),
+      })),
+      mysteryNotebookRevisions: debateMysteryNotebookRevisions.map((row) => ({
+        id: String(row.id),
+        sessionId: String(row.session_id),
+        revision: Number(row.revision ?? 1),
+        documentJson: String(row.document_json),
+        reason: String(row.reason),
+        idempotencyKey: String(row.idempotency_key),
+        createdAt: String(row.created_at),
+      })),
+      mysteryV2: debateMysteryV2,
+      mysteryAssets: debateMysteryAssets,
+    },
+    sessionNotes: sessionNotes.map((row) => ({
+      surface: String(row.surface) as NonNullable<
+        BackupSnapshot["sessionNotes"]
+      >[number]["surface"],
+      sessionId: String(row.session_id),
+      body: String(row.body),
+      captures: backupAppletSessionNoteCaptures(row.captures_json),
+      createdAt: String(row.created_at),
+      updatedAt: String(row.updated_at),
+    })),
+    transcriptFrameSamples: transcriptFrameSamples.map((row) => ({
+      surface: String(row.surface) as NonNullable<
+        BackupSnapshot["transcriptFrameSamples"]
+      >[number]["surface"],
+      sessionId: String(row.session_id),
+      entryId: String(row.entry_id),
+      fps: Number(row.fps),
+      capturedAt: String(row.captured_at),
+    })),
+    focusEvents: focusEvents.map((row) => ({
+      surface: String(row.surface) as NonNullable<BackupSnapshot["focusEvents"]>[number]["surface"],
+      sessionId: String(row.session_id),
+      transition: String(row.transition) as "away" | "returned",
+      occurredAt: String(row.occurred_at),
+    })),
+    presenceBeats: presenceBeats.map((row) => ({
+      id: String(row.id),
+      surface: String(row.surface) as NonNullable<
+        BackupSnapshot["presenceBeats"]
+      >[number]["surface"],
+      sessionId: String(row.session_id),
+      responseId: String(row.response_id),
+      speakerBotId: String(row.speaker_bot_id),
+      speakerName: String(row.speaker_name),
+      trigger: String(row.trigger) as NonNullable<
+        BackupSnapshot["presenceBeats"]
+      >[number]["trigger"],
+      source: String(row.source) as NonNullable<
+        BackupSnapshot["presenceBeats"]
+      >[number]["source"],
+      text: String(row.text),
+      heardCharacterCount: Number(row.heard_character_count ?? 0),
+      completion: String(row.completion) as NonNullable<
+        BackupSnapshot["presenceBeats"]
+      >[number]["completion"],
+      playbackStartedAtMs: Number(row.playback_started_at_ms ?? 0),
+      playbackEndedAtMs:
+        typeof row.playback_ended_at_ms === "number"
+          ? row.playback_ended_at_ms
+          : null,
+      createdAt: String(row.created_at),
+      updatedAt: String(row.updated_at),
+    })),
+    replays: {
+      recordings: replayRecordings.map((row) => ({
+        id: String(row.id),
+        surface: row.surface === "signal" ? "signal" : "coffee",
+        sourceId: String(row.source_id),
+        manifestVersion: Number(row.manifest_version ?? 1),
+        manifestJson: String(row.manifest_json),
+        manifestHash:
+          typeof row.manifest_hash === "string" ? row.manifest_hash : null,
+        timelineJson:
+          typeof row.timeline_json === "string" ? row.timeline_json : null,
+        transcriptVtt:
+          typeof row.transcript_vtt === "string" ? row.transcript_vtt : null,
+        transcriptMarkdown:
+          typeof row.transcript_markdown === "string"
+            ? row.transcript_markdown
+            : null,
+        createdAt: String(row.created_at),
+        updatedAt: String(row.updated_at),
+      })),
+      voiceTakes: replayVoiceTakes.map((row) => ({
+        id: String(row.id),
+        recordingId: String(row.recording_id),
+        sourceKey: String(row.source_key),
+        sourceMessageId:
+          typeof row.source_message_id === "string"
+            ? row.source_message_id
+            : null,
+        sourceEventId:
+          typeof row.source_event_id === "string" ? row.source_event_id : null,
+        snapshotJson: String(row.snapshot_json),
+        createdAt: String(row.created_at),
+        updatedAt: String(row.updated_at),
+      })),
+    },
+    actionSfxPacks: listActionSfxPackClipsForBackup(db, userId),
+    englishPacingProfiles: listEnglishPacingProfilesForBackup(db, userId),
+    premiumVoiceLibrary: listPremiumVoiceLibrary(db, userId),
     memories: memories.map((memory) => ({
       id: memory.id,
       conversationId: memory.conversation_id ?? undefined,
       botId: memory.bot_id ?? undefined,
+      targetBotId: memory.target_bot_id ?? undefined,
       confidence: memory.confidence,
+      baseConfidence: memory.base_confidence ?? memory.confidence,
       category: memory.category,
       tier: memory.tier,
+      lifecycle:
+        memory.lifecycle ??
+        (memory.source === "inferred" ? "derived" : memory.tier),
       durability: memory.durability ?? undefined,
+      source: memory.source,
+      certainty: memory.certainty ?? undefined,
+      sourceMessageIds: safeParseStringArray(memory.source_message_ids),
+      evidenceMemoryIds: memoryEvidenceIds.get(memory.id) ?? [],
+      evidenceLineageKnown:
+        memory.evidence_lineage_known !== 0 ||
+        (memoryEvidenceIds.get(memory.id)?.length ?? 0) > 0,
+      lastReinforcedAt: memory.last_reinforced_at ?? memory.created_at,
       createdAt: memory.created_at,
       payload: decryptJson(
         {
@@ -2118,6 +3506,16 @@ export function exportUserSnapshot(
         },
         userKey,
       ),
+    })),
+    memoryReceipts: memoryReceipts.map((receipt) => ({
+      id: receipt.id,
+      memoryId: receipt.memory_id,
+      learnerBotId: receipt.learner_bot_id ?? undefined,
+      targetBotId: receipt.target_bot_id ?? undefined,
+      conversationId: receipt.conversation_id ?? undefined,
+      kind: receipt.kind,
+      createdAt: receipt.created_at,
+      readAt: receipt.read_at ?? undefined,
     })),
   };
 }
@@ -2130,22 +3528,37 @@ function assertSnapshotIdsStayWithinTenant(
   const assertIds = (
     table:
       | "bots"
+      | "coffee_groups"
       | "conversations"
       | "messages"
       | "memories"
+      | "memory_acquisition_receipts"
       | "botcast_shows"
+      | "botcast_stage_presets"
       | "botcast_episodes"
       | "botcast_episode_segments"
       | "botcast_messages"
       | "botcast_events"
+      | "bot_presence_beats"
+      | "debate_sessions"
+      | "debate_events"
+      | "debate_recess_checkpoints"
+      | "debate_mystery_cases"
+      | "debate_mystery_actions"
+      | "debate_mystery_notebooks"
+      | "debate_mystery_notebook_revisions"
+      | "debate_mystery_v2_cases"
+      | "debate_mystery_v2_jobs"
+      | "debate_mystery_asset_vault"
+      | "debate_mystery_audio_manifests"
+      | "debate_mystery_audio_cache"
+      | "replay_recordings"
+      | "replay_voice_takes"
       | SlateBackupTable,
     ids: readonly string[],
-    idColumn: "id" | "project_id" = "id",
+    idColumn: "id" | "project_id" | "session_id" | "cache_key" = "id",
   ): void => {
     const seen = new Set<string>();
-    const findOwner = db.prepare(
-      `SELECT user_id FROM ${table} WHERE ${idColumn} = ?`,
-    );
     for (const rawId of ids) {
       const id = rawId.trim();
       if (!id) continue;
@@ -2153,10 +3566,6 @@ function assertSnapshotIdsStayWithinTenant(
         throw new Error(`Account backup contains a duplicate ${table} id.`);
       }
       seen.add(id);
-      const row = findOwner.get(id) as { user_id?: string } | undefined;
-      if (row?.user_id && row.user_id !== userId) {
-        throw new Error(`Account backup ${table} id belongs to another user.`);
-      }
     }
   };
 
@@ -2171,6 +3580,33 @@ function assertSnapshotIdsStayWithinTenant(
         )
       : [],
   );
+  const coffeeGroups = Array.isArray(snapshot.coffeeGroups)
+    ? snapshot.coffeeGroups
+    : [];
+  assertIds(
+    "coffee_groups",
+    coffeeGroups.flatMap((group) =>
+      group && typeof group.id === "string" ? [group.id] : [],
+    ),
+  );
+  const coffeeGroupIds = new Set(
+    coffeeGroups.flatMap((group) =>
+      group && typeof group.id === "string" && group.id.trim()
+        ? [group.id.trim()]
+        : [],
+    ),
+  );
+  const findOwnedCoffeeGroup = db.prepare(
+    "SELECT 1 AS owned FROM coffee_groups WHERE user_id = ? AND id = ?",
+  );
+  for (const conversation of conversations) {
+    const groupId = conversation?.coffee?.groupId?.trim();
+    if (!groupId || coffeeGroupIds.has(groupId)) continue;
+    const owned = findOwnedCoffeeGroup.get(userId, groupId);
+    if (!owned) {
+      throw new Error("Account backup contains an unavailable owner-bound reference.");
+    }
+  }
   assertIds(
     "conversations",
     conversations.flatMap((conversation) =>
@@ -2197,8 +3633,20 @@ function assertSnapshotIdsStayWithinTenant(
         )
       : [],
   );
+  assertIds(
+    "memory_acquisition_receipts",
+    Array.isArray(snapshot.memoryReceipts)
+      ? snapshot.memoryReceipts.flatMap((receipt) =>
+          receipt && typeof receipt.id === "string" ? [receipt.id] : [],
+        )
+      : [],
+  );
   const botcast = snapshot.botcast;
   if (botcast) {
+    assertIds(
+      "botcast_stage_presets",
+      (botcast.stagePresets ?? []).map((item) => item.id),
+    );
     assertIds(
       "botcast_shows",
       botcast.shows.map((item) => item.id),
@@ -2218,6 +3666,91 @@ function assertSnapshotIdsStayWithinTenant(
     assertIds(
       "botcast_events",
       botcast.events.map((item) => item.id),
+    );
+  }
+  if (snapshot.replays) {
+    assertIds(
+      "replay_recordings",
+      snapshot.replays.recordings.map((item) => item.id),
+    );
+    assertIds(
+      "replay_voice_takes",
+      snapshot.replays.voiceTakes.map((item) => item.id),
+    );
+  }
+  if (snapshot.debates) {
+    assertIds(
+      "debate_sessions",
+      snapshot.debates.sessions.map((item) => item.id),
+    );
+    assertIds(
+      "debate_events",
+      snapshot.debates.events.map((item) => item.id),
+    );
+    assertIds(
+      "debate_recess_checkpoints",
+      (snapshot.debates.recessCheckpoints ?? []).map(
+        (item) => item.sessionId,
+      ),
+      "session_id",
+    );
+    assertIds(
+      "debate_mystery_cases",
+      (snapshot.debates.mysteryCases ?? []).map((item) => item.sessionId),
+      "session_id",
+    );
+    assertIds(
+      "debate_mystery_actions",
+      (snapshot.debates.mysteryActions ?? []).map((item) => item.id),
+    );
+    assertIds(
+      "debate_mystery_notebooks",
+      (snapshot.debates.mysteryNotebooks ?? []).map((item) => item.sessionId),
+      "session_id",
+    );
+    assertIds(
+      "debate_mystery_notebook_revisions",
+      (snapshot.debates.mysteryNotebookRevisions ?? []).map((item) => item.id),
+    );
+    const mysteryV2 = snapshot.debates.mysteryV2;
+    if (mysteryV2) {
+      assertIds(
+        "debate_mystery_v2_cases",
+        (mysteryV2.cases ?? []).map((item) => item.sessionId),
+        "session_id",
+      );
+      assertIds(
+        "debate_mystery_v2_jobs",
+        (mysteryV2.jobs ?? []).map((item) => item.id),
+      );
+      assertIds(
+        "debate_mystery_audio_manifests",
+        (mysteryV2.manifests ?? []).map((item) => item.sessionId),
+        "session_id",
+      );
+      assertIds(
+        "debate_mystery_audio_cache",
+        (mysteryV2.clips ?? []).map((item) => item.cacheKey),
+        "cache_key",
+      );
+    }
+    if (snapshot.debates.mysteryAssets) {
+      const semanticOwners = new Set<string>();
+      for (const item of snapshot.debates.mysteryAssets.assets) {
+        const owner = `${item.sessionId}:${item.kind}:${item.subjectId}`;
+        if (semanticOwners.has(owner)) {
+          throw new Error(
+            "Account backup contains a duplicate sealed mystery asset owner.",
+          );
+        }
+        semanticOwners.add(owner);
+      }
+    }
+  }
+  if (snapshot.presenceBeats) {
+    assertIds(
+      "bot_presence_beats",
+      snapshot.presenceBeats.map((item) => item.id),
     );
   }
   const slate = snapshot.slate;
@@ -2250,7 +3783,7 @@ function assertSnapshotIdsStayWithinTenant(
       let findOwner = ownerStatements.get(rule.targetTable);
       if (!findOwner) {
         findOwner = db.prepare(
-          `SELECT user_id FROM ${rule.targetTable} WHERE id = ?`,
+          `SELECT 1 AS owned FROM ${rule.targetTable} WHERE user_id = ? AND id = ?`,
         );
         ownerStatements.set(rule.targetTable, findOwner);
       }
@@ -2267,16 +3800,9 @@ function assertSnapshotIdsStayWithinTenant(
           );
         }
         if (targetIds.has(value)) continue;
-        const owner = findOwner.get(value) as { user_id?: string } | undefined;
-        if (owner?.user_id && owner.user_id !== userId) {
-          throw new Error(
-            `Account backup ${rule.targetTable} reference belongs to another user.`,
-          );
-        }
-        if (!owner?.user_id) {
-          throw new Error(
-            `Account backup ${rule.source}.${rule.field} references missing ${rule.targetTable} data.`,
-          );
+        const owned = findOwner.get(userId, value);
+        if (!owned) {
+          throw new Error("Account backup contains an unavailable owner-bound reference.");
         }
       }
     }
@@ -2303,10 +3829,23 @@ export function importUserSnapshot(
     );
   }
   validateBackupBotAvatarDetails(snapshot.bots);
+  const hasCoffeeDrinkSurface = snapshot.conversations.some(
+    (conversation) =>
+      Boolean(conversation.coffee?.settings.barRitual?.specialImageId?.trim()),
+  );
+  if (hasCoffeeDrinkSurface && !projectOwnedAssets) {
+    throw new Error(
+      "Account backup is missing the project-asset archive for a Coffee drink surface.",
+    );
+  }
   const preparedAssets = projectOwnedAssets
     ? prepareProjectOwnedAssetImport(userId, snapshot, projectOwnedAssets, {
         imageIdExists: (imageId) =>
-          Boolean(db.prepare("SELECT 1 FROM images WHERE id = ?").get(imageId)),
+          Boolean(
+            db
+              .prepare("SELECT 1 FROM images WHERE user_id = ? AND id = ?")
+              .get(userId, imageId),
+          ),
       })
     : null;
   let transactionStarted = false;
@@ -2315,7 +3854,13 @@ export function importUserSnapshot(
     db.exec("BEGIN IMMEDIATE;");
     transactionStarted = true;
     assertSnapshotIdsStayWithinTenant(db, userId, snapshot);
-    importUserSnapshotWithinTransaction(db, userId, snapshot, userKey);
+    importUserSnapshotWithinTransaction(
+      db,
+      userId,
+      snapshot,
+      userKey,
+      preparedAssets,
+    );
     if (preparedAssets) {
       applyPreparedProjectOwnedAssetsWithinTransaction(
         db,
@@ -2328,6 +3873,13 @@ export function importUserSnapshot(
   } catch (error) {
     if (transactionStarted) db.exec("ROLLBACK;");
     if (preparedAssets) cleanupPreparedProjectOwnedAssetFiles(preparedAssets);
+    const message = error instanceof Error ? error.message : "";
+    if (
+      message.includes(OWNER_CONSTRAINT_ERROR) ||
+      message.includes("UNIQUE constraint failed")
+    ) {
+      throw new Error("Account backup contains unavailable owner-bound data.");
+    }
     throw error;
   }
 }
@@ -2337,9 +3889,20 @@ function importUserSnapshotWithinTransaction(
   userId: string,
   snapshot: BackupSnapshot,
   userKey: Buffer,
+  preparedAssets: PreparedProjectOwnedAssetImport | null,
 ): void {
   if (snapshot.settings) {
     const settings = snapshot.settings;
+    const memoryEcology = settings.memoryEcology
+      ? resolveMemoryEcologySettingsPatch(
+          settings.memoryEcology as unknown as Record<string, unknown>,
+          DEFAULT_MEMORY_ECOLOGY_SETTINGS,
+        )
+      : {
+          ...DEFAULT_MEMORY_ECOLOGY_SETTINGS,
+          learnAboutPlayer: settings.autoMemory,
+          learnAboutBots: settings.autoMemory,
+        };
     const openAiApiKey =
       typeof settings.openAiApiKey === "string" &&
       settings.openAiApiKey.length > 0
@@ -2375,26 +3938,79 @@ function importUserSnapshotWithinTransaction(
     const storedAutoFallbackChain = settings.autoFallbackChain
       ? serializeAutoFallbackChain(settings.autoFallbackChain)
       : null;
+    const currentLivingShellRow = db
+      .prepare(
+        "SELECT capability_revelations FROM living_shell_account_state WHERE user_id = ?",
+      )
+      .get(userId) as { capability_revelations?: string } | undefined;
+    const currentCapabilityRevelations = normalizePrismCapabilityRevelations(
+      currentLivingShellRow?.capability_revelations,
+    );
+    const importedCapabilityRevelations = normalizePrismCapabilityRevelations(
+      settings.capabilityRevelations,
+      { completedFallback: settings.capabilityRevelations === undefined },
+    );
+    const mergedCapabilityRevelations = Object.fromEntries(
+      PRISM_CAPABILITY_IDS.map((capability) => [
+        capability,
+        currentCapabilityRevelations[capability].revealed
+          ? currentCapabilityRevelations[capability]
+          : importedCapabilityRevelations[capability],
+      ]),
+    ) as PrismCapabilityRevelations;
+    db.prepare(
+      `UPDATE living_shell_account_state
+          SET capability_revelations = ?, updated_at = ?
+        WHERE user_id = ?`,
+    ).run(
+      JSON.stringify(
+        mergedCapabilityRevelations,
+      ),
+      new Date().toISOString(),
+      userId,
+    );
     db.prepare(
       `
       UPDATE users
       SET
         theme = ?,
         graphics_quality = ?,
+        crt_focus = ?,
+        typography_scale = ?,
+        atmosphere_style = ?,
+        hub_atmosphere_enabled = ?,
+        hub_atmosphere_image_id = NULL,
+        hub_atmosphere_image_style = NULL,
+        startup_preference = ?,
         preferred_provider = ?,
         ephemeral_chat_provider_preferences = ?,
         preferred_image_provider = ?,
         provider_locked = ?,
         auto_memory = ?,
+        memory_learn_about_player = ?,
+        memory_learn_about_bots = ?,
+        memory_acquisition_sensitivity = ?,
+        memory_short_term_days = ?,
+        memory_long_term_threshold = ?,
+        memory_inferred_min_evidence = ?,
+        memory_inferred_threshold = ?,
         composer_writing_assist = ?,
         experimental_dual_ollama_enabled = ?,
         experimental_all_model_effort_enabled = ?,
         coffee_experimental_table_angle_enabled = ?,
+        debate_whodunnit_reuse_synthesized_exhibits = ?,
+        debate_whodunnit_text_voice_mode = ?,
+        debate_whodunnit_speech_type = ?,
+        debate_whodunnit_perspective = ?,
         psychic_mode_enabled = ?,
         auto_switch_model = ?,
         auto_fallback_chain = ?,
+        online_auto_provider_bias = ?,
+        online_auto_provider_weights = ?,
+        online_auto_quality_posture = ?,
         fallback_model_message_stripe = ?,
         hidden_bot_model_ids = ?,
+        hidden_global_picker_model_ids = ?,
         hidden_comfyui_workflow_ids = ?,
         preferred_local_model = ?,
         preferred_online_model = ?,
@@ -2418,8 +4034,12 @@ function importUserSnapshotWithinTransaction(
         zen_ask_question_patience_ms = ?,
         zen_autonomy_enabled = ?,
         prism_default_bot_face_thinking_frames = ?,
+        prism_default_bot_face_mouth_speech_poses = ?,
         prism_default_llm_model = ?,
+        prism_cloud_llm_model = ?,
         prism_image_tool_llm_model = ?,
+        prism_refract_local_model = ?,
+        prism_refract_online_model = ?,
         dev_memories_enabled = ?,
         dev_memories_text = ?,
         openai_key_ciphertext = ?,
@@ -2441,6 +4061,9 @@ function importUserSnapshotWithinTransaction(
         elevenlabs_voice_bank = ?,
         elevenlabs_voice_model = ?,
         elevenlabs_voice_collection_id = ?,
+        zen_player_voice_enabled = ?,
+        player_audio_voice_profile = ?,
+        player_name_pronunciation = ?,
         prism_default_bot_audio_voice_profile = ?
       WHERE id = ?
     `,
@@ -2449,6 +4072,11 @@ function importUserSnapshotWithinTransaction(
         ? settings.theme
         : "system",
       normalizeGraphicsQuality(settings.graphicsQuality),
+      normalizeCrtFocus(settings.crtFocus),
+      normalizePrismTypographyScale(settings.typographyScale),
+      normalizeHubAtmosphereStyle(settings.atmosphereStyle),
+      settings.hubAtmosphereEnabled === false ? 0 : 1,
+      normalizePrismStartupPreference(settings.startupPreference),
       settings.preferredProvider === "openai" ||
         settings.preferredProvider === "anthropic"
         ? settings.preferredProvider
@@ -2464,18 +4092,45 @@ function importUserSnapshotWithinTransaction(
           (settings.preferredProvider === "local" ? "local" : "openai"),
       }),
       settings.providerLocked ? 1 : 0,
-      settings.autoMemory ? 1 : 0,
+      memoryEcology.learnAboutPlayer || memoryEcology.learnAboutBots ? 1 : 0,
+      memoryEcology.learnAboutPlayer ? 1 : 0,
+      memoryEcology.learnAboutBots ? 1 : 0,
+      memoryEcology.acquisitionSensitivity,
+      memoryEcology.shortTermRetentionDays,
+      memoryEcology.longTermPromotionThreshold,
+      memoryEcology.inferredMinEvidenceCount,
+      memoryEcology.inferredConfidenceThreshold,
       settings.composerWritingAssist ? 1 : 0,
       settings.experimentalDualOllamaEnabled ? 1 : 0,
       settings.experimentalAllModelEffortEnabled === true ? 1 : 0,
       settings.coffeeExperimentalTableAngleEnabled === true ? 1 : 0,
+      settings.debateWhodunnitReuseSynthesizedExhibits === true ? 1 : 0,
+      normalizeWhodunnitTextVoiceMode(
+        settings.debateWhodunnitTextVoiceMode,
+      ),
+      normalizeWhodunnitSpeechType(settings.debateWhodunnitSpeechType),
+      normalizeWhodunnitInvestigationPerspective(settings.debateWhodunnitPerspective),
       settings.psychicModeEnabled === true ? 1 : 0,
       settings.autoModeEnabled === true && storedAutoFallbackChain ? 1 : 0,
       storedAutoFallbackChain,
+      clampOnlineAutoProviderBias(settings.onlineAutoProviderBias),
+      serializeOnlineAutoProviderWeights(
+        settings.onlineAutoProviderWeights ??
+          parseStoredOnlineAutoProviderWeights(null, settings.onlineAutoProviderBias),
+      ),
+      normalizeOnlineAutoQualityPosture(settings.onlineAutoQualityPosture),
       settings.fallbackModelMessageStripe === false ? 0 : 1,
       JSON.stringify(
         Array.isArray(settings.hiddenBotModelIds)
           ? settings.hiddenBotModelIds.filter(
+              (value): value is string =>
+                typeof value === "string" && value.trim().length > 0,
+            )
+          : [],
+      ),
+      JSON.stringify(
+        Array.isArray(settings.hiddenGlobalPickerModelIds)
+          ? settings.hiddenGlobalPickerModelIds.filter(
               (value): value is string =>
                 typeof value === "string" && value.trim().length > 0,
             )
@@ -2531,8 +4186,14 @@ function importUserSnapshotWithinTransaction(
       serializeBotFaceThinkingFrames(
         settings.prismDefaultBotFaceThinkingFrames,
       ),
+      serializeBotFaceCustomSpeechPosesForStorage(
+        settings.prismDefaultBotFaceMouthSpeechPoses,
+      ),
       settings.prismDefaultLlmModel?.trim() ?? "",
+      settings.prismCloudLlmModel?.trim() ?? "",
       settings.prismImageToolLlmModel?.trim() ?? "",
+      settings.prismRefractLocalModel?.trim() ?? "",
+      settings.prismRefractOnlineModel?.trim() ?? "",
       settings.devMemoriesEnabled ? 1 : 0,
       settings.devMemoriesText ?? "",
       encryptedOpenAiKey?.ciphertext ?? null,
@@ -2544,7 +4205,7 @@ function importUserSnapshotWithinTransaction(
       encryptedElevenLabsKey?.ciphertext ?? null,
       encryptedElevenLabsKey?.iv ?? null,
       encryptedElevenLabsKey?.tag ?? null,
-      normalizeVoiceMode(settings.voiceMode),
+      normalizeSpeechTypeVoiceMode(settings.voiceMode),
       settings.voiceEffectsEnabled === false ? 0 : 1,
       normalizeBotVoiceVolume(settings.voiceVolume),
       settings.operatingSystemVoicesEnabled === true ? 1 : 0,
@@ -2564,11 +4225,63 @@ function importUserSnapshotWithinTransaction(
       normalizeElevenLabsVoiceCollectionId(
         settings.elevenLabsVoiceCollectionId,
       ),
+      settings.zenPlayerVoiceEnabled === true ? 1 : 0,
+      serializeBotAudioVoiceProfileV1(settings.playerAudioVoiceProfile),
+      normalizeBotNamePronunciation(settings.playerNamePronunciation),
       serializeBotAudioVoiceProfileV1(
         settings.prismDefaultBotAudioVoiceProfile,
       ),
       userId,
     );
+  }
+
+  if (Array.isArray(snapshot.modelEffortPreferences)) {
+    db.prepare(
+      "DELETE FROM model_reasoning_effort_preferences WHERE user_id = ?",
+    ).run(userId);
+    for (const rawPreference of snapshot.modelEffortPreferences) {
+      const provider = normalizeModelEffortProvider(rawPreference?.provider);
+      const modelId = normalizeModelEffortModelId(rawPreference?.modelId);
+      const effort = normalizeModelReasoningEffortPreference(
+        rawPreference?.effort,
+      );
+      if (!provider || !modelId || !effort) continue;
+      setModelReasoningEffortPreference(db, {
+        userId,
+        provider,
+        modelId,
+        effort,
+        updatedAt:
+          typeof rawPreference.updatedAt === "string"
+            ? rawPreference.updatedAt
+            : undefined,
+      });
+    }
+  }
+
+  if (Array.isArray(snapshot.modelTurboPreferences)) {
+    db.prepare("DELETE FROM model_turbo_preferences WHERE user_id = ?").run(
+      userId,
+    );
+    for (const rawPreference of snapshot.modelTurboPreferences) {
+      const provider = normalizeModelEffortProvider(rawPreference?.provider);
+      const modelId = normalizeModelEffortModelId(rawPreference?.modelId);
+      if (!provider || !modelId || rawPreference?.turbo !== true) continue;
+      try {
+        setModelTurboPreference(db, {
+          userId,
+          provider,
+          modelId,
+          turbo: true,
+          updatedAt:
+            typeof rawPreference.updatedAt === "string"
+              ? rawPreference.updatedAt
+              : undefined,
+        });
+      } catch {
+        // Ignore stale preferences for models that no longer support Turbo.
+      }
+    }
   }
 
   if (Array.isArray(snapshot.bots)) {
@@ -2602,8 +4315,9 @@ function importUserSnapshotWithinTransaction(
 	        max_tokens,
 	        top_p,
 	        top_k,
-	        repetition_penalty,
+        repetition_penalty,
         color,
+        accent_color,
         glyph,
         avatar_details_json,
         face_eyes_font,
@@ -2623,22 +4337,31 @@ function importUserSnapshotWithinTransaction(
         face_mouth_offset_y,
         face_mouth_rotation_deg,
         face_blink_bar,
+        face_blink_count,
         face_blink_scale,
         face_blink_offset_x,
         face_blink_offset_y,
+        face_blink_rotation_deg,
         face_thinking_frames,
+        face_thinking_scale,
+        face_thinking_offset_x,
+        face_thinking_offset_y,
         authored_audio_voice_profile,
         audio_voice_profile_override,
         chat_enabled,
         visibility,
         created_at,
         updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     for (const bot of snapshot.bots) {
       if (!bot || typeof bot.id !== "string" || bot.id.trim().length === 0)
         continue;
       const now = new Date().toISOString();
+      const legacySpeechPoses =
+        String(bot.faceMouthAnimation) === "custom"
+          ? normalizeBotFaceCustomSpeechPoses(bot.faceMouthCharacter)
+          : null;
       insertBot.run(
         bot.id.trim(),
         userId,
@@ -2688,6 +4411,7 @@ function importUserSnapshotWithinTransaction(
         typeof bot.color === "string" && bot.color.trim().length > 0
           ? bot.color.trim()
           : null,
+        normalizeBotIdentityColor(bot.accentColor),
         typeof bot.glyph === "string" && bot.glyph.trim().length > 0
           ? bot.glyph.trim()
           : null,
@@ -2696,9 +4420,11 @@ function importUserSnapshotWithinTransaction(
           : serializeBotAvatarDetailsV1(bot.avatarDetails),
         normalizeBotFaceFontId(bot.faceEyesFont),
         normalizeBotFaceEyeCharacter(bot.faceEyeCharacter),
-        DEFAULT_BOT_FACE_GLYPH_ANIMATION,
+        normalizeBotFaceEyeMovement(bot.faceEyeAnimation) ??
+          DEFAULT_BOT_FACE_EYE_MOVEMENT,
         normalizeBotFaceFontId(bot.faceMouthFont),
-        normalizeBotFaceMouthCharacter(bot.faceMouthCharacter),
+        legacySpeechPoses?.[0] ??
+          normalizeBotFaceMouthCharacter(bot.faceMouthCharacter),
         normalizeBotFaceGlyphAnimation(bot.faceMouthAnimation),
         normalizeBotFaceFontWeight(bot.faceFontWeight),
         normalizeBotFaceEyeScale(bot.faceEyeScale),
@@ -2713,13 +4439,23 @@ function importUserSnapshotWithinTransaction(
         normalizeBotFaceMouthRotationDeg(bot.faceMouthRotationDeg),
         normalizeBotFaceBlinkBar(bot.faceBlinkBar) ??
           DEFAULT_BOT_FACE_BLINK_BAR,
+        normalizeBotFaceEyeCount(bot.faceBlinkCount) ??
+          (normalizeBotFaceEyeCharacter(bot.faceEyeCharacter) !== null
+            ? normalizeBotFaceEyeCount(bot.faceEyeCount)
+            : null) ??
+          DEFAULT_BOT_FACE_EYE_COUNT,
         normalizeBotFaceBlinkScale(bot.faceBlinkScale) ??
           DEFAULT_BOT_FACE_BLINK_SCALE,
         normalizeBotFaceBlinkOffsetX(bot.faceBlinkOffsetX) ??
           DEFAULT_BOT_FACE_BLINK_OFFSET_X,
         normalizeBotFaceBlinkOffsetY(bot.faceBlinkOffsetY) ??
           DEFAULT_BOT_FACE_BLINK_OFFSET_Y,
+        normalizeBotFaceBlinkRotationDeg(bot.faceBlinkRotationDeg) ??
+          DEFAULT_BOT_FACE_BLINK_ROTATION_DEG,
         serializeBotFaceThinkingFrames(bot.faceThinkingFrames),
+        normalizeBotFaceThinkingScale(bot.faceThinkingScale),
+        normalizeBotFaceThinkingOffsetX(bot.faceThinkingOffsetX),
+        normalizeBotFaceThinkingOffsetY(bot.faceThinkingOffsetY),
         serializeBotAudioVoiceProfileV1(bot.authoredAudioVoiceProfile),
         bot.audioVoiceProfileOverride === null ||
           bot.audioVoiceProfileOverride === undefined
@@ -2739,7 +4475,184 @@ function importUserSnapshotWithinTransaction(
       ).run(serializeBotPowersV1(bot.powers ?? []), bot.id.trim(), userId);
       db.prepare(
         "UPDATE bots SET face_mouth_coffee_pucker = ? WHERE id = ? AND user_id = ?",
-      ).run(bot.faceMouthCoffeePucker === true ? 1 : 0, bot.id.trim(), userId);
+      ).run(
+        bot.faceMouthCoffeePucker === false
+          ? 0
+          : DEFAULT_BOT_FACE_MOUTH_COFFEE_PUCKER
+            ? 1
+            : 0,
+        bot.id.trim(),
+        userId,
+      );
+      db.prepare(
+        "UPDATE bots SET face_mouth_speech_poses = ? WHERE id = ? AND user_id = ?",
+      ).run(
+        serializeBotFaceCustomSpeechPosesForStorage(bot.faceMouthSpeechPoses) ??
+          serializeBotFaceCustomSpeechPosesForStorage(legacySpeechPoses),
+        bot.id.trim(),
+        userId,
+      );
+      db.prepare(
+        "UPDATE bots SET face_eye_spacing = ? WHERE id = ? AND user_id = ?",
+      ).run(
+        normalizeBotFaceEyeSpacing(bot.faceEyeSpacing) ??
+          DEFAULT_BOT_FACE_EYE_SPACING,
+        bot.id.trim(),
+        userId,
+      );
+      if (
+        bot.globalMood &&
+        GLOBAL_BOT_MOOD_KEYS.includes(bot.globalMood) &&
+        bot.globalMood !== "neutral"
+      ) {
+        setGlobalBotMood(
+          db,
+          userId,
+          bot.id.trim(),
+          bot.globalMood,
+          "backup_restore",
+          typeof bot.updatedAt === "string" && bot.updatedAt.trim()
+            ? bot.updatedAt
+            : now,
+        );
+      }
+    }
+  }
+
+  if (Array.isArray(snapshot.libraryGroups)) {
+    replaceLibraryGroups({
+      db,
+      userId,
+      groups: snapshot.libraryGroups,
+      manageTransaction: false,
+    });
+  }
+
+  const restorableCoffeeGroupImageIds = new Map(
+    (preparedAssets?.coffeeGroupImageReferences ?? []).map((reference) => [
+      reference.groupId,
+      reference.sourceImageId,
+    ] as const),
+  );
+  if (Array.isArray(snapshot.coffeeGroups)) {
+    const ownedBotIds = new Set(
+      (db
+        .prepare("SELECT id FROM bots WHERE user_id = ?")
+        .all(userId) as Array<{ id: string }>).map((row) => row.id),
+    );
+    const insertCoffeeGroup = db.prepare(
+      `INSERT OR REPLACE INTO coffee_groups
+         (id, user_id, name, ethos, atmosphere_json, synthesis_json,
+          coffee_settings, preset_mode, coffee_topic_mode, model_choice,
+          starter_topics, mood_summary, archived_at, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    );
+    const insertCoffeeGroupSeat = db.prepare(
+      `INSERT INTO coffee_group_seats
+         (user_id, group_id, seat_index, bot_id, updated_at)
+       VALUES (?, ?, ?, ?, ?)`,
+    );
+    for (const group of snapshot.coffeeGroups) {
+      const groupId =
+        typeof group?.id === "string" ? group.id.trim() : "";
+      if (!groupId) continue;
+      const now = new Date().toISOString();
+      const createdAt =
+        typeof group.createdAt === "string" && group.createdAt.trim()
+          ? group.createdAt.trim()
+          : now;
+      const updatedAt =
+        typeof group.updatedAt === "string" && group.updatedAt.trim()
+          ? group.updatedAt.trim()
+          : createdAt;
+      const atmosphere = backupCoffeeGroupAtmosphere(
+        group.atmosphere,
+        updatedAt,
+      );
+      const portableAtmosphere =
+        atmosphere &&
+        restorableCoffeeGroupImageIds.get(groupId) === atmosphere.imageId
+          ? atmosphere
+          : null;
+      const synthesis = coffeeGroupSynthesisForRestore({
+        value: group.synthesis,
+        atmosphereWasReferenced: atmosphere !== null,
+        atmosphereIsPortable: portableAtmosphere !== null,
+        updatedAt,
+      });
+      const name =
+        typeof group.name === "string"
+          ? group.name.replace(/\s+/gu, " ").trim().slice(0, 80)
+          : "";
+      const ethos =
+        typeof group.ethos === "string"
+          ? group.ethos
+              .replace(/\s+/gu, " ")
+              .trim()
+              .slice(0, BACKUP_COFFEE_GROUP_ETHOS_MAX_LENGTH)
+          : "";
+      const seats = normalizedBackupCoffeeGroupSeats(
+        group.seatBotIds,
+        ownedBotIds,
+      );
+      insertCoffeeGroup.run(
+        groupId,
+        userId,
+        name || "Imported Coffee Group",
+        ethos,
+        JSON.stringify(portableAtmosphere ?? {}),
+        JSON.stringify(synthesis),
+        JSON.stringify(normalizeCoffeeSessionSettings(group.coffeeSettings)),
+        group.presetMode === "auto" ? "auto" : "manual",
+        group.topicSelectionMode === "auto" ? "auto" : "manual",
+        JSON.stringify(backupJsonObject(group.modelChoice)),
+        JSON.stringify(backupJsonObject(group.starterTopics)),
+        JSON.stringify(backupJsonObject(group.moodSummary)),
+        typeof group.archivedAt === "string" && group.archivedAt.trim()
+          ? group.archivedAt.trim()
+          : null,
+        createdAt,
+        updatedAt,
+      );
+      db.prepare(
+        "DELETE FROM coffee_group_seats WHERE user_id = ? AND group_id = ?",
+      ).run(userId, groupId);
+      for (let seatIndex = 0; seatIndex < seats.length; seatIndex += 1) {
+        insertCoffeeGroupSeat.run(
+          userId,
+          groupId,
+          seatIndex,
+          seats[seatIndex],
+          updatedAt,
+        );
+      }
+      if (
+        group.soundtrack?.provider === "elevenlabs" &&
+        typeof group.soundtrack.audioBase64 === "string" &&
+        /^audio\/(?:mpeg|mp3)$/iu.test(group.soundtrack.contentType)
+      ) {
+        const soundtrackBytes = Buffer.from(group.soundtrack.audioBase64, "base64");
+        if (soundtrackBytes.length > 0 && soundtrackBytes.length <= 12 * 1024 * 1024) {
+          db.prepare(
+            `INSERT OR REPLACE INTO coffee_group_soundtracks
+               (group_id, user_id, generation_status, generation_token,
+                provider, model, prompt, content_type, audio_bytes, duration_ms,
+                revision, error, created_at, updated_at)
+             VALUES (?, ?, 'ready', NULL, 'elevenlabs', ?, ?, ?, ?, ?, ?, NULL, ?, ?)`,
+          ).run(
+            groupId,
+            userId,
+            group.soundtrack.model,
+            group.soundtrack.prompt,
+            group.soundtrack.contentType,
+            soundtrackBytes,
+            Math.max(3_000, Math.round(group.soundtrack.durationMs)),
+            Math.max(1, Math.round(group.soundtrack.revision)),
+            group.soundtrack.createdAt || createdAt,
+            group.soundtrack.updatedAt || updatedAt,
+          );
+        }
+      }
     }
   }
 
@@ -2747,6 +4660,20 @@ function importUserSnapshotWithinTransaction(
     const botcast = snapshot.botcast;
     const showIds = new Set(botcast.shows.map((show) => show.id));
     const episodeIds = new Set(botcast.episodes.map((episode) => episode.id));
+    for (const preset of botcast.stagePresets ?? []) {
+      db.prepare(
+        `INSERT OR REPLACE INTO botcast_stage_presets
+          (id, user_id, name, stage_json, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+      ).run(
+        preset.id,
+        userId,
+        preset.name,
+        preset.stageJson,
+        preset.createdAt,
+        preset.updatedAt,
+      );
+    }
     for (const show of botcast.shows) {
       db.prepare(
         `INSERT OR REPLACE INTO botcast_shows
@@ -2776,6 +4703,18 @@ function importUserSnapshotWithinTransaction(
         typeof show.introAudio.audioBase64 === "string"
       ) {
         const audioBytes = Buffer.from(show.introAudio.audioBase64, "base64");
+        const outdentBytes =
+          typeof show.introAudio.outdent?.audioBase64 === "string"
+            ? Buffer.from(show.introAudio.outdent.audioBase64, "base64")
+            : null;
+        const validOutdent = Boolean(
+          outdentBytes &&
+            outdentBytes.length > 0 &&
+            outdentBytes.length <= 4 * 1024 * 1024 &&
+            /^audio\/(?:mpeg|mp3)$/iu.test(
+              show.introAudio.outdent?.contentType ?? "",
+            ),
+        );
         if (
           audioBytes.length > 0 &&
           audioBytes.length <= 4 * 1024 * 1024 &&
@@ -2784,8 +4723,10 @@ function importUserSnapshotWithinTransaction(
           db.prepare(
             `INSERT OR REPLACE INTO botcast_show_intro_audio
               (show_id, user_id, provider, model, prompt, content_type,
-               audio_bytes, duration_ms, revision, created_at, updated_at)
-             VALUES (?, ?, 'elevenlabs', ?, ?, ?, ?, ?, ?, ?, ?)`,
+               audio_bytes, duration_ms, outdent_prompt,
+               outdent_content_type, outdent_audio_bytes,
+               outdent_duration_ms, revision, created_at, updated_at)
+             VALUES (?, ?, 'elevenlabs', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           ).run(
             show.id,
             userId,
@@ -2794,6 +4735,15 @@ function importUserSnapshotWithinTransaction(
             show.introAudio.contentType,
             audioBytes,
             Math.max(3_000, Math.round(show.introAudio.durationMs)),
+            validOutdent ? show.introAudio.outdent!.prompt : null,
+            validOutdent ? show.introAudio.outdent!.contentType : null,
+            validOutdent ? outdentBytes : null,
+            validOutdent
+              ? Math.max(
+                  3_000,
+                  Math.round(show.introAudio.outdent!.durationMs),
+                )
+              : null,
             Math.max(1, Math.round(show.introAudio.revision)),
             show.introAudio.createdAt || show.createdAt,
             show.introAudio.updatedAt || show.updatedAt,
@@ -2839,12 +4789,12 @@ function importUserSnapshotWithinTransaction(
         `INSERT OR REPLACE INTO botcast_episodes
           (id, user_id, show_id, host_bot_id, guest_bot_id, guest_kind,
            guest_name, guest_context, title, topic,
-           producer_brief, provider, model, response_mode, duration_minutes, status, segment, outcome,
+           producer_brief, guest_brief, provider, model, response_mode, duration_minutes, status, segment, outcome,
            tension_level, warning_count, started_at, completed_at, runtime_ms,
            model_warmup_hold_duration_ms, model_warmup_hold_started_at,
            persona_reviewer_bot_id, persona_reviewer_name, persona_rating,
-           persona_comment, persona_reviewed_at, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           persona_comment, persona_reviewed_at, persona_review_provenance_json, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       ).run(
         episode.id,
         userId,
@@ -2857,13 +4807,18 @@ function importUserSnapshotWithinTransaction(
         episode.title,
         episode.topic,
         episode.producerBrief,
-        episode.provider === "openai" || episode.provider === "anthropic"
+        episode.guestBrief ?? "",
+        episode.provider === "ollama_cloud" ||
+        episode.provider === "openai" ||
+        episode.provider === "anthropic"
           ? episode.provider
           : "local",
         typeof episode.model === "string" ? episode.model : null,
         episode.responseMode === "auto" || episode.responseMode === "online"
           ? episode.responseMode
-          : episode.provider === "openai" || episode.provider === "anthropic"
+          : episode.provider === "ollama_cloud" ||
+              episode.provider === "openai" ||
+              episode.provider === "anthropic"
             ? "online"
             : "local",
         typeof episode.durationMinutes === "number" &&
@@ -2893,6 +4848,9 @@ function importUserSnapshotWithinTransaction(
           : null,
         episode.personaReview?.comment ?? null,
         episode.personaReview?.createdAt ?? null,
+        episode.personaReview?.provenance
+          ? JSON.stringify(episode.personaReview.provenance)
+          : null,
         episode.createdAt,
         episode.updatedAt,
       );
@@ -2953,24 +4911,54 @@ function importUserSnapshotWithinTransaction(
     importSlateSnapshot(db, userId, snapshot.slate);
   }
 
+  const ownedCoffeeGroupIds = new Set(
+    (db
+      .prepare("SELECT id FROM coffee_groups WHERE user_id = ?")
+      .all(userId) as Array<{ id: string }>).map((row) => row.id),
+  );
   const insertConversation = db.prepare(`
-    INSERT OR REPLACE INTO conversations (id, user_id, title, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?)
+    INSERT OR REPLACE INTO conversations
+      (id, user_id, title, conversation_mode, bot_group_ids, coffee_settings,
+       coffee_session_state,
+       coffee_group_id, coffee_duration_minutes, coffee_preset_id, coffee_topic,
+       coffee_absent_bot_ids, coffee_team_mode_json, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
   const insertMessage = db.prepare(`
     INSERT OR REPLACE INTO messages (id, conversation_id, user_id, role, content, provider, model, bot_id, tool_payload, created_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
   const insertMemory = db.prepare(`
-    INSERT OR REPLACE INTO memories (id, user_id, conversation_id, bot_id, ciphertext, iv, tag, confidence, category, tier, durability, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT OR REPLACE INTO memories
+      (id, user_id, conversation_id, bot_id, target_bot_id,
+       ciphertext, iv, tag, confidence, base_confidence, category, tier,
+       lifecycle, durability, source, certainty, source_message_ids,
+       evidence_lineage_known, last_reinforced_at, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   for (const conversation of snapshot.conversations) {
+    const coffee = conversation.coffee;
     insertConversation.run(
       conversation.id,
       userId,
       conversation.title,
+      coffee ? "coffee" : "sandbox",
+      coffee ? JSON.stringify(coffee.botGroupIds) : null,
+      coffee
+        ? JSON.stringify(normalizeCoffeeSessionSettings(coffee.settings))
+        : null,
+      coffee?.sessionState === "closing" || coffee?.sessionState === "complete"
+        ? coffee.sessionState
+        : "active",
+      coffee?.groupId && ownedCoffeeGroupIds.has(coffee.groupId)
+        ? coffee.groupId
+        : null,
+      coffee?.durationMinutes ?? null,
+      coffee?.presetId ?? null,
+      coffee?.topic ?? null,
+      JSON.stringify(coffee?.absentBotIds ?? []),
+      coffee?.teamsJson ?? null,
       conversation.createdAt,
       conversation.updatedAt,
     );
@@ -2986,6 +4974,7 @@ function importUserSnapshotWithinTransaction(
     for (const message of conversation.messages) {
       const providerValue =
         message.provider === "local" ||
+        message.provider === "ollama_cloud" ||
         message.provider === "openai" ||
         message.provider === "anthropic"
           ? message.provider
@@ -3023,27 +5012,553 @@ function importUserSnapshotWithinTransaction(
     }
   }
 
+  if (snapshot.debates) {
+    const sessionIds = new Set<string>();
+    const statuses = new Set([
+      "live",
+      "waiting_for_player",
+      "paused",
+      "completed",
+      "cancelled",
+      "failed",
+    ]);
+    const phases = new Set([
+      "opening",
+      "challenge",
+      "rebuttal",
+      "closing",
+      "verdict",
+    ]);
+    const playerRoles = new Set(["judge", "participant", "spectator"]);
+    const sides = new Set(["for", "against"]);
+    const insertSession = db.prepare(
+      `INSERT OR REPLACE INTO debate_sessions
+         (id, user_id, revision, status, phase, step_key, player_role,
+          player_side_id, create_idempotency_key, motion, winner_side_id,
+          session_json, error, created_at, updated_at, completed_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    );
+    for (const session of snapshot.debates.sessions) {
+      if (
+        !session?.id?.trim() ||
+        !statuses.has(session.status) ||
+        !phases.has(session.phase) ||
+        !playerRoles.has(session.playerRole) ||
+        !session.stepKey?.trim() ||
+        !session.motion?.trim()
+      ) {
+        throw new Error("Account backup contains an invalid Debate session.");
+      }
+      if (
+        session.playerSideId !== null &&
+        !sides.has(session.playerSideId)
+      ) {
+        throw new Error("Account backup contains an invalid Debate player side.");
+      }
+      if (
+        session.winnerSideId !== null &&
+        !sides.has(session.winnerSideId)
+      ) {
+        throw new Error("Account backup contains an invalid Debate winner.");
+      }
+      try {
+        JSON.parse(session.sessionJson);
+      } catch {
+        throw new Error("Account backup contains invalid Debate session JSON.");
+      }
+      insertSession.run(
+        session.id,
+        userId,
+        Math.max(1, Math.floor(session.revision || 1)),
+        session.status,
+        session.phase,
+        session.stepKey,
+        session.playerRole,
+        session.playerSideId,
+        session.createIdempotencyKey?.trim() || `backup:${session.id}`,
+        session.motion,
+        session.winnerSideId,
+        session.sessionJson,
+        session.error,
+        session.createdAt,
+        session.updatedAt,
+        session.completedAt,
+      );
+      sessionIds.add(session.id);
+    }
+    const insertEvent = db.prepare(
+      `INSERT OR REPLACE INTO debate_events
+         (id, user_id, session_id, sequence, phase, step_key, kind,
+          event_json, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    );
+    for (const event of snapshot.debates.events) {
+      if (
+        !event?.id?.trim() ||
+        !sessionIds.has(event.sessionId) ||
+        !phases.has(event.phase) ||
+        !event.stepKey?.trim() ||
+        !event.kind?.trim()
+      ) {
+        throw new Error("Account backup contains an invalid Debate event.");
+      }
+      try {
+        JSON.parse(event.eventJson);
+      } catch {
+        throw new Error("Account backup contains invalid Debate event JSON.");
+      }
+      insertEvent.run(
+        event.id,
+        userId,
+        event.sessionId,
+        Math.max(1, Math.floor(event.sequence || 1)),
+        event.phase,
+        event.stepKey,
+        event.kind,
+        event.eventJson,
+        event.createdAt,
+      );
+    }
+    const insertRecessCheckpoint = db.prepare(
+      `INSERT OR REPLACE INTO debate_recess_checkpoints
+         (session_id, user_id, source_revision, snapshot_json, created_at)
+       VALUES (?, ?, ?, ?, ?)`,
+    );
+    for (const checkpoint of snapshot.debates.recessCheckpoints ?? []) {
+      if (
+        !checkpoint?.sessionId?.trim() ||
+        !sessionIds.has(checkpoint.sessionId) ||
+        !Number.isInteger(checkpoint.sourceRevision) ||
+        checkpoint.sourceRevision < 1 ||
+        !checkpoint.createdAt?.trim()
+      ) {
+        throw new Error(
+          "Account backup contains an invalid Debate recess checkpoint.",
+        );
+      }
+      try {
+        JSON.parse(checkpoint.snapshotJson);
+      } catch {
+        throw new Error(
+          "Account backup contains invalid Debate recess checkpoint JSON.",
+        );
+      }
+      insertRecessCheckpoint.run(
+        checkpoint.sessionId,
+        userId,
+        checkpoint.sourceRevision,
+        checkpoint.snapshotJson,
+        checkpoint.createdAt,
+      );
+    }
+    const insertMysteryCase = db.prepare(
+      `INSERT OR REPLACE INTO debate_mystery_cases
+         (session_id, user_id, schema_version, generator_version, private_json,
+          content_hash, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    );
+    for (const mystery of snapshot.debates.mysteryCases ?? []) {
+      if (
+        !sessionIds.has(mystery.sessionId) ||
+        !Number.isInteger(mystery.schemaVersion) ||
+        mystery.schemaVersion < 1 ||
+        !Number.isInteger(mystery.generatorVersion) ||
+        mystery.generatorVersion < 1
+      ) {
+        throw new Error("Account backup contains an invalid private Mystery case.");
+      }
+      try { JSON.parse(mystery.privateJson); }
+      catch { throw new Error("Account backup contains invalid private Mystery JSON."); }
+      if (createHash("sha256").update(mystery.privateJson).digest("hex") !== mystery.contentHash) {
+        throw new Error("Account backup contains a corrupted private Mystery case.");
+      }
+      insertMysteryCase.run(
+        mystery.sessionId,
+        userId,
+        mystery.schemaVersion,
+        mystery.generatorVersion,
+        mystery.privateJson,
+        mystery.contentHash,
+        mystery.createdAt,
+        mystery.updatedAt,
+      );
+    }
+    const insertMysteryAction = db.prepare(
+      `INSERT OR REPLACE INTO debate_mystery_actions
+         (id, user_id, session_id, sequence, action_kind,
+          public_payload_json, occurred_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    );
+    for (const action of snapshot.debates.mysteryActions ?? []) {
+      if (!action.id?.trim() || !sessionIds.has(action.sessionId) || !Number.isInteger(action.sequence) || action.sequence < 1 || !action.actionKind?.trim()) {
+        throw new Error("Account backup contains an invalid Mystery replay action.");
+      }
+      try { JSON.parse(action.publicPayloadJson); }
+      catch { throw new Error("Account backup contains invalid Mystery replay JSON."); }
+      insertMysteryAction.run(action.id, userId, action.sessionId, action.sequence, action.actionKind, action.publicPayloadJson, action.occurredAt);
+    }
+    const insertMysteryNotebook = db.prepare(
+      `INSERT OR REPLACE INTO debate_mystery_notebooks
+         (session_id, user_id, revision, document_json,
+          pending_proposal_json, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    );
+    for (const notebook of snapshot.debates.mysteryNotebooks ?? []) {
+      if (!sessionIds.has(notebook.sessionId) || !Number.isInteger(notebook.revision) || notebook.revision < 1) {
+        throw new Error("Account backup contains an invalid Mystery notebook.");
+      }
+      try {
+        JSON.parse(notebook.documentJson);
+        if (notebook.pendingProposalJson) JSON.parse(notebook.pendingProposalJson);
+      } catch { throw new Error("Account backup contains invalid Mystery notebook JSON."); }
+      insertMysteryNotebook.run(notebook.sessionId, userId, notebook.revision, notebook.documentJson, notebook.pendingProposalJson, notebook.createdAt, notebook.updatedAt);
+    }
+    const notebookReasons = new Set(["edit", "cleanup", "undo", "import"]);
+    const insertMysteryNotebookRevision = db.prepare(
+      `INSERT OR REPLACE INTO debate_mystery_notebook_revisions
+         (id, user_id, session_id, revision, document_json, reason,
+          idempotency_key, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    );
+    for (const revision of snapshot.debates.mysteryNotebookRevisions ?? []) {
+      if (!revision.id?.trim() || !sessionIds.has(revision.sessionId) || !Number.isInteger(revision.revision) || revision.revision < 1 || !notebookReasons.has(revision.reason) || !revision.idempotencyKey?.trim()) {
+        throw new Error("Account backup contains an invalid Mystery notebook revision.");
+      }
+      try { JSON.parse(revision.documentJson); }
+      catch { throw new Error("Account backup contains invalid Mystery notebook revision JSON."); }
+      insertMysteryNotebookRevision.run(revision.id, userId, revision.sessionId, revision.revision, revision.documentJson, revision.reason, revision.idempotencyKey, revision.createdAt);
+    }
+    if (snapshot.debates.mysteryV2) {
+      importDebateMysteryV2BackupV1(
+        db,
+        userId,
+        snapshot.debates.mysteryV2,
+        sessionIds,
+      );
+    }
+    if (snapshot.debates.mysteryAssets) {
+      importDebateMysteryAssetVaultBackupV1(
+        db,
+        userId,
+        userKey,
+        snapshot.debates.mysteryAssets,
+        sessionIds,
+      );
+    }
+  }
+
+  if (snapshot.sessionNotes) {
+    const insertSessionNote = db.prepare(
+      `INSERT OR REPLACE INTO applet_session_notes
+         (user_id, surface, session_id, body, captures_json, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    );
+    for (const note of snapshot.sessionNotes) {
+      const surface = readAppletSessionNoteSurface(note?.surface);
+      const sessionId = note?.sessionId?.trim() ?? "";
+      const body = typeof note?.body === "string" ? note.body.trim() : "";
+      if (
+        !surface ||
+        !sessionId ||
+        !body ||
+        body.length > APPLET_SESSION_NOTE_MAX_CHARACTERS ||
+        !appletSessionBelongsToUser(db, userId, surface, sessionId)
+      ) {
+        continue;
+      }
+      insertSessionNote.run(
+        userId,
+        surface,
+        sessionId,
+        body,
+        JSON.stringify(backupAppletSessionNoteCaptures(note.captures)),
+        note.createdAt,
+        note.updatedAt,
+      );
+    }
+  }
+
+  if (snapshot.transcriptFrameSamples) {
+    const insertFrameSample = db.prepare(
+      `INSERT OR IGNORE INTO applet_transcript_frame_samples
+         (user_id, surface, session_id, entry_id, fps, captured_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+    );
+    for (const sample of snapshot.transcriptFrameSamples) {
+      const surface = readAppletSessionNoteSurface(sample?.surface);
+      const sessionId = sample?.sessionId?.trim() ?? "";
+      const entryId = sample?.entryId?.trim() ?? "";
+      const fps = Number(sample?.fps);
+      if (
+        !surface ||
+        !sessionId ||
+        !entryId ||
+        !Number.isInteger(fps) ||
+        fps < 1 ||
+        fps > 240 ||
+        !Number.isFinite(Date.parse(sample?.capturedAt ?? "")) ||
+        !appletSessionBelongsToUser(db, userId, surface, sessionId)
+      ) {
+        continue;
+      }
+      insertFrameSample.run(
+        userId,
+        surface,
+        sessionId,
+        entryId,
+        fps,
+        new Date(sample.capturedAt).toISOString(),
+      );
+    }
+  }
+
+  if (snapshot.focusEvents) {
+    for (const event of snapshot.focusEvents) {
+      const surface = readLiveSessionFocusSurface(event?.surface);
+      const sessionId = event?.sessionId?.trim() ?? "";
+      const transition = readLiveSessionFocusTransition(event?.transition);
+      if (!surface || !sessionId || !transition || !Number.isFinite(Date.parse(event?.occurredAt ?? "")) || !liveSessionFocusBelongsToUser(db, userId, surface, sessionId)) continue;
+      recordLiveSessionFocusEvent(db, userId, surface, sessionId, transition, event.occurredAt);
+    }
+  }
+
+  if (snapshot.presenceBeats) {
+    const surfaces = new Set([
+      "chat",
+      "zen",
+      "sandbox",
+      "coffee",
+      "signal",
+      "debate",
+    ]);
+    const triggers = new Set(["interruption", "redirect", "waiting"]);
+    const sources = new Set(["default", "custom"]);
+    const completions = new Set([
+      "playing",
+      "completed",
+      "interrupted",
+      "failed",
+    ]);
+    const insertPresenceBeat = db.prepare(
+      `INSERT OR REPLACE INTO bot_presence_beats
+         (id, user_id, surface, session_id, response_id, speaker_bot_id,
+          speaker_name, trigger, source, text, heard_character_count,
+          completion, playback_started_at_ms, playback_ended_at_ms,
+          created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    );
+    for (const beat of snapshot.presenceBeats) {
+      const heardCharacterCount = Math.max(
+        0,
+        Math.min(
+          Array.from(beat.text ?? "").length,
+          Math.floor(Number(beat.heardCharacterCount) || 0),
+        ),
+      );
+      if (
+        !beat?.id?.trim() ||
+        !beat.sessionId?.trim() ||
+        !beat.responseId?.trim() ||
+        !beat.speakerBotId?.trim() ||
+        !beat.speakerName?.trim() ||
+        !surfaces.has(beat.surface) ||
+        !triggers.has(beat.trigger) ||
+        !sources.has(beat.source) ||
+        !completions.has(beat.completion) ||
+        typeof beat.text !== "string" ||
+        !Number.isFinite(beat.playbackStartedAtMs)
+      ) {
+        throw new Error("Account backup contains an invalid response cue.");
+      }
+      insertPresenceBeat.run(
+        beat.id,
+        userId,
+        beat.surface,
+        beat.sessionId,
+        beat.responseId,
+        beat.speakerBotId,
+        beat.speakerName,
+        beat.trigger,
+        beat.source,
+        beat.text,
+        heardCharacterCount,
+        beat.completion,
+        beat.playbackStartedAtMs,
+        Number.isFinite(beat.playbackEndedAtMs)
+          ? beat.playbackEndedAtMs
+          : null,
+        beat.createdAt,
+        beat.updatedAt,
+      );
+    }
+  }
+
+  if (snapshot.replays) {
+    const recordingIds = new Set<string>();
+    for (const recording of snapshot.replays.recordings) {
+      const sourceExists = recording.surface === "signal"
+        ? db
+            .prepare("SELECT id FROM botcast_episodes WHERE id = ? AND user_id = ?")
+            .get(recording.sourceId, userId)
+        : db
+            .prepare("SELECT id FROM conversations WHERE id = ? AND user_id = ?")
+            .get(recording.sourceId, userId);
+      if (!sourceExists || !recording.manifestJson.trim()) continue;
+      db.prepare(
+        `INSERT OR REPLACE INTO replay_recordings
+          (id, user_id, surface, source_id, status, progress,
+           manifest_version, manifest_json, manifest_hash, timeline_json,
+           transcript_vtt, transcript_markdown, width, height, fps,
+           created_at, updated_at)
+         VALUES (?, ?, ?, ?, 'queued', 0, ?, ?, ?, ?, ?, ?, 1920, 1080, 30, ?, ?)`,
+      ).run(
+        recording.id,
+        userId,
+        recording.surface,
+        recording.sourceId,
+        Math.max(1, Math.round(recording.manifestVersion || 1)),
+        recording.manifestJson,
+        recording.manifestHash,
+        recording.timelineJson,
+        recording.transcriptVtt,
+        recording.transcriptMarkdown,
+        recording.createdAt,
+        recording.updatedAt,
+      );
+      recordingIds.add(recording.id);
+    }
+    for (const take of snapshot.replays.voiceTakes) {
+      if (!recordingIds.has(take.recordingId) || !take.snapshotJson.trim()) continue;
+      db.prepare(
+        `INSERT OR REPLACE INTO replay_voice_takes
+          (id, user_id, recording_id, source_key, source_message_id,
+           source_event_id, snapshot_json, status, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, 'planned', ?, ?)`,
+      ).run(
+        take.id,
+        userId,
+        take.recordingId,
+        take.sourceKey,
+        take.sourceMessageId,
+        take.sourceEventId,
+        take.snapshotJson,
+        take.createdAt,
+        take.updatedAt,
+      );
+    }
+  }
+
+  if (Array.isArray(snapshot.actionSfxPacks)) {
+    db.prepare("DELETE FROM action_sfx_pack_clips WHERE user_id = ?").run(
+      userId,
+    );
+    restoreActionSfxPackClipsFromBackup(db, userId, snapshot.actionSfxPacks);
+  }
+
+  if (Array.isArray(snapshot.englishPacingProfiles)) {
+    db.prepare("DELETE FROM english_pacing_profiles WHERE user_id = ?").run(
+      userId,
+    );
+    restoreEnglishPacingProfilesFromBackup(
+      db,
+      userId,
+      snapshot.englishPacingProfiles,
+    );
+  }
+
+  if (Array.isArray(snapshot.premiumVoiceLibrary)) {
+    restorePremiumVoiceLibrary(db, userId, snapshot.premiumVoiceLibrary);
+  }
+
   for (const memory of snapshot.memories) {
     const encrypted = encryptJson(memory.payload, userKey);
+    const tier = memory.tier ??
+      normalizeMemoryTier(
+        undefined,
+        memory.confidence,
+        memory.confidence,
+        memory.durability ?? 0.5,
+      );
+    const lifecycle: MemoryLifecycle =
+      memory.lifecycle === "derived" || memory.source === "inferred"
+        ? "derived"
+        : memory.lifecycle === "long_term" || tier === "long_term"
+          ? "long_term"
+          : "short_term";
     insertMemory.run(
       memory.id,
       userId,
       memory.conversationId ?? null,
       memory.botId ?? null,
+      memory.targetBotId ?? null,
       encrypted.ciphertext,
       encrypted.iv,
       encrypted.tag,
       memory.confidence,
+      memory.baseConfidence ?? memory.confidence,
       memory.category ?? "user",
-      memory.tier ??
-        normalizeMemoryTier(
-          undefined,
-          memory.confidence,
-          memory.confidence,
-          memory.durability ?? 0.5,
-        ),
+      lifecycle === "derived" ? "short_term" : tier,
+      lifecycle,
       memory.durability ?? 0.5,
+      lifecycle === "derived" ? "inferred" : (memory.source ?? "direct"),
+      memory.certainty ?? null,
+      JSON.stringify(
+        Array.isArray(memory.sourceMessageIds)
+          ? memory.sourceMessageIds.filter(
+              (id): id is string => typeof id === "string" && id.length > 0,
+            )
+          : [],
+      ),
+      memory.evidenceLineageKnown ? 1 : 0,
+      memory.lastReinforcedAt ?? memory.createdAt,
       memory.createdAt,
+    );
+  }
+
+  const importedMemoryIds = new Set(snapshot.memories.map((memory) => memory.id));
+  const insertEvidenceLink = db.prepare(
+    `INSERT OR IGNORE INTO memory_evidence_links
+      (user_id, inferred_memory_id, evidence_memory_id, created_at)
+     VALUES (?, ?, ?, ?)`,
+  );
+  for (const memory of snapshot.memories) {
+    if (!importedMemoryIds.has(memory.id)) continue;
+    let restoredEvidence = false;
+    for (const evidenceId of memory.evidenceMemoryIds ?? []) {
+      if (!importedMemoryIds.has(evidenceId) || evidenceId === memory.id) continue;
+      insertEvidenceLink.run(
+        userId,
+        memory.id,
+        evidenceId,
+        memory.createdAt,
+      );
+      restoredEvidence = true;
+    }
+    if (restoredEvidence) {
+      db.prepare(
+        "UPDATE memories SET evidence_lineage_known = 1 WHERE id = ? AND user_id = ?",
+      ).run(memory.id, userId);
+    }
+  }
+
+  const insertMemoryReceipt = db.prepare(
+    `INSERT OR REPLACE INTO memory_acquisition_receipts
+      (id, user_id, memory_id, learner_bot_id, target_bot_id,
+       conversation_id, kind, created_at, read_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  );
+  for (const receipt of snapshot.memoryReceipts ?? []) {
+    if (!importedMemoryIds.has(receipt.memoryId)) continue;
+    insertMemoryReceipt.run(
+      receipt.id,
+      userId,
+      receipt.memoryId,
+      receipt.learnerBotId ?? null,
+      receipt.targetBotId ?? null,
+      receipt.conversationId ?? null,
+      receipt.kind === "bot_relation" ? "bot_relation" : "player_memory",
+      receipt.createdAt,
+      receipt.readAt ?? null,
     );
   }
 }

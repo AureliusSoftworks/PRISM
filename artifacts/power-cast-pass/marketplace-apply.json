@@ -1,0 +1,163 @@
+{
+  "mode": "apply",
+  "database": "/Users/jared/Library/Application Support/com.localai.prism-desktop/localai.db",
+  "theme": {
+    "id": "power-collection",
+    "name": "Power Collection",
+    "botCount": 16
+  },
+  "roster": [
+    {
+      "id": "silent-jack",
+      "name": "Silent Simon",
+      "power": "Mute",
+      "effects": [
+        "mute"
+      ],
+      "changed": true
+    },
+    {
+      "id": "lazy-cameron",
+      "name": "Lazy Lauren",
+      "power": "Lazy",
+      "effects": [
+        "response_budget"
+      ],
+      "changed": true
+    },
+    {
+      "id": "tiny-bill",
+      "name": "Tiny Tina",
+      "power": "Tiny",
+      "effects": [
+        "avatar_scale"
+      ],
+      "changed": true
+    },
+    {
+      "id": "interrupting-tom",
+      "name": "Heckling Hector",
+      "power": "Interrupting",
+      "effects": [
+        "interruption",
+        "action_bias",
+        "turn_gravity",
+        "response_bond"
+      ],
+      "changed": true
+    },
+    {
+      "id": "copycat-calvin",
+      "name": "Copycat Calvin",
+      "power": "Copycat",
+      "effects": [
+        "speech_copy"
+      ],
+      "changed": true
+    },
+    {
+      "id": "joyful-nora",
+      "name": "Merry Martin",
+      "power": "Radiant Joy",
+      "effects": [
+        "mood_boost"
+      ],
+      "changed": true
+    },
+    {
+      "id": "crazy-brenda",
+      "name": "Crazy Craig",
+      "power": "Existential Crisis",
+      "effects": [
+        "topic_gravity"
+      ],
+      "changed": true
+    },
+    {
+      "id": "mumbling-jim",
+      "name": "Nonsense Nora",
+      "power": "Mumbling",
+      "effects": [
+        "speech_obfuscation"
+      ],
+      "changed": true
+    },
+    {
+      "id": "obsessed-kevin",
+      "name": "Fixated Felix",
+      "power": "Obsessed",
+      "effects": [
+        "addressed_fandom"
+      ],
+      "changed": true
+    },
+    {
+      "id": "identity-crisis-ian",
+      "name": "Confusion Collin",
+      "power": "Identity Crisis",
+      "effects": [
+        "identity_mirror"
+      ],
+      "changed": true
+    },
+    {
+      "id": "sad-sally",
+      "name": "Sad Sally",
+      "power": "Sad",
+      "effects": [
+        "mood_drain"
+      ],
+      "changed": true
+    },
+    {
+      "id": "forgetful-freddie",
+      "name": "Forgetful Forrest",
+      "power": "Short-Term Amnesia",
+      "effects": [
+        "eternal_introduction",
+        "social_influence"
+      ],
+      "changed": true
+    },
+    {
+      "id": "alias-avery",
+      "name": "Alias Allen",
+      "power": "John/Jane Doe",
+      "effects": [
+        "false_name"
+      ],
+      "changed": true
+    },
+    {
+      "id": "shapeshifter-sam",
+      "name": "Shapeshifter Shannon",
+      "power": "Shapeshifter",
+      "effects": [
+        "identity_shapeshift"
+      ],
+      "changed": true
+    },
+    {
+      "id": "following-jackson",
+      "name": "Following Jackson",
+      "power": "Gullible",
+      "effects": [
+        "credulity"
+      ],
+      "changed": true
+    },
+    {
+      "id": "fibbing-phil",
+      "name": "Fibbing Phil",
+      "power": "Anti-Truth",
+      "effects": [
+        "anti_truth"
+      ],
+      "changed": true
+    }
+  ],
+  "changedBundles": 16,
+  "removedBundles": [],
+  "manifestChanged": true,
+  "backup": "/Users/jared/Developer/Web Apps/PRISM/artifacts/power-cast-pass/marketplace-backup-20260806T185926Z"
+}

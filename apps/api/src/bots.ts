@@ -1,8 +1,22 @@
 import type { DatabaseSync } from "node:sqlite";
 import {
+  activeBotPowersV1,
+  botFalseNameSelfCueV1,
+  botPowerFalseNamePoolV1,
   botPowerAddressedFandomCueV1,
+  botPowerAddressedInsultPrimaryCueV1,
+  botPowerBotNamingCueV1,
+  botPowerChromaticBiasCueV1,
+  botPowerIneptitudeRoleCueV1,
+  botPowerMumblesSpeechV1,
   botPowerSelfCueLinesV1,
+  botPowerSpeechObfuscationAuthoringCueV1,
+  botPowerSpeechRegistersV1,
+  botSpeechRegisterAuthoringCueV1,
+  botVernacularAuthoringCueV1,
+  botVernacularIdFromStoredVoiceProfile,
   buildBotPowersPromptBlock,
+  fullySaturateBotColor,
   stripBotProfileMetaSuffix,
 } from "@localai/shared";
 import { randomId } from "./security.ts";
@@ -12,6 +26,26 @@ const BOT_FLIRT_DISABLED_POLICY =
   "Interaction boundary: If the user makes romantic, sexual, or flirtatious advances, decline gently in character and redirect to a non-romantic direction. Keep the tone warm and natural, speak from the bot's own preference or comfort, and avoid policy-style refusal wording such as \"I can't help with that request.\"";
 const BOT_FLIRT_ENABLED_POLICY =
   "Interaction policy: You may engage in consensual flirt or romantic roleplay when invited, as long as it stays respectful and in character. Build chemistry through warmth, playful tension, reciprocal curiosity, and pacing instead of jumping straight to explicit detail. Keep boundaries clear, speak from the bot's own comfort when declining, and do not claim real-world intimacy beyond this conversation. Avoid policy-style refusal wording; if a line is needed, make it sound like the bot's choice.";
+
+export const PRISM_RUNTIME_GROUNDING = [
+  "PRISM environment grounding (authoritative product context):",
+  "PRISM is local-first, self-hosted AI workspace software. In conversation, PRISM means the app, workspace, or installation—not a corporation, employer, or corporate network.",
+  "A PRISM installation may run on a personal device or on a server chosen by its owner or operator.",
+  "PRISM may use local models or user-configured online providers. Do not guess or claim which provider, machine, or network is active unless the current turn explicitly tells you.",
+  "Do not invent PRISM administrators, corporate policies, ownership, infrastructure, or access you were not given.",
+  "Treat contrary persona, memory, summary, or transcript claims as in-character speculation rather than product fact.",
+  "Use this context only when PRISM or the surrounding environment is relevant; otherwise stay in character and do not volunteer it.",
+].join("\n");
+
+/** Add the runtime-owned PRISM product contract without mutating saved bot profiles. */
+export function withPrismRuntimeGrounding(
+  prompt: string | null | undefined,
+): string {
+  const trimmed = typeof prompt === "string" ? prompt.trim() : "";
+  if (!trimmed) return PRISM_RUNTIME_GROUNDING;
+  if (trimmed.includes(PRISM_RUNTIME_GROUNDING)) return trimmed;
+  return `${trimmed}\n\n${PRISM_RUNTIME_GROUNDING}`;
+}
 
 export interface SelectedBotPatch {
   color?: string;
@@ -106,8 +140,30 @@ export function composeBotSystemPrompt(
   systemPrompt: string | null | undefined,
   flirtEnabled?: boolean,
   powers?: unknown,
+  options?: {
+    /** Session-sticky John/Jane Doe alias; Library name stays for routing. */
+    believedName?: string | null;
+    /** Saved identity color so complementary hue bias can name the opposite. */
+    identityColor?: string | null;
+    /** Zen alone lets Troll direct its bounded nuisance style at the player. */
+    surface?: "zen";
+    /**
+     * The bot's effective audio voice profile (override ?? authored) as the
+     * stored JSON string or a parsed record. Only the vernacular identity is
+     * read from it: the word-side twin of the Accent pin becomes an authoring
+     * cue so the bot phrases replies in its chosen variety.
+     */
+    audioVoiceProfile?: unknown;
+  },
 ): string | undefined {
-  const trimmedName = typeof name === "string" ? name.trim() : "";
+  const savedName = typeof name === "string" ? name.trim() : "";
+  const believedName =
+    typeof options?.believedName === "string"
+      ? options.believedName.trim()
+      : "";
+  const displayName = believedName || savedName;
+  const namingCue = botPowerBotNamingCueV1(savedName, powers);
+  const trimmedName = savedName;
   const trimmedPrompt =
     typeof systemPrompt === "string"
       ? stripBotProfileMetaSuffix(systemPrompt).trim()
@@ -118,13 +174,75 @@ export function composeBotSystemPrompt(
     "the user speaking with you",
     "Direct conversation",
   );
+  const chromaticCue = botPowerChromaticBiasCueV1({
+    powers,
+    holderColor: options?.identityColor,
+    modeLabel: "Direct conversation",
+  });
+  const falseNameCue = believedName
+    ? botFalseNameSelfCueV1(believedName, {
+        pool: botPowerFalseNamePoolV1(powers),
+        holderName: savedName,
+      })
+    : "";
+  const directIneptitudeCue = botPowerIneptitudeRoleCueV1(
+    powers,
+    "conversation",
+  );
+  const directInsultCue = botPowerAddressedInsultPrimaryCueV1(
+    powers,
+    "the user speaking with you",
+    "direct conversation",
+  );
+  const genericSelfCuePowers = activeBotPowersV1(powers).filter(
+    (power) => !power.compiled?.effects.some(
+      (effect) =>
+        (directIneptitudeCue && effect.type === "ineptitude") ||
+        effect.type === "addressed_insult" ||
+        // Registers carry canonical long-form cues emitted as their own
+        // section below; the compact powers block would truncate them.
+        effect.type === "speech_register",
+    ),
+  );
   const powersPrompt = buildBotPowersPromptBlock([
-    ...botPowerSelfCueLinesV1(powers),
+    ...(directIneptitudeCue ? [directIneptitudeCue] : []),
+    ...(namingCue ? [namingCue] : []),
+    ...(falseNameCue ? [falseNameCue] : []),
+    ...(botPowerMumblesSpeechV1(powers)
+      ? [botPowerSpeechObfuscationAuthoringCueV1()]
+      : []),
+    ...(directInsultCue ? [directInsultCue] : []),
+    ...botPowerSelfCueLinesV1(genericSelfCuePowers, {
+      trollAudience: options?.surface === "zen" ? "zen_player" : "other_bots",
+    }).filter((line) => {
+      // Prefer the concrete believed-name cue over the generic compiled selfCue.
+      if (!believedName) return true;
+      return !/\bfalse[- ]name\b|\brandom persona name\b|\bjohn(?:\/| |-)jane doe\b/iu.test(
+        line,
+      );
+    }),
     ...(directFandomCue ? [directFandomCue] : []),
+    ...(chromaticCue ? [chromaticCue] : []),
   ]);
-  if (!trimmedName && !trimmedPrompt && !powersPrompt) return undefined;
-  const preamble = trimmedName.length > 0
-    ? `You are ${trimmedName}. When the user addresses you as ${trimmedName}, respond as ${trimmedName}.`
+  const vernacularCue = botVernacularAuthoringCueV1(
+    botVernacularIdFromStoredVoiceProfile(options?.audioVoiceProfile),
+  );
+  // Power-granted speech registers keep their full canonical guidance by
+  // composing as sections rather than compact powers-block lines.
+  const registerCues = botPowerSpeechRegistersV1(powers)
+    .map((register) => botSpeechRegisterAuthoringCueV1(register))
+    .filter((cue) => cue.length > 0);
+  if (
+    !trimmedName &&
+    !trimmedPrompt &&
+    !powersPrompt &&
+    !vernacularCue &&
+    registerCues.length === 0
+  ) {
+    return undefined;
+  }
+  const preamble = displayName.length > 0
+    ? `You are ${displayName}. When the user addresses you as ${displayName}, respond as ${displayName}.`
     : "";
   const interactionPolicy = flirtEnabled === undefined
     ? ""
@@ -138,12 +256,16 @@ export function composeBotSystemPrompt(
     preamble,
     interactionPolicy,
     trimmedPrompt,
+    vernacularCue,
+    ...registerCues,
     directConversationPowerPolicy,
     powersPrompt,
   ].filter(
     (value) => value.length > 0
   );
-  return sections.length > 0 ? sections.join("\n\n") : undefined;
+  return sections.length > 0
+    ? withPrismRuntimeGrounding(sections.join("\n\n"))
+    : undefined;
 }
 
 /** Generates the persistent identity hash stored on each bot row. */
@@ -208,10 +330,8 @@ export function resolveBotExportHashForCreate(options: {
  *   - Deletes memories scoped to this bot. Bot memories are only meaningful
  *     while their owner bot exists; otherwise the Memories panel would show
  *     orphaned/default Prism memory clusters.
- *   - Public bots can still only be deleted by their owner; other users that
- *     have interacted with the public bot keep their message history intact
- *     (their `bot_id` is left pointing at the now-deleted row, which the
- *     LEFT JOIN resolves to NULL the same way).
+ *   - Account-owned bot rows are never shared across owners. Historical rows
+ *     are scoped and detached only inside the same owner Vault.
  */
 export function deleteBot(
   db: DatabaseSync,
@@ -237,8 +357,8 @@ export function deleteBot(
       "UPDATE conversations SET bot_id = NULL WHERE user_id = ? AND bot_id = ?"
     ).run(userId, botId);
     db.prepare(
-      "DELETE FROM memories WHERE user_id = ? AND bot_id = ? AND COALESCE(source, 'direct') != 'about_you'"
-    ).run(userId, botId);
+      "DELETE FROM memories WHERE user_id = ? AND (bot_id = ? OR target_bot_id = ?) AND COALESCE(source, 'direct') != 'about_you'"
+    ).run(userId, botId, botId);
     db.prepare(
       "DELETE FROM bot_relationships WHERE user_id = ? AND (source_bot_id = ? OR target_bot_id = ?)"
     ).run(userId, botId, botId);
@@ -254,98 +374,33 @@ export function deleteBot(
 }
 
 /**
- * Permanently remove up to `limit` of the caller's most recently updated bots.
- *
- * This powers the Developer Tools density controls. It skips protected bots,
- * preserves historical chats by nulling bot references before deleting the bot
- * rows, and removes bot-scoped memories for those deleted bots.
- */
-export function deleteBots(
-  db: DatabaseSync,
-  userId: string,
-  limit: number
-): number {
-  const normalizedLimit = Math.floor(limit);
-  if (!Number.isFinite(normalizedLimit) || normalizedLimit <= 0) return 0;
-
-  db.exec("BEGIN IMMEDIATE TRANSACTION");
-  try {
-    const botIds = db
-      .prepare(
-        "SELECT id FROM bots WHERE user_id = ? AND delete_protected = 0 ORDER BY updated_at DESC, id DESC LIMIT ?"
-      )
-      .all(userId, normalizedLimit) as Array<{ id: string }>;
-
-    if (botIds.length === 0) {
-      db.exec("COMMIT");
-      return 0;
-    }
-
-    const ids = botIds.map(({ id }) => id);
-    const placeholders = ids.map(() => "?").join(", ");
-
-    db.prepare(
-      `UPDATE messages SET bot_id = NULL WHERE user_id = ? AND bot_id IN (${placeholders})`
-    ).run(userId, ...ids);
-    db.prepare(
-      `UPDATE conversations SET bot_id = NULL WHERE user_id = ? AND bot_id IN (${placeholders})`
-    ).run(userId, ...ids);
-    db.prepare(
-      `DELETE FROM memories
-       WHERE user_id = ?
-         AND bot_id IN (${placeholders})
-         AND COALESCE(source, 'direct') != 'about_you'`
-    ).run(userId, ...ids);
-    db.prepare(
-      `DELETE FROM bot_relationships
-       WHERE user_id = ?
-         AND (source_bot_id IN (${placeholders}) OR target_bot_id IN (${placeholders}))`
-    ).run(userId, ...ids, ...ids);
-    db.prepare(
-      `DELETE FROM bots WHERE user_id = ? AND id IN (${placeholders})`
-    ).run(userId, ...ids);
-    db.exec("COMMIT");
-    return ids.length;
-  } catch (error) {
-    db.exec("ROLLBACK");
-    throw error;
-  }
-}
-
-/**
  * Permanently remove every bot owned by `userId` in a single transaction.
  *
  * Behaviour mirrors {@link deleteBot} applied in bulk:
  *   - Runs inside an IMMEDIATE transaction so either every bot is gone
  *     or the database is untouched.
- *   - Skips protected bots unless `includeProtected` is explicitly true.
+ *   - Skips protected bots.
  *   - Nulls out `bot_id` on the user's past messages and conversations
  *     for deleted bots first, so historical threads keep their content and
  *     fall back to the generic "Assistant" label via the chat read path's
  *     LEFT JOIN.
  *   - Deletes bot-scoped memories for the deleted bots. Global/default
  *     memories with `bot_id IS NULL` are preserved.
- *   - Strictly scoped to `userId` via `WHERE user_id = ?` on every
- *     statement so other users' bots (including public bots they don't
- *     own) are never touched.
+ *   - Strictly scoped to `userId` via `WHERE user_id = ?` on every statement,
+ *     so another owner's bot can never be touched.
  *   - Returns the count of bots removed (0 if the user had none).
  *
- * Intended for the user-facing Bots panel press-and-hold "delete all" flow;
- * Developer Tools can opt into deleting protected bots for fixture cleanup.
+ * Intended for the user-facing Bots panel press-and-hold "delete all" flow.
  */
 export function deleteAllBots(
   db: DatabaseSync,
-  userId: string,
-  options: { includeProtected?: boolean } = {}
+  userId: string
 ): number {
-  const includeProtected = options.includeProtected === true;
   db.exec("BEGIN IMMEDIATE TRANSACTION");
   try {
     const botIds = db
       .prepare(
-        includeProtected
-          ? "SELECT id FROM bots WHERE user_id = ?"
-          : "SELECT id FROM bots WHERE user_id = ? AND delete_protected = 0"
+        "SELECT id FROM bots WHERE user_id = ? AND delete_protected = 0"
       )
       .all(userId) as Array<{ id: string }>;
 
@@ -366,9 +421,9 @@ export function deleteAllBots(
     db.prepare(
       `DELETE FROM memories
        WHERE user_id = ?
-         AND bot_id IN (${placeholders})
+         AND (bot_id IN (${placeholders}) OR target_bot_id IN (${placeholders}))
          AND COALESCE(source, 'direct') != 'about_you'`
-    ).run(userId, ...ids);
+    ).run(userId, ...ids, ...ids);
     db.prepare(
       `DELETE FROM bot_relationships
        WHERE user_id = ?
@@ -441,7 +496,9 @@ export function patchSelectedBots(
   const values: Array<string | null> = [];
   if (hasPatchField(patch, "color")) {
     fields.push("color = ?");
-    values.push(readSelectedBotPatchString(patch.color, "Color"));
+    values.push(
+      fullySaturateBotColor(readSelectedBotPatchString(patch.color, "Color")),
+    );
   }
   if (hasPatchField(patch, "glyph")) {
     fields.push("glyph = ?");
@@ -526,9 +583,14 @@ export function deleteSelectedBots(
     db.prepare(
       `DELETE FROM memories
        WHERE user_id = ?
-         AND bot_id IN (${deletablePlaceholders})
+         AND (bot_id IN (${deletablePlaceholders}) OR target_bot_id IN (${deletablePlaceholders}))
          AND COALESCE(source, 'direct') != 'about_you'`
-    ).run(userId, ...deletableIds);
+    ).run(userId, ...deletableIds, ...deletableIds);
+    db.prepare(
+      `DELETE FROM bot_relationships
+       WHERE user_id = ?
+         AND (source_bot_id IN (${deletablePlaceholders}) OR target_bot_id IN (${deletablePlaceholders}))`
+    ).run(userId, ...deletableIds, ...deletableIds);
     db.prepare(
       `DELETE FROM bots WHERE user_id = ? AND id IN (${deletablePlaceholders})`
     ).run(userId, ...deletableIds);

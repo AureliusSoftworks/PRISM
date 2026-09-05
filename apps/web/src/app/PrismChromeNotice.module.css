@@ -1,0 +1,199 @@
+.viewport {
+  position: fixed;
+  top: calc(
+    var(--app-shell-top-nav-height, var(--app-navbar-height, 66px)) - 1px
+  );
+  left: 50%;
+  z-index: 880;
+  display: grid;
+  width: min(620px, calc(100vw - 24px));
+  gap: 4px;
+  pointer-events: none;
+  transform: translateX(-50%);
+}
+
+.viewport[data-placement="inline"] {
+  position: relative;
+  inset: auto;
+  z-index: auto;
+  width: 100%;
+  transform: none;
+}
+
+.notice {
+  --notice-accent: var(--accent, var(--botcast-accent, #7b5cff));
+  --notice-ink: var(--fg, var(--botcast-ink, #f7f5fc));
+  --notice-muted: var(--fg-muted, var(--botcast-muted, #aaa5b6));
+  --notice-line: var(--line, var(--botcast-line, rgba(255, 255, 255, 0.12)));
+  --notice-surface: var(--bg-surface, var(--botcast-chrome, #11121a));
+  box-sizing: border-box;
+  min-width: 0;
+  min-height: 38px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--notice-accent) 28%, var(--notice-line));
+  border-top-color: color-mix(in srgb, var(--notice-accent) 36%, var(--notice-line));
+  border-radius: 0 0 11px 11px;
+  padding: 5px 7px 5px 11px;
+  color: var(--notice-ink);
+  background:
+    linear-gradient(
+      90deg,
+      color-mix(in srgb, var(--notice-accent) 8%, var(--notice-surface)),
+      color-mix(in srgb, var(--notice-surface) 96%, transparent)
+    );
+  box-shadow:
+    0 10px 24px rgba(0, 0, 0, 0.22),
+    inset 0 1px 0 color-mix(in srgb, #ffffff 7%, transparent);
+  backdrop-filter: blur(18px) saturate(1.08);
+  -webkit-backdrop-filter: blur(18px) saturate(1.08);
+  pointer-events: auto;
+  animation: prismChromeNoticeIn 180ms cubic-bezier(0.2, 0.82, 0.2, 1) both;
+}
+
+.viewport[data-placement="inline"] .notice {
+  border-top-color: color-mix(in srgb, var(--notice-accent) 28%, var(--notice-line));
+  border-radius: 10px;
+  box-shadow:
+    0 8px 20px rgba(0, 0, 0, 0.16),
+    inset 0 1px 0 color-mix(in srgb, #ffffff 6%, transparent);
+}
+
+.notice[data-tone="success"] {
+  --notice-accent: var(--prism-s, #2fd3e3);
+}
+
+.notice[data-tone="warning"] {
+  --notice-accent: var(--prism-r, #ff9f1c);
+}
+
+.notice[data-tone="error"] {
+  --notice-accent: var(--prism-p, #ff4d6d);
+}
+
+.notice[data-tone="memory"] {
+  --notice-accent: var(--prism-m, var(--accent, #7b5cff));
+}
+
+.marker {
+  flex: 0 0 auto;
+  width: 2px;
+  height: 18px;
+  border-radius: 999px;
+  background: var(--notice-accent);
+  box-shadow: 0 0 10px color-mix(in srgb, var(--notice-accent) 58%, transparent);
+}
+
+.copy {
+  min-width: 0;
+  display: flex;
+  flex: 1 1 auto;
+  align-items: baseline;
+  gap: 7px;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.label {
+  flex: 0 0 auto;
+  color: color-mix(in srgb, var(--notice-accent) 72%, var(--notice-ink));
+  font: 760 0.67rem/1 system-ui, sans-serif;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+.message {
+  min-width: 0;
+  overflow: hidden;
+  color: color-mix(in srgb, var(--notice-ink) 82%, var(--notice-muted));
+  font: 570 0.74rem/1.2 system-ui, sans-serif;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.action,
+.dismiss {
+  flex: 0 0 auto;
+  border: 0;
+  color: color-mix(in srgb, var(--notice-accent) 70%, var(--notice-ink));
+  background: transparent;
+  cursor: pointer;
+}
+
+.action {
+  min-height: 26px;
+  border-radius: 7px;
+  padding: 0 8px;
+  font: 720 0.66rem/1 system-ui, sans-serif;
+  letter-spacing: 0.02em;
+}
+
+.dismiss {
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  padding: 0;
+  color: var(--notice-muted);
+  font: 500 1rem/1 system-ui, sans-serif;
+}
+
+.action:hover,
+.action:focus-visible,
+.dismiss:hover,
+.dismiss:focus-visible {
+  color: var(--notice-ink);
+  background: color-mix(in srgb, var(--notice-accent) 12%, transparent);
+  outline: none;
+}
+
+.action:focus-visible,
+.dismiss:focus-visible {
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--notice-accent) 62%, transparent);
+}
+
+.action:disabled {
+  opacity: 0.46;
+  cursor: not-allowed;
+}
+
+@keyframes prismChromeNoticeIn {
+  from {
+    opacity: 0;
+    transform: translateY(-5px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (max-width: 640px) {
+  .viewport {
+    width: calc(100vw - 16px);
+  }
+
+  .notice {
+    min-height: 36px;
+    padding-left: 9px;
+  }
+
+  .copy {
+    gap: 5px;
+  }
+
+  .label {
+    max-width: 28vw;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .notice {
+    animation: none;
+  }
+}

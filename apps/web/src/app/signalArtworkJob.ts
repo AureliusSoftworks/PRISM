@@ -89,3 +89,15 @@ export function signalArtworkJobHeadline(
   }
   return "Preparing show artwork";
 }
+
+export function signalArtworkJobSoftSynthesisCount(
+  job: SignalArtworkJobSnapshot,
+  activeAssetCount: number,
+  queuedAssetCount: number,
+): number {
+  if (signalArtworkJobIsActive(job)) {
+    return Math.max(1, activeAssetCount + queuedAssetCount);
+  }
+  if (job.status === "completed") return 0;
+  return 1;
+}

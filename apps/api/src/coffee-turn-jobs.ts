@@ -1,12 +1,15 @@
 import { randomId } from "./security.ts";
 import type {
   CoffeeTurnJobPhase,
+  CoffeeTurnJobRetryMetadataV1,
   CoffeeTurnJobStatus,
   CoffeeTurnResponse,
+  CoffeeTurnModelSelectionKind,
   ReasoningEffort,
 } from "@localai/shared";
+import { coffeeTurnJobFailureV1 } from "./coffee-turn-failure.ts";
 
-const COFFEE_TURN_JOB_TTL_MS = 5 * 60_000;
+export const COFFEE_TURN_JOB_TTL_MS = 12 * 60_000;
 
 type InternalCoffeeTurnJob = CoffeeTurnJobStatus & {
   userId: string;
@@ -18,6 +21,17 @@ const jobs = new Map<string, InternalCoffeeTurnJob>();
 
 function isTerminalCoffeeTurnPhase(phase: CoffeeTurnJobPhase): boolean {
   return phase === "completed" || phase === "interrupted" || phase === "stale" || phase === "failed";
+}
+
+/**
+ * Whether a bot is still choosing or holding the floor. Only these phases may
+ * hold the table: by `voicing` the response already exists and everything left
+ * is client-owned playback. Counting playback here turns any reveal the client
+ * never finishes — an interrupted line, a stalled tab, a dropped callback —
+ * into a table that generates nothing until the job's full TTL elapses.
+ */
+function coffeeTurnJobHoldsFloor(phase: CoffeeTurnJobPhase): boolean {
+  return phase === "routing" || phase === "thinking";
 }
 
 function nowIso(): string {
@@ -34,6 +48,8 @@ function publicStatus(job: InternalCoffeeTurnJob): CoffeeTurnJobStatus {
     updatedAt: job.updatedAt,
     interruptEligibleAt: job.interruptEligibleAt,
     ...(job.response ? { response: job.response } : {}),
+    ...(job.failure ? { failure: job.failure } : {}),
+    ...(job.retry ? { retry: job.retry } : {}),
     ...(job.error ? { error: job.error } : {}),
   };
 }
@@ -62,7 +78,11 @@ export function startCoffeeTurnJob(args: {
    * never cancel a response already being prepared for the player. */
   supersedeExisting?: boolean;
   effort?: ReasoningEffort | null;
-  /** Test and embedding override; production jobs use the five-minute default. */
+  selectionKind?: CoffeeTurnModelSelectionKind;
+  retry?: CoffeeTurnJobRetryMetadataV1;
+  latestMessageCursor?: string | null;
+  getLatestMessageCursor?: () => string | null;
+  /** Test and embedding override; production jobs outlive bounded AUTO recovery. */
   ttlMs?: number;
   run: (context: {
     signal: AbortSignal;
@@ -87,6 +107,7 @@ export function startCoffeeTurnJob(args: {
     startedAt,
     updatedAt: startedAt,
     interruptEligibleAt: null,
+    ...(args.retry ? { retry: args.retry } : {}),
     controller,
     expiresAtMs: Date.now() + (args.ttlMs ?? COFFEE_TURN_JOB_TTL_MS),
   };
@@ -113,6 +134,14 @@ export function startCoffeeTurnJob(args: {
     (error: unknown) => {
       if (job.phase === "interrupted" || controller.signal.aborted) return;
       job.error = error instanceof Error ? error.message : "Coffee turn failed.";
+      job.failure = coffeeTurnJobFailureV1({
+        error,
+        selectionKind: args.selectionKind ?? "fixed",
+        speakerBotId: job.speakerBotId,
+        latestMessageCursor:
+          args.getLatestMessageCursor?.() ?? args.latestMessageCursor ?? null,
+        retry: args.retry ?? null,
+      });
       setPhase("failed");
     }
   );
@@ -134,7 +163,7 @@ export function getActiveCoffeeTurnJobForConversation(
     if (
       job.userId === userId &&
       job.conversationId === conversationId &&
-      !isTerminalCoffeeTurnPhase(job.phase)
+      coffeeTurnJobHoldsFloor(job.phase)
     ) {
       return publicStatus(job);
     }

@@ -27,6 +27,7 @@ const pristine: BotCustomizerSavePristine = {
   topK: 40,
   repetitionPenalty: 1.1,
   color: "#66cc33",
+  accentColor: null,
   glyph: "bot",
   faceEyesFont: "warm",
   faceEyeCharacter: null,
@@ -34,6 +35,7 @@ const pristine: BotCustomizerSavePristine = {
   faceMouthFont: "warm",
   faceMouthCharacter: null,
   faceMouthAnimation: "none",
+  faceMouthSpeechPoses: null,
   faceMouthCoffeePucker: false,
   faceFontWeight: 500,
   faceEyeScale: 1,
@@ -41,15 +43,21 @@ const pristine: BotCustomizerSavePristine = {
   faceEyeOffsetY: 0,
   faceEyeRotationDeg: 0,
   faceEyeCount: 1,
+  faceEyeSpacing: 0.36,
   faceMouthScale: 1,
   faceMouthOffsetX: 0,
   faceMouthOffsetY: 0,
   faceMouthRotationDeg: 0,
   faceBlinkBar: "|",
+  faceBlinkCount: 1,
   faceBlinkScale: 1,
   faceBlinkOffsetX: 0,
   faceBlinkOffsetY: 0,
+  faceBlinkRotationDeg: 0,
   faceThinkingFrames: ["|", "/", "-", "\\"],
+  faceThinkingScale: 1,
+  faceThinkingOffsetX: 0,
+  faceThinkingOffsetY: 0,
   avatarDetails: null,
   profilePictureImageId: null,
   audioVoiceProfile: DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
@@ -81,6 +89,7 @@ const currentFromPristine = (
   topK: pristine.topK,
   repetitionPenalty: pristine.repetitionPenalty,
   color: pristine.color,
+  accentColor: pristine.accentColor,
   glyph: pristine.glyph,
   faceEyesFont: pristine.faceEyesFont,
   faceEyeCharacter: pristine.faceEyeCharacter,
@@ -88,6 +97,7 @@ const currentFromPristine = (
   faceMouthFont: pristine.faceMouthFont,
   faceMouthCharacter: pristine.faceMouthCharacter,
   faceMouthAnimation: pristine.faceMouthAnimation,
+  faceMouthSpeechPoses: pristine.faceMouthSpeechPoses,
   faceMouthCoffeePucker: pristine.faceMouthCoffeePucker,
   faceFontWeight: pristine.faceFontWeight,
   faceEyeScale: pristine.faceEyeScale,
@@ -95,15 +105,21 @@ const currentFromPristine = (
   faceEyeOffsetY: pristine.faceEyeOffsetY,
   faceEyeRotationDeg: pristine.faceEyeRotationDeg,
   faceEyeCount: pristine.faceEyeCount,
+  faceEyeSpacing: pristine.faceEyeSpacing,
   faceMouthScale: pristine.faceMouthScale,
   faceMouthOffsetX: pristine.faceMouthOffsetX,
   faceMouthOffsetY: pristine.faceMouthOffsetY,
   faceMouthRotationDeg: pristine.faceMouthRotationDeg,
   faceBlinkBar: pristine.faceBlinkBar,
+  faceBlinkCount: pristine.faceBlinkCount,
   faceBlinkScale: pristine.faceBlinkScale,
   faceBlinkOffsetX: pristine.faceBlinkOffsetX,
   faceBlinkOffsetY: pristine.faceBlinkOffsetY,
+  faceBlinkRotationDeg: pristine.faceBlinkRotationDeg,
   faceThinkingFrames: pristine.faceThinkingFrames,
+  faceThinkingScale: pristine.faceThinkingScale,
+  faceThinkingOffsetX: pristine.faceThinkingOffsetX,
+  faceThinkingOffsetY: pristine.faceThinkingOffsetY,
   avatarDetails: pristine.avatarDetails,
   profilePictureImageId: pristine.profilePictureImageId,
   audioVoiceProfile: pristine.audioVoiceProfile,
@@ -168,6 +184,23 @@ describe("bot customizer save patch", () => {
     assert.deepEqual(
       buildBotCustomizerSavePatch(currentFromPristine({ color: "#66CC33" }), pristine),
       {}
+    );
+  });
+
+  it("patches explicit and Auto Atmosphere accents independently", () => {
+    assert.deepEqual(
+      buildBotCustomizerSavePatch(
+        currentFromPristine({ accentColor: "#00AAFF" }),
+        pristine,
+      ),
+      { accentColor: "#00AAFF" },
+    );
+    assert.deepEqual(
+      buildBotCustomizerSavePatch(currentFromPristine({ accentColor: null }), {
+        ...pristine,
+        accentColor: "#00aaff",
+      }),
+      { accentColor: null },
     );
   });
 
@@ -245,6 +278,24 @@ describe("bot customizer save patch", () => {
     );
   });
 
+  it("patches Custom Speech poses independently from the resting mouth", () => {
+    const poses = ["—", "·", "△", "○"] as const;
+    assert.deepEqual(
+      buildBotCustomizerSavePatch(
+        currentFromPristine({ faceMouthSpeechPoses: poses }),
+        pristine,
+      ),
+      { faceMouthSpeechPoses: poses },
+    );
+    assert.deepEqual(
+      buildBotCustomizerSavePatch(
+        currentFromPristine({ faceMouthSpeechPoses: null }),
+        { ...pristine, faceMouthSpeechPoses: poses },
+      ),
+      { faceMouthSpeechPoses: null },
+    );
+  });
+
   it("patches custom glyph animation and eye rotation edits", () => {
     assert.deepEqual(
       buildBotCustomizerSavePatch(
@@ -263,6 +314,16 @@ describe("bot customizer save patch", () => {
     );
   });
 
+  it("patches None as a distinct static mouth animation", () => {
+    assert.deepEqual(
+      buildBotCustomizerSavePatch(
+        currentFromPristine({ faceMouthAnimation: "static" }),
+        pristine,
+      ),
+      { faceMouthAnimation: "static" },
+    );
+  });
+
   it("patches the custom eye count independently", () => {
     assert.deepEqual(
       buildBotCustomizerSavePatch(
@@ -270,6 +331,16 @@ describe("bot customizer save patch", () => {
         pristine,
       ),
       { faceEyeCount: 2 },
+    );
+  });
+
+  it("patches the custom eye spacing independently", () => {
+    assert.deepEqual(
+      buildBotCustomizerSavePatch(
+        currentFromPristine({ faceEyeSpacing: 0.48 }),
+        pristine,
+      ),
+      { faceEyeSpacing: 0.48 },
     );
   });
 
@@ -317,13 +388,24 @@ describe("bot customizer save patch", () => {
     );
   });
 
-  it("patches custom blink scale and placement edits", () => {
+  it("patches Blink eye count independently", () => {
+    assert.deepEqual(
+      buildBotCustomizerSavePatch(
+        currentFromPristine({ faceBlinkCount: 2 }),
+        pristine,
+      ),
+      { faceBlinkCount: 2 },
+    );
+  });
+
+  it("patches blink scale, placement, and rotation edits", () => {
     assert.deepEqual(
       buildBotCustomizerSavePatch(
         currentFromPristine({
           faceBlinkScale: 1.2,
           faceBlinkOffsetX: -0.08,
           faceBlinkOffsetY: 0.06,
+          faceBlinkRotationDeg: -40,
         }),
         pristine
       ),
@@ -331,6 +413,7 @@ describe("bot customizer save patch", () => {
         faceBlinkScale: 1.2,
         faceBlinkOffsetX: -0.08,
         faceBlinkOffsetY: 0.06,
+        faceBlinkRotationDeg: -40,
       }
     );
   });
@@ -342,6 +425,24 @@ describe("bot customizer save patch", () => {
         pristine
       ),
       { faceThinkingFrames: [".", "o", "O", "o"] }
+    );
+  });
+
+  it("patches shared thinking glyph size and position", () => {
+    assert.deepEqual(
+      buildBotCustomizerSavePatch(
+        currentFromPristine({
+          faceThinkingScale: 1.2,
+          faceThinkingOffsetX: -0.08,
+          faceThinkingOffsetY: 0.06,
+        }),
+        pristine
+      ),
+      {
+        faceThinkingScale: 1.2,
+        faceThinkingOffsetX: -0.08,
+        faceThinkingOffsetY: 0.06,
+      }
     );
   });
 

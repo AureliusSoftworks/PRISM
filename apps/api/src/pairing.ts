@@ -100,10 +100,16 @@ export function consumePairingCode(
     throw new Error("Pairing code has expired.");
   }
 
-  db.prepare("UPDATE pairing_codes SET used_at = ? WHERE id = ?").run(
+  const consumed = db.prepare(
+    "UPDATE pairing_codes SET used_at = ? WHERE user_id = ? AND id = ? AND used_at IS NULL",
+  ).run(
     now.toISOString(),
+    row.user_id,
     row.id
   );
+  if (Number(consumed.changes) !== 1) {
+    throw new Error("Pairing code has already been used.");
+  }
 
   return { userId: row.user_id };
 }

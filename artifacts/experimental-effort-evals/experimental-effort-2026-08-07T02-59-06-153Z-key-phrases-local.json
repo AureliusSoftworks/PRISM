@@ -1,0 +1,137 @@
+{
+  "schema": "prism-experimental-effort-eval-v1",
+  "createdAt": "2026-08-07T02:59:06.153Z",
+  "prompt": "In exactly 2 sentences, explain how Prism can keep a chat on the user's machine.\n\nConstraints:\n- Include the word local\n- Use the exact phrase private planning pass once\n- Keep under 60 words\n- Do not show step-by-step private reasoning",
+  "options": {
+    "thinkingProvider": "openai",
+    "localModel": "llama3.2",
+    "thinkingModel": "gpt-5.6-sol",
+    "judgeModel": "gpt-5.5",
+    "effort": "high",
+    "outDir": "artifacts/experimental-effort-evals",
+    "temperature": 0.25,
+    "maxTokens": 3200,
+    "noJudge": false,
+    "includeScratchpad": true
+  },
+  "tempDbPath": "<removed>",
+  "runs": [
+    {
+      "id": "local-baseline",
+      "label": "Local baseline",
+      "provider": "local",
+      "model": "llama3.2",
+      "reasoningEffort": "none",
+      "experimentalAllModelEffortEnabled": false,
+      "psychicModeEnabled": false,
+      "requiresApiKey": null,
+      "status": "ok",
+      "durationMs": 3153,
+      "assistant": "Prism keeps a chat on the user's machine by storing data locally, allowing for seamless conversation continuity without relying on external servers. This is achieved through a private planning pass that enables local storage and processing of user data, ensuring secure and efficient communication within the user's device.",
+      "assistantChars": 323
+    },
+    {
+      "id": "thinking-reference",
+      "label": "Thinking reference",
+      "provider": "openai",
+      "model": "gpt-5.6-sol",
+      "reasoningEffort": "high",
+      "experimentalAllModelEffortEnabled": false,
+      "psychicModeEnabled": false,
+      "requiresApiKey": "openai",
+      "status": "ok",
+      "durationMs": 3363,
+      "assistant": "Prism can keep a chat local by storing conversation data on the user’s own machine instead of sending it to a remote service. A private planning pass can also run there when using a locally hosted model, keeping processing and storage on-device.",
+      "assistantChars": 245
+    },
+    {
+      "id": "local-simulated-effort",
+      "label": "Local simulated effort",
+      "provider": "local",
+      "model": "llama3.2",
+      "reasoningEffort": "high",
+      "experimentalAllModelEffortEnabled": false,
+      "psychicModeEnabled": true,
+      "requiresApiKey": null,
+      "status": "ok",
+      "durationMs": 11277,
+      "assistant": "Prism keeps a chat on the user's machine by utilizing a local-first approach, storing all data and logs in a private planning pass that ensures confidentiality and security. This is achieved through a self-hosted architecture, allowing users to maintain control over their personal conversations while ensuring they remain stored locally.",
+      "assistantChars": 338,
+      "planningWarnings": [
+        "audit_unusable; provider=local; model=llama3.2; chars=189; fallbackChars=246"
+      ],
+      "psychicDebug": {
+        "summary": "Prism will keep the chat on your local machine to maintain user privacy and security. This is achieved through a private planning pass that ensures all data remains stored locally, without relying on external infrastructure or cloud services.",
+        "effort": "high",
+        "provider": "local",
+        "model": "llama3.2",
+        "simulated": true,
+        "passCount": 3,
+        "passes": [
+          {
+            "name": "plan",
+            "chars": 99,
+            "summary": "Prism will keep the chat on your local machine to maintain user privacy and security. This is achieved through a private planning pass that ensures all data remains stored locally, without relying on external infrastructure or cloud services."
+          },
+          {
+            "name": "draft",
+            "chars": 141,
+            "summary": "I'm keeping your chat on your local machine."
+          },
+          {
+            "name": "audit",
+            "chars": 246,
+            "summary": "I'm checking the private draft against our plan to keep the chat on your local machine. I'll make sure all UI indicators are labels instead of toggles.",
+            "warning": "audit_unusable; provider=local; model=llama3.2; chars=189; fallbackChars=246"
+          }
+        ],
+        "guidanceChars": 1382,
+        "scratchpadChars": 535,
+        "scratchpad": "Plan scratchpad: Required constraints: local storage, no cloud sync. Forbidden words: sensitive info, personal data. Private draft: Prism uses a private planning pass to store and manage chat logs locally on the user's machine, ensuring all data remains secure and private. Private audit: - Keep: Do not show step-by-step private reasoning - Keep: Keep under 60 words - Fix: No analysis preamble; emit only the requested answer shape. - Fix: Never abbreviate the answer with ellipses; write the complete table and every required label."
+      }
+    }
+  ],
+  "judge": {
+    "model": "gpt-5.5",
+    "responseMap": {
+      "A": "local-baseline",
+      "B": "thinking-reference",
+      "C": "local-simulated-effort"
+    },
+    "result": {
+      "scores": {
+        "A": {
+          "correctness": 7,
+          "reasoning": 7,
+          "actionability": 7,
+          "constraints": 10,
+          "total": 8,
+          "notes": "Meets all stated constraints: exactly 2 sentences, under 60 words, includes local, uses the exact phrase once, and does not show private reasoning. Explanation is mostly correct, though it overstates that a private planning pass 'enables' storage and processing."
+        },
+        "B": {
+          "correctness": 9,
+          "reasoning": 9,
+          "actionability": 8,
+          "constraints": 10,
+          "total": 9,
+          "notes": "Meets all constraints cleanly. Provides the clearest and most accurate explanation: local storage on the user's machine and optional local processing with a locally hosted model."
+        },
+        "C": {
+          "correctness": 6,
+          "reasoning": 6,
+          "actionability": 6,
+          "constraints": 10,
+          "total": 7,
+          "notes": "Meets all stated constraints, but the explanation is less accurate because it says data and logs are stored 'in a private planning pass,' which is conceptually muddled. Self-hosted architecture is plausible but less directly tied to keeping the chat on the machine."
+        }
+      },
+      "ranking": [
+        "B",
+        "A",
+        "C"
+      ],
+      "winner": "B",
+      "summary": "All responses satisfy the formatting and wording constraints, but Response B is the most accurate and coherent explanation. Response A is acceptable but slightly imprecise, while Response C is the weakest due to conceptual confusion around the private planning pass."
+    }
+  }
+}

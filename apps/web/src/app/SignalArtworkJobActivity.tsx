@@ -1,13 +1,16 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { PrismBlockingLoader } from "./PrismBlockingLoader";
 import {
   SIGNAL_ARTWORK_JOB_EVENT,
   signalArtworkAssetLabel,
   signalArtworkJobHeadline,
   signalArtworkJobIsActive,
+  signalArtworkJobSoftSynthesisCount,
   type SignalArtworkJobSnapshot,
 } from "./signalArtworkJob";
+import { registerPrismSoftSynthesisJobs } from "./prismSoftSynthesisUi.ts";
 import styles from "./signalArtworkJobActivity.module.css";
 
 type SignalArtworkJobActivityProps = {
@@ -16,14 +19,16 @@ type SignalArtworkJobActivityProps = {
   onOpenSignal: () => void;
 };
 
-function elapsedLabel(startedAt: string, nowMs: number): string {
-  const elapsedSeconds = Math.max(
-    0,
-    Math.floor((nowMs - new Date(startedAt).getTime()) / 1_000),
-  );
-  const minutes = Math.floor(elapsedSeconds / 60);
-  const seconds = elapsedSeconds % 60;
-  return minutes > 0 ? `${minutes}m ${String(seconds).padStart(2, "0")}s` : `${seconds}s`;
+function isActiveArtworkAssetStatus(
+  status: SignalArtworkJobSnapshot["assets"][number]["status"],
+): boolean {
+  return status === "generating" || status === "attaching";
+}
+
+function isQueuedArtworkAssetStatus(
+  status: SignalArtworkJobSnapshot["assets"][number]["status"],
+): boolean {
+  return status === "waiting" || status === "waiting-for-night";
 }
 
 export function SignalArtworkJobActivity({
@@ -32,7 +37,6 @@ export function SignalArtworkJobActivity({
   onOpenSignal,
 }: SignalArtworkJobActivityProps): React.JSX.Element | null {
   const [job, setJob] = useState<SignalArtworkJobSnapshot | null>(null);
-  const [nowMs, setNowMs] = useState(() => Date.now());
   const [actionBusy, setActionBusy] = useState(false);
 
   const refresh = useCallback(async (): Promise<void> => {
@@ -58,7 +62,6 @@ export function SignalArtworkJobActivity({
   useEffect(() => {
     if (!job || !signalArtworkJobIsActive(job)) return;
     const interval = window.setInterval(() => {
-      setNowMs(Date.now());
       void request<{ job: SignalArtworkJobSnapshot }>(
         `/api/botcast/artwork-jobs/${encodeURIComponent(job.id)}`,
       )
@@ -77,9 +80,36 @@ export function SignalArtworkJobActivity({
     [job],
   );
 
-  if (!job) return null;
+  const activeAssets = useMemo(
+    () => assetSummary.filter((asset) => isActiveArtworkAssetStatus(asset.status)),
+    [assetSummary],
+  );
+  const queuedAssets = useMemo(
+    () => assetSummary.filter((asset) => isQueuedArtworkAssetStatus(asset.status)),
+    [assetSummary],
+  );
+
+  const softJobCount = useMemo(() => {
+    if (!job) return 0;
+    return signalArtworkJobSoftSynthesisCount(
+      job,
+      activeAssets.length,
+      queuedAssets.length,
+    );
+  }, [activeAssets.length, job, queuedAssets.length]);
+
+  useEffect(() => {
+    registerPrismSoftSynthesisJobs("signal-artwork", softJobCount);
+    return () => registerPrismSoftSynthesisJobs("signal-artwork", 0);
+  }, [softJobCount]);
+
+  // A successful receipt remains available to Signal's own poller, but it is
+  // no longer queue work and must not reappear when another source expands
+  // the shared Synthesis panel.
+  if (!job || softJobCount === 0) return null;
   const active = signalArtworkJobIsActive(job);
-  const elapsed = elapsedLabel(job.startedAt, job.finishedAt ? new Date(job.finishedAt).getTime() : nowMs);
+  const progress =
+    job.totalCount > 0 ? job.completedCount / job.totalCount : null;
   const cancel = async (): Promise<void> => {
     if (!active || job.status === "cancelling") return;
     setJob((current) => (current ? { ...current, status: "cancelling" } : current));
@@ -109,67 +139,133 @@ export function SignalArtworkJobActivity({
   };
 
   return (
-    <aside
-      className={styles.activity}
-      data-theme={theme}
-      data-active={active ? "true" : undefined}
-      data-status={job.status}
-      data-signal-artwork-activity="true"
-      data-dev-panel-safe-area="bottom"
-      aria-live="polite"
-      aria-label={`Signal artwork for ${job.showName}`}
-    >
-      <span className={styles.spectrum} aria-hidden="true" />
-      <header>
-        <div>
-          <span className={styles.eyebrow}>Signal · {job.showName}</span>
-          <strong>{signalArtworkJobHeadline(job)}</strong>
-        </div>
-        <span className={styles.count}>{job.completedCount}/{job.totalCount}</span>
-      </header>
-      <div className={styles.track} data-active={active ? "true" : undefined} aria-hidden="true">
-        <span />
-      </div>
-      <div className={styles.meta}>
-        <span>{job.completedCount} asset{job.completedCount === 1 ? "" : "s"} complete</span>
-        <span>Elapsed {elapsed}</span>
-      </div>
-      <ul className={styles.assets}>
-        {assetSummary.map((asset) => (
-          <li key={asset.kind} data-status={asset.status}>
-            <span aria-hidden="true" />
-            <b>{asset.label}</b>
-            <small>
-              {asset.status === "waiting-for-night"
-                ? "Waiting for Dark studio"
-                : asset.status === "attaching"
-                  ? "Saving to show"
-                  : asset.status.replaceAll("-", " ")}
-            </small>
-          </li>
-        ))}
-      </ul>
-      {job.errors.length > 0 ? (
-        <p className={styles.error} role="alert">{job.errors.at(-1)?.message}</p>
-      ) : null}
-      <footer>
-        {active ? (
-          <button
-            type="button"
-            onClick={() => void cancel()}
-            disabled={actionBusy || job.status === "cancelling"}
-          >
-            {job.status === "cancelling" ? "Stopping…" : "Cancel"}
-          </button>
-        ) : (
+    <PrismBlockingLoader
+      open
+      placement="docked"
+      theme={theme}
+      eyebrow={`Signal · ${job.showName}`}
+      title={signalArtworkJobHeadline(job)}
+      detail={`${job.completedCount} asset${job.completedCount === 1 ? "" : "s"} complete`}
+      stepLabel={
+        active
+          ? job.status === "cancelling"
+            ? "Stopping artwork…"
+            : "Synthesizing artwork"
+          : "Artwork ready"
+      }
+      progress={progress}
+      startedAt={job.startedAt}
+      footer={
+        active
+          ? "Soft prepare — keep using PRISM while assets land one at a time."
+          : "Artwork finished. Open Signal or dismiss this card."
+      }
+      cancelLabel="Cancel artwork synthesis"
+      cancelConfirmTitle="Cancel synthesizing Signal artwork?"
+      cancelConfirmDetail="Finished assets stay. Anything still rendering will stop."
+      onCancel={
+        active
+          ? () => {
+              void cancel();
+            }
+          : undefined
+      }
+      footerActions={
+        active ? undefined : (
           <>
-            <button type="button" onClick={onOpenSignal}>View Signal</button>
-            <button type="button" onClick={() => void dismiss()} disabled={actionBusy}>
+            <button type="button" onClick={onOpenSignal}>
+              View Signal
+            </button>
+            <button
+              type="button"
+              onClick={() => void dismiss()}
+              disabled={actionBusy}
+            >
               Dismiss
             </button>
           </>
-        )}
-      </footer>
-    </aside>
+        )
+      }
+      activeChildren={
+        active && activeAssets.length > 0 ? (
+          <ul
+            className={styles.assets}
+            data-signal-artwork-activity="true"
+            data-job-section-list="active"
+            aria-label={`Active Signal artwork for ${job.showName}`}
+          >
+            {activeAssets.map((asset) => (
+              <li key={asset.kind} data-status={asset.status}>
+                <span aria-hidden="true" />
+                <b>{asset.label}</b>
+                <small>
+                  {asset.status === "attaching"
+                    ? "Saving to show"
+                    : asset.status.replaceAll("-", " ")}
+                </small>
+                <button
+                  type="button"
+                  data-soft-job-action="stop"
+                  onClick={() => void cancel()}
+                  disabled={actionBusy || job.status === "cancelling"}
+                  aria-label={`Stop synthesizing ${asset.label}`}
+                >
+                  Stop
+                </button>
+              </li>
+            ))}
+          </ul>
+        ) : undefined
+      }
+      queuedChildren={
+        active && queuedAssets.length > 0 ? (
+          <ul
+            className={styles.assets}
+            data-signal-artwork-activity="true"
+            data-job-section-list="queued"
+            aria-label={`Queued Signal artwork for ${job.showName}`}
+          >
+            {queuedAssets.map((asset) => (
+              <li key={asset.kind} data-status={asset.status}>
+                <span aria-hidden="true" />
+                <b>{asset.label}</b>
+                <small>
+                  {asset.status === "waiting-for-night"
+                    ? "Waiting for Dark studio"
+                    : "Queued"}
+                </small>
+              </li>
+            ))}
+          </ul>
+        ) : undefined
+      }
+    >
+      {!active ? (
+        <ul
+          className={styles.assets}
+          data-signal-artwork-activity="true"
+          aria-label={`Signal artwork for ${job.showName}`}
+        >
+          {assetSummary.map((asset) => (
+            <li key={asset.kind} data-status={asset.status}>
+              <span aria-hidden="true" />
+              <b>{asset.label}</b>
+              <small>
+                {asset.status === "waiting-for-night"
+                  ? "Waiting for Dark studio"
+                  : asset.status === "attaching"
+                    ? "Saving to show"
+                    : asset.status.replaceAll("-", " ")}
+              </small>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+      {job.errors.length > 0 ? (
+        <p className={styles.error} role="alert">
+          {job.errors.at(-1)?.message}
+        </p>
+      ) : null}
+    </PrismBlockingLoader>
   );
 }

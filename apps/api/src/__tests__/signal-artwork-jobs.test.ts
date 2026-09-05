@@ -20,6 +20,7 @@ test("normalizes each partial artwork request without adding historical assets",
     "logo",
   ]);
   assert.deepEqual(normalizeSignalArtworkAssetKinds(["unknown"]), []);
+  assert.deepEqual(normalizeSignalArtworkAssetKinds(["studio-lighting"]), []);
   assert.deepEqual(normalizeSignalArtworkAssetKinds("logo"), []);
 });
 
@@ -240,7 +241,11 @@ test("runs a single requested logo as a one-asset background job", async () => {
 
 test("uses the saved Dark studio as the source for a Light-only refresh", async () => {
   const sources: Array<string | null> = [];
-  const manager = new SignalArtworkJobManager(() => new Date(), () => "job-day");
+  let lightingRefreshes = 0;
+  const manager = new SignalArtworkJobManager(
+    () => new Date(),
+    () => "job-day",
+  );
   manager.start({
     userId: "user-day",
     showId: "show-day",
@@ -253,12 +258,163 @@ test("uses the saved Dark studio as the source for a Light-only refresh", async 
       return { imageId: "image-day", imageUrl: "/images/day" };
     },
     attach: async () => undefined,
+    refreshStudioLighting: async () => {
+      lightingRefreshes += 1;
+      return {
+        imageId: "image-studio-lighting",
+        imageUrl: "/images/studio-lighting",
+      };
+    },
   });
 
   const job = await waitForTerminal(manager, "user-day");
   assert.equal(job.status, "completed");
-  assert.equal(job.totalCount, 1);
+  assert.equal(job.totalCount, 2);
   assert.deepEqual(sources, ["saved-night"]);
+  assert.equal(lightingRefreshes, 1);
+});
+
+test("finishes every generated Studio with a fresh local lighting map", async () => {
+  const calls: string[] = [];
+  const manager = new SignalArtworkJobManager(
+    () => new Date(),
+    () => "job-studio-lighting",
+  );
+  manager.start({
+    userId: "user-studio-lighting",
+    showId: "show-studio-lighting",
+    showName: "Lit Signal",
+    kinds: ["night-studio", "day-studio"],
+    releaseSlot: async () => undefined,
+    generate: async (kind, sourceNightImageId) => {
+      calls.push(`generate:${kind}:${sourceNightImageId ?? "none"}`);
+      return { imageId: `image-${kind}`, imageUrl: `/images/${kind}` };
+    },
+    attach: async (kind) => {
+      calls.push(`attach:${kind}`);
+    },
+    refreshStudioLighting: async () => {
+      calls.push("refresh:studio-lighting");
+      return {
+        imageId: "image-studio-lighting",
+        imageUrl: "/images/studio-lighting",
+      };
+    },
+  });
+
+  const job = await waitForTerminal(manager, "user-studio-lighting");
+  assert.equal(job.status, "completed");
+  assert.equal(job.completedCount, 3);
+  assert.equal(job.totalCount, 3);
+  assert.deepEqual(job.assets.map((asset) => asset.kind), [
+    "night-studio",
+    "day-studio",
+    "studio-lighting",
+  ]);
+  assert.equal(
+    job.assets.find((asset) => asset.kind === "studio-lighting")?.imageId,
+    "image-studio-lighting",
+  );
+  assert.deepEqual(calls, [
+    "generate:night-studio:none",
+    "attach:night-studio",
+    "generate:day-studio:image-night-studio",
+    "attach:day-studio",
+    "refresh:studio-lighting",
+  ]);
+});
+
+test("keeps a standalone Studio lighting refresh visibly queued until its image slot starts", async () => {
+  let releaseQueue!: () => void;
+  const queueGate = new Promise<void>((resolve) => {
+    releaseQueue = resolve;
+  });
+  const calls: string[] = [];
+  let released = 0;
+  const manager = new SignalArtworkJobManager(
+    () => new Date(),
+    () => "job-lighting-only",
+  );
+  const initial = manager.start({
+    userId: "user-lighting-only",
+    showId: "show-lighting-only",
+    showName: "Queued Signal",
+    studioLightingOnly: true,
+    acquireSlot: async () => {
+      calls.push("queue");
+      await queueGate;
+      calls.push("acquired");
+    },
+    releaseSlot: async () => {
+      released += 1;
+    },
+    refreshStudioLighting: async () => {
+      calls.push("refresh");
+      return {
+        imageId: "lighting-only-image",
+        imageUrl: "/images/lighting-only",
+      };
+    },
+  });
+
+  assert.equal(initial.currentAsset, null);
+  assert.deepEqual(initial.assets.map((asset) => asset.kind), [
+    "studio-lighting",
+  ]);
+  assert.deepEqual(initial.assets.map((asset) => asset.status), ["waiting"]);
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  assert.deepEqual(calls, ["queue"]);
+
+  releaseQueue();
+  const completed = await waitForTerminal(manager, "user-lighting-only");
+  assert.equal(completed.status, "completed");
+  assert.equal(completed.completedCount, 1);
+  assert.equal(completed.assets[0]?.status, "complete");
+  assert.deepEqual(calls, ["queue", "acquired", "refresh"]);
+  assert.equal(released, 1);
+});
+
+test("cancels a standalone Studio lighting refresh before it acquires the image slot", async () => {
+  let released = 0;
+  let refreshed = false;
+  const manager = new SignalArtworkJobManager(
+    () => new Date(),
+    () => "job-lighting-queued-cancel",
+  );
+  manager.start({
+    userId: "user-lighting-queued-cancel",
+    showId: "show-lighting-queued-cancel",
+    showName: "Cancelled Signal",
+    studioLightingOnly: true,
+    acquireSlot: (signal) =>
+      new Promise<void>((_resolve, reject) => {
+        signal.addEventListener(
+          "abort",
+          () => reject(new DOMException("cancelled", "AbortError")),
+          { once: true },
+        );
+      }),
+    releaseSlot: async () => {
+      released += 1;
+    },
+    refreshStudioLighting: async () => {
+      refreshed = true;
+      return { imageId: "never", imageUrl: "/images/never" };
+    },
+  });
+
+  manager.cancel(
+    "user-lighting-queued-cancel",
+    "job-lighting-queued-cancel",
+  );
+  const cancelled = await waitForTerminal(
+    manager,
+    "user-lighting-queued-cancel",
+  );
+  assert.equal(cancelled.status, "cancelled");
+  assert.equal(cancelled.assets[0]?.status, "skipped");
+  assert.equal(refreshed, false);
+  assert.equal(released, 0);
 });
 
 test("can render an independent online logo while preserving the Dark-to-Light dependency", async () => {

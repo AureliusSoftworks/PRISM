@@ -5,8 +5,9 @@ import { tryUnlinkGeneratedImageFile } from "./image-storage.ts";
 export const BOT_PROFILE_PICTURE_IMAGE_PURPOSE = "bot_profile_picture";
 export const BOT_PROFILE_PICTURE_UPLOAD_MAX_BYTES = 8 * 1024 * 1024;
 export const BOT_PROFILE_PICTURE_SIZE = "1024x1024";
-export const GALLERY_EXCLUDED_PURPOSE_SQL =
-  "COALESCE(purpose, 'gallery') NOT IN ('wallpaper', 'bot_profile_picture')";
+/** Positive classification for the global Images panel and its bot lanes. */
+export const GENERAL_IMAGE_LIBRARY_SQL =
+  "origin IN ('images_panel', 'zen_chat', 'sandbox_chat') AND COALESCE(purpose, 'gallery') IN ('gallery', 'image_generation')";
 
 export function botProfilePictureImageBelongsToBot(
   db: DatabaseSync,

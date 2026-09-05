@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
-import { statSync } from "node:fs";
+import { readFileSync, statSync } from "node:fs";
 import test from "node:test";
 import {
   DEFAULT_SESSION_ATMOSPHERE_MIX,
+  DEFAULT_SESSION_AMBIENT_BOT_VOCALIZATION_PROFILE,
   DEFAULT_SESSION_AMBIENT_FOLEY_PROFILE,
   DEFAULT_SIGNAL_ATMOSPHERE_MIX,
   DEFAULT_STUDIO_ATMOSPHERE_URL,
@@ -15,15 +16,37 @@ import {
   coffeeCupFoleyCueForTransition,
   SIGNAL_ATMOSPHERE_RELATIVE_MIX_MAX,
   createSeamlessSessionAtmosphereLoopBuffer,
+  sessionAmbientBotVocalizationCue,
+  sessionAmbientBotVocalizationCueForKind,
+  sessionAmbientBotVocalizationDelayMs,
+  sessionAmbientBotVocalizationTargetId,
   sessionAmbientFoleyDelayMs,
   sessionAmbientFoleyUrl,
+  sessionAmbientFoleyUrlFrom,
   sessionAtmosphereBusVolume,
   sessionAtmosphereLoopEndTime,
+  sessionAtmosphereLoopIsRecordable,
   signalAtmosphereMixLevelFromRelative,
   signalAtmosphereRelativeMixLevel,
   signalSessionAtmosphereActive,
   startSessionAtmosphere,
 } from "./session-atmosphere-audio.ts";
+
+test("background and grain loops independently opt out of faithful-master capture", () => {
+  const options = {
+    backgroundRecordable: false,
+    grainRecordable: false,
+  };
+  assert.equal(sessionAtmosphereLoopIsRecordable("background", options), false);
+  assert.equal(sessionAtmosphereLoopIsRecordable("grain", options), false);
+  assert.equal(
+    sessionAtmosphereLoopIsRecordable("grain", {
+      ...options,
+      grainRecordable: true,
+    }),
+    true,
+  );
+});
 
 test("Signal keeps its atmosphere alive through a completed episode's outro", () => {
   const base = {
@@ -63,6 +86,7 @@ test("Signal mix removes static while keeping atmosphere and tactile Foley separ
     background: 0.16,
     grain: 0,
     foley: 1,
+    filmGrain: 1,
   });
   assert.ok(
     DEFAULT_SIGNAL_ATMOSPHERE_MIX.background >
@@ -113,6 +137,229 @@ test("session atmosphere foley is deterministic and tactfully spaced", () => {
     sessionAmbientFoleyUrl("session-a", 2),
     /^\/audio\/session-atmosphere\//u,
   );
+  const courtroomFoley = ["/court/chair.mp3", "/court/cough.mp3"] as const;
+  const selected = sessionAmbientFoleyUrlFrom("session-a", 2, courtroomFoley);
+  assert.ok(
+    courtroomFoley.includes(selected as (typeof courtroomFoley)[number]),
+  );
+  assert.equal(
+    selected,
+    sessionAmbientFoleyUrlFrom("session-a", 2, courtroomFoley),
+  );
+  assert.match(
+    sessionAmbientFoleyUrlFrom("session-a", 2, ["", "  "]),
+    /^\/audio\/session-atmosphere\//u,
+  );
+});
+
+test("ambient bot vocalizations are sparse bundled recordings with deterministic targets", () => {
+  assert.deepEqual(DEFAULT_SESSION_AMBIENT_BOT_VOCALIZATION_PROFILE, {
+    minDelayMs: 34_000,
+    maxDelayMs: 76_000,
+    trim: 1,
+  });
+  assert.equal(
+    sessionAmbientBotVocalizationDelayMs("session-a", 2),
+    sessionAmbientBotVocalizationDelayMs("session-a", 2),
+  );
+  assert.ok(sessionAmbientBotVocalizationDelayMs("session-a", 2) >= 34_000);
+  assert.ok(sessionAmbientBotVocalizationDelayMs("session-a", 2) <= 76_000);
+  assert.equal(
+    sessionAmbientBotVocalizationTargetId("session-a", 2, ["", "a", "b"]),
+    sessionAmbientBotVocalizationTargetId("session-a", 2, ["", "a", "b"]),
+  );
+  assert.equal(sessionAmbientBotVocalizationTargetId("session-a", 2, []), null);
+
+  const kinds = new Set<string>();
+  for (let index = 0; index < 200; index += 1) {
+    const cue = sessionAmbientBotVocalizationCue("session-a", index);
+    kinds.add(cue.kind);
+    assert.match(cue.url, /^\/audio\/(?:session-atmosphere|voice-presence)\//u);
+    assert.ok(cue.durationMs >= 700 && cue.durationMs <= 1_300);
+    assert.ok(
+      statSync(new URL(`../../public${cue.url}`, import.meta.url)).size > 1_000,
+      `${cue.url} should be bundled`,
+    );
+  }
+  assert.deepEqual(
+    kinds,
+    new Set([
+      "throat-clear",
+      "mouth-sound",
+      "lip-smack",
+      "soft-sigh",
+      "soft-inhale",
+    ]),
+  );
+
+  const inhale = sessionAmbientBotVocalizationCueForKind(
+    "speaker-handoff",
+    3,
+    "soft-inhale",
+  );
+  assert.equal(inhale.kind, "soft-inhale");
+  assert.equal(inhale.index, 3);
+  assert.match(inhale.sequenceKey, /speaker-handoff:bot-vocalization:3/u);
+  assert.ok(
+    statSync(new URL(`../../public${inhale.url}`, import.meta.url)).size >
+      1_000,
+  );
+});
+
+test("ambient bot vocalizations use the local Foley lane without a voice profile", () => {
+  const originalAudio = Object.getOwnPropertyDescriptor(globalThis, "Audio");
+  const originalWindow = Object.getOwnPropertyDescriptor(globalThis, "window");
+  const scheduled: Array<{ callback: () => void; delayMs: number }> = [];
+  const instances: Array<{ src: string; volume: number }> = [];
+  class FakeAudio {
+    readonly src: string;
+    preload = "";
+    loop = false;
+    volume = 1;
+    constructor(src: string) {
+      this.src = src;
+      instances.push(this);
+    }
+    addEventListener(): void {}
+    removeEventListener(): void {}
+    play(): Promise<void> {
+      return Promise.resolve();
+    }
+    pause(): void {}
+    removeAttribute(): void {}
+    load(): void {}
+  }
+  Object.defineProperty(globalThis, "Audio", {
+    configurable: true,
+    value: FakeAudio,
+  });
+  Object.defineProperty(globalThis, "window", {
+    configurable: true,
+    value: {
+      setTimeout(callback: () => void, delayMs: number): number {
+        scheduled.push({ callback, delayMs });
+        return scheduled.length;
+      },
+      clearTimeout(): void {},
+    },
+  });
+  try {
+    const seenKinds: string[] = [];
+    const controller = startSessionAtmosphere({
+      seed: "local-vocalization",
+      volume: 1,
+      mix: { background: 0, grain: 0, foley: 0.5 },
+      ambientFoley: false,
+      ambientBotVocalizations: true,
+      ambientBotVocalizationProfile: {
+        minDelayMs: 1_000,
+        maxDelayMs: 1_000,
+        trim: 0.4,
+      },
+      shouldDeferFoley: () => true,
+      shouldDeferBotVocalization: () => false,
+      onAmbientBotVocalization(cue) {
+        seenKinds.push(cue.kind);
+        return true;
+      },
+    });
+    assert.equal(scheduled.length, 1);
+    scheduled[0]!.callback();
+    assert.equal(seenKinds.length, 1);
+    assert.equal(instances.length, 1);
+    assert.match(
+      instances[0]?.src ?? "",
+      /^\/audio\/(?:session-atmosphere|voice-presence)\//u,
+    );
+    assert.equal(instances[0]?.volume, 0.2);
+    controller.stop();
+  } finally {
+    if (originalAudio) {
+      Object.defineProperty(globalThis, "Audio", originalAudio);
+    } else {
+      Reflect.deleteProperty(globalThis, "Audio");
+    }
+    if (originalWindow) {
+      Object.defineProperty(globalThis, "window", originalWindow);
+    } else {
+      Reflect.deleteProperty(globalThis, "window");
+    }
+  }
+});
+
+test("owned ambient bot vocalizations skip bundled Foley audio", () => {
+  const originalAudio = Object.getOwnPropertyDescriptor(globalThis, "Audio");
+  const originalWindow = Object.getOwnPropertyDescriptor(globalThis, "window");
+  const scheduled: Array<{ callback: () => void; delayMs: number }> = [];
+  const instances: Array<{ src: string; volume: number }> = [];
+  class FakeAudio {
+    readonly src: string;
+    preload = "";
+    loop = false;
+    volume = 1;
+    constructor(src: string) {
+      this.src = src;
+      instances.push(this);
+    }
+    addEventListener(): void {}
+    removeEventListener(): void {}
+    load(): void {}
+    play(): Promise<void> {
+      return Promise.resolve();
+    }
+    pause(): void {}
+  }
+  Object.defineProperty(globalThis, "Audio", {
+    configurable: true,
+    value: FakeAudio,
+  });
+  Object.defineProperty(globalThis, "window", {
+    configurable: true,
+    value: {
+      setTimeout(callback: () => void, delayMs: number): number {
+        scheduled.push({ callback, delayMs });
+        return scheduled.length;
+      },
+      clearTimeout(): void {},
+    },
+  });
+  try {
+    const seenKinds: string[] = [];
+    const controller = startSessionAtmosphere({
+      seed: "owned-vocalization",
+      volume: 1,
+      mix: { background: 0, grain: 0, foley: 0.5 },
+      ambientFoley: false,
+      ambientBotVocalizations: true,
+      ambientBotVocalizationProfile: {
+        minDelayMs: 1_000,
+        maxDelayMs: 1_000,
+        trim: 0.4,
+      },
+      shouldDeferFoley: () => true,
+      shouldDeferBotVocalization: () => false,
+      onAmbientBotVocalization(cue) {
+        seenKinds.push(cue.kind);
+        return "owned";
+      },
+    });
+    assert.equal(scheduled.length, 1);
+    scheduled[0]!.callback();
+    assert.equal(seenKinds.length, 1);
+    assert.equal(instances.length, 0);
+    controller.stop();
+  } finally {
+    if (originalAudio) {
+      Object.defineProperty(globalThis, "Audio", originalAudio);
+    } else {
+      Reflect.deleteProperty(globalThis, "Audio");
+    }
+    if (originalWindow) {
+      Object.defineProperty(globalThis, "window", originalWindow);
+    } else {
+      Reflect.deleteProperty(globalThis, "window");
+    }
+  }
 });
 
 test("Signal can disable generic ambient Foley while preserving synchronized cues", () => {
@@ -163,7 +410,7 @@ test("Signal can disable generic ambient Foley while preserving synchronized cue
     controller.playCue("coffeeSip");
     assert.equal(instances.length, 1);
     assert.match(instances[0]?.src ?? "", /coffee-sip\.mp3$/u);
-    assert.equal(instances[0]?.volume, 0.625);
+    assert.equal(instances[0]?.volume, 0.3125);
     controller.stop();
   } finally {
     if (originalAudio) {
@@ -177,6 +424,88 @@ test("Signal can disable generic ambient Foley while preserving synchronized cue
       Reflect.deleteProperty(globalThis, "window");
     }
   }
+});
+
+test("preloaded Foley starts from the prepared element without cue-time loading", () => {
+  const originalAudio = Object.getOwnPropertyDescriptor(globalThis, "Audio");
+  const instances: Array<{
+    loadCalls: number;
+    playCalls: number;
+    src: string;
+  }> = [];
+  class FakeAudio {
+    readonly src: string;
+    preload = "";
+    loop = false;
+    volume = 1;
+    loadCalls = 0;
+    playCalls = 0;
+    constructor(src: string) {
+      this.src = src;
+      instances.push(this);
+    }
+    addEventListener(): void {}
+    removeEventListener(): void {}
+    play(): Promise<void> {
+      this.playCalls += 1;
+      return Promise.resolve();
+    }
+    pause(): void {}
+    removeAttribute(): void {}
+    load(): void {
+      this.loadCalls += 1;
+    }
+  }
+  Object.defineProperty(globalThis, "Audio", {
+    configurable: true,
+    value: FakeAudio,
+  });
+  try {
+    const controller = startSessionAtmosphere({
+      seed: "preloaded-foley",
+      volume: 1,
+      mix: { background: 0, grain: 0, foley: 0.5 },
+      ambientFoley: false,
+    });
+    controller.preloadFoley(["/audio/debate/gavel-attention-v3.wav"]);
+
+    assert.equal(instances.length, 1);
+    assert.equal(instances[0]?.src, "/audio/debate/gavel-attention-v3.wav");
+    assert.equal(instances[0]?.loadCalls, 1);
+    assert.equal(instances[0]?.playCalls, 0);
+
+    controller.playFoley("/audio/debate/gavel-attention-v3.wav");
+    assert.equal(instances.length, 2);
+    assert.equal(instances[0]?.playCalls, 1);
+    assert.equal(instances[1]?.loadCalls, 1);
+    assert.equal(instances[1]?.playCalls, 0);
+    controller.stop();
+  } finally {
+    if (originalAudio) {
+      Object.defineProperty(globalThis, "Audio", originalAudio);
+    } else {
+      Reflect.deleteProperty(globalThis, "Audio");
+    }
+  }
+});
+
+test("latency-critical atmosphere preloads and plays Foley through worker-decoded Web Audio", () => {
+  const source = readFileSync(
+    new URL("./session-atmosphere-audio.ts", import.meta.url),
+    "utf8",
+  );
+  assert.match(
+    source,
+    /if \(latencyCritical\) \{\s*void livePerformanceAudioPcm\(normalizedUrl\);\s*return;/u,
+  );
+  assert.match(
+    source,
+    /if \(latencyCritical && options\.loop !== true\) \{\s*return playLivePerformanceFoley\(url, bus, options\);\s*\}/u,
+  );
+  assert.match(
+    source,
+    /decodeLiveVoicePcm\(bytes\)[\s\S]*?context\.createBuffer\([\s\S]*?context\.createBufferSource\(\)/u,
+  );
 });
 
 test("session atmosphere exposes bundled studio and cup-synced foley assets", () => {
@@ -201,9 +530,29 @@ test("cup foley emits exactly once for each sip and return transition", () => {
   assert.equal(coffeeCupFoleyCueForTransition(false, false), null);
   assert.equal(coffeeCupFoleyCueForTransition(false, true), "coffeeSip");
   assert.equal(coffeeCupFoleyCueForTransition(true, true), null);
+  assert.equal(coffeeCupFoleyCueForTransition(true, false), "coffeeCupPlace");
+});
+
+test("Signal defers the cup placement cue to the mug animation's table-contact beat", () => {
   assert.equal(
-    coffeeCupFoleyCueForTransition(true, false),
-    "coffeeCupPlace",
+    coffeeCupFoleyCueForTransition(false, true, "animation-end"),
+    "coffeeSip",
+  );
+  assert.equal(
+    coffeeCupFoleyCueForTransition(true, false, "animation-end"),
+    null,
+  );
+  const source = readFileSync(
+    new URL("./session-atmosphere-audio.ts", import.meta.url),
+    "utf8",
+  );
+  assert.match(
+    source,
+    /addEventListener\("animationend", announceAnimatedCupPlacement, true\)/u,
+  );
+  assert.match(
+    source,
+    /mug\.dataset\.sipping !== "true"[\s\S]{0,220}playCue\("coffeeCupPlace"\)/u,
   );
 });
 
@@ -242,8 +591,9 @@ test("session atmosphere buses keep their own calibrated and clamped gains", () 
   );
 });
 
-test("live mix changes retune independent loops without restarting them", () => {
+test("HTML loop fallback fades lifecycle and mix changes without restarting", async () => {
   const originalAudio = Object.getOwnPropertyDescriptor(globalThis, "Audio");
+  const originalWindow = Object.getOwnPropertyDescriptor(globalThis, "window");
   const instances: Array<{
     src: string;
     volume: number;
@@ -276,14 +626,30 @@ test("live mix changes retune independent loops without restarting them", () => 
     configurable: true,
     value: FakeAudio,
   });
+  Object.defineProperty(globalThis, "window", {
+    configurable: true,
+    value: {
+      clearInterval: globalThis.clearInterval,
+      clearTimeout: globalThis.clearTimeout,
+      setInterval: globalThis.setInterval,
+      setTimeout: globalThis.setTimeout,
+    },
+  });
   try {
     const controller = startSessionAtmosphere({
       seed: "signal-mix",
       volume: 1,
       backgroundUrl: "/room.mp3",
       grainUrl: "/grain.mp3",
+      startTransitionMs: 20,
+      ambientFoley: false,
     });
     assert.equal(instances.length, 2);
+    assert.deepEqual(
+      instances.map(({ volume }) => volume),
+      [0, 0],
+    );
+    await new Promise<void>((resolve) => globalThis.setTimeout(resolve, 30));
     assert.deepEqual(
       instances.map(({ src, volume }) => [src, volume]),
       [
@@ -295,20 +661,30 @@ test("live mix changes retune independent loops without restarting them", () => 
     controller.setMix({
       volume: 0.5,
       mix: { background: 0.2, grain: 0.1, foley: 0.3 },
+      transitionMs: 20,
     });
     assert.equal(instances.length, 2);
-    assert.deepEqual(
-      instances.map(({ volume }) => volume),
-      [0.1, 0.05],
+    await new Promise<void>((resolve) => globalThis.setTimeout(resolve, 30));
+    const [backgroundVolume, grainVolume] = instances.map(
+      ({ volume }) => volume,
     );
+    assert.ok(Math.abs((backgroundVolume ?? 0) - 0.1) <= 0.001);
+    assert.ok(Math.abs((grainVolume ?? 0) - 0.05) <= 0.001);
 
-    controller.stop();
+    controller.stop(20);
+    assert.ok(instances.every(({ paused }) => !paused));
+    await new Promise<void>((resolve) => globalThis.setTimeout(resolve, 30));
     assert.ok(instances.every(({ paused }) => paused));
   } finally {
     if (originalAudio) {
       Object.defineProperty(globalThis, "Audio", originalAudio);
     } else {
       Reflect.deleteProperty(globalThis, "Audio");
+    }
+    if (originalWindow) {
+      Object.defineProperty(globalThis, "window", originalWindow);
+    } else {
+      Reflect.deleteProperty(globalThis, "window");
     }
   }
 });
@@ -339,9 +715,9 @@ test("atmosphere loops crossfade into a periodic, sample-continuous buffer", () 
 
   const sampleRate = 8;
   const decoded = new FakeAudioBuffer(1, 32, sampleRate);
-  decoded.getChannelData(0).set(
-    Float32Array.from({ length: decoded.length }, (_, index) => index),
-  );
+  decoded
+    .getChannelData(0)
+    .set(Float32Array.from({ length: decoded.length }, (_, index) => index));
   const context = {
     createBuffer(numberOfChannels: number, length: number, rate: number) {
       return new FakeAudioBuffer(numberOfChannels, length, rate);
@@ -367,6 +743,20 @@ test("atmosphere loops crossfade into a periodic, sample-continuous buffer", () 
   assert.equal(channel[3], 3);
   assert.equal(channel[4], 4);
   assert.equal(channel[0]! - channel.at(-1)!, 1);
+
+  const validatedRegion = createSeamlessSessionAtmosphereLoopBuffer(
+    context,
+    decoded as unknown as AudioBuffer,
+    0,
+    0.5,
+    0.5,
+    3.5,
+  );
+  const validatedChannel = validatedRegion.getChannelData(0);
+  assert.equal(validatedRegion.duration, 2.5);
+  assert.equal(validatedChannel[0], 24);
+  assert.equal(validatedChannel.at(-1), 23);
+  assert.equal(validatedChannel[0]! - validatedChannel.at(-1)!, 1);
 });
 
 test("supported browsers play decoded atmosphere on sample-accurate loop sources", async () => {
@@ -375,6 +765,7 @@ test("supported browsers play decoded atmosphere on sample-accurate loop sources
   const sources: FakeBufferSource[] = [];
   const contexts: FakeAudioContext[] = [];
   const fetched: string[] = [];
+  const gainRamps: Array<{ value: number; endTime: number }> = [];
 
   class FakeAudioBuffer {
     readonly duration: number;
@@ -403,6 +794,11 @@ test("supported browsers play decoded atmosphere on sample-accurate loop sources
       value: 1,
       setValueAtTime: (value: number): void => {
         this.gain.value = value;
+      },
+      cancelScheduledValues: (): void => {},
+      linearRampToValueAtTime: (value: number, endTime: number): void => {
+        this.gain.value = value;
+        gainRamps.push({ value, endTime });
       },
     };
   }
@@ -471,13 +867,22 @@ test("supported browsers play decoded atmosphere on sample-accurate loop sources
       return {
         ok: true,
         status: 200,
+        headers: new Headers({
+          "x-prism-loop-start-ms": "500",
+          "x-prism-loop-end-ms": "3500",
+          "x-prism-loop-crossfade-ms": "500",
+        }),
         arrayBuffer: async () => new ArrayBuffer(8),
       };
     },
   });
   Object.defineProperty(globalThis, "window", {
     configurable: true,
-    value: { AudioContext: FakeAudioContext },
+    value: {
+      AudioContext: FakeAudioContext,
+      clearTimeout: globalThis.clearTimeout,
+      setTimeout: globalThis.setTimeout,
+    },
   });
   let controller: ReturnType<typeof startSessionAtmosphere> | null = null;
   try {
@@ -486,6 +891,7 @@ test("supported browsers play decoded atmosphere on sample-accurate loop sources
       volume: 1,
       backgroundUrl: "/room.mp3",
       grainUrl: "/grain.mp3",
+      startTransitionMs: 650,
       ambientFoley: false,
     });
     await new Promise<void>((resolve) => globalThis.setTimeout(resolve, 0));
@@ -495,9 +901,34 @@ test("supported browsers play decoded atmosphere on sample-accurate loop sources
     assert.ok(sources.every((source) => source.started));
     assert.ok(sources.every((source) => source.loop));
     assert.ok(sources.every((source) => source.loopStart === 0));
-    assert.ok(sources.every((source) => source.loopEnd === 2.25));
+    assert.ok(sources.every((source) => source.loopEnd === 2.5));
+    assert.deepEqual(gainRamps, [
+      {
+        value: DEFAULT_SESSION_ATMOSPHERE_MIX.background,
+        endTime: 0.65,
+      },
+      { value: DEFAULT_SESSION_ATMOSPHERE_MIX.grain, endTime: 0.65 },
+    ]);
+    gainRamps.length = 0;
 
-    controller.stop();
+    controller.setMix({
+      volume: 0.5,
+      mix: { background: 0.2, grain: 0.1, foley: 1 },
+      transitionMs: 320,
+    });
+    assert.deepEqual(gainRamps, [
+      { value: 0.1, endTime: 0.32 },
+      { value: 0.05, endTime: 0.32 },
+    ]);
+
+    gainRamps.length = 0;
+    controller.stop(10);
+    assert.ok(sources.every((source) => !source.stopped));
+    assert.deepEqual(gainRamps, [
+      { value: 0, endTime: 0.01 },
+      { value: 0, endTime: 0.01 },
+    ]);
+    await new Promise<void>((resolve) => globalThis.setTimeout(resolve, 20));
     assert.ok(sources.every((source) => source.stopped));
   } finally {
     controller?.stop();
@@ -613,10 +1044,11 @@ test("loop leveler recovers very quiet ambience before applying the mix bus", ()
       allowMixBoost: true,
       ambientFoley: false,
     });
-    assert.equal(gains.length, 2);
-    assert.equal(gains[0]?.gain.value, SESSION_ATMOSPHERE_LOOP_PRE_GAIN);
+    assert.equal(gains.length, 3);
+    assert.equal(gains[0]?.gain.value, 1);
+    assert.equal(gains[1]?.gain.value, SESSION_ATMOSPHERE_LOOP_PRE_GAIN);
     assert.equal(
-      gains[1]?.gain.value,
+      gains[2]?.gain.value,
       DEFAULT_SESSION_ATMOSPHERE_MIX.background,
     );
     assert.equal(
@@ -660,9 +1092,9 @@ test("loop leveler recovers very quiet ambience before applying the mix bus", ()
     );
 
     controller.playCue("coffeeCupPlace");
-    assert.equal(gains.length, 3);
+    assert.equal(gains.length, 4);
     assert.equal(
-      gains[2]?.gain.value,
+      gains[3]?.gain.value,
       DEFAULT_SESSION_ATMOSPHERE_MIX.foley * 1.0625,
     );
 
@@ -670,9 +1102,27 @@ test("loop leveler recovers very quiet ambience before applying the mix bus", ()
       volume: 0.5,
       mix: { background: 0.2, grain: 0, foley: 2 },
     });
-    assert.equal(gains[0]?.gain.value, SESSION_ATMOSPHERE_LOOP_PRE_GAIN);
-    assert.equal(gains[1]?.gain.value, 0.1);
-    assert.equal(gains[2]?.gain.value, 1.0625);
+    assert.equal(gains[0]?.gain.value, 1);
+    assert.equal(gains[1]?.gain.value, SESSION_ATMOSPHERE_LOOP_PRE_GAIN);
+    assert.equal(gains[2]?.gain.value, 0.1);
+    assert.equal(gains[3]?.gain.value, 1.0625);
+
+    controller.setPresentationSuspended(true, 0);
+    assert.equal(gains[2]?.gain.value, 0);
+    assert.equal(gains[3]?.gain.value, 0);
+    assert.equal(controller.playFoley("/audio/session-atmosphere/paper.mp3"), false);
+
+    controller.setMix({
+      volume: 0.8,
+      mix: { background: 0.4, grain: 0, foley: 1 },
+    });
+    // Mix updates stash while suspended and stay silent.
+    assert.equal(gains[2]?.gain.value, 0);
+
+    controller.setPresentationSuspended(false, 0);
+    assert.ok(Math.abs((gains[2]?.gain.value ?? -1) - 0.32) < 1e-9);
+    assert.ok(Math.abs((gains[3]?.gain.value ?? -1) - 0.85) < 1e-9);
+
     controller.stop();
   } finally {
     if (originalAudio) {

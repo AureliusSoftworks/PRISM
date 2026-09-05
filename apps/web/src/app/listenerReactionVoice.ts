@@ -1,10 +1,15 @@
 import {
   applyVoiceDeliveryMoodToProfile,
+  BOT_VOICE_GAIN_DB_MAX,
+  DIRECTIONAL_IRRITATION_GAIN_DB_MAX,
   listenerReactionHasAudio,
+  listenerReactionInterruptedSpeakerTextV1,
+  listenerReactionSpokenTextV1,
   normalizeBotAudioVoiceProfileV1,
   normalizeBotVoiceVolume,
   type BotAudioVoiceProfileV1,
   type ListenerReactionPlanV1,
+  type NormalizedBotAudioVoiceProfileV1,
   type VoiceDeliveryMood,
 } from "@localai/shared";
 import {
@@ -21,15 +26,58 @@ import {
 } from "./englishVoice.ts";
 import {
   playRealtimeVoiceBytes,
+  releaseReactionVoiceAudio,
   stopReactionVoiceAudio,
   type VoicePlaybackChannel,
+  type VoicePlaybackLifecycle,
 } from "./voiceEffects.ts";
 import type { RoomAcousticsSend } from "./roomAcoustics.ts";
 
 export type ListenerReactionVoiceMode = "english" | "bottish" | "babble";
 
+/** Ordinary Signal backchannels sit beneath the line that owns the mic. */
+export const SIGNAL_LISTENER_REACTION_VOICE_GAIN = 0.32;
+
+/** Interrupting a turn is crosstalk, not a quiet listener acknowledgement. */
+export function signalListenerReactionVoiceGain(
+  plan: Pick<
+    ListenerReactionPlanV1,
+    "interjectionAttempt" | "spokenCue" | "publicSpokenCue"
+  >,
+): number {
+  return !plan.interjectionAttempt && listenerReactionSpokenTextV1(plan)
+    ? SIGNAL_LISTENER_REACTION_VOICE_GAIN
+    : 1;
+}
+
 /** A perceptible beat after a cut-in before the interrupted bot answers back. */
 export const INTERRUPTED_SPEAKER_RETORT_PAUSE_MS = 850;
+
+/**
+ * Temporarily raise profile gain for a single irritation playback.
+ * Never mutates the authored profile; returns a shallow copy.
+ */
+export function applyDirectionalIrritationGainToProfile(
+  profile: NormalizedBotAudioVoiceProfileV1,
+  gainDbBoost?: number | null,
+): NormalizedBotAudioVoiceProfileV1 {
+  if (
+    typeof gainDbBoost !== "number" ||
+    !Number.isFinite(gainDbBoost) ||
+    gainDbBoost <= 0
+  ) {
+    return profile;
+  }
+  const boost = Math.max(
+    0,
+    Math.min(DIRECTIONAL_IRRITATION_GAIN_DB_MAX, gainDbBoost),
+  );
+  if (boost <= 0) return profile;
+  return {
+    ...profile,
+    gainDb: Math.min(BOT_VOICE_GAIN_DB_MAX, profile.gainDb + boost),
+  };
+}
 
 async function waitForReactionVoiceStart(
   delayMs: number,
@@ -61,10 +109,15 @@ export function listenerReactionVoiceCacheKey(args: {
   engine: string;
   profile: BotAudioVoiceProfileV1;
 }): string {
+  const spoken = listenerReactionSpokenTextV1(args.plan) ?? "silent";
+  const foley = args.plan.vocalFoley ?? "no-foley";
+  const identity = args.plan.interjectionAttempt
+    ? args.plan.seed
+    : `${args.plan.listenerBotId}:${spoken}:${foley}`;
   return JSON.stringify([
-    args.plan.seed,
-    args.plan.spokenCue ?? "silent",
-    args.plan.vocalFoley ?? "no-foley",
+    identity,
+    spoken,
+    foley,
     args.mode,
     args.engine,
     args.profile,
@@ -72,14 +125,17 @@ export function listenerReactionVoiceCacheKey(args: {
 }
 
 export function interruptedSpeakerReactionVoiceCacheKey(args: {
-  plan: Pick<ListenerReactionPlanV1, "seed" | "interruptedSpeakerCue">;
+  plan: Pick<
+    ListenerReactionPlanV1,
+    "seed" | "interruptedSpeakerCue" | "publicInterruptedSpeakerCue"
+  >;
   mode: ListenerReactionVoiceMode;
   engine: string;
   profile: BotAudioVoiceProfileV1;
 }): string {
   return JSON.stringify([
     args.plan.seed,
-    args.plan.interruptedSpeakerCue ?? "silent",
+    listenerReactionInterruptedSpeakerTextV1(args.plan) ?? "silent",
     "interrupted-speaker",
     args.mode,
     args.engine,
@@ -94,14 +150,17 @@ export async function playListenerReactionVoice(args: {
   globalVolume: number;
   effectsEnabled: boolean;
   mood?: VoiceDeliveryMood | null;
+  gainDbBoost?: number;
   englishClip?: EnglishVoiceSynthesisClip | null;
   roomAcoustics?: RoomAcousticsSend;
   stereoPan?: number;
   channel?: VoicePlaybackChannel;
+  lifecycle?: VoicePlaybackLifecycle;
+  scheduledStartAtPerformanceMs?: number;
 }): Promise<boolean> {
   if (!listenerReactionHasAudio(args.plan)) return false;
   if (args.plan.vocalFoley && args.mode !== "english") return false;
-  const cue = args.plan.spokenCue ?? "...";
+  const cue = listenerReactionSpokenTextV1(args.plan) ?? "...";
   return playEphemeralReactionVoice({
     text: cue,
     seed: args.plan.seed,
@@ -110,11 +169,14 @@ export async function playListenerReactionVoice(args: {
     globalVolume: args.globalVolume,
     effectsEnabled: args.effectsEnabled,
     mood: args.mood,
+    gainDbBoost: args.gainDbBoost,
     englishClip: args.englishClip,
     roomAcoustics: args.roomAcoustics,
     stereoPan: args.stereoPan,
     channel: args.channel,
-    maxDurationMs: args.plan.interjectionAttempt ? 1_300 : 900,
+    lifecycle: args.lifecycle,
+    scheduledStartAtPerformanceMs: args.scheduledStartAtPerformanceMs,
+    maxDurationMs: args.plan.interjectionAttempt ? 2_400 : 2_000,
   });
 }
 
@@ -126,13 +188,16 @@ export async function playEphemeralReactionVoice(args: {
   globalVolume: number;
   effectsEnabled: boolean;
   mood?: VoiceDeliveryMood | null;
+  gainDbBoost?: number;
   englishClip?: EnglishVoiceSynthesisClip | null;
   roomAcoustics?: RoomAcousticsSend;
   stereoPan?: number;
   maxDurationMs?: number;
   channel?: VoicePlaybackChannel;
   startDelayMs?: number;
+  scheduledStartAtPerformanceMs?: number;
   signal?: AbortSignal;
+  lifecycle?: VoicePlaybackLifecycle;
 }): Promise<boolean> {
   const cue = args.text.replace(/\s+/gu, " ").trim();
   const normalizedInputProfile = normalizeBotAudioVoiceProfileV1(args.profile);
@@ -141,8 +206,12 @@ export async function playEphemeralReactionVoice(args: {
   if (!(await waitForReactionVoiceStart(args.startDelayMs ?? 0, args.signal))) {
     return false;
   }
+  const boostedProfile = applyDirectionalIrritationGainToProfile(
+    normalizedInputProfile,
+    args.gainDbBoost,
+  );
   const profile = normalizeBotAudioVoiceProfileV1({
-    ...applyVoiceDeliveryMoodToProfile(normalizedInputProfile, args.mood),
+    ...applyVoiceDeliveryMoodToProfile(boostedProfile, args.mood),
     volume: normalizeBotVoiceVolume(args.globalVolume),
   });
   if (args.mode === "english") {
@@ -161,9 +230,12 @@ export async function playEphemeralReactionVoice(args: {
       voiceEffect: voiceEffectForPlayback(profile),
       alignment: args.englishClip.alignment,
       channel: args.channel ?? "reaction",
-      maxDurationMs: args.maxDurationMs ?? 900,
+      maxDurationMs: args.maxDurationMs ?? 2_000,
       roomAcoustics: args.roomAcoustics,
       stereoPan: args.stereoPan,
+      lifecycle: args.lifecycle,
+      scheduledStartAtPerformanceMs: args.scheduledStartAtPerformanceMs,
+      compensateLifecycleForOutputLatency: true,
     });
   }
 
@@ -184,10 +256,13 @@ export async function playEphemeralReactionVoice(args: {
         }
       : {}),
     channel: args.channel ?? "reaction",
-    maxDurationMs: args.maxDurationMs ?? 900,
+    maxDurationMs: args.maxDurationMs ?? 2_000,
     roomAcoustics: args.roomAcoustics,
     stereoPan: args.stereoPan,
+    lifecycle: args.lifecycle,
+    scheduledStartAtPerformanceMs: args.scheduledStartAtPerformanceMs,
+    compensateLifecycleForOutputLatency: true,
   });
 }
 
-export { stopReactionVoiceAudio };
+export { releaseReactionVoiceAudio, stopReactionVoiceAudio };

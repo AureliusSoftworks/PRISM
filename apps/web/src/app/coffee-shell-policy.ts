@@ -1,5 +1,5 @@
 export type CoffeeShellSessionPhase =
-  "selecting" | "preview" | "topic" | "arriving" | "live" | "finished";
+  "selecting" | "preview" | "barista" | "topic" | "arriving" | "live" | "finished";
 
 export type UniversalNavbarAction =
   | "promptCenter"
@@ -22,7 +22,11 @@ export type UniversalNavbarTooltipMap = Partial<
   Record<UniversalNavbarAction, string>
 >;
 
-export type LiveSessionChromeName = "Coffee" | "Signal";
+export type LiveSessionChromeName =
+  | "Coffee"
+  | "Debate"
+  | "Signal"
+  | "Story";
 
 export interface LiveSessionChromePolicy {
   lockMessage: string;
@@ -36,13 +40,24 @@ export function liveSessionChromePolicy(
   const exitInstruction =
     sessionName === "Coffee"
       ? "End the Coffee session"
-      : "Cut or finish the Signal session";
+      : sessionName === "Debate"
+        ? "Return to the Debate lobby"
+        : sessionName === "Story"
+          ? "Start a new Story"
+          : "Cut or finish the Signal session";
+  const lockMessage =
+    sessionName === "Debate"
+      ? "This Debate is sealed to its saved LOCAL/ONLINE lane, model, Effort or Max, and Turbo setting. Return to the Debate lobby to configure a new Duel."
+      : `${exitInstruction} before changing LOCAL/ONLINE, model, Effort, or other session chrome. Auto still picks model and Effort for each generation when selected.`;
   return {
-    lockMessage: `${exitInstruction} before changing session chrome.`,
+    lockMessage,
     disabledNavbarActions: {
       promptCenter: true,
       refresh: true,
       settings: true,
+      voice: true,
+      usage: true,
+      memories: true,
       images: true,
       bots: true,
     },
@@ -50,6 +65,12 @@ export function liveSessionChromePolicy(
       promptCenter: `${exitInstruction} before opening Prompt Center.`,
       refresh: `${exitInstruction} before refreshing Prism.`,
       settings: `${exitInstruction} before opening Settings.`,
+      voice:
+        sessionName === "Debate"
+          ? `${exitInstruction} before changing Voice. The speaking type is frozen for this Duel.`
+          : `${exitInstruction} before changing Voice. The recorded speaking type is baked for the session.`,
+      usage: `${exitInstruction} before opening Usage.`,
+      memories: `${exitInstruction} before opening Memories.`,
       images: `${exitInstruction} before opening Images.`,
       bots: `${exitInstruction} before changing bots.`,
     },
@@ -68,7 +89,11 @@ export function coffeeShellPolicy(args: {
   conversationActive: boolean;
   phase: CoffeeShellSessionPhase;
 }): CoffeeShellPolicy {
-  const liveSessionActive = args.phase === "arriving" || args.phase === "live";
+  const liveSessionActive =
+    args.conversationActive &&
+    (args.phase === "topic" ||
+      args.phase === "arriving" ||
+      args.phase === "live");
   const reviewActive = args.conversationActive && args.phase === "finished";
   const liveChromePolicy = liveSessionActive
     ? liveSessionChromePolicy("Coffee")
@@ -77,7 +102,8 @@ export function coffeeShellPolicy(args: {
   return {
     liveSessionActive,
     reviewActive,
-    showEndSessionInSwitcher: liveSessionActive,
+    /* The shared minimal session bar owns Back; no app-switcher exit is shown. */
+    showEndSessionInSwitcher: false,
     disabledNavbarActions: liveChromePolicy?.disabledNavbarActions ?? {},
     disabledNavbarActionTooltips:
       liveChromePolicy?.disabledNavbarActionTooltips ?? {},

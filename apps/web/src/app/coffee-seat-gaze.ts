@@ -3,6 +3,7 @@ export type CoffeeSeatHorizontalSide = -1 | 0 | 1;
 export type CoffeeSeatLayoutPhase =
   | "selecting"
   | "preview"
+  | "barista"
   | "topic"
   | "arriving"
   | "live"

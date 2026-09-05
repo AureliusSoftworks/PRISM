@@ -21,20 +21,24 @@ describe("English speech canonical message ownership", () => {
   it("uses one message-id synthesis request and never commits transcript state", () => {
     const effectSource = completedMessageVoiceEffect();
     assert.equal(
-      [...effectSource.matchAll(/requestEnglishClip\(\{/g)].length,
+      [...effectSource.matchAll(/requestEnglishResponse\(\{/g)].length,
       1,
     );
     assert.match(
       effectSource,
-      /requestEnglishClip\(\{[\s\S]*?messageId: message\.id,[\s\S]*?engine: effectiveEnglishEngine/,
+      /requestEnglishResponse\(\{[\s\S]*?messageId: message\.id,[\s\S]*?engine: effectiveEnglishEngine/,
     );
     assert.match(
       effectSource,
-      /messageId: input\.messageId,[\s\S]*?detail\.incognito[\s\S]*?ephemeralMessage: true,[\s\S]*?spokenText: speechDisplayContent/,
+      /messageId: input\.messageId,[\s\S]*?spokenText: spokenMessageText,[\s\S]*?detail\.incognito[\s\S]*?ephemeralMessage: true/,
     );
     assert.match(
       effectSource,
-      /await enqueueEnglishVoice\([\s\S]*?message\.id,[\s\S]*?startChatSpeechReveal\([\s\S]*?speechRevealKey,[\s\S]*?speechDisplayContent/,
+      /const speechLifecycle =[\s\S]*?startChatSpeechReveal\([\s\S]*?speechRevealKey,[\s\S]*?speechDisplayContent/,
+    );
+    assert.match(
+      effectSource,
+      /await enqueueEnglishVoice\([\s\S]*?message\.id,[\s\S]*?speechLifecycle\(clip\.alignment\)/,
     );
     assert.doesNotMatch(effectSource, /buildSpeechRevealPhrases/);
     assert.doesNotMatch(effectSource, /\bsetDetail\(/);

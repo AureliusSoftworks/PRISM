@@ -30,7 +30,7 @@ export interface StoryThemeAsset {
   url: string;
   width: number;
   height: number;
-  format: "png";
+  format: "webp";
   transparent: boolean;
   immutable: true;
   deletable: false;
@@ -113,7 +113,7 @@ function prismDefaultAsset(
   return {
     ...asset,
     themeId: PRISM_DEFAULT_STORY_THEME_ID,
-    format: "png",
+    format: "webp",
     immutable: true,
     deletable: false,
     editable: false,
@@ -171,7 +171,7 @@ export const PRISM_DEFAULT_STORY_THEME: StoryThemeManifest = {
       id: "sprite_reference_sheet",
       kind: "sprite_reference",
       label: "Sprite reference sheet",
-      url: `${PRISM_DEFAULT_ASSET_BASE_PATH}/sprite_reference_sheet.png`,
+      url: `${PRISM_DEFAULT_ASSET_BASE_PATH}/sprite_reference_sheet.webp`,
       width: 2048,
       height: 1536,
       transparent: true,
@@ -184,7 +184,7 @@ export const PRISM_DEFAULT_STORY_THEME: StoryThemeManifest = {
       id: "sprite_fallback_silhouette",
       kind: "sprite_fallback",
       label: "Sprite fallback android",
-      url: `${PRISM_DEFAULT_ASSET_BASE_PATH}/sprite_fallback_silhouette.png`,
+      url: `${PRISM_DEFAULT_ASSET_BASE_PATH}/sprite_fallback_silhouette.webp`,
       width: 1024,
       height: 1536,
       transparent: true,
@@ -197,7 +197,7 @@ export const PRISM_DEFAULT_STORY_THEME: StoryThemeManifest = {
       id: "background_reference_exterior",
       kind: "background_reference",
       label: "Exterior background reference",
-      url: `${PRISM_DEFAULT_ASSET_BASE_PATH}/background_reference_exterior.png`,
+      url: `${PRISM_DEFAULT_ASSET_BASE_PATH}/background_reference_exterior.webp`,
       width: 1920,
       height: 1080,
       transparent: false,
@@ -209,7 +209,7 @@ export const PRISM_DEFAULT_STORY_THEME: StoryThemeManifest = {
       id: "background_reference_interior",
       kind: "background_reference",
       label: "Interior background reference",
-      url: `${PRISM_DEFAULT_ASSET_BASE_PATH}/background_reference_interior.png`,
+      url: `${PRISM_DEFAULT_ASSET_BASE_PATH}/background_reference_interior.webp`,
       width: 1920,
       height: 1080,
       transparent: false,
@@ -221,7 +221,7 @@ export const PRISM_DEFAULT_STORY_THEME: StoryThemeManifest = {
       id: "background_reference_liminal",
       kind: "background_reference",
       label: "Liminal background reference",
-      url: `${PRISM_DEFAULT_ASSET_BASE_PATH}/background_reference_liminal.png`,
+      url: `${PRISM_DEFAULT_ASSET_BASE_PATH}/background_reference_liminal.webp`,
       width: 1920,
       height: 1080,
       transparent: false,
@@ -233,7 +233,7 @@ export const PRISM_DEFAULT_STORY_THEME: StoryThemeManifest = {
       id: "cutscene_reference",
       kind: "cutscene_reference",
       label: "Cutscene reference",
-      url: `${PRISM_DEFAULT_ASSET_BASE_PATH}/cutscene_reference.png`,
+      url: `${PRISM_DEFAULT_ASSET_BASE_PATH}/cutscene_reference.webp`,
       width: 1920,
       height: 1080,
       transparent: false,
@@ -245,7 +245,7 @@ export const PRISM_DEFAULT_STORY_THEME: StoryThemeManifest = {
       id: "projection_fallback",
       kind: "projection_fallback",
       label: "Projection fallback",
-      url: `${PRISM_DEFAULT_ASSET_BASE_PATH}/projection_fallback.png`,
+      url: `${PRISM_DEFAULT_ASSET_BASE_PATH}/projection_fallback.webp`,
       width: 1920,
       height: 1080,
       transparent: false,
@@ -257,7 +257,7 @@ export const PRISM_DEFAULT_STORY_THEME: StoryThemeManifest = {
       id: "map_style_reference",
       kind: "map_style_reference",
       label: "Map style reference",
-      url: `${PRISM_DEFAULT_ASSET_BASE_PATH}/map_style_reference.png`,
+      url: `${PRISM_DEFAULT_ASSET_BASE_PATH}/map_style_reference.webp`,
       width: 1920,
       height: 1080,
       transparent: false,

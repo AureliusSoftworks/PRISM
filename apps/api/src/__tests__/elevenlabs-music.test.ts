@@ -4,10 +4,34 @@ import { buildSignalMusicProfile } from "@localai/shared";
 import {
   SIGNAL_ELEVENLABS_MUSIC_MODEL,
   buildSignalElevenLabsMusicCompositionPlan,
-  requestSignalElevenLabsIntroMusic,
+  buildSignalElevenLabsOutdentCompositionPlan,
+  requestSignalElevenLabsMusic,
 } from "../elevenlabs-music.ts";
 
 describe("Signal ElevenLabs intro music", () => {
+  it("adds producer keyword cues to both halves of the ident and the outdent", () => {
+    const profile = buildSignalMusicProfile({
+      temperament: "neutral",
+      seed: "keyword-show",
+      premise: "A curious conversation.",
+    });
+    const keywords = ["tactile", "restless clockwork"];
+    const ident = buildSignalElevenLabsMusicCompositionPlan({
+      profile,
+      seed: "keyword-show",
+      keywords,
+    });
+    const outdent = buildSignalElevenLabsOutdentCompositionPlan({
+      profile,
+      seed: "keyword-show",
+      keywords,
+    });
+    for (const chunk of [...ident.chunks, ...outdent.chunks]) {
+      assert.match(chunk.positive_styles.join(" "), /producer keyword influence: tactile/u);
+      assert.match(chunk.positive_styles.join(" "), /restless clockwork/u);
+    }
+  });
+
   it("builds a stable, severe commanding plan without raw-persona leakage", () => {
     const plan = buildSignalElevenLabsMusicCompositionPlan({
       profile: buildSignalMusicProfile({
@@ -33,11 +57,13 @@ describe("Signal ElevenLabs intro music", () => {
     const negative = plan.chunks.flatMap((chunk) => chunk.negative_styles).join(" ");
     assert.doesNotMatch(serialized, /Mara|Vale|urgent public evidence|system_prompt|show-private-name/iu);
     assert.equal(plan.chunks.length, 2);
-    assert.deepEqual(plan.chunks.map((chunk) => chunk.duration_ms), [3_000, 3_000]);
-    assert.match(positive, /foreground phrase begins immediately/u);
+    assert.deepEqual(plan.chunks.map((chunk) => chunk.duration_ms), [4_000, 4_000]);
+    assert.match(positive, /foreground melody begins immediately/u);
+    assert.match(positive, /genuinely melodic theme/u);
     assert.match(positive, /two-note low-brass call/u);
-    assert.match(positive, /descending minor-tonal melodic contour/u);
-    assert.match(positive, /abrupt dry hard-button ending/u);
+    assert.match(positive, /low descending proclamation/u);
+    assert.match(positive, /inevitable low hard-button cadence/u);
+    assert.match(positive, /brief natural release/u);
     assert.match(negative, /ambient pad/u);
     assert.match(negative, /pad-only/u);
     assert.match(negative, /drone/u);
@@ -47,6 +73,41 @@ describe("Signal ElevenLabs intro music", () => {
     assert.doesNotMatch(positive, /cheerful|whimsical|corporate|ambient|soundscape/iu);
     assert.doesNotMatch(serialized, /rising variation|warm and modern/iu);
     assert.doesNotMatch(positive, /resolving chime/iu);
+    assert.doesNotMatch(negative, /fade out/u);
+  });
+
+  it("pairs a host-specific four-second outdent with the opening fingerprint", () => {
+    const profile = buildSignalMusicProfile({
+      temperament: "inventive",
+      seed: "host-a:show-a",
+      hostingStyle: "Precise, curious, and delighted by mechanisms.",
+      studioIdentity: "A workshop of gears, circuits, and metal instruments.",
+    });
+    const ident = buildSignalElevenLabsMusicCompositionPlan({
+      profile,
+      seed: "host-a:show-a",
+    });
+    const outdent = buildSignalElevenLabsOutdentCompositionPlan({
+      profile,
+      seed: "host-a:show-a",
+    });
+    assert.deepEqual(
+      outdent.chunks.map((chunk) => chunk.duration_ms),
+      [4_000],
+    );
+    assert.ok(outdent.chunks.every((chunk) => chunk.duration_ms >= 3_000));
+    const identText = JSON.stringify(ident);
+    const outdentText = JSON.stringify(outdent);
+    const fingerprint = profile.motifIntervals.join(", ");
+    assert.match(identText, new RegExp(fingerprint, "u"));
+    assert.match(outdentText, new RegExp(fingerprint, "u"));
+    assert.match(outdentText, /paired opening ident|opening host signature/u);
+    assert.match(outdentText, /same instrumental identity/u);
+    assert.match(outdentText, /closing outdent/u);
+    assert.doesNotMatch(
+      outdentText,
+      /host-a|show-a|Precise, curious|gears, circuits/iu,
+    );
   });
 
   it("keeps playful and warm provider directions distinct from commanding", () => {
@@ -113,7 +174,7 @@ describe("Signal ElevenLabs intro music", () => {
     assert.match(cinematicText, /two-note low-brass call/u);
     assert.match(magicalText, /celesta|tuned-glass/u);
     assert.match(magicalText, /irregular five-note question/u);
-    assert.match(magicalText, /106 BPM/u);
+    assert.match(magicalText, /98 BPM/u);
     assert.doesNotMatch(magicalText, /92 BPM|severe low pulse/u);
     assert.match(nauticalText, /ukulele/u);
     assert.match(nauticalText, /syncopated ukulele strum gesture/u);
@@ -133,6 +194,61 @@ describe("Signal ElevenLabs intro music", () => {
     assert.notDeepEqual(magical, nautical);
   });
 
+  it("carries persona-specific emotional contradictions and music axes into provider-safe plans", () => {
+    const volatile = buildSignalMusicProfile({
+      temperament: "inventive",
+      seed: "private-volatile-host",
+      persona:
+        "A reckless chaotic scientist with sardonic dangerous genius and an unexpectedly protective streak.",
+      musicDirection:
+        "Volatile alien science with theremin, analog electricity, lurching asymmetry, chromatic instability, and a short-circuit ending.",
+    });
+    const monumental = buildSignalMusicProfile({
+      temperament: "commanding",
+      seed: "private-monumental-host",
+      persona:
+        "A severe authoritarian commander whose absolute public control hides tragic private conflict.",
+      musicDirection:
+        "Monumental orchestra with contrabass strings, low brass, martial timpani, minor gravity, and an inevitable hard cadence.",
+    });
+    const buoyant = buildSignalMusicProfile({
+      temperament: "playful",
+      seed: "private-buoyant-host",
+      persona:
+        "A carefree cheerful optimist with innocent delight and unstoppable comic confidence.",
+      musicDirection:
+        "Sunny wooden acoustic world with ukulele, marimba, buoyant syncopation, bright modal harmony, and a lifted smile ending.",
+    });
+    const plans = [volatile, monumental, buoyant].map((profile, index) =>
+      buildSignalElevenLabsMusicCompositionPlan({
+        profile,
+        seed: `provider-plan-${index}`,
+      }),
+    );
+    const [volatileText, monumentalText, buoyantText] = plans.map((plan) =>
+      JSON.stringify(plan),
+    );
+
+    assert.match(
+      volatileText ?? "",
+      /brilliant volatility.*threatened by its own instability.*theremin.*lurching asymmetric.*chromatic unstable.*short-circuit/iu,
+    );
+    assert.match(
+      monumentalText ?? "",
+      /disciplined authority.*buried tragic undertow.*contrabass.*low-brass.*martial.*minor gravity.*inevitable/iu,
+    );
+    assert.match(
+      buoyantText ?? "",
+      /unbreakable optimism.*unstoppable.*ukulele.*wooden-marimba.*buoyant syncopation.*bright modal.*lifted smile/iu,
+    );
+    assert.doesNotMatch(
+      `${volatileText}${monumentalText}${buoyantText}`,
+      /private-(?:volatile|monumental|buoyant)-host|reckless chaotic scientist|authoritarian commander|carefree cheerful optimist/iu,
+    );
+    assert.notDeepEqual(plans[0], plans[1]);
+    assert.notDeepEqual(plans[1], plans[2]);
+  });
+
   it("requests an exact Music v2 composition plan and returns its bytes", async () => {
     let capturedUrl = "";
     let capturedInit: RequestInit | undefined;
@@ -143,7 +259,7 @@ describe("Signal ElevenLabs intro music", () => {
       }),
       seed: "show-1",
     });
-    const result = await requestSignalElevenLabsIntroMusic({
+    const result = await requestSignalElevenLabsMusic({
       apiKey: "secret-test-key",
       compositionPlan,
       fetchImpl: async (input, init) => {

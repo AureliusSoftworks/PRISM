@@ -1,8 +1,460 @@
-# Project Lessons Learned
+### 2026-08-16 · architecture
+**Trigger**: Signal producer "Say this" gibberish went through Auto; every model failed, then local llama error became a 503 instead of airing the queued line.
+**Lesson**: Producer `directQuote` / Say this is a host read, not a prompt contract. Skip the model. Frame it as a Producer note (`The Producer sent this in.`) and speak the queued words exactly. Do not send that text through Auto, sanitizer repairs, response budgets, mumble, or Cursed Tongue.
+**Applies to**: `composeBotcastProducerDirectQuoteUtterance` in `packages/shared/src/botcast.ts`, `advanceBotcastEpisode` in `apps/api/src/botcast.ts`
 
-LocalAI-specific patterns and corrections. Updated when project-specific behavior needs to be remembered.
+### 2026-08-16 · UX
+**Trigger**: Coffee review of “Magic that isn't actually magic” — 5FPS, 7s Auto hops, 77s dead air after a cutoff.
+**Lesson**: Floor reclaim and max-speed pileup cannot wait on Opus/Terra thinking. Keep reclaim cutoffs like `Let me finish—` instead of treating them as invalid output. Reorder Coffee Auto recovery so Opus-class hops are last; swap a heavy Auto primary only on reclaim. Clamp effort to none on reclaim, pileup, and max-speed. A bot talking over the player must not mark itself as the interrupted bot. Skip empty-cup frown/reach on crowded pileup, and drop Coffee seat materials only after FPS falls below 24 on a 4+ seat table.
+**Applies to**: `coffeeReplyLooksUnfinished` reclaim cutoff, `coffeePreferFastAutoFallbackChain`, `coffeeTurnPreferFastPace`, `maybeBuildBotInterruptionEvent`, `coffee-seat-load-shed.ts`
 
----
+### 2026-08-16 · UX
+**Trigger**: Coffee review of “Magic that isn't actually magic” — lag plus Harry/Hermione talking in seat action text.
+**Lesson**: Bare `let` is spoken reclaim language (`Let me finish`), not a stage verb. Keep `lets`/`letting` for gestures like `lets a beat pass`. Unwrap reclaim/first-person/`The Patronus was a choi—` wraps onto the table line; never let them win the seat action badge. `coffeeActionsForMessage` must sanitize stored `coffeeStageAction` the same way.
+**Applies to**: `looksLikeSpokenProseMiswrappedAsAction` / unmarked stage start in `botMention.ts`, `coffeeActionsForMessage`, `isValidCoffeeStageAction`
+
+### 2026-08-16 · UX
+**Trigger**: Signal's All bots group pill opened (chevron flipped) but the group list never appeared.
+**Lesson**: Chat's `.composeBotMenu` opens upward with parent-relative `bottom: calc(100% + 6px)`. Shared BotPicker group menus portal onto `document.body` with `position: fixed`. Always set an explicit `bottom` (`auto` when opening down, a pixel value when opening up) so that leftover Chat CSS cannot collapse the menu to zero height. Flip above the trigger when Signal/Debate sit low on screen.
+**Applies to**: `placeBotPickerGroupMenu` in `botPickerGroupMenu.ts`, `BotPickerToolbar` portal
+
+### 2026-08-16 · UX
+**Trigger**: Debate Copycat Calvin repeated the moderator intro or went silent after one original floor, and the chair ignored a mumbled/garbled advocate line.
+**Lesson**: After a Copycat's first Debate floor, hard-repeat the opposing side's latest heard public line — not any line that merely names the holder. If the Copycat speaks second, copy immediately; originate only when the other side has not spoken yet. Skip echo-avoidance retries and post-copy sanitizers that would invent a new argument. If a public advocate line is unintelligible, the bot chair cuts in after it lands; a human Judge keeps that call.
+**Applies to**: `debateLatestCopycatSourceSpeech` in `packages/shared/src/debate.ts`, Copycat/unintelligible adapters in `apps/api/src/debate.ts`
+
+### 2026-08-16 · UX
+**Trigger**: Avatar Studio kept rolling Cursed Tongue for a last-name-each-session idea; the original prompt was a leftover letter and rerolls rebuilt from that locked scrap.
+**Lesson**: Last-name-each-session is a runtime Power (Surname Drift), not a profile wildcard. Do not lock the original Power idea after create — players edit that text and reroll. Never let the model invent Cursed Tongue unless the prompt is actually about profanity. One- or two-character prompts should fail, not become a built-in.
+**Applies to**: `BotPowersEditor` in `page.tsx`, `deterministicFalseNamePower` / compile guards in `bot-powers.ts`, `false_name` pool `given_plus_random_surname`.
+
+### 2026-08-06 · design
+**Trigger**: Steam prep — marketplace bots shipped with packaged second-person lore as "memories."
+**Lesson**: Marketplace `.bot` packs must ship with empty memories (`memoryCount` 0, no `memories.json`). Persona/identity lives in `bot.json`; memories are earned via player and bot interaction. Use `scripts/strip-marketplace-bot-memories.mjs`; Steam staging refuses `memoryCount !== 0`.
+**Applies to**: Marketplace packaging, Steam content staging, bot import
+
+### 2026-08-06 · architecture
+**Trigger**: Soft-suite key-phrase case — High met wording constraints but lost on correctness by saying chat logs were stored “in a private planning pass.”
+**Lesson**: Required-phrase transfer must separate *mention the phrase* from *define the concept*. Detect misuse (`stored in a private planning pass`), enforce exact sentence counts, and repair when the phrase is warped into a storage container.
+**Applies to**: `appendPsychicAnswerGuidance`, `detectObviousConstraintBreaks`, repair directives in `chat.ts`
+
+### 2026-08-06 · architecture
+**Trigger**: Cafe Phase A — even with repair, llama3.2 High still anchored on illegal private drafts (Bob 16:00–20:00).
+**Lesson**: When the user prompt has hard can't/must constraints, skip Psychic `draft` / `revise_draft` on the simulated ladder (plan→audit only) so the final is not primed by an illegal private schedule.
+**Applies to**: `shouldSkipPsychicDraftForHardConstraints` in `chat.ts`
+
+### 2026-08-06 · architecture
+**Trigger**: Cafe Phase A — guidance/must-keeps still left llama3.2 copying Bob 16:00–20:00 and omitting R3.
+**Lesson**: After simulated finals, run one heuristic **constraint-repair** generation when obvious breaks are detected (named can't-close on late shift, past closing time, missing R1–R3, ellipsis stubs, 2-hour shifts). Keep repair thrifty; reject repairs that add breaks or truncate without improvement.
+**Applies to**: `detectObviousConstraintBreaks`, `maybeRepairGuidedFinalAnswer` in `chat.ts`
+
+### 2026-08-06 · architecture
+**Trigger**: Cafe Phase A review — llama3.2 High sim lost to None (Sol 10 > None 4 > High-sim 2); audit returned `[]` (2 chars) while private draft invented Bob closing past 6pm.
+**Lesson**: Empty/placeholder Psychic audits must fall back to a deterministic Fix/Keep checklist from extracted user must-keeps. Expand constraint extraction beyond S1-style lines (can't/cannot, shift lengths, R1–R3, Use only…). Final guidance must state user must-keeps outrank private drafts and ban analysis preambles.
+**Applies to**: `extractExplicitUserConstraints`, `buildDeterministicConstraintAudit`, `composePsychicFinalGuidance`, `appendPsychicAnswerGuidance` in `chat.ts`
+
+### 2026-08-06 · UX
+**Trigger**: Player asked to stop special Kokoro pacing rules and use the bot's normal English pacing settings.
+**Lesson**: Do not punctuation-chop Instant/Kokoro synthesis or inject hardcoded clause pauses. Stream in token windows only. Inter-chunk silence comes only from the bot/player calibrated English pacing profile (`Calibrate English pacing`); with no profile, play continuous natural Kokoro.
+**Applies to**: `local-voice-stream.ts`, `englishClauseBreath.ts`
+
+### 2026-08-06 · UX
+**Trigger**: Marketplace bots used Reflective/Direct styles that silently fell back to Balanced; wanted chassis metal variety by Communication Style.
+**Lesson**: Keep Communication Style as an official `BotVoicePreset` dial (including reflective/direct). Soft metal alloys live as a separate CSS wash (`--bot-face-metal-alloy-*`) mixed into frame tint — LEDs/phosphor stay on identity color; Prism rainbow chassis disables the mix.
+**Applies to**: `botProfile.ts`, `botFrameMetalAlloy.ts`, `botAvatarIdentityMaterial.ts`, `page.module.css` `.botFaceFrameTint`
+
+### 2026-08-06 · UX
+**Trigger**: Lime felt missing from everyday chrome; Dev Tools teal read like player product accents.
+**Lesson**: Brand letter I is lime `#b7e63a` — companion/orb/focus must not remap I to cyan. Settings Behavior may use lime as a standalone rail. Developer chrome uses bronze `#b8895a` (`--prism-dev-accent`) for Dev Tools, Coffee `$dev` overlays, and Settings → Experimental — never spectrum cyan/lime.
+**Applies to**: `prismCompanion.module.css`, `prism-orb.module.css`, `globals.css`, `page.module.css` (settings + `.devTools*` + `.coffeeDev*`)
+
+### 2026-08-06 · UX
+**Trigger**: Ask Prism idle fade should eventually leave the scene entirely.
+**Lesson**: Idle presence is two equal stages: dim after `PRISM_COMPANION_IDLE_DIM_MS`, then hide after the same span (`PRISM_COMPANION_IDLE_VANISH_MS`). Keep the companion mounted so Option+Space and Option wield can revive it via `clearIdleDim` (including at wield arm start).
+**Applies to**: `PrismCompanion.tsx`, `prismCompanion.module.css`
+
+### 2026-08-06 · architecture
+**Trigger**: Soft Debate exhibit synth returned 503 “Another image is generating” while a docked soft job was already in flight.
+**Lesson**: Soft exhibit sprites must use `waitForImageSlot` (FIFO queue), not `tryAcquireImageSlot`. Client may start another soft synth while one is busy; only uploads hard-lock the asset controls. Docked soft-job UI already supports multiple in-flight titles.
+**Applies to**: `/api/debates/exhibits/synthesize`, `synthesizeEvidenceObjectImage`, `softExhibitSynthesizeJobs`
+
+### 2026-08-06 · UX
+**Trigger**: Debate Brave/Scholar inputs looked clickable in LOCAL but HTML `disabled` swallowed focus with no feedback.
+**Lesson**: LOCAL must still block public search (privacy), but keep the query fields focusable/typable. Search buttons should explain “switch to ONLINE” instead of silently no-op’ing. Drafting a query (including Wield Prism) is local-safe; only `/api/debates/research` is ONLINE-gated.
+**Applies to**: Debate evidence Brave/Scholar inputs, `publicResearchBlockedReason`, research action buttons
+
+### 2026-08-05 · architecture
+**Trigger**: Effort None still showed a hollow Public Plan Psychic card; player wanted maximum simulated-effort milking, then wanted simulation as product default.
+**Lesson**: Effort `none` must skip Psychic entirely. Simulated Effort is product-default for thoughtless models (lean standard ladder). The heavy spine (Alternatives→…→Compliance Sweep) is Settings → Experimental “Deep simulated thinking”, stored on the old `experimental_all_model_effort_enabled` flag. Educate with a one-shot toast when Effort changes on a simulated model.
+**Applies to**: `simulatedEffortLadderPasses(profile)`, `runPsychicPlanningPass`, capability resolve default-on, surface prep, modeTutorials
+
+### 2026-08-06 · architecture
+**Trigger**: Thrifty Minimal on gemma3:4b failed plan JSON 6/6 (`invalid_json`, passCount 0).
+**Lesson**: Thrifty Minimal planning maxTokens must stay high enough for small locals to emit complete `summary`/`scratchpad`/`answerGuidance` JSON (≈300, not 200). Soften Minimal thrifty prompt to demand complete valid JSON rather than ultra-short fields that truncate mid-object.
+**Applies to**: `simulatedPsychicPlanningMaxTokens`, `psychicPlanPromptForEffort` in `chat.ts`
+
+### 2026-08-05 · architecture
+**Trigger**: Wanted LOCAL simulated thinking to feel Fast-lean without a Fast toggle.
+**Lesson**: Bake thrifty budgets into the simulated-effort ladder itself — lean maxTokens/note caps at minimal/low/medium, richer at high/xhigh — across Chat Psychic and Coffee/Signal/Debate/Story preparation. Keep Effort as the depth dial; defer real ONLINE Fast (`service_tier` / provider speed) to a later toggle.
+**Applies to**: `packages/shared/src/reasoningEffort.ts` simulated budget helpers, `model-effort-runner.ts`, `chat.ts` Psychic planning clamps
+
+### 2026-08-05 · UX
+**Trigger**: Composer empty-state dice in Zen/Chat duplicated a one-shot send while Debate/Signal already use Wield Prism field refract.
+**Lesson**: Sunset composer dice submit. Register the message box as a Prism `field` refract target (`chat-composer-prompt`) so Wield → click drafts an editable prompt with Space reroll; keep Send for typed text only.
+**Applies to**: `renderChatComposerWithPrismRefract`, `/api/composer/random-prompt`, modeTutorials composer steps
+
+### 2026-08-05 · UX
+**Trigger**: Psychic disclosure and model/effort chrome showed on immersive Zen bubbles; Zen should stay quiet.
+**Lesson**: Settled Psychic + message model/effort metadata are transcript-Chat only (`chatPresentation === "chat"` / Conversations open). Immersive Zen (`presentation === "zen"`) never paints them; private simulated passes may still run underneath. Legacy sandbox keeps disclosure.
+**Applies to**: `isPsychicPresentationSurfaceView(view, chatPresentation)`, `renderAssistantPsychicDisclosure`, `renderMessageGenerationMetadata`
+
+### 2026-08-05 · UX
+**Trigger**: Psychic “seeing thinking” appeared to do nothing — no Psychic label/text on product Chat.
+**Lesson**: Product Home is `view=chat`. Transcript Chat vs Zen is `chatPresentation` from the Conversations sidebar, not sandbox-only gating.
+**Applies to**: `chatPresentationForSurface`, Psychic disclosure surfaces
+
+### 2026-08-05 · UX
+**Trigger**: Model picker still showed a DEFAULT pill on GPT 4o Mini after Auto became the player-facing default.
+**Lesson**: Do not badge catalog `isDefault` models as “Default” in the picker. Auto owns the “Prism chooses” role; `isDefault` may remain internal for fallback/catalog ordering only.
+**Applies to**: `ComposerModelPicker` in `page.tsx`, `composeModelDefaultBadge` (removed)
+
+### 2026-08-06 · architecture
+**Trigger**: Phase B revived Chat Qdrant after years of Zen-only gating despite Chat-oriented comments.
+**Lesson**: Companion lanes (Chat + Zen) share Qdrant summary read/write; Sandbox never does. Gate with `companionLaneUsesQdrantMemorySummaries(mode)`, not `mode === "zen"`. Keep LOCAL (Qdrant is on-LAN). Pin with Chat inject + Sandbox non-search tests.
+**Applies to**: `retrieveMemoriesWithFallback`, `summarizeAndStoreMemories`, Phase B `PRISM-gz07b`
+
+### 2026-08-06 · testing
+**Trigger**: Soft-continuity-memory suite — encrypted memories bleed across eval arms on a shared user DB.
+**Lesson**: Before seeding case memories in experimental-effort continuity suites, `DELETE FROM memories WHERE user_id = ?` for the eval user. Companion retrieval is user-scoped, so leftover drink facts will contaminate travel recalls and falsely tank High.
+**Applies to**: `seedContinuityConversation` in `experimental-effort.ts`, Phase B memory evals
+
+### 2026-08-06 · architecture
+**Trigger**: Phase B denser thread-state card after continuity digest validation.
+**Lesson**: Do not dump raw continuity system blobs into Psychic. Build a sectioned card, strip instructional preambles, and priority-pack (thread/memory first) under a fixed char budget so long Coffee notes cannot crowd out must-keep facts.
+**Applies to**: `extractPsychicContinuityDigest`, Phase B `PRISM-gz07b`
+
+### 2026-08-06 · testing
+**Trigger**: Phase B soft-continuity suite — facts only in seeded thread compact; High vs None on llama3.2.
+**Lesson**: Score continuity with deterministic must-include/label checks (not judge-only). Seed a fresh sandbox conversation + `thread_compact` summary per arm. Expect `continuity_digest` on High planning warnings. Empty None answers still count as a product signal but note them — they inflate High≥None margins.
+**Applies to**: `experimental-effort.ts --suite soft-continuity`, Phase B `PRISM-gz07b`
+
+### 2026-08-06 · architecture
+**Trigger**: Phase B — LOCAL High could plan without seeing memories/thread compact because Psychic stripped all `system` messages.
+**Lesson**: Re-inject a capped continuity digest (thread compact, memory hints, Zen/Coffee continuity prefixes) into Psychic plan + private passes. Do not feed persona/tool system prompts into private planning — only continuity sources. Keep LOCAL-only; digest is assembled from prompt messages already built for the final turn.
+**Applies to**: `extractPsychicContinuityDigest`, `runPsychicPlanningPass`, `runPsychicPrivateTextPass`, Phase B `PRISM-gz07b`
+
+### 2026-08-05 · UX
+**Trigger**: Settings → Models ONLINE fallback chain: after Fallback 1 was set, picking any model in Fallback 2+ closed the dropdown without changing the selection.
+**Lesson**: Portaled `ComposerModelPicker` menus in multi-slot Settings rows must (1) treat `[data-compose-model-menu]` via `closest()` in the window-capture outside handler (refs can be stale with multiple pickers), (2) commit the choice on `pointerdown` before dismiss can win, and (3) use stable `key={lane:index}` — never include the selected value in the key or the row remounts mid-gesture.
+**Applies to**: `ComposerModelPicker` outside dismiss, Auto recovery fallback rows in `page.tsx`
+
+### 2026-08-05 · architecture
+**Trigger**: Simulated Effort on llama3.2 produced visible finals that were only `assistant` or started with `assistant\n\n…` while private plan/draft/audit passes looked healthy.
+**Lesson**: Never append Psychic/simulated-Effort guidance as a trailing `system` message after the last `user` turn. Ollama chat templates (llama3.2 confirmed) then emit a literal role token as content. Insert guidance immediately before the last user message, and strip a leading `assistant|user|system` role marker from local replies as a safety net.
+**Applies to**: `appendPsychicAnswerGuidance` in `chat.ts`, `stripLeadingChatRoleMarker` in `providers.ts`, `/effort-review`
+
+### 2026-08-06 · UX
+**Trigger**: Debate alignment needed Signal-like per-voice and gallery levels for mic checks, plus a way to A/B gallery heat.
+**Lesson**: Persist For/Moderator/Against voice levels + Gallery volume on stage alignment (v12 localStorage). Put a **Test** control on each mixer lane (not only the lower position tuner) so mic checks are obvious. Apply voice levels on soundcheck and live `DebateUtterance.voiceLevel`; scale gallery murmur beds with `scaleDebateAudienceMixByGalleryVolume` (leave Foley untouched). Gallery heat is an alignment-session-only cycle: Off → Murmuring → Restless → Disruptive → Off — do not save it with alignment. Murmuring stays murmur-only; Restless+ introduce crosstalk. When the shared bed hits its ceiling, prefer keeping grain so free_for_all Disruptive does not collapse into Restless.
+**Applies to**: `debateStageAlignment.ts`, `DebateExperience` alignment mixer, `debateAudiencePressure.ts`, `page.tsx` `playDebateUtterance`
+
+### 2026-08-05 · UX
+**Trigger**: Spectator hard-bake exit/return showed a stage-only pause card; Proceedings (and chamber chrome) could spoil the prepared floor before Start.
+**Lesson**: For Spectator pause/ready holds, render a static full-screen `DebateIdentOverlay` (`data-hold="true"`) with Start/Resume — not `.stageStateOverlay`. Keep mid-watch stage pause only for non-spectator roles. Hold skips the timed curtain so the title stays until the player continues. CSS hold overrides for `.identComposition` must be declared **after** `[data-kind=intro|outro] .identComposition` (or with higher specificity) — otherwise the timed fade wins and Start Debate disappears into a blank black chamber.
+**Applies to**: `DebateExperience.tsx` `DebateIdentOverlay`, spectator pause branch, `DebateExperience.module.css` `.identOverlay[data-hold]`
+
+### 2026-08-05 · UX
+**Trigger**: Auto picker subtitle truncated (“PRISM CHOOSES THE BEST MODEL…”).
+**Lesson**: Keep Auto meta to a short line that fits beside the triangle glyph — default `"Picks model & effort"` (uppercased in the menu). Avoid long “chooses the best… for each request/generation” copy in narrow navbar pickers.
+**Applies to**: `AUTO_MODEL_SETTINGS_SUBTEXT`, Coffee/Debate/Signal Auto meta overrides
+
+### 2026-08-05 · UX
+**Trigger**: Auto model-picker row looked plain next to provider-tinted lanes; user wanted premium rainbow + triangle.
+**Lesson**: Style Auto as `composeModelOptionAuto` / `data-model-choice="auto"` with a spectrum rail + multi-provider wash, readable meta tint, and `AutoModelChoiceGlyph` (hollow triangle with spectrum stroke) in the effort column. Keep single-provider rows on their lane accents so Auto is the enticing default.
+**Applies to**: `ComposerModelPicker` Auto option, `page.module.css` `.composeModelOptionAuto`
+
+### 2026-08-05 · UX
+**Trigger**: Portaled model picker looked flat — missing OpenAI cyan / Anthropic terracotta / local green lane rails.
+**Lesson**: `COMPOSE_MENU_PORTAL_THEME_VARS` must include `--provider-accent-*`. Those tokens live on `.themeDark`/`.themeLight`, not `document.body`; without copying them onto the portal style, `composeModelOption[data-model-provider]` washes and inset rails resolve empty.
+**Applies to**: `page.tsx` `COMPOSE_MENU_PORTAL_THEME_VARS`, `composerMentionPortal.ts`, model picker portals
+
+### 2026-08-05 · UX
+**Trigger**: Model/effort/bot pickers stayed open on outside click while applet/voice (PrismMenu) closed reliably.
+**Lesson**: Portaled compose pickers must dismiss on `window` `pointerdown` capture (same as PrismMenu), not bubble `mousedown`/`document` only — Zen canvas and companion handlers can stop lower propagation and strand menus.
+**Applies to**: `ComposerModelPicker`, `ComposerBotPicker`, `PrismMenu.tsx`
+
+### 2026-08-05 · UX
+**Trigger**: Zen navbar auto-hid while a portaled dropdown (model/effort/bot/voice/app switcher) was still open — pointer left the bar into `document.body` portals.
+**Lesson**: Hold navbar visibility with `holdAppNavbarForDropdown()` (ref-counted) whenever a navbar/compose portal menu is open. Do not rely on `onPointerLeave` alone; menus escape the navbar DOM. Overflow gear uses the same hold (replacing `pinAppNavbar` for that case).
+**Applies to**: `appNavbarChrome.ts`, `page.tsx` ComposerModelPicker / ComposerBotPicker / voice / app switcher / chat overflow
+
+### 2026-08-05 · UX
+**Trigger**: Viewport-fit fix set `.forum { flex: 1 1 0 }` and the live stage collapsed to a tiny letterboxed strip.
+**Lesson**: Keep the Debate stage at `flex: 0 0 auto` + `width: 100%` + `aspect-ratio: 2 / 1` so height comes from width. Never give the stage `flex-basis: 0` — height collapses first and aspect-ratio then shrinks width. Let `.stageSupport` be `flex: 1 1 0` to absorb leftover / shrink. Keep the no-`100dvh` transcript rail fix.
+**Applies to**: `DebateExperience.module.css` `.forum`, `.stageSupport`, live viewport fit
+
+
+**Lesson**: Never size nested Debate rail/transcript with `calc(100dvh - Npx)` — the shell grid already reserved the navbar + live header. Use `height: 100%` / `flex: 1 1 auto` + `min-height: 0` + `overflow: hidden` on `.live` / `.liveWorkspace` / `.debateRail`, and let `.transcriptFeed` scroll inside.
+**Applies to**: `DebateExperience.module.css` live layout, proceeding console transcript
+
+
+**Lesson**: Archive list items need cast colors + model + effort projected from `session_json` (`listDebateSessions`). Render Coffee-like gradient chips (`buildDebateArchiveChipVisualStyle`) with meta tags, model label, and effort glyph. Freeze `lastReasoningEffort` on create/advance so fixed lanes still show an effort chip; Auto prefers `latestAutoRoute.reasoningEffort`.
+**Applies to**: `DebateExperience.tsx` archive rows, `debateArchiveChipGradient.ts`, `DebateSessionListItemV1`, `listDebateSessions`
+
+### 2026-08-05 · UX
+**Trigger**: Right-hand drawers (Settings, Usage, etc.) locked the whole shell — navbar LOCAL/ONLINE, model picker, and other panel buttons were unreachable.
+**Lesson**: While a right panel is open, keep the shared top navbar interactive. Do not `inert` the chat pane wholesale (`inert` cannot exempt descendants). Inert only non-chrome children; start overlay + drawer below `--app-shell-top-nav-height`; raise navbar stacking above the dimmer. Publish the measured nav height on `document.documentElement` for fixed panel layers outside `.chatPane`. Background blur stays on content.
+**Applies to**: `page.tsx` right-panel focus trap, `page.module.css` `.panelOverlay` / `.panel`, `navbar-panel-chrome.test.ts`
+
+### 2026-08-05 · UX
+**Trigger**: Debate exhibit sprites stayed Used/protected after Archive was empty.
+**Lesson**: Archive Remove soft-cancels proceedings (`status: cancelled`) for quarantine restore but hides them from the Archive list. Image usage scans must exclude `status = 'cancelled'` Debate sessions so Clear unused can reclaim exhibit sprites; restoring a proceeding re-protects its images.
+**Applies to**: `image-asset-cleanup.ts`, Debate Archive Remove, Asset Library Clear unused
+
+### 2026-08-05 · UX
+**Trigger**: Debate Archive showed two floating Ask Prism orbs.
+**Lesson**: Each applet shell must call `renderGlobalPrismCompanion()` exactly once. A second mount paints a duplicate orb; pin with a source test on the Debate companion tail.
+**Applies to**: `page.tsx` Debate view, `prism-companion-presence.test.ts`
+
+### 2026-08-05 · UX
+**Trigger**: Full-circle Spectator/Watch bake waits were too long; cosmetics shared the same hard loader.
+**Lesson**: Hard waits are head-start bake + invent/refraction only (fullscreen `PrismBlockingLoader`, elapsed timer, confirm-X). Progressive bake unlocks when **both** ~2.5 min estimated buffer and min steps are met; enter held at Start; frontier soft-pauses while baking; cancel/leave checkpoints and resumes append-only from the tip; fully `ready` is always reviewable from the beginning. Soft waits use the same refract loader with `placement="docked"` (bottom-right, no inert, companion stays): Debate exhibit synthesize and Signal artwork keep working while Save/edit continue; emoji/assets remain fallback until sprites land. Exhibit soft jobs may run in parallel after Save (same open draft stays one-at-a-time); the docked card lists each job with per-job Stop, × stops all, and the card hides under a hard invent/motion loader without cancelling the soft jobs.
+**Applies to**: `PrismBlockingLoader.tsx`, `DebateExperience.tsx`, `SignalArtworkJobActivity.tsx`, `liveBake.ts`, `modeTutorials.ts`
+
+### 2026-08-05 · [UX]
+**Trigger**: Spectator Gallery ready showed Forum · Verdict and “Jury has returned 5–0” after bake.
+**Lesson**: Baked Spectator sessions finish the floor server-side (`stepKey: completed`, jury phase complete) before Start. Live chrome must follow presentation progress (`debateLivePhaseLabel`, `debateJuryOutcomeRevealed`) — never the baked end-state — until the matching events are heard.
+**Applies to**: `debatePresentation.ts`, Debate live header, Jury roster/chamber, Spectator bake hold
+
+### 2026-08-05 · [UX]
+**Trigger**: Effort glyph spin was inconsistent during LLM calls — especially new chats with progressive/psychic streaming.
+**Lesson**: `pendingReplyVisible` must survive the mid-request upgrade from optimistic `detail.id === "pending"` to the real conversation id. Adopt the real id into `pendingReplyConversationId` on first progressive segment, and keep `isPendingReplyVisible` tolerant of that upgrade. Wire `generating` on every live model picker that owns LLM work (Chat/Zen + Coffee `botThinking`). Prefer `transform: rotate()` for the spin so hover `transform: scale` cannot fight it.
+**Applies to**: `pendingReplyVisible.ts`, `ComposerModelPicker` `data-generating`, Coffee header picker, effort glyph CSS
+
+### 2026-08-05 · [UX]
+**Trigger**: User asked that summoning Prism keep the navbar clear, Wield hide it, and auto-hide return app-wide like old Zen; then disabled idle auto-hide for Signal and Debate.
+**Lesson**: Drive shared chrome through `appNavbarChrome.ts`. Summon sets `data-prism-companion-open` and raises navbar above the companion backdrop (z 860 > 854). Idle auto-hide and Wield tuck are Zen-only (`chatPresentation === "zen"`); Chat, Signal, Debate, and every other shell keep a persistent bar even while Wielding. Do not put the summon blur over the navbar.
+**Applies to**: `PrismCompanion`, `globals.css`, shared applet navbar, conversation hide/reveal seams
+
+### 2026-08-05 · [UX]
+**Trigger**: User asked whether invent warmup was app-wide; chose to make desaturated fullscreen warm + fullscreen refraction loader the global Wield/Refract rule.
+**Lesson**: Every text Wield Prism / Refract path must (1) warm a cold local model behind a desaturated fullscreen prepare modal, then (2) show `PrismBlockingLoader` while synthesis runs. Invent magics that already own their UI set `ownsPresentation: true`. Field Refract and other magics go through `PrismRefractionGateProvider`. Image synthesis is out of scope unless explicitly expanded.
+**Applies to**: `ModelWarmupIntermission`, `prismRefractionGate.tsx`, Companion field Refract, Debate/Coffee invent, Debate synthesize
+
+### 2026-08-05 · [UX]
+**Trigger**: Favorites hero only showed Group actions — Atmosphere was hidden because the group is `builtIn`.
+**Lesson**: Favorites stays built-in (fixed name, always seeded, no Edit/Delete/Add-bots dialog), but it still owns a room. Use `botLibraryGroupAllowsRoomAtmosphere` so Atmosphere, wallpaper writers, image bubbles, and waiting-room eligibility work for `builtin:favorites` while other built-ins stay locked out.
+**Applies to**: Bot Library group hero, room atmosphere dialog, waiting room, Coffee return from Favorites
+
+### 2026-08-05 · [UX]
+**Trigger**: Debate Studio Forum Cast bot chips had no right-click menu, unlike Zen/Chat library chips.
+**Lesson**: Any `BotPickerTile` grid (Debate cast, Signal host/guest pickers, Coffee canvas cast, Chat/Zen) must open the shared Library bot context menu. Prefer `data-bot-id` + shell `handleAppContextMenu` / `openBotContextMenuById`, and never use the native `disabled` attribute on “already cast” chips if that would block contextmenu — use `aria-disabled` and ignore the click instead. Mount `renderBotContextMenu()` in that shell.
+**Applies to**: Debate/Signal/Coffee bot pickers, `BotPickerTile`, `page.tsx` context menu portal
+
+### 2026-08-05 · [UX]
+**Trigger**: English TTS mouth was closer, but lips still reopened before a pause finished — consonants/vowels must stay 1:1 with audio in every speaking mode.
+**Lesson**: Never apply speech-activity attack across a real pause (only inside continuous phoneme runs ≤ merge gap). Cap release to half of the following silence. After CRT rests, add a post-rest lead-in. Never remap literal `"closed"` → `"speech-closed"` while an utterance is still in progress — Zen returns null; Coffee/Signal/Debate must idle lips the same way while keeping Replying/talking status on the utterance clock.
+**Applies to**: `speechActivity.ts`, `speechSegmentClock.ts`, `zenLiveBotMouthShapeForTalkingState`, Coffee/Signal/Debate mouth gates, Avatar Studio / hub previews
+
+### 2026-08-07 · [UX]
+**Trigger**: Thinking / avatar SFX kept playing under Signal bake and other fullscreen loaders.
+**Lesson**: Fullscreen hard waits (`PrismBlockingLoader` fullscreen + `ModelWarmupIntermission`) must mute avatar SFX via `beginPrismFullscreenBlockingAudioMute`. Docked soft synthesis stays audible. Do not leave computer-calculating loops under an opaque bake/invent overlay.
+**Applies to**: `prismFullscreenBlockingAudio.ts`, `botAvatarSfx.ts`, `PrismBlockingLoader.tsx`, `ModelWarmupIntermission.tsx`
+
+### 2026-08-05 · [UX]
+**Trigger**: Signal Watch baking showed the show intro card during synthesis, so the active bake job was easy to miss.
+**Lesson**: For Watch progressive bake, show the fullscreen `PrismBlockingLoader` only while the unlock buffer is unmet, then open the branded intro / held Start. Do not put bake status on the intro card topic line.
+**Applies to**: `BotcastExperience.tsx` Watch start path, `PrismBlockingLoader`
+
+### 2026-08-05 · [UX]
+**Trigger**: Debate audience murmur and seat chatter only returned between beats, not while a debater was speaking.
+**Lesson**: Do not zero gallery pressure for the body of a live monologue. Keep a formality floor on the silence gate, and while a line is still being heard force scored pressure into at least the murmuring band so talker seats, ambient vocal Foley, and the murmur bed stay alive under advocacy. Full mute reads as an empty room.
+**Applies to**: `packages/shared/src/debateAudiencePressure.ts`, Debate gallery mix / `audienceChattering` in `DebateExperience.tsx`
+
+### 2026-08-04 · [UX]
+**Trigger**: "*Replying*" under the Zen orb flickered on/off during speech pauses.
+**Lesson**: Keep presence `isTalking` / Replying tied to utterance-in-progress (`chatAssistantRevealInProgress`), not to momentary mouth shape. Idle lips through silence with `mouthShape === null`, but do not drop the status label when voicing windows close.
+**Applies to**: `ZenLiveBotPresencePlate`, `zenLiveBotUtteranceActive` in `page.tsx`
+
+### 2026-08-04 · [UX]
+**Trigger**: After pause-idle fix, mouth still started a beat before TTS audio.
+**Lesson**: Never apply speech-activity attack to the first voiced onset, and give text-cadence (no-alignment) windows a ~110ms lead-in idle. Oversized punctuation rest units compress spoken beats and race the mouth ahead of Kokoro — keep rests modest.
+**Applies to**: `speechActivity.ts`, `speechSegmentClock.ts`, `zenLiveMouth` rest weights
+
+### 2026-08-04 · [UX]
+**Trigger**: Mouth kept cycling through natural TTS pauses (local English has no character timing).
+**Lesson**: A literal `"closed"` mouth during speech must idle talking — never remap to `speech-closed` while `isTalking` stays true. When provider alignment is missing, build activity windows from the punctuation-weighted CRT cadence so commas/periods silence lips; do not leave `speechActivityWindows` null on local clips.
+**Applies to**: Zen/Chat mouth memo, `speechActivity.ts` text cadence, Avatar Studio / hub / Coffee voice previews
+
+### 2026-08-04 · [UX]
+**Trigger**: Chat-only personal notes were wired only to the main Chat lane; the player tried `bug note: …` in floating Ask Prism and nothing saved.
+**Lesson**: “Talk to Prism” for meta tools means the floating Ask Prism companion (`/api/prism-companion`) as well as Chat. Clear shorthand (`note:`, `bug note:`) should save without relying on the model. Still block Private/incognito.
+**Applies to**: `prism-companion.ts`, `userNotes`, `/prism` command docs
+
+### 2026-07-31 · [workflow]
+**Trigger**: `/update-bots marie antoinette` — she only lives on `library-dev-backup` (`branchLock: "dev"`), so the public-only promote loop skipped her.
+**Lesson**: `promote-library-design-to-marketplace.mjs` bare runs stay public-shelf only; explicit `--only` may include branch-locked backups. Marketplace bundles never ship account-bound ElevenLabs voice identities; preserve personal Library IDs locally and keep provider treatment separate from portable PRISM/base voice promotion.
+**Applies to**: `/update-bots`, `scripts/promote-library-design-to-marketplace.mjs`, `library-dev-backup`
+
+### 2026-07-31 · [UX]
+**Trigger**: Chat empty home sometimes showed a large dead gap between the bot grid and the composer on startup.
+**Lesson**: Hub empty state (`.emptyStateHubPicker`) stretches to fill the pane. Pack the picker with `margin-top: auto` on `.chatCanvasPickerControls` (keep breathing room via `padding-top`). Also beat `.messages[data-chat-ephemeral="true"]` bottom padding with `.messages.messagesEmptyState[data-chat-ephemeral="true"]` so the live-thread runway does not leak into empty home.
+**Applies to**: `page.module.css` empty Chat/Sandbox hub, `spotlight-search.test.ts`
+
+### 2026-07-31 · [UX]
+**Trigger**: Spectator Debate had no player body; user wanted Prism in the below-screen gallery.
+**Lesson**: Inject Spectator Prism via `debateSpectatorPrismAudienceSeat` + `debateAudienceBotsForSession({ spectatorPrism })`, pin to front-row center, reuse `DEBATE_PLAYER_JUDGE_BOT_ID` for Default Prism face. Do not put Spectator on a podium. Skip ambient gallery chatter for the player seat.
+**Applies to**: `debateAudience.ts`, `DebateExperience.tsx`, Spectator role only
+
+### 2026-07-31 · [UX]
+**Trigger**: Producer-guest English TTS cut the host question mid-line (~0:19 Thinking) and the sticky prompt showed only three clamped lines.
+**Lesson**: Signal voice completion must not use char×34 alone when `onStart(null)`; floor with word-paced `signalVoiceCompletionFallbackDurationMs` and extend the watchdog from `onProgress` as duration settles. Producer sticky host prompts must stay fully readable (scroll, not `line-clamp: 3`) — the tutorial promise is “never hold the whole question in memory.”
+**Applies to**: `BotcastExperience.tsx`, `signalLiveCaptions.ts`, `botcast.module.css`, Producer guest Choose Me
+
+### 2026-07-31 · [UX]
+**Trigger**: Debate vocal Foley tags should speak like Signal and stay out of the transcript.
+**Lesson**: Persona-surprise (`persona_reaction_*`) and ambient vocal Foley speak via ElevenLabs immersive tags (`[clears throat] ...`) with empty Proceedings captions. Filter with `debateEventIsAtmosphericVocalFoley`. Ambient cues return `"owned"` from `onAmbientBotVocalization` so bundled MP3 does not double-play; fall back to MP3 only if voice playback fails.
+**Applies to**: `debateFoley.ts`, `DebateExperience.tsx`, `session-atmosphere-audio.ts`, Proceedings / verbose transcript
+
+### 2026-07-31 · [UX]
+**Trigger**: Bots felt frozen while talking — no blinks / eye wander on the main CRT face.
+**Lesson**: Do not hardcode `faceEyeMovement="still"` on the primary ZenLiveBotMannequin CRT plate. Use authored `faceStyle.eyeAnimation` (still only for reduced/audience detail). Default `blinkWhileTalking` to true on the mannequin so speech keeps a calmer blink cadence.
+**Applies to**: `ZenLiveBotMannequin` in `page.tsx`, `CoffeeSeatPlateEmoji`, `botFaceEyeMovement.ts`
+
+### 2026-07-31 · [architecture]
+**Trigger**: Marketplace catalog blocked Library custom mouths (`faceMouthCharacter` forced null).
+**Lesson**: Public Marketplace face art must accept every Library-authored face field that normalizes cleanly (mouths, eyes, offsets, rotations). Do not sanitize custom mouth/eye glyphs out of public bundles. Catalog tests should validate normalization + uniqueness, not a forced “default mouth / -90 eyes” polish recipe.
+**Applies to**: `botMarketplaceCatalog.test.ts`, `promote-library-design-to-marketplace.mjs`, `/update-bots`
+
+### 2026-07-31 · [UX]
+**Trigger**: Wanted Foley vocal tags in Debate like Signal, above the bots.
+**Lesson**: Reuse Signal’s italic `*Action*` overhead pattern on `.botStagePresence` / Jury seats. Drive tags from ambient vocalization kinds (`Clears throat` / `Sighs` / `Inhales`) plus persona-surprise reaction content via `resolveDebateVocalFoleyTagText`. Do not invent a second pill chrome unless listener-reaction mm-hm pills are explicitly requested. Spoken Foley must not land in Proceedings — same contract as Signal listener vocal reactions.
+**Applies to**: `debateFoley.ts`, `DebateExperience.tsx`, `DebateExperience.module.css`
+
+### 2026-07-31 · [UX]
+**Trigger**: Soft lane drift for Zen/Chat live bot avatars — stationary bob, travel only up or down.
+**Lesson**: Own idle bob + vertical hops on the presence plate via CSS `--zen-live-bot-lane-drift-*` offsets (do not mutate persisted drag position). Zero ambient body hover amplitude on the Zen plate so bobs do not stack. Pause travel while talking; zero offsets while dragging / reduced motion / transitioning.
+**Applies to**: `zenLiveBotLaneDrift.ts`, `ZenLiveBotPresencePlate` in `page.tsx`, `page.module.css`
+
+### 2026-07-31 · [UX]
+**Trigger**: Request to enable sentence-case by default in the Composer on desktop.
+**Lesson**: HTML `autocapitalize="sentences"` is ignored on desktop Electron. Live TipTap/textarea insertion must capitalize via `applyComposerSentenceCaseInsertion`, and send-time `applyComposerSendAutoCorrect` should also sentence-case safely (skip `@/#/!/?/` tokens and `example.com`-style periods). Coffee/Signal keep spellcheck off but can still enable sentence capitalization when the account writing-assist setting is on.
+**Applies to**: ComposerInput, DesktopMarkdownComposer, composerSentenceCase, composerSendAutoCorrect
+
+### 2026-07-30 · [UX]
+**Trigger**: Wanted Default Prism back as the Coffee replay player body without undoing pot-only live Coffee.
+**Lesson**: Restore the replay-only `coffeeReplayPlayerSeat` (Prism mannequin + nameplate pot dock) under `coffeeReplayActive && playerPresent`. Keep participant id `coffee-player` for audio-master direction; flip manifest to `third-person-prism` / `visible: true`. Do not revive barista, player mug, or live on-camera player.
+**Applies to**: `page.tsx` Coffee review stage, `page.module.css`, `replayManifest.ts`, Coffee tutorials.
+
+### 2026-07-30 · [UX]
+**Trigger**: Coffee Send waited for player TTS `onStart` before any table typewriter, so Premium synth left blank “thinking” dead air.
+**Lesson**: On Send, enter `userTableTyping` and stream the player line immediately; start voice in parallel. Register the settle waiter before awaiting voice so a fast provisional typewriter cannot miss its resolve. Hold settle until `coffeePlayerVoiceRevealReadyRef` is true and the active delivery (provisional or voice-locked) finishes; when audio arrives late, floor visible length so the stream never jumps backward. Bot `runCoffeeTurnJob` still starts only after settle.
+**Applies to**: `sendCoffeeTurn`, player typewriter RAF, `startCoffeePlayerVoiceForReveal` in `page.tsx`.
+
+### 2026-07-30 · [perf]
+**Trigger**: Coffee Action field felt laggy while the live table kept moving.
+**Lesson**: Speech TipTap already buffers local edits against deferred `coffeeDraft` sync; the Action `<input>` must do the same with local state + a last-emitted guard. Never bind Action directly to parent `value` and never overwrite `actionValueRef` from props on every render — live Coffee re-renders will fight keystrokes and can drop mid-type action text before the 240ms parent flush.
+**Applies to**: `ComposerInput` Action rail in `page.tsx`, Coffee/Signal/Zen shared action field.
+
+### 2026-07-30 · [UX]
+**Trigger**: Debate Territory needed Command Center prompts and wildcard decks.
+**Lesson**: Attach setup seed fields with `renderPickAwareComposer`. Prompt Center picks expand to body text on insert via `resolveComposerPromptPickToPlainText`; wildcard decks and `{SLOT}` chips stay literal until Build/start/send. Expand decks/`{a|b}`/`{TODAY}` only into the outbound payload; fill `{NAME}`-style slots on the server then. Never rewrite the composer draft with resolved wildcard prose, and never expand on every companion-draft render (that would re-roll randomness). Keep catalog dice separate from Command Center deck rolls. Do not put pick-aware composers in Bot Profile Builder.
+**Applies to**: `DebateExperience` Territory / Your idea, `expandComposerDraft`, Signal setup + on-air, Coffee send, Slate companion.
+
+### 2026-07-26 · [architecture]
+**Trigger**: Needed a personal Marketplace backup of Library-only bots without shipping that shelf on main/release.
+**Lesson**: Marketplace shelves can carry `branchLock: "dev"`. Visibility helpers must require an exact branch match (`NEXT_PUBLIC_PRISM_BRANCH`), and public catalog quality gates should exclude branch-locked bots so personal backups can preserve Library state without public polish constraints.
+**Applies to**: `botMarketplace.ts`, `prismDevGating.ts`, `scripts/publish-library-dev-backup-marketplace.mjs`.
+
+### 2026-07-25 · [UX]
+**Trigger**: Profile-builder wildcards looked useful for random last names each turn, but expansion only baked once on save.
+**Lesson**: Do not put Prompt Center wildcards / pick-aware composers in Bot Profile Builder textareas. Bot identity copy must stay durable plain text; per-turn randomization needs a live runtime template elsewhere, not bake-on-save profile fields.
+**Applies to**: `BotProfileBuilder` in `apps/web/src/app/page.tsx`, bot create/save paths.
+
+### 2026-07-25 · [UX]
+**Trigger**: Signal closing left a 286px rail gap, and two faithful replays began saved audio before the extended intro visual had meaningfully revealed; one capture placed first speech at 778ms despite a saved 7980ms intro contract.
+**Lesson**: Outro stays full-bleed under the navbar until Return to show. For recording, never stop the ident on model warmup and never compact thinking while `episodePreRoll` exists. For legacy playback calibration, keep picture start and intro-card hold as independent knobs: picture start is animation-only head start, while card hold is audio-clock duration until the cut to wide. Never let picture start shorten or lengthen the card. Dissolve still lands on forced wide; copy a report with both values.
+**Applies to**: `botcast.module.css` outro/replay intro, `BotcastExperience` pre-roll capture gate and `SignalReplayBookend`.
+
+### 2026-07-24 · [UX]
+**Trigger**: Signal’s shows panel returned as soon as an episode completed, while the closing card was still up.
+**Lesson**: Treat intro, live, completed/cancelled awaiting dismiss, and the outro card as one immersive presentation. Keep `data-live-episode` / shows-rail hiding and chrome lock until Return to show clears the episode; only offer Cut show while the episode is still on air.
+**Applies to**: `BotcastExperience` `liveSessionActive` / `showLiveExit`, shared Signal navbar exit wiring.
+
+### 2026-07-24 · [UX]
+**Trigger**: Copycat Calvin (echo-bound Signal host) 400'd on producer Interrupt guest now with “cannot originate an interruption.”
+**Lesson**: Echo-bound hosts may still cut in, but only by repeating the last audience-heard on-air phrase. Derive the bridge from that heard prefix (or prior cast line for pre-speech cuts), skip saved hostInterruptionLines membership, force the durable host turn through speech-copy, and avoid double-playing the same echo after the ephemeral bridge.
+**Applies to**: Signal `interrupt_guest` in `apps/api/src/botcast.ts`, `BotcastExperience` bridge UI, shared `botcastEchoHostInterruptPhrase`.
+
+### 2026-07-24 · [UX]
+**Trigger**: Repeated Coffee/Signal interruptions needed to escalate annoyance without permanent hostility or replay drift.
+**Lesson**: Model interruption irritation as session-local directed edges with idempotent transition ids, bias the existing reclaim planner instead of inventing a third floor state, keep expression verbal-forward with capped snark/Foley/gain, and persist delivery metadata so live and replay stay aligned.
+**Applies to**: Coffee and Signal crosstalk in shared `directionalIrritation`, `coffee.ts`, `botcast.ts`, and web reaction playback.
+
+### 2026-07-24 · [testing]
+**Trigger**: A local Coffee Group Ethos response used a curly closing quote and appended word-count notes, so failed JSON parsing persisted the entire model reply as the Ethos.
+**Lesson**: Structured generation must never fall back to the full raw response after JSON parsing fails. Recover only the named field with a narrow malformed-JSON extractor, validate the complete user-facing contract before persistence, and keep an exact regression fixture for observed local-model formatting debris.
+**Applies to**: Coffee Group identity synthesis in `apps/api/src/coffee.ts` and similar PRISM structured-generation parsers.
+
+### 2026-07-24 · [perf]
+**Trigger**: Coffee group session starts waited on personalized starter-topic LLM generation, and unfocused windows suspended visuals on blur.
+**Lesson**: Open Coffee from saved/deterministic topics immediately and refresh personalized group topics in the background with roster/settings/ethos re-checks before persist. Suspend `prismVisualLifecycle` on blur/hide/pagehide/system pause so Mission Control thumbnails and background spaces freeze. Bound Coffee reveal voice with a validity token so the 1.8s silent fallback cannot let late queued audio become audible. Live Debate/Coffee/Signal claim `acquirePrismLivingSession` so minimize/blur sleeps visuals only — audio, autoplay, and bake stay up; companion `systemPaused` still holds. Without a living-session claim, Debate may still recess via `usePrismAppAwayFromUser`.
+**Applies to**: `apps/api/src/coffee.ts` `ensureCanonicalCoffeeGroupStarterTopics`, `apps/web/src/app/prismVisualLifecycle.ts`, `apps/web/src/app/englishVoice.ts`, Coffee reveal voice in `page.tsx`, `DebateExperience.tsx`, `prismPresentationSuspend.ts`.
+
+### 2026-08-05 · [architecture]
+**Trigger**: Switching away from Prism during a live Debate raced the floor to the end because suspended voice returned false and silent-revealed every remaining event.
+**Lesson**: Never treat presentation-suspend as “skip this line.” Hold with `waitWhilePrismPresentationSuspended` when presentation is truly suspended. Live sits claim `acquirePrismLivingSession` so ordinary minimize keeps audio (visuals may sleep); companion system pause still suspends and can recess. Spectator seal must also require `spectatorWatchPresentationCompleteRef` after the final presentable beat — `!presenting` alone after a suspend abort must never call `/seal-presentation`.
+**Applies to**: `prismPresentationSuspend.ts`, `DebateExperience.tsx` consume/auto-advance/away-recess/seal, `page.tsx` `playDebateUtterance`.
+
+### 2026-08-07 · [UX]
+**Trigger**: Minimizing Prism soft-paused live Debate/Coffee/Signal and Debate auto-recessed, breaking sessions while bake/recording only needed the window to stay "live."
+**Lesson**: Split visual sleep from living-session audio. `prismVisualLifecycle` suspends Pixi/CSS on hide **and** ordinary blur so Mission Control thumbnails freeze; `acquirePrismLivingSession` keeps voice, atmosphere, Coffee autoplay, Debate/Signal orchestration, and faithful `AudioContext` capture running. Do not recess Debate or duck presentation solely because the desktop window lost focus.
+**Applies to**: `prismPresentationSuspend.ts`, `prismVisualLifecycle.ts`, `replayAudioMasterCapture.ts`, `DebateExperience.tsx`, `BotcastExperience.tsx`, Coffee living-session claim in `page.tsx`.
+
+### 2026-07-24 · [architecture]
+**Trigger**: Coffee/Signal/Zen needed frequent `*actions*` without a second model wait, while still allowing occasional persona/prop beats.
+**Lesson**: Plan stage actions before the existing speaker call (80% Director / 20% persona invite). Persist one canonical action metadata field per lane (`coffeeStageAction`, Signal `stage_action_text`, `zenStageAction`), strip actions from spoken content, and keep legacy inline/`coffeeAmbientAction` reads as fallbacks so live/reload/replay never double-render. Yield to social silence, crosstalk reclaim, Powers, departures, listener reactions, and Zen live-action ownership.
+**Applies to**: `packages/shared/src/stageActionDirector.ts`, Coffee/Signal/Zen speaker paths, replay manifests.
+
+### 2026-07-30 · [UX]
+**Trigger**: Material impact prototypes needed a Debate test path for sealed packet add and table presentation.
+**Lesson**: Map exhibit adjective/object text to a material impact library (`debateExhibitImpactSfx`), play a lighter one-shot on packet add (direct audio, setup has no atmosphere bus), and play a fuller Foley hit when `DebateEvidencePedestal` mounts live. Keep audience paper-shuffle as room reaction; object impact is separate.
+**Applies to**: `debateExhibitImpactSfx.ts`, `DebateExperience.tsx` `addEvidenceObject` + pedestal, `public/audio/debate/exhibits/`.
+
+### 2026-07-23 · [UX]
+**Trigger**: Coffee seat action badges rendered stage directions in all caps (“EXTENDS A HAND…”).
+**Lesson**: Canvas-facing action/stage-direction copy stays sentence case across Coffee, Zen, and Signal. Keep `text-transform: none` on badge/presence/voice-action text and sentence-case in the display normalizer; only the composer Action field chrome stays uppercase.
+**Applies to**: `page.module.css` `.coffeeSeatActionBadgeText`, `normalizeCoffeeSeatActionBadgeText`, Signal `voiceActionText` / `signalVoicePerformanceActionPresentationAtProgress`.
+
+### 2026-07-23 · [architecture]
+**Trigger**: Signal episodes froze with bots staring; sending a producer cue then failed with “Producer cues wait for the host's next turn.”
+**Lesson**: Prefetch (`prepareFollowingBotResponse`) commits the next turn via `POST /advance`. A queued producer cue must not skip that prepared result and re-POST with the cue — the server has already moved on, the 400 stops autoRun, and the stage goes dead. Prefer a matching prepared advance, bake any already-queued host cue into the prefetch body, and if a late cue still 400s, resync the episode and catch up unplayed lines instead of killing the rundown.
+**Applies to**: `apps/web/src/app/BotcastExperience.tsx` advance/prefetch/cue handoff.
+
+### 2026-07-23 · [UX]
+**Trigger**: Sound FX Bench needed both local trim editing and one-click sibling generation without a reference-audio provider.
+**Lesson**: Add Start/End trim as outer waveform handles with discarded-region dimming, keep Fade In/Out relative to the retained slice, and enforce a minimum keep ratio so fades never fight empty audio. Expose Fade and Trim as mutually exclusive envelope modes so their left/right handles never share the same interaction lane. For Similar, reuse the stored generation prompt when available and otherwise build a family prompt from the display name plus assigned actions, returning through the existing candidate Keep/Edit/Toss flow.
+**Applies to**: `apps/web/public/tools/sound-fx-bench.html` editor trim and library Similar action.
+
+### 2026-07-23 · [UX]
+**Trigger**: Sound FX Bench assets played at full volume from the Library but at only 16–30% from Demo panels, making contextual auditions sound substantially quieter.
+**Lesson**: Keep Library and Demo auditions perceptually comparable. Lift the contextual path with one named master-gain constant while preserving cue-specific balance and per-source headroom; include the same master gain in any displayed or recorded output-gain diagnostics.
+**Applies to**: `apps/web/public/tools/sound-fx-bench.html` Library/Demo playback balance.
+
+### 2026-07-23 · [UX]
+**Trigger**: The Sound FX Bench thinking-avatar loop was verified by numeric filenames, but the visible third and fourth poses were out of order.
+**Lesson**: Verify animation order from the rendered artwork, not only filename sequence. For the current thinking-avatar spinner, the smooth visual cycle is horizontal → descending diagonal → vertical → ascending diagonal, while idle remains the separate smiling `bot_0` image. Keep all five source PNGs tracked with the bench instead of relying on ignored local files. Preserve the small elliptical underglow that grounds the robot, but do not add a separate upper radial hover orb behind the supplied sprite art. For idle levitation, animate the sprite rather than its container so the light remains attached to the ground; widen, soften, and dim the underglow as the robot rises, then tighten and brighten it as the robot descends. Hover may start the thinking frames and sound, but must not scale the sprite or inherit the generic circular button highlight.
+**Applies to**: `apps/web/public/tools/sound-fx-bench.html` thinking-avatar frame mapping.
+
+### 2026-07-23 · [UX]
+**Trigger**: The Sound FX Bench demo represented bot-card hover with one large card, but evaluating hover sound and visual timing needs repeated neighboring targets.
+**Lesson**: Interaction demos should preserve the density that gives the behavior meaning. For bot-card hover auditions, use a compact multi-card grid so moving between targets exposes hover onset, visual activation, and release timing together.
+**Applies to**: `apps/web/public/tools/sound-fx-bench.html` demo snippets.
+
+### 2026-07-23 · [UX]
+**Trigger**: The Sound FX Bench represented action audio with direct soundboard pads, bypassing the action-text keywords that trigger those sounds in PRISM.
+**Lesson**: A fidelity demo should exercise the real trigger path, not only the final output. Action-audio auditioning should accept prose, report the matched production keyword family, and then resolve the cue through the live assignment map.
+**Applies to**: `apps/web/public/tools/sound-fx-bench.html` action-audio snippet and `apps/web/src/app/coffee-action-sfx.ts` keyword parity.
 
 ### 2026-07-11 · [UX]
 **Trigger**: Zen's first-session transcript became downward-scroll locked again after an earlier flex-margin fix, while the console also reported a maximum React update depth from the autonomy scheduler.
@@ -16,7 +468,7 @@ LocalAI-specific patterns and corrections. Updated when project-specific behavio
 
 ### 2026-07-11 · [design]
 **Trigger**: A request to replace the Sharp face font was initially interpreted as changing the preset's glyph structure and geometry.
-**Lesson**: Avatar Studio's Core/Soft/Sharp/Bounce/Serif choices are font personalities first. When one lacks distinction, choose a replacement typeface based on how its punctuation and symbols render at face scale, then name the style after the resulting visual character; do not change facial glyph structure unless explicitly requested. Doto was preferred over DotGothic16 and Bungee because its dotted matrix reads distinctly while preserving variable weight; self-host the licensed font so it works offline.
+**Lesson**: Avatar Studio's Core/Soft/Mono/Bounce/Serif choices are font personalities first. When one lacks distinction, choose a replacement typeface based on how its punctuation and symbols render at face scale, then name the style after the resulting visual character; do not change facial glyph structure unless explicitly requested. The Mono slot uses Noto Sans Mono with both `latin` and `latin-ext` subsets because the animated mouth vocabulary requires native `ɵ` and `ʘ` glyphs; preserve the stored `concise` ID for saved-bot compatibility.
 **Applies to**: `packages/shared/src/botAvatar.ts`, `apps/web/src/app/layout.tsx`, and face-font rules in `apps/web/src/app/page.module.css`.
 
 ### 2026-07-11 · [UX]
@@ -48,6 +500,61 @@ LocalAI-specific patterns and corrections. Updated when project-specific behavio
 **Trigger**: The bot About birthday controls allowed BC birth years without automatically marking the bot/persona as deceased.
 **Lesson**: BC birth years should force deceased status on and prevent present-day age semantics. If a profile control implies an impossible living state, normalize the data and lock the dependent UI state.
 **Applies to**: `packages/shared/src/botProfile.ts`, `packages/shared/src/botProfile.test.ts`, and `apps/web/src/app/page.tsx` bot profile birthday controls.
+
+### 2026-07-24 · [UX]
+**Trigger**: Coffee reviews exposed literal `assistant` speech in spaced, glued, bracketed-action, and role-only forms; exact Power responses could reintroduce it after draft sanitation. The same transcripts leaked noun actions (`A haughty scoff`) and trailing vocal beats (`burp`) as speech.
+**Lesson**: Strip chat-role framing at draft sanitation, after Power/hard-response transforms, and while loading exact-response rows. Parse balanced `{action}` / `[action]` role suffixes into `*action*`, suppress role-only rows as silence, and run narrow visible-action formatting after exact transforms. Noun action openers become explicit physical beats; short trailing vocal actions stay wrapped. Do not sanitize away ordinary words such as `User experience`.
+**Applies to**: `apps/api/src/coffee.ts` `stripCoffeeSpeakerPrefix` / `sanitizeCoffeeTableReply`.
+
+### 2026-07-24 · [UX]
+**Trigger**: A stay-on-thread Coffee premise demanded one unfree decision and its forcing cause, but the table discussed free will abstractly without satisfying the requested answer shape.
+**Lesson**: Topic anchoring must preserve explicit evidence/example/decision/cause requirements, not merely repeat the topic's subject. When a premise says everyone must answer or penalizes refusal, each still-unanswered bot must lead with a direct first-person answer; retry a dodge once, then show an explicit refusal rather than laundering philosophy into compliance. Adjacent abstraction is still topic drift.
+**Applies to**: `apps/api/src/coffee.ts` `buildSpeakerPrompt` topic contract.
+
+### 2026-07-24 · [perf]
+**Trigger**: Coffee review — afterparty + pileup + responseDelayBias=100 + breathingRoom=0 melted the table to <1fps; End needed spam-clicks. Export also baked "... sure. Go ahead." into cut-off lines.
+**Lesson**: Max-speed pileup must keep a short paint/input gap (~320ms), never a true 0ms schedule — every turn already replaces full Coffee conversation state and seat mood CSS filters. Mood replay events should emit only when social deltas exceed a small threshold. Bot-crosstalk annoyed follow-ups stay out of the saved cutoff line but remain visibly owned by the live interruption banner while audible.
+**Applies to**: `apps/web/src/app/coffee-turn-pacing.ts`, `apps/api/src/coffee.ts` mood replay + `recordCoffeeInterruptionPause`, Coffee review exports.
+
+### 2026-07-24 · [UX]
+**Trigger**: Thinking-time dead-air commentary felt too frequent, showed above seats like *actions*, and repeated the same lines.
+**Lesson**: Coffee dead-air asides must be sparse (chance + multi-turn gap + extra think delay), rotate commentators, and expand line variety with recent-text avoidance. Any intelligible aside must remain visibly owned by its seat for the full audible presentation; mouth-only speech is ghost speech.
+**Applies to**: `apps/web/src/app/deadAirAside.ts`, Coffee thinking aside effect in `page.tsx`, Coffee tutorial copy.
+
+### 2026-07-24 · [UX]
+**Trigger**: Coffee review — Trump audibly cut in on Stewie with no visible mouth/line; equipping the coffee pot caused major lag.
+**Lesson**: Bot-crosstalk cut-ins must call `presentCoffeeListenerReaction` (visual + audio) while the interrupted bot is still the active speaker, and `clearCoffeeListenerReaction(true)` if interrupt APIs fail — never bare `playCoffeeListenerReaction` alone (ghost speech). Seat badges and live interruption banners must show `spokenCue` for cut-ins, not only gesture labels. Coffee pot drag x/y must update via DOM CSS vars with React setState only for structural pour/return changes; skip cup hit-testing on tray grab; cache cup rects briefly while dragging; avoid multi-cup `drop-shadow` filters while equipped. Stale reveal epochs after `startCoffeeVoiceForReveal` must abort voice and unmark seen ids.
+**Applies to**: `apps/web/src/app/page.tsx` automatic cut-in + coffee pot drag path + reveal voice; `page.module.css` pot-drag cup highlights.
+
+### 2026-07-24 · [UX]
+**Trigger**: A directed Coffee reply showed Adolf's new text while Trump's prior line audibly replayed.
+**Lesson**: Live Coffee speech must have one visible owner. `queueCoffeeReveal` owns same-session bot audio and its synchronized table typewriter; the resume-latest voice fallback may run only when entering a conversation, never when that conversation refreshes during a player send or live turn. Ephemeral asides and interruption tails must keep matching seat/banner text visible while audible.
+**Applies to**: `apps/web/src/app/page.tsx` Coffee resumed/live voice ownership.
+
+### 2026-07-24 · [UX]
+**Trigger**: A Coffee review exported top-offs as nearly-full cups dropping to 4%, and leaked bare `(prism-bot://…)` targets plus a valid bracketed mention misread as an action.
+**Lesson**: Coffee cup `progress` is consumption progress, so review exports must display fullness as `1 - progress`. Strip only orphan bot href targets; preserve complete `[Name](prism-bot://…)` mentions, and parse bracketed role actions only after an actual chat-role prefix was removed.
+**Applies to**: `apps/web/src/app/coffee-replay.ts`; `apps/api/src/coffee.ts` role/mention sanitation.
+
+### 2026-07-24 · [UX]
+**Trigger**: After the fallback-ordering fix, an existing group ("Gentle Order") still showed a fully canned quartet forever because the deterministic output had been persisted as the group's canonical topics.
+**Lesson**: Never persist purely deterministic starter topics as canonical. Track whether generation was LLM-backed, serve fallback topics per-session without storing them, and treat a stored quartet drawn entirely from the static pools (`coffeeGroupStarterTopicsLookCanned`) as an upgrade candidate on the next session start.
+**Applies to**: `apps/api/src/coffee.ts` `inferCoffeeGroupStarterTopicsDetailed` / `ensureCanonicalCoffeeGroupStarterTopics`.
+
+### 2026-07-24 · [design]
+**Trigger**: Jared reversed Coffee's "bots wait while the player types" bias in favor of Signal's live flow.
+**Lesson**: In Coffee, typing must never suppress the table: no loop-timer clearing, autoplay deferral, reveal holds, wake/force draft gates, or session-clock hold while composing. A thinking bot keeps its `botThinking` state over `playerComposing`, and a send during botThinking queues behind the bot's line (via the reveal-settle wait) instead of aborting the turn or recording an interruption. Only a send during a visible reveal (`tableTyping`) is a player interruption. `userIsComposing` still goes to the server — it enables bot cut-ins while typing, not suppression.
+**Applies to**: `apps/web/src/app/page.tsx` Coffee scheduling/sendCoffeeTurn, `coffee-user-reveal-flow.ts`, `coffee-session-clock.ts`.
+
+### 2026-07-24 · [perf]
+**Trigger**: Coffee composer typing stayed laggy after draft-state deferral; live spell-correct (native spellcheck/autocorrect attributes on the TipTap editor) was still active in Coffee/Signal.
+**Lesson**: Live writing assist is a Chat/Zen-only affordance. Coffee and Signal composers run assist-free, and when the account writing-assist setting is on, apply the deterministic send-time pass (`applyComposerSendAutoCorrect`) as text enters the Coffee table or Signal producer queue.
+**Applies to**: `apps/web/src/app/composerSendAutoCorrect.ts`, `renderShellComposer` in `page.tsx`, `submitProducerGuestAnswer` in `BotcastExperience.tsx`.
+
+### 2026-07-24 · [UX]
+**Trigger**: New Coffee groups always showed the same four canned starter topics ("Which rule deserves breaking?" etc.).
+**Lesson**: Canonical Coffee group starter completion must not jump straight from failed/filtered helper output to a fixed canned quartet. Prefer multi-seat tagged LLM labels, then unlabeled LLM labels, then bot-grounded deterministic + group-seeded fill topics, and only then the shared fallback. Discarding every candidate that lacks `participantBotIds` makes LOCAL/helper failures look identical across groups.
+**Applies to**: `apps/api/src/coffee.ts` `completeCanonicalCoffeeGroupStarterTopics` / `coffeeCanonicalGroupStarterTopicPadding`.
 
 ### 2026-05-22 · [UX]
 **Trigger**: Coffee starter topics improved from generic suggestions but still rendered nonsensical title fragments like "bold angle on Stoic ethics and physics as".
@@ -364,7 +871,192 @@ LocalAI-specific patterns and corrections. Updated when project-specific behavio
 **Lesson**: When visual polish is already intentional, do not flatten/remove styling as a diagnostic fix unless explicitly approved. First preserve the visual baseline, reproduce the issue, and isolate layout/re-render/compositing causes with the smallest reversible probe.
 **Applies to**: LocalAI responsive UI/debugging work in `apps/web/src/app/page.tsx` and `apps/web/src/app/page.module.css`.
 
+### 2026-07-23 · [UX]
+**Trigger**: “More tension” and “increase the drag” referred to different parts of Companion Glass feel: strong held resistance, a forceful release, and several wall-to-wall passes before momentum visibly decays.
+**Lesson**: Tune elastic pointer toys along three explicit axes: held drag transfer, release spring/slingshot force, and post-release damping/restitution. A bounded web drag cannot guarantee that a hidden native cursor reappears on the orb: the pointer can continue beyond the arena after the orb clamps, and browsers cannot warp it back. Do not simulate the native cursor with a fake one after that distinction matters. For Sound FX Bench, prioritize a visible native cursor with direct 1:1 orb tracking; express the requested slingshot feel through high spring/launch force and low-loss wall bounces. For impact-audio calibration, scale gain from measured collision velocity with explicit floor/ceiling constants, but remove all visible calibration/interaction copy once tuning is approved—the Companion Glass footer should show only its assigned-sound count. Keep energetic toys interruptible: clicking a moving arena should engage a clearly indicated high-damping, zero-rebound brake and return cleanly to center.
+**Applies to**: `apps/web/public/tools/sound-fx-bench.html` Companion Glass pointer physics.
+
+### 2026-07-23 · [UX]
+**Trigger**: The Sanctum Sound Editor was allowed to stack at a normal desktop width and repeated the selected sound, privacy state, and editing instructions in a large heading block.
+**Lesson**: Keep the Sound FX Bench library and assignment/editor panels side by side throughout normal desktop widths. Treat single-column stacking as an emergency narrow-screen fallback, not the design target. The selected library row already supplies editing context, so the editor should open directly on its instrument controls instead of repeating identity and instructional copy.
+**Applies to**: `apps/web/public/tools/sound-fx-bench.html` workspace and editor breakpoints.
+
 ### 2026-04-24 · [UX]
 **Trigger**: Mobile bot customizer color/glyph popover used vertical space well but felt ambiguous to dismiss because it behaved like a near-full-height sheet.
 **Lesson**: Third-layer mobile popovers inside the right drawer should read as centered modal cards, not full-height sheets. Keep a visible dimmed outside area around the card so tap-outside dismissal is obvious; use a moderate viewport-height cap and let the internal glyph grid scroll instead of stretching the whole popover to the top and bottom safe areas.
 **Applies to**: `apps/web/src/app/page.module.css` `.colorGlyphPopover` mobile styling.
+
+### 2026-07-23 · [UX]
+**Trigger**: The first shared fade timeline was clearer than two nested slider cards, but its repeating decorative waveform and rectangular color washes still did not explain how the edit would shape the sound.
+**Lesson**: Audio-editing visuals should communicate the actual processing, not merely decorate the controls. Use the selected sound’s real waveform, clip it to the gain envelope, draw the fade ramps directly, keep paired handles independently reachable when they meet, and constrain conflicting values so the visual shape and rendered audio remain identical. Once the handles and waveform make the state obvious, omit redundant dynamic prose such as “Drag inward” or “Fades shaped.” Treat the three prominent envelope value chips as keyboard-accessible per-parameter reset buttons—Fade In to None, Gain to 0 dB, and Fade Out to None—with each reset recorded as one Undo step.
+**Applies to**: `apps/web/public/tools/sound-fx-bench.html` Sound FX Bench envelope editor.
+
+### 2026-07-23 · [UX]
+**Trigger**: Fine Tune still behaved like optional disclosure content even though its controls are part of the core desktop editing instrument.
+**Lesson**: Keep core Sound FX editing controls permanently visible. When vertical space is tight, remove explanatory repetition and consolidate controls instead of hiding them. Gain belongs inside the full-width waveform as a vertical fader, dynamically centered between the Fade In and Fade Out handles; never shrink the envelope to create a sidecar control. Fine Tune should retain only tone, timing, and phase, with its prominent High-end and Speed value chips acting as one-click resets to 0 dB and 1×.
+**Applies to**: `apps/web/public/tools/sound-fx-bench.html` waveform gain fader and Fine Tune console.
+
+### 2026-07-23 · [UX]
+**Trigger**: The Sound FX editor presented Save as available before any setting changed, then placed whole-edit Restore, Undo, and Preview actions inside the Envelope heading.
+**Lesson**: Editing instruments should reflect whether the current settings differ from their opening state: disable Save when there is nothing to preserve, including after values are restored manually. Undo should retain real edit history while Save follows current-state equality, and a continuous slider or dial gesture should collapse into one reversible step rather than flooding history with every input frame. Place actions according to their true scope: controls affecting both Envelope and Fine Tune belong in a distinct toolbar owned by their shared editor parent, and a globally placed Restore action must restore the whole editor.
+**Applies to**: `apps/web/public/tools/sound-fx-bench.html` editor action state and history controls.
+
+### 2026-07-23 · [UX]
+**Trigger**: The custom player looked cohesive, but its vertical volume popover felt detached from the otherwise inline transport and overlapped nearby interface space.
+**Lesson**: Do not duplicate sound-shaping gain as temporary player volume. Keep the compact audition transport mute-only, and overlay per-file gain inside the editor waveform between the fade handles so its ownership and save behavior are unambiguous.
+**Applies to**: `apps/web/public/tools/sound-fx-bench.html` Sanctum player and waveform gain control.
+
+### 2026-07-23 · [UX]
+**Trigger**: The Sound FX Bench header stacked its title and full explanatory subtitle beneath the PRISM mark at a normal desktop width, then retained a redundant tool title after being compressed.
+**Lesson**: Utility benches should use a compact single-row identity bar at normal desktop widths: small atelier mark and the primary view toggle. Omit a repeated tool title when the surrounding context already identifies the bench, move optional explanatory copy into a title tooltip on the mark, and reserve header stacking for emergency narrow-screen fallback.
+**Applies to**: `apps/web/public/tools/sound-fx-bench.html` bench header and responsive breakpoints.
+
+### 2026-07-24 · [UX]
+**Trigger**: Fixing Coffee speech mouths by counter-rotating every mouth glyph made standard plate mouths sideways, while Rick's rendered custom mouth remained correct.
+**Lesson**: Shared Coffee/Signal faces have three mouth cases. Rendered custom glyphs use authored screen-relative rotation; standard bots' generated plate visemes inherit the plate rotation and may apply a plate-relative authored delta; generated fallback visemes temporarily replacing a configured custom glyph must keep the neutral plate baseline rather than inheriting that different glyph's authored angle. Transient generated expressions such as the empty-cup frown must clear both the custom mouth character and its rotation instead of injecting the expression into the custom-mouth slot. Never classify solely by what glyph is rendered in the current frame.
+**Applies to**: `apps/web/src/app/CoffeeSeatPlateEmoji.tsx`, Coffee and Signal speech visemes, sip puckers, empty-cup frowns, and mouth-rotation tests.
+
+### 2026-07-24 · [UX]
+**Trigger**: Disabling a bot's `Coffee *` option preserved its custom mouth character but still ran the surrounding sip-face presentation, allowing persistent mouth features such as Darth Vader's respirator to disappear briefly.
+**Lesson**: `Coffee *` owns the entire sip-mouth treatment, not only the replacement character. When it is off, cup motion may continue, but the face must receive no sip glyph, pucker offset, rest transition, or mouth-active presentation whatsoever.
+**Applies to**: Coffee seat sip presentation in `apps/web/src/app/page.tsx` and `apps/web/src/app/coffee-seat-plate.ts`.
+
+### 2026-07-24 · [UX]
+**Trigger**: Coffee intentionally let an active sip finish after a bot entered its thinking state, which made the bot appear to ponder while drinking.
+**Lesson**: Thinking is a higher-priority embodied state than sipping. Entering thinking must immediately return the cup to rest, cancel explicit and ambient sip visuals, block new sip windows, and preserve cup progress at the prior valid sip gate rather than consuming invisibly.
+**Applies to**: Coffee cup scheduling, explicit action sips, completed sip animations, thinking indicators, and cup-progress gating.
+
+### 2026-07-24 · [UX]
+**Trigger**: A producer-ended Signal session was completed and archived, which also made a deliberately cancelled recording resumable and visible beside finished episodes.
+**Lesson**: Signal cancellation is terminal but not an archive. A first producer cut may synthesize one fast, smooth sign-off, and a second press may escalate to a canned immediate exit; both outcomes still preserve only reusable booking inputs for Latest episodes, discard replay media, stay out of recorded counts/archive cards, and reject every continuation path.
+**Applies to**: Signal episode status, producer Cut show flow, replay finalization, episode archive, and booking autofill.
+
+### 2026-07-24 · [UX]
+**Trigger**: Escalating a Signal producer cut correctly aborted the first smooth-ending request, but its expected `AbortError` was still shown as a failure toast beside the successful canned exit.
+**Lesson**: When a second user action intentionally supersedes an in-flight request, suppress the aborted request only after confirming its operation token is stale or the error is an abort. Preserve visible errors for the replacement request and genuine failures.
+**Applies to**: Signal two-stage producer cuts and other explicitly superseding request flows.
+
+### 2026-07-24 · [UX]
+**Trigger**: Signal thinking-gap compaction activated during pre-roll, paused the replay master over the intro, and rebased speech timing so replay mouths drifted from voices.
+**Lesson**: Replay compaction removes only the interval where a bot is visibly and audibly in its thinking state. It must preserve natural dead air, interruption timing, crosstalk, retorts, branded bookends, and pre-speech breath foley; release the hold immediately before that breath begins so audio, speech markers, cameras, and mouths share one time origin.
+**Applies to**: Signal intro capture, replay audio-master holds, logical replay timing, and audiovisual synchronization.
+
+### 2026-07-24 · [UX]
+**Trigger**: Protecting Signal host reclaim and producer-interruption follow-ups by suppressing an always-interrupt guest's Power made Interrupting Tom appear not to try on several addressed host turns.
+**Lesson**: Separate interruption attempt from floor ownership. An always-interrupt Power must visibly and audibly try on every eligible addressed turn; reclaim or producer protection may let the current speaker keep the floor, but must not erase the attempt itself.
+**Applies to**: Signal crosstalk planning, reclaim protection, producer `interrupt_guest`, and always-on interruption Powers.
+
+### 2026-07-24 · [UX]
+**Trigger**: Interrupting Tom successfully took the floor from a Signal host, then deterministic social silence consumed Tom's required response turn.
+**Lesson**: A successful interruption creates a substantive response obligation. Social-silence planning must not let an interrupter seize the mic and then say nothing; silence remains valid only when it does not break an explicit turn-taking payoff.
+**Applies to**: Signal Power interruptions, floor-yield routing, deterministic social silence, and interruption follow-up prompts.
+
+### 2026-07-24 · [perf]
+**Trigger**: An always-interrupt Signal guest combined overlapping voices and repeated camera cuts with per-animation-frame rerenders of the full studio, causing gameplay-breaking lag and disrupting producer cue typing.
+**Lesson**: Keep audio timing exact, but pace React presentation commits for discrete mouths and captions. High-frequency voice progress must not rerender the entire Signal control room at display refresh rate, and camera transitions must preserve active producer-input focus and caret.
+**Applies to**: Signal live speech progress, interruption-heavy Powers, animated cameras, stage rendering, and private host cues.
+
+### 2026-07-24 · [UX]
+**Trigger**: Signal could play an interrupted speaker's follow-on line without moving that bot's mouth, treat a cut-in near the end of a thought like a meaningful cutoff, and fall back from the bot's Premium American voice to a differently accented local voice.
+**Lesson**: Secondary speech channels need their own text, alignment, progress, cancellation cleanup, and effective identity-scoped voice recipe. Keep the cut-in attempt, but once at least 85 percent of the original line was heard, omit the offended retort and floor reclaim; if the requested Premium retort clip is unavailable, do not silently substitute a voice that changes the character's accent.
+**Applies to**: Signal listener reactions, interrupted-speaker crosstalk, mouth visemes, voice prefetch/fallback, manual producer interruptions, and Power interruption planning.
+
+### 2026-07-24 · [architecture]
+**Trigger**: A faithful Signal replay compiled captured `speech_start` direction events as one-millisecond utterances instead of pairing them with their matching `speech_end` events, making the master audio appear to begin ahead of mouths and cameras.
+**Lesson**: Compile replay speech as channel-scoped start/end spans keyed by source message and speaker. Schedule live cut-in audio against the same monotonic target clock, and record direction start/stop events from the audible playback lifecycle so the master, camera, and mouth timelines share one measured span.
+**Applies to**: Signal replay manifests, overlapping reaction/crosstalk channels, audio-master synchronization, live cut-in scheduling, and replay video direction.
+
+### 2026-07-24 · [UX]
+**Trigger**: Signal validated that Rick's complete generated opening contained the show and cast introduction, then an early Power interruption discarded that introduction and made the saved episode feel as though it began mid-conversation.
+**Lesson**: Validate interruption safety against the audience-heard prefix, not the hidden complete line. Front-load the show and host identity, complete the guest introduction immediately, and delay or suppress an opening cutoff until all three identities have aired.
+**Applies to**: Signal opening authoring, Power interruption timing, transcript truncation, and replay continuity.
+
+### 2026-07-24 · [UX]
+**Trigger**: A Signal interruption moved an explicitly selected Left, Right, or Wide camera to the interrupting bot even though Auto camera was disabled.
+**Lesson**: Manual camera selection owns the frame until the Producer changes it. Gate every transient speaker, reaction, thinking, and interruption shot behind Auto mode; within Auto, let Instant cut to an interrupter but keep Animated on the current shot because a camera sweep is too slow for a brief overlap. Audio and performance state must never implicitly seize a fixed camera.
+**Applies to**: Signal live camera resolution, Power interruptions, listener reactions, and faithful camera capture.
+
+### 2026-07-24 · [UX]
+**Trigger**: A faithful Signal replay began with several seconds of branded intro video, but its transcript list started directly on Rick's first line and visually implied that speech began at zero.
+**Lesson**: Time-bearing non-dialogue segments need exclusive timeline ownership. Derive a clickable intro row from the recorded first-utterance start so its duration, active highlight, seeking, audio, and video all describe the same opening span; faithful replay must not fall back to an estimated dialogue index when no recorded utterance is active.
+**Applies to**: Signal faithful replay transcripts, intro video timing, scrubber seeking, and active-row presentation.
+
+### 2026-07-24 · [UX]
+**Trigger**: The live Signal shell collapsed to one stage column after an episode was created while its intro still targeted the old second column, so the browser rendered the intro beside the stage.
+**Lesson**: Treat branded pre-roll as live presentation state from its first frame. Hide setup rails immediately and explicitly place overlays in the live grid column at every breakpoint so grid reconfiguration cannot create an unintended side column.
+**Applies to**: Signal live intro layout, responsive grid transitions, and other full-stage pre-roll overlays.
+
+### 2026-07-24 · [architecture]
+**Trigger**: A spontaneous Signal host sign-off still carried a planned guest Power interjection, the closing invented continuity from a numbered topic, and two rejected provider drafts were reported as a successful generation before deterministic repair.
+**Lesson**: Protect generated closing intent before applying interruption plans, validate anthology continuity claims instead of relying on prompts alone, and report provider acceptance separately from app-level fallback recovery.
+**Applies to**: Signal closing ownership, Power crosstalk planning, anthology validation, ONLINE retry provenance, and review transcripts.
+
+### 2026-07-25 · [UX]
+**Trigger**: Extending Prompt Center picks to Signal setup replaced the compact single-line episode-topic input with a rich composer surface.
+**Lesson**: “Prompts everywhere” means enriching existing composer textareas, not changing ordinary single-line inputs into composer-shaped multiline controls. Preserve each field’s original input semantics and visual footprint unless the request explicitly includes redesigning that field.
+**Applies to**: PRISM composer-pick rollouts, Signal setup fields, and other applet forms that mix single-line inputs with multiline composers.
+
+### 2026-07-25 · UX
+**Trigger**: Forgetful/amnesia Power over-coached "fresh first contact" and rewrote organic replies.
+**Lesson**: Short-term amnesia should be a pure per-turn context wipe. Do not inject hard performance cues or rewrite replies that admit forgetting; let dangling referents land naturally.
+**Applies to**: botPower eternal_introduction, Coffee/Signal/Chat/Zen/Story adapters, Forgetful Freddie showcase
+
+### 2026-08-06 · [architecture]
+**Trigger**: Fibbing Phil hub preview announced "My name is Fibbing Phil" despite Anti-truth.
+**Lesson**: Powers must override conflicting *system* prompts (forced name intros, mode scaffolding) but never beat *player* control (authored names, direct instructions). Hub voice preview should speak Power-aliased names; compiler order must not let false_name steal Anti-truth intents that mention invented aliases.
+**Applies to**: bot powers, hub voice preview, compileBotPowers coalesce order
+
+### 2026-08-16 · [design]
+**Trigger**: Debate Auto coverage was asked never to cut to Jury; Jury is only for deliberation.
+**Lesson**: The Jury chamber is a required scene, not a camera. Auto may glance at forum seats (Left, Moderator, Right, Wide) during speech, but never Jury. Enter the chamber automatically for leanings, deliberation, and ballots; do not put Jury on the camera strip.
+**Applies to**: Debate Auto coverage, `debateSpeechCamera.ts`, camera controls, Debate tutorials
+
+### 2026-08-16 · [workflow]
+**Trigger**: After aligning Signal’s producer-comments caret, the agent asked Jared to report back.
+**Lesson**: One-shot product fixes ship and stop. No verification AskQuestion unless we are already iterating.
+**Applies to**: Agent communication after PRISM bugfixes
+
+### 2026-09-03 · [UX]
+**Trigger**: Whodunnit light-color sampling chose a broad neutral ceiling instead of the smaller warm fixture the player clicked.
+**Lesson**: Local raster sampling must rank a bounded set of each color cluster’s strongest nearby pixels rather than requiring a fixed percentage of the full search area. Large neutral surfaces must not outvote a compact luminous source, and existing lights need an explicit resample action.
+**Applies to**: Whodunnit room-light placement, raster color sampling, and contextual editor defaults
+
+### 2026-09-03 · [architecture]
+**Trigger**: An explicit Whodunnit overhead redraw replaced an asteroid observatory with terrestrial estate imagery because a legacy venue lacked a structural profile and its current cover could be discarded silently.
+**Lesson**: Derived venue art must resolve one spoiler-safe identity from the current Library presentation before prompting or review. Frozen case snapshots may contribute layout geometry, but never stale visual identity; unknown structures stay neutral, declared cover read failures abort, and asset references rotate only after continuity approval.
+**Applies to**: Whodunnit Mansion Library redraws, case-scene repair, generated venue derivatives, and protected asset replacement
+
+### 2026-09-04 · [UX]
+**Trigger**: The Whodunnit overhead editor projected 16×12 envelope percentages directly onto its 2:1 stage, stretching a correct widescreen plate into an ultrawide strip.
+**Lesson**: Overhead placement, room outlines, and generated composition must use the same fitted board projection as live Investigation. Keep the plate at restrained 2:1 widescreen or narrower; never introduce a separate preview transform that makes it panoramic.
+**Applies to**: Whodunnit overhead generation, Mansion Editor placement, Field Repair placement, and live map registration
+
+### 2026-09-04 · [UX]
+**Trigger**: Whodunnit Field Repair tried to correct a misplaced exterior entrance by asking an image model to infer the doorway, but the player could identify the exact threshold more reliably.
+**Lesson**: Registration repairs should prefer direct manipulation on the exact rendered surface. Let the player click the intended point, convert that click through the surface's real fitted bounds, and persist the normalized coordinates without an image-model call.
+**Applies to**: Whodunnit exterior entrances, Field Repair placement tools, and future visual anchor correction
+
+### 2026-09-04 · [UX]
+**Trigger**: A Whodunnit first meeting staged the player beside an idle suspect and ended with a command tutorial spoken as an in-world thought.
+**Lesson**: First contact belongs to the encountered character: stage that character alone, give their audible line ownership of voice and mouth movement, and keep command instruction out of diegetic dialogue. Bring the player avatar onstage only after Talk or Present deliberately begins an interrogation.
+**Applies to**: Whodunnit room introductions, dialogue staging, voice/mouth synchronization, and contextual guidance
+
+### 2026-09-04 · [UX]
+**Trigger**: A live Whodunnit room enlarged accepted 16:9 artwork with `cover` to fill a taller stage, visibly trimming both sides compared with the Lights & FX editor.
+**Lesson**: Treat accepted room art as a complete composition. Fit it inside one aspect-locked plane shared by the image, lights, effects, and examination geometry; use a subdued ambient extension only outside that plane instead of cropping the playable image.
+**Applies to**: Whodunnit live rooms, Lights & FX registration, examination hit-testing, and future full-frame scene presentation
+
+### 2026-09-04 · [UX]
+**Trigger**: Whodunnit's coarse Examine-grid highlight disappeared when the cursor crossed an invisible hotspot boundary without leaving the visible square.
+**Lesson**: Grid hover feedback must follow the cursor's visible cell continuously. Keep hidden hotspot geometry responsible only for clickability and the hand cursor, and clear the square only when the cursor leaves the room stage.
+**Applies to**: Whodunnit Examine mode, investigation grids, hidden hotspots, and pointer affordances
+
+### 2026-09-04 · [UX]
+**Trigger**: Whodunnit Case File repair exposed separate top-level cards for an item’s emoji, description, and name, making one object-level concern feel fragmented.
+**Lesson**: Organize Field Repair by the thing the player says is wrong before asking which property to change. Keep one inaccurate-item entry with clear Emoji, Item information, and Asset branches; preserve precise name and description choices beneath Information.
+**Applies to**: Whodunnit Case File repair, found-item presentation fixes, and nested repair menus
+
+### 2026-09-04 · [architecture]
+**Trigger**: Lois Griffin formally introduced herself to a player-controlled Peter Griffin because Case Forge stripped all relationship context before authoring their room exchange.
+**Lesson**: Whodunnit persona chemistry must come only from explicit canon in the frozen cast profiles, captured once as bounded private pair context. It may direct recognition, address, and delivery, but it must never become evidence, awareness, a proof route, public session data, or learned Coffee/Signal relationship state. Dialogue advancement must likewise preserve actors already present in one exchange instead of treating every speaker handoff as a new entrance.
+**Applies to**: Whodunnit Case Forge, direct Prosecutor/suspect dialogue, portable case packages, replay-safe staging, and relationship-memory isolation

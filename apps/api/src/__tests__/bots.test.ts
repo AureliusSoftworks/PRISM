@@ -3,7 +3,9 @@ import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
 import {
   botPowerSourceHashV1,
+  fullySaturateBotColor,
   parseStoredBotPrompt,
+  serializeBotAudioVoiceProfileV1,
   serializeStoredBotPrompt,
 } from "@localai/shared";
 import {
@@ -12,12 +14,13 @@ import {
   composeBotSystemPrompt,
   deleteAllBots,
   deleteBot,
-  deleteBots,
   deleteSelectedBots,
   normalizeBotExportHash,
   patchSelectedBots,
+  PRISM_RUNTIME_GROUNDING,
   resolveBotExportHashForCreate,
   setSelectedBotsDeleteProtection,
+  withPrismRuntimeGrounding,
   type SelectedBotPatch,
 } from "../bots.ts";
 
@@ -42,30 +45,126 @@ describe("composeBotSystemPrompt", () => {
     // Identity is first so the model has the persona priming before the
     // user's behavioural instructions take effect.
     assert.match(prompt!, /^You are Frank\./);
-    assert.match(prompt!, /\n\nYou speak like a sailor\.$/);
+    assert.match(prompt!, /\n\nYou speak like a sailor\./);
+    assert.equal(prompt!.endsWith(PRISM_RUNTIME_GROUNDING), true);
+  });
+
+  it("speaks the saved vernacular after the persona and never without one", () => {
+    const profile = JSON.stringify({
+      v: 2,
+      enabled: true,
+      baseVoiceId: "voice-5",
+      vernacularId: "scots",
+      pitch: 0,
+      warmth: 0,
+      pace: 0,
+      lilt: 0,
+      bottishTone: 0.45,
+      eqTilt: 0,
+      gainDb: 0,
+      volume: 1,
+      texture: {
+        preset: "clean",
+        amount: 0,
+        bandwidth: 1,
+        noise: 0,
+        instability: 0,
+        distortion: 0,
+        damage: 0,
+      },
+    });
+    const prompt = composeBotSystemPrompt(
+      "Lachlan",
+      "A dry-witted lighthouse keeper.",
+      false,
+      undefined,
+      { audioVoiceProfile: profile },
+    );
+    assert.ok(prompt);
+    assert.match(prompt!, /Vernacular — Scots: /u);
+    // Persona first, then the vernacular colors it.
+    assert.ok(
+      prompt!.indexOf("lighthouse keeper") < prompt!.indexOf("Vernacular — "),
+    );
+    assert.match(prompt!, /never respell words phonetically/u);
+    const plain = composeBotSystemPrompt(
+      "Lachlan",
+      "A dry-witted lighthouse keeper.",
+      false,
+      undefined,
+      { audioVoiceProfile: null },
+    );
+    assert.doesNotMatch(plain ?? "", /Vernacular/u);
+  });
+
+  it("composes power-granted speech registers as full sections, not truncated block lines", () => {
+    const powers = JSON.stringify([
+      {
+        version: 1,
+        id: "noir-cloak",
+        name: "Noir Narrator",
+        intent: "Narrates like a hardboiled detective.",
+        enabled: true,
+        compileStatus: "ready",
+        compiled: {
+          version: 1,
+          sourceHash: botPowerSourceHashV1(
+            "Noir Narrator",
+            "Narrates like a hardboiled detective.",
+          ),
+          selfCue: "unused: the canonical register section replaces this",
+          observerCue: "Speaks in noir narration.",
+          effects: [{ type: "speech_register", register: "noir" }],
+          ruleLabels: ["Noir narrator"],
+        },
+      },
+    ]);
+    const prompt = composeBotSystemPrompt("Marlowe", "A private eye.", false, powers);
+    assert.ok(prompt);
+    // Full canonical guidance survives — the compact powers block would have
+    // clipped it at 280 characters.
+    assert.match(
+      prompt!,
+      /Speech register — Noir narrator: [\s\S]*slow right hook/u,
+    );
+    assert.match(prompt!, /Register rules: keep standard English spelling/u);
+    assert.doesNotMatch(prompt!, /Active Powers:[\s\S]*Speech register/u);
   });
 
   it("trims whitespace on both fields before composing", () => {
     const prompt = composeBotSystemPrompt("  Tim  ", "   You help with code.   ");
     assert.ok(prompt);
     assert.match(prompt!, /^You are Tim\./);
-    assert.match(prompt!, /You help with code\.$/);
+    assert.match(prompt!, /You help with code\./);
     assert.doesNotMatch(prompt!, /  /); // no double spaces leaked through
   });
 
   it("falls back to the raw system prompt when no name is present", () => {
     assert.equal(
       composeBotSystemPrompt(undefined, "You are a haiku poet."),
-      "You are a haiku poet."
+      withPrismRuntimeGrounding("You are a haiku poet.")
     );
     assert.equal(
       composeBotSystemPrompt(null, "You are a haiku poet."),
-      "You are a haiku poet."
+      withPrismRuntimeGrounding("You are a haiku poet.")
     );
     assert.equal(
       composeBotSystemPrompt("", "You are a haiku poet."),
-      "You are a haiku poet."
+      withPrismRuntimeGrounding("You are a haiku poet.")
     );
+  });
+
+  it("adds one authoritative PRISM environment contract without mutating profile text", () => {
+    const savedProfile = "Stay impatient and suspicious of institutions.";
+    const prompt = composeBotSystemPrompt("Rick Sanchez", savedProfile);
+    assert.ok(prompt);
+    assert.match(prompt, /PRISM is local-first, self-hosted AI workspace software/u);
+    assert.match(prompt, /not a corporation, employer, or corporate network/u);
+    assert.match(prompt, /Do not guess or claim which provider/u);
+    assert.match(prompt, /stay in character and do not volunteer it/u);
+    assert.equal(prompt.split("PRISM environment grounding").length - 1, 1);
+    assert.equal(savedProfile, "Stay impatient and suspicious of institutions.");
+    assert.equal(withPrismRuntimeGrounding(prompt), prompt);
   });
 
   it("returns undefined when both fields are missing/blank (Default bot case)", () => {
@@ -73,6 +172,34 @@ describe("composeBotSystemPrompt", () => {
     assert.equal(composeBotSystemPrompt(null, null), undefined);
     assert.equal(composeBotSystemPrompt("", ""), undefined);
     assert.equal(composeBotSystemPrompt("   ", "   "), undefined);
+  });
+
+  it("colors the Default companion from the stored account voice profile alone", () => {
+    // Default Prism has no bot row: its users-row persona columns stay null
+    // and only `prism_default_bot_audio_voice_profile` (edited from the
+    // Default customize voice tab) carries identity. The serialized column
+    // value must be enough to produce the vernacular authoring cue, because
+    // the /api/chat prismHomeTurn branch passes exactly these nulls.
+    const stored = serializeBotAudioVoiceProfileV1({
+      v: 2,
+      baseVoiceId: "voice-1",
+      vernacularId: "scots",
+    });
+    const prompt = composeBotSystemPrompt(null, null, undefined, null, {
+      audioVoiceProfile: stored,
+    });
+    assert.ok(prompt, "expected the vernacular cue alone to compose a prompt");
+    assert.match(prompt!, /Vernacular — Scots: /u);
+    assert.equal(prompt!.endsWith(PRISM_RUNTIME_GROUNDING), true);
+    // Without a saved vernacular the Default companion stays promptless, so
+    // Home/Zen turns keep shipping only the built-in Prism voice.
+    const plain = composeBotSystemPrompt(null, null, undefined, null, {
+      audioVoiceProfile: serializeBotAudioVoiceProfileV1({
+        v: 2,
+        baseVoiceId: "voice-1",
+      }),
+    });
+    assert.equal(plain, undefined);
   });
 
   it("strips structured bot-editor metadata before composing with name", () => {
@@ -92,6 +219,59 @@ describe("composeBotSystemPrompt", () => {
     const prompt = composeBotSystemPrompt("DJ K-Razor", "");
     assert.ok(prompt);
     assert.match(prompt!, /You are DJ K-Razor\./);
+  });
+
+  it("folds the saved vernacular into an authoring cue after the persona", () => {
+    const prompt = composeBotSystemPrompt(
+      "Murph",
+      "You are a diner regular.",
+      false,
+      "[]",
+      {
+        audioVoiceProfile: JSON.stringify({
+          v: 2,
+          baseVoiceId: "voice-1",
+          vernacularId: "scots",
+        }),
+      },
+    );
+    assert.ok(prompt);
+    assert.match(prompt!, /Vernacular — Scots:/);
+    // Words only — the cue forbids phonetic respelling because the accent
+    // stack owns pronunciation.
+    assert.match(prompt!, /never respell words phonetically/);
+    // The cue colors the persona; it never replaces or precedes it.
+    assert.ok(
+      prompt!.indexOf("You are a diner regular.") <
+        prompt!.indexOf("Vernacular — Scots:"),
+    );
+    // Placeless noir is a speech-register Power, not a regional vernacular.
+    // A stale V3 voice value must not smuggle that register into authored speech.
+    const v3Prompt = composeBotSystemPrompt("Murph", "", false, "[]", {
+      audioVoiceProfile: {
+        v: 3,
+        local: { pronunciation: { vernacularId: "noir" } },
+      },
+    });
+    assert.doesNotMatch(v3Prompt ?? "", /Vernacular|Noir narrator/iu);
+  });
+
+  it("keeps plain-speech bots free of any vernacular cue", () => {
+    for (const audioVoiceProfile of [
+      undefined,
+      null,
+      JSON.stringify({ v: 2, baseVoiceId: "voice-1" }),
+      "{broken",
+    ]) {
+      const prompt = composeBotSystemPrompt(
+        "Tim",
+        "You are concise.",
+        false,
+        "[]",
+        { audioVoiceProfile },
+      );
+      assert.doesNotMatch(prompt ?? "", /Vernacular/, String(audioVoiceProfile));
+    }
   });
 
   it("adds gentle rejection guidance when flirt mode is disabled", () => {
@@ -154,6 +334,96 @@ describe("composeBotSystemPrompt", () => {
     assert.doesNotMatch(prompt ?? "", /DRAFT_MARKER|DISABLED_MARKER/u);
   });
 
+  it("makes a ready short-term-amnesia Power visibly fresh-contact in Chat and Zen prompts", () => {
+    const name = "Short-Term Amnesia";
+    const intent = "Only the current other-speaker message remains.";
+    const prompt = composeBotSystemPrompt(
+      "Forgetful Freddie",
+      "Stay courteous and earnest.",
+      false,
+      [{
+        version: 1,
+        id: "forgetful-freddie",
+        name,
+        intent,
+        enabled: true,
+        compileStatus: "ready",
+        compiled: {
+          version: 1,
+          sourceHash: botPowerSourceHashV1(name, intent),
+          selfCue: "",
+          observerCue: "",
+          effects: [{
+            type: "eternal_introduction",
+            memory: "current_other_speaker_message",
+          }],
+          ruleLabels: ["Current message only"],
+        },
+      }],
+    );
+
+    assert.match(
+      prompt ?? "",
+      /Hard fresh-contact rule[\s\S]*Briefly greet, introduce, or re-orient[\s\S]*reuse a canned introduction/iu,
+    );
+  });
+
+  it("makes Inept a hard direct-conversation failure instead of a generic trait", () => {
+    const name = "Inept";
+    const intent = "Cannot follow instructions.";
+    const prompt = composeBotSystemPrompt("Rick Sanchez", "Stay impatient.", false, [{
+      version: 1,
+      id: "inept",
+      name,
+      intent,
+      enabled: true,
+      compileStatus: "ready",
+      compiled: {
+        version: 1,
+        sourceHash: botPowerSourceHashV1(name, intent),
+        selfCue: "Always botch the current instruction.",
+        observerCue: "Rick visibly mishandles instructions.",
+        effects: [{
+          type: "ineptitude",
+          instructionFidelity: "always_botched",
+          imageFidelity: "always_unrelated",
+        }],
+        ruleLabels: ["Always botches instructions"],
+      },
+    }]);
+
+    assert.match(prompt ?? "", /HARD Ineptitude/u);
+    assert.match(prompt ?? "", /Every contribution visibly botches one central duty/u);
+    assert.match(prompt ?? "", /never satisfy exact wording, format, facts, count/u);
+    assert.doesNotMatch(prompt ?? "", /Inept: Always botch the current instruction/u);
+  });
+
+  it("keeps the holder identity while cueing its bot-name suffix", () => {
+    const intent = "Always adds ‘bot’ suffix when saying a bot’s name (e.g. “Hello Morty Bot”).";
+    const prompt = composeBotSystemPrompt("Rick Sanchez", "Stay impatient.", false, [{
+      version: 1,
+      id: "bot-designation",
+      name: "Bot Designation",
+      intent,
+      enabled: true,
+      compileStatus: "ready",
+      compiled: {
+        version: 1,
+        sourceHash: botPowerSourceHashV1("Bot Designation", intent),
+        selfCue: "Use Rick Sanchez when saying a bot’s name (e as your public designation.",
+        observerCue: "Call Rick Sanchez Rick Sanchez when saying a bot’s name (e.",
+        effects: [{ type: "designation", placement: "suffix", text: "when saying a bot’s name (e" }],
+        ruleLabels: ["Suffix designation"],
+      },
+    }]);
+
+    assert.match(prompt ?? "", /You are Rick Sanchez\./u);
+    assert.match(prompt ?? "", /keep your own name exactly "Rick Sanchez"/u);
+    assert.match(prompt ?? "", /When naming or directly addressing another bot/u);
+    assert.doesNotMatch(prompt ?? "", /You are Rick Sanchez Bot\./u);
+    assert.doesNotMatch(prompt ?? "", /when saying a bot’s name/u);
+  });
+
   it("targets the user explicitly when an addressed-fandom Power reaches Chat or Zen", () => {
     const name = "Obsessed";
     const intent = "He is obsessively a fan of whoever he is talking to.";
@@ -178,6 +448,47 @@ describe("composeBotSystemPrompt", () => {
     assert.match(prompt ?? "", /obsessively idolize the user speaking with you now/iu);
     assert.match(prompt ?? "", /vary wording/iu);
     assert.match(prompt ?? "", /never stalk, coerce, invent private knowledge/iu);
+  });
+
+  it("names complementary hue prejudice in Chat without targeting the user", () => {
+    const name = "Racist";
+    const intent = "He is racist toward other bots.";
+    const prompt = composeBotSystemPrompt(
+      "Hueist Hugh",
+      "Stay vivid.",
+      false,
+      [{
+        version: 1,
+        id: "hueist-hugh",
+        name,
+        intent,
+        enabled: true,
+        compileStatus: "ready",
+        compiled: {
+          version: 1,
+          sourceHash: botPowerSourceHashV1(name, intent),
+          selfCue: "You judge other bots by phosphor color.",
+          observerCue: "Hugh snubs complementary hues.",
+          effects: [{
+            type: "chromatic_bias",
+            polarity: "hate",
+            color: { kind: "complementary_of_holder" },
+            strength: "large",
+            matchBandDeg: 30,
+          }],
+          ruleLabels: ["Hates complementary hues"],
+        },
+      }],
+      { identityColor: "#ff0000" },
+    );
+
+    assert.match(prompt ?? "", /Direct conversation hue prejudice/iu);
+    assert.match(prompt ?? "", /cyan/iu);
+    assert.match(
+      prompt ?? "",
+      /Soft only: judge bot phosphor color, never people or the player; no slurs or puppeting\./iu,
+    );
+    assert.doesNotMatch(prompt ?? "", /idolize the user/iu);
   });
 });
 
@@ -297,6 +608,7 @@ function createTestDb(): DatabaseSync {
       user_id TEXT NOT NULL,
       conversation_id TEXT,
       bot_id TEXT,
+      target_bot_id TEXT,
       ciphertext TEXT NOT NULL,
       iv TEXT NOT NULL,
       tag TEXT NOT NULL,
@@ -446,6 +758,35 @@ describe("deleteBot", () => {
     );
   });
 
+  it("deletes directed pair memories when the deleted bot is either participant", () => {
+    const db = createTestDb();
+    seedBot(db, "user-1", "bot-1");
+    seedBot(db, "user-1", "bot-2");
+    seedBot(db, "user-1", "bot-3");
+    seedMemory(db, "user-1", "bot-1", "pair-source");
+    seedMemory(db, "user-1", "bot-2", "pair-target");
+    seedMemory(db, "user-1", "bot-2", "pair-unrelated");
+    db.prepare("UPDATE memories SET target_bot_id = ? WHERE id = ?").run(
+      "bot-2",
+      "pair-source",
+    );
+    db.prepare("UPDATE memories SET target_bot_id = ? WHERE id = ?").run(
+      "bot-1",
+      "pair-target",
+    );
+    db.prepare("UPDATE memories SET target_bot_id = ? WHERE id = ?").run(
+      "bot-3",
+      "pair-unrelated",
+    );
+
+    deleteBot(db, "user-1", "bot-1");
+
+    const rows = db.prepare("SELECT id FROM memories ORDER BY id").all() as Array<{
+      id: string;
+    }>;
+    assert.deepEqual(rows.map((row) => row.id), ["pair-unrelated"]);
+  });
+
   it("deletes directed relationship rows involving the deleted bot", () => {
     const db = createTestDb();
     seedBot(db, "user-1", "bot-1");
@@ -542,103 +883,6 @@ describe("deleteBot", () => {
       .prepare("SELECT bot_id FROM messages WHERE id = ?")
       .get("msg-2") as { bot_id: string | null } | undefined;
     assert.equal(msg?.bot_id, "bot-2");
-  });
-});
-
-describe("deleteBots", () => {
-  it("removes the newest limited set and leaves older bots intact", () => {
-    const db = createTestDb();
-    seedBot(db, "user-1", "old", "2026-01-01T00:00:00.000Z");
-    seedBot(db, "user-1", "middle", "2026-01-02T00:00:00.000Z");
-    seedBot(db, "user-1", "new", "2026-01-03T00:00:00.000Z");
-    seedHistoryReferencingBot(db, "user-1", "new", "new");
-    seedHistoryReferencingBot(db, "user-1", "middle", "middle");
-    seedMemory(db, "user-1", "old", "memory-old");
-    seedMemory(db, "user-1", "middle", "memory-middle");
-    seedMemory(db, "user-1", "new", "memory-new");
-    seedMemory(db, "user-1", null, "memory-global");
-
-    const deleted = deleteBots(db, "user-1", 2);
-
-    assert.equal(deleted, 2);
-    const survivors = db
-      .prepare("SELECT id FROM bots ORDER BY id")
-      .all() as Array<{ id: string }>;
-    assert.deepEqual(
-      survivors.map((bot) => bot.id),
-      ["old"]
-    );
-
-    for (const suffix of ["new", "middle"]) {
-      const msg = db
-        .prepare("SELECT bot_id FROM messages WHERE id = ?")
-        .get(`msg-${suffix}`) as { bot_id: string | null } | undefined;
-      assert.equal(msg?.bot_id, null);
-    }
-    const memories = db
-      .prepare("SELECT id FROM memories ORDER BY id")
-      .all() as Array<{ id: string }>;
-    assert.deepEqual(
-      memories.map((memory) => memory.id),
-      ["memory-global", "memory-old"]
-    );
-  });
-
-  it("stays scoped to the acting user", () => {
-    const db = createTestDb();
-    seedBot(db, "user-1", "mine-1", "2026-01-01T00:00:00.000Z");
-    seedBot(db, "user-1", "mine-2", "2026-01-02T00:00:00.000Z");
-    seedBot(db, "user-2", "theirs", "2026-01-03T00:00:00.000Z");
-    seedHistoryReferencingBot(db, "user-2", "theirs", "theirs");
-    seedMemory(db, "user-2", "theirs", "memory-theirs");
-
-    const deleted = deleteBots(db, "user-1", 10);
-
-    assert.equal(deleted, 2);
-    const survivor = db
-      .prepare("SELECT id FROM bots WHERE user_id = ?")
-      .get("user-2") as { id: string } | undefined;
-    assert.equal(survivor?.id, "theirs");
-    const msg = db
-      .prepare("SELECT bot_id FROM messages WHERE id = ?")
-      .get("msg-theirs") as { bot_id: string | null } | undefined;
-    assert.equal(msg?.bot_id, "theirs");
-    const memory = db
-      .prepare("SELECT bot_id FROM memories WHERE id = ?")
-      .get("memory-theirs") as { bot_id: string | null } | undefined;
-    assert.equal(memory?.bot_id, "theirs");
-  });
-
-  it("skips protected bots when deleting a limited newest set", () => {
-    const db = createTestDb();
-    seedBot(db, "user-1", "old", "2026-01-01T00:00:00.000Z");
-    seedBot(db, "user-1", "protected-new", "2026-01-03T00:00:00.000Z", true);
-    seedBot(db, "user-1", "unprotected-new", "2026-01-02T00:00:00.000Z");
-    seedHistoryReferencingBot(db, "user-1", "protected-new", "protected");
-    seedHistoryReferencingBot(db, "user-1", "unprotected-new", "unprotected");
-    seedMemory(db, "user-1", "protected-new", "memory-protected");
-    seedMemory(db, "user-1", "unprotected-new", "memory-unprotected");
-
-    const deleted = deleteBots(db, "user-1", 10);
-
-    assert.equal(deleted, 2);
-    const survivors = db
-      .prepare("SELECT id FROM bots ORDER BY id")
-      .all() as Array<{ id: string }>;
-    assert.deepEqual(
-      survivors.map((bot) => bot.id),
-      ["protected-new"]
-    );
-    assert.equal(
-      (db.prepare("SELECT bot_id FROM messages WHERE id = ?")
-        .get("msg-protected") as { bot_id: string | null }).bot_id,
-      "protected-new"
-    );
-    assert.equal(
-      (db.prepare("SELECT bot_id FROM memories WHERE id = ?")
-        .get("memory-protected") as { bot_id: string | null }).bot_id,
-      "protected-new"
-    );
   });
 });
 
@@ -787,44 +1031,6 @@ describe("deleteAllBots", () => {
     );
   });
 
-  it("deletes protected bots when explicitly requested", () => {
-    const db = createTestDb();
-    seedBot(db, "user-1", "protected", "2026-01-03T00:00:00.000Z", true);
-    seedBot(db, "user-1", "unprotected");
-    seedBot(db, "user-2", "theirs", "2026-01-04T00:00:00.000Z", true);
-    seedHistoryReferencingBot(db, "user-1", "protected", "protected");
-    seedHistoryReferencingBot(db, "user-1", "unprotected", "unprotected");
-    seedHistoryReferencingBot(db, "user-2", "theirs", "theirs");
-    seedMemory(db, "user-1", "protected", "memory-protected");
-    seedMemory(db, "user-1", "unprotected", "memory-unprotected");
-    seedMemory(db, "user-2", "theirs", "memory-theirs");
-
-    const deleted = deleteAllBots(db, "user-1", { includeProtected: true });
-
-    assert.equal(deleted, 2);
-    assert.deepEqual(
-      (db.prepare("SELECT id FROM bots ORDER BY id").all() as Array<{ id: string }>).map(
-        (bot) => bot.id
-      ),
-      ["theirs"]
-    );
-    assert.equal(
-      (db.prepare("SELECT bot_id FROM messages WHERE id = ?")
-        .get("msg-protected") as { bot_id: string | null }).bot_id,
-      null
-    );
-    assert.equal(
-      (db.prepare("SELECT bot_id FROM messages WHERE id = ?")
-        .get("msg-theirs") as { bot_id: string | null }).bot_id,
-      "theirs"
-    );
-    assert.deepEqual(
-      (db.prepare("SELECT id FROM memories ORDER BY id").all() as Array<{ id: string }>).map(
-        (memory) => memory.id
-      ),
-      ["memory-theirs"]
-    );
-  });
 });
 
 describe("deleteSelectedBots", () => {
@@ -951,8 +1157,8 @@ describe("patchSelectedBots", () => {
         color: string | null;
       }>).map((row) => [row.id, row.user_id, row.color]),
       [
-        ["a", "user-1", "#112233"],
-        ["b", "user-1", "#112233"],
+        ["a", "user-1", fullySaturateBotColor("#112233")],
+        ["b", "user-1", fullySaturateBotColor("#112233")],
         ["theirs", "user-2", null],
       ]
     );
@@ -986,8 +1192,8 @@ describe("patchSelectedBots", () => {
         row.glyph,
       ]),
       [
-        ["#abcdef", "triangle"],
-        ["#abcdef", "triangle"],
+        [fullySaturateBotColor("#abcdef"), "triangle"],
+        [fullySaturateBotColor("#abcdef"), "triangle"],
       ]
     );
   });

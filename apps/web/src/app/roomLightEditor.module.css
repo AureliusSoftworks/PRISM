@@ -1,0 +1,98 @@
+/* The editor owns the whole screen: no card inset, so the room stage and its tray get every pixel. */
+.dialog { --panel: #10131f; --panel-2: #151928; --ink: #f2eefc; --muted: #b1aabe; --edge: #676079; --edge-soft: #353046; --accent: #b798ff; --danger: #f0a4ad; color: var(--ink); background: var(--panel); border: 0; border-radius: 0; padding: 0; width: 100vw; max-width: none; height: 100dvh; max-height: none; overflow: hidden; }
+.dialog[data-theme="light"] { --panel: #f5f7fc; --panel-2: #ffffff; --ink: #20293b; --muted: #546077; --edge: #a0a8bc; --edge-soft: #d5dae6; --accent: #6741aa; --danger: #b8323f; }
+.dialog::backdrop { background: #02040bd9; backdrop-filter: blur(8px); }
+.content { height: 100%; display: flex; flex-direction: column; }
+.dialog button, .dialog select { background: var(--panel); color: var(--ink); border: 1px solid var(--edge); border-radius: .6rem; padding: .6rem .85rem; font: inherit; cursor: pointer; }
+.dialog button:hover { border-color: var(--accent); }
+.dialog button:disabled { opacity: .45; cursor: default; }
+.dialog button:focus-visible, .dialog select:focus-visible, .dialog input:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
+.dialog button[aria-pressed="true"], .dialog .primary { background: var(--accent); color: var(--panel); }
+.toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: .75rem; padding: 1rem 1.25rem; border-bottom: 1px solid var(--edge); }
+.toolbar > div:first-child { margin-right: auto; }
+.toolbar h2 { margin: .2rem 0 0; font-size: 1.25rem; }
+.toolbar small, .inspector > small { color: var(--muted); }
+.toolbar label { display: flex; align-items: center; gap: .5rem; }
+.toolbarGroup { display: inline-flex; }
+.toolbarGroup > button:first-child { border-radius: .6rem 0 0 .6rem; }
+.toolbarGroup > button:last-child { margin-left: -1px; border-radius: 0 .6rem .6rem 0; }
+.workspace { display: flex; flex: 1; min-height: 0; }
+.sceneColumn { display: grid; grid-template-rows: minmax(0, 1fr) auto; flex: 1; min-width: 0; min-height: 0; }
+/* A size container so the stage can fill exactly the height left above the tray. */
+.sceneWell { display: flex; justify-content: center; align-items: flex-start; padding: .75rem .75rem 0; min-width: 0; min-height: 0; overflow: hidden; background: #080b12; container-type: size; }
+.stage { position: relative; isolation: isolate; overflow: hidden; width: min(100%, calc((100cqh - .75rem) * var(--scene-aspect))); max-height: calc(100cqh - .75rem); aspect-ratio: var(--scene-aspect); flex-shrink: 1; background: #080b12; }
+/* Tray: the selected marker's controls live under the stage, always present in edit mode so
+ * selecting a marker never resizes the stage under the pointer. */
+.tray { display: flex; align-items: center; min-height: 7.4rem; padding: .65rem 1rem .75rem; border-top: 1px solid var(--edge); background: var(--panel-2); }
+.tray > .section { flex: 1; display: flex; flex-wrap: wrap; align-items: center; gap: .55rem 1.4rem; padding: 0; border: 0; background: transparent; }
+.tray > .section > header { flex: 0 0 auto; display: grid; gap: .1rem; min-width: 7.5rem; }
+.tray > .section > header > strong { font-size: .8rem; }
+.tray .properties label { flex: 0 1 16rem; }
+.tray .properties label:has(input[type="checkbox"]),
+.tray .properties label:has(input[type="color"]) { flex: 0 0 auto; grid-template-columns: auto auto; gap: .45rem; }
+.tray .properties > small { flex: 1 1 100%; order: 10; max-width: 72rem; }
+.tray .properties > button { order: 5; margin-left: auto; }
+.tray > .hint { margin: 0; }
+.stage > img { display: block; width: 100%; height: 100%; object-fit: cover; user-select: none; pointer-events: none; }
+.stage[data-art-style="mosaic"] > img { image-rendering: pixelated; }
+.dialog .marker { position: absolute; z-index: 5; width: 2.25rem; height: 2.25rem; padding: 0; transform: translate(-50%, -50%); border: 2px solid var(--light-color); background: #0c1125f2; color: #fff; box-shadow: 0 1px 8px #000a; touch-action: none; cursor: grab; border-radius: 50%; }
+.dialog .marker[data-selected="true"] { outline: 2px solid white; outline-offset: 3px; }
+.dialog .marker[data-effect="true"] { border-style: dashed; border-radius: .6rem; }
+.marker small { position: absolute; right: -.3rem; top: -.5rem; border-radius: 1rem; padding: .05rem .3rem; background: #fff; color: #111; font-size: .65rem; }
+.dialog .endpoint { position: absolute; z-index: 6; width: .85rem; height: .85rem; padding: 0; background: white; border: 2px solid #161126; border-radius: 2px; transform: translate(-50%,-50%); touch-action: none; cursor: move; }
+.dialog .endpoint[data-godray-corner] { width: 1rem; height: 1rem; border-color: #fff; box-shadow: 0 0 0 2px #0009, 0 2px 8px #000a; }
+.dialog .endpoint[data-godray-corner="window"] { background: var(--accent); }
+.dialog .endpoint[data-godray-corner="landing"] { width: 1.25rem; height: 1.25rem; background: #7ee0ff; border-radius: 50%; cursor: grab; }
+.dialog .endpoint[data-godray-label]::after { content: attr(data-godray-label); position: absolute; top: -1.25rem; left: 50%; transform: translateX(-50%); color: #fff; font-size: .68rem; font-weight: 850; text-shadow: 0 0 3px #000, 0 0 6px #000; pointer-events: none; }
+.godrayEdgeLabel { position: absolute; z-index: 5; transform: translate(-50%, .55rem); color: #7ee0ff; font-size: .68rem; font-weight: 850; text-shadow: 0 0 3px #000, 0 0 6px #000; pointer-events: none; }
+/* Guide for the selected godray: dashed at rest, solid and filled while a corner drags. */
+.godrayGuide { position: absolute; z-index: 4; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; filter: drop-shadow(0 0 2px #000c); }
+.godrayGuide polygon { fill: #ffffff2e; stroke: #fff; stroke-width: 1.5; stroke-dasharray: 5 4; }
+.godrayGuide[data-dragging="true"] polygon { fill: #ffffff59; stroke-width: 2; stroke-dasharray: none; }
+.godrayGuideRay { stroke: #fffc; stroke-width: 1; stroke-dasharray: 2 3; }
+.godrayGuide[data-dragging="true"] .godrayGuideRay { stroke-dasharray: none; }
+.godrayGuideWindow { stroke: var(--accent); stroke-width: 3; stroke-linecap: round; }
+.godrayGuideFloor { stroke: #7ee0ff; stroke-width: 3; stroke-linecap: round; }
+.inspector { width: 17rem; padding: .9rem; display: flex; flex-direction: column; gap: .75rem; overflow-y: auto; border-left: 1px solid var(--edge); }
+.inspector small { line-height: 1.5; }
+/* Inspector sections: Lights, Selected light, Auto-place. */
+.section { display: grid; gap: .6rem; padding: .75rem; border: 1px solid var(--edge-soft); border-radius: .8rem; background: var(--panel-2); }
+.section > header { display: flex; align-items: baseline; justify-content: space-between; gap: .5rem; }
+.section > header > strong { font-size: .78rem; letter-spacing: .01em; }
+.section > header > small { color: var(--muted); font-size: .68rem; font-variant-numeric: tabular-nums; }
+.dialog .place { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 62%, var(--edge)); font-weight: 600; }
+.dialog .place:hover:not(:disabled) { background: color-mix(in srgb, var(--accent) 12%, var(--panel-2)); }
+.lightList { display: grid; gap: .3rem; }
+.dialog .lightList button { display: grid; grid-template-columns: 1.3rem minmax(0, 1fr) auto; align-items: center; gap: .45rem; padding: .42rem .55rem; text-align: left; font-size: .8rem; border-color: var(--edge-soft); }
+.dialog .lightList button > span { color: var(--light-color, var(--accent)); font-size: 1rem; line-height: 1; text-shadow: 0 0 .5rem color-mix(in srgb, var(--light-color, var(--accent)) 55%, transparent); }
+.dialog .lightList button > strong { overflow: hidden; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.dialog .lightList button > small { color: var(--muted); font-size: .68rem; font-variant-numeric: tabular-nums; }
+.dialog .lightList button[aria-pressed="true"] { color: var(--ink); border-color: var(--accent); background: color-mix(in srgb, var(--accent) 16%, var(--panel-2)); }
+.dialog .lightList button[aria-pressed="true"] > small { color: var(--accent); }
+.tips { color: var(--muted); font-size: .7rem; }
+.hint { margin: 0; color: var(--muted); font-size: .8rem; line-height: 1.45; }
+.properties label { display: grid; grid-template-columns: 5.4rem minmax(0, 1fr); align-items: center; gap: .5rem; font-size: .8rem; }
+.properties label > span { display: flex; align-items: center; gap: .45rem; min-width: 0; }
+.properties input[type="range"] { flex: 1; min-width: 0; width: auto; accent-color: var(--accent); }
+.properties output { min-width: 2.7rem; color: var(--muted); font-size: .7rem; font-variant-numeric: tabular-nums; text-align: right; }
+.properties input[type="checkbox"] { justify-self: start; width: 1rem; height: 1rem; margin: 0; accent-color: var(--accent); }
+.properties input[type="color"] { justify-self: start; width: 3.1rem; height: 1.9rem; padding: .1rem; border: 1px solid var(--edge); border-radius: .45rem; background: var(--panel); cursor: pointer; }
+.properties > small { color: var(--muted); font-size: .7rem; }
+.dialog .danger { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 42%, var(--edge-soft)); }
+.dialog .danger:hover { border-color: var(--danger); }
+.autoPlace { border-color: color-mix(in srgb, var(--accent) 40%, var(--edge-soft)); background: linear-gradient(165deg, color-mix(in srgb, var(--accent) 11%, var(--panel-2)), var(--panel-2) 70%); }
+.online { padding: .12rem .45rem; color: var(--accent); border: 1px solid color-mix(in srgb, var(--accent) 55%, transparent); border-radius: 999px; font-size: .58rem; font-weight: 800; letter-spacing: .09em; }
+.contextMenu { position: fixed; z-index: 15; display: grid; gap: .35rem; min-width: 12rem; padding: .4rem; background: var(--panel); border: 1px solid var(--edge); border-radius: .75rem; box-shadow: 0 .8rem 2rem #0008; }
+.contextMenu button { width: 100%; text-align: left; }
+.contextMenu button small { float: right; margin-left: .75rem; color: var(--muted); font-size: .72rem; }
+.pickerScrim { position: absolute; inset: 0; z-index: 20; display: grid; place-items: center; background: #02040bc4; }
+.picker { border: 1px solid var(--edge); border-radius: 1rem; background: var(--panel); padding: 1.25rem; width: min(28rem,90%); display: grid; gap: .7rem; }
+.picker header { display: flex; align-items: center; justify-content: space-between; }
+.picker header h3 { margin: 0; }
+.picker > button { display: grid; grid-template-columns: 2rem 1fr; text-align: left; gap: .3rem; }
+.picker > button > span { grid-row: span 2; align-self: center; font-size: 1.4rem; }
+.picker small { color: var(--muted); }
+.error, .notice { position: absolute; bottom: 1rem; left: 1rem; right: 1rem; z-index: 25; padding: 1rem; background: var(--panel); border-radius: .6rem; }
+.error { border: 1px solid #dc6974; }
+.notice { border: 1px solid var(--accent); }
+@media (max-width: 800px) { .inspector { width: 12.5rem; padding: .6rem; } .toolbar { gap: .4rem; padding: .65rem; } .properties label { grid-template-columns: 1fr; } .sceneWell { padding: .5rem .5rem 0; } .tray { min-height: 0; padding: .5rem .6rem; } .tray > .section { gap: .4rem .8rem; } .tray .properties label { flex-basis: 11rem; } }

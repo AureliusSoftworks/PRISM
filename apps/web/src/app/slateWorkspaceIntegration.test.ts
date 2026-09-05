@@ -4,18 +4,32 @@ import { describe, it } from "node:test";
 import { MODE_TUTORIALS } from "./modeTutorials.ts";
 
 const source = readFileSync(new URL("./SlateWorkspace.tsx", import.meta.url), "utf8");
+const cockpitComponentSource = [
+  readFileSync(new URL("./SlateStoryMap.tsx", import.meta.url), "utf8"),
+  readFileSync(new URL("./SlateManuscriptCanvas.tsx", import.meta.url), "utf8"),
+  readFileSync(new URL("./SlateDirectorBar.tsx", import.meta.url), "utf8"),
+  readFileSync(new URL("./SlateDirectionQuestion.tsx", import.meta.url), "utf8"),
+].join("\n");
 const workspaceCss = readFileSync(
   new URL("./slateWorkspace.module.css", import.meta.url),
   "utf8",
 );
 const pageSource = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
+const companionSource = readFileSync(
+  new URL("./PrismCompanion.tsx", import.meta.url),
+  "utf8",
+);
 
 describe("Slate workspace integration", () => {
   it("renders every registered Slate tutorial target in the live workspace", () => {
+    const renderedSlateSources = `${source}\n${cockpitComponentSource}\n${pageSource}\n${companionSource}`;
     for (const step of MODE_TUTORIALS.slate.steps) {
       const match = step.targetSelector.match(/data-tutorial-target="([^"]+)"/);
       assert.ok(match?.[1], `Could not read target from ${step.targetSelector}`);
-      assert.match(source, new RegExp(`data-tutorial-target="${match[1]}"`));
+      assert.match(
+        renderedSlateSources,
+        new RegExp(`data-tutorial-target="${match[1]}"`),
+      );
     }
   });
 
@@ -28,6 +42,9 @@ describe("Slate workspace integration", () => {
     assert.match(source, /\/accept`/);
     assert.match(source, /\/reject`/);
     assert.match(source, /Lock selection/);
+    assert.match(source, /This proposal targets the entire imported manuscript/);
+    assert.match(source, /slateWritingProposalPreview/);
+    assert.match(source, /writingProposalNeedsPassageScope/);
   });
 
   it("flushes manuscript autosave before leaving or switching projects", () => {
@@ -81,7 +98,8 @@ describe("Slate workspace integration", () => {
     assert.doesNotMatch(exportSource, /appendChild|removeChild|\.append\(|\.remove\(/);
     assert.match(source, /Take a clean copy/);
     assert.match(source, /Directions, Continuity notes, and review metadata stay private/);
-    assert.match(source, /aria-controls="slate-export-panel"/);
+    assert.match(source, /data-tutorial-target="slate-project-tools"/);
+    assert.match(source, /Clean manuscript export/);
   });
 
   it("keeps the export card branded, theme-owned, and responsive", () => {
@@ -181,7 +199,8 @@ describe("Slate workspace integration", () => {
       source,
       /if \(shouldGenerateCover\) \{[\s\S]*?synthesizeProjectCover\(response\.project\.id\)/,
     );
-    assert.match(source, /Create new cover/);
+    assert.match(source, /kind="slate_cover"/);
+    assert.match(source, /onSynthesize=\{\(direction, selection\) =>/);
     assert.match(source, /\/api\/slate\/projects\/\$\{encodeURIComponent\(projectId\)\}\/cover/);
     assert.match(source, /setEntryMode\("desk"\)[\s\S]*?setReturnSession\(null\)/);
     assert.match(
@@ -227,7 +246,8 @@ describe("Slate workspace integration", () => {
     assert.match(source, /Create a book cover/);
     assert.match(source, /shouldGenerateCover/);
     assert.match(source, /Generate a new title/);
-    assert.match(source, /Generate a new cover/);
+    assert.match(source, /label="Book covers"/);
+    assert.doesNotMatch(source, />Generate a new cover</);
     assert.match(source, /event\.metaKey \|\| event\.ctrlKey/);
     assert.match(progressiveSource, /manuscript: existingMaterial/);
     assert.match(progressiveSource, /catch \(cause\)[\s\S]*?Slate could not create the project/);
@@ -302,23 +322,31 @@ describe("Slate workspace integration", () => {
     assert.match(source, /Story so far/);
     assert.match(source, /Where it is going/);
     assert.match(source, /Continuity’s one recommendation/);
+    assert.match(
+      source,
+      /className=\{styles\.returnCover\}[\s\S]*?project\.cover\.imageUrl/,
+    );
     assert.match(source, /slateReturnSplashShouldShow/);
     assert.match(source, /slateReturnNextCardSectionId/);
     assert.match(workspaceCss, /\.returnSession::before[\s\S]*var\(--slate-p\)[\s\S]*var\(--slate-m\)/);
+    assert.match(workspaceCss, /\.returnSession[\s\S]*?grid-template-columns:[^;]+190px/);
+    assert.match(workspaceCss, /\.returnSynopsis p[\s\S]*?-webkit-line-clamp: 3/);
+    assert.match(workspaceCss, /\.returnCover\[data-cover-ready="true"\][\s\S]*?mix-blend-mode: screen/);
+    assert.match(
+      workspaceCss,
+      /@media \(max-width: 680px\)[\s\S]*?\.returnCover\s*\{[\s\S]*?display: none/,
+    );
   });
 
   it("uses the shared PRISM app header and keeps its utility panels mounted", () => {
+    const slateBranchStart = pageSource.lastIndexOf('if (view === "slate")');
     const slateBranch = pageSource.slice(
-      pageSource.indexOf('if (view === "slate")'),
-      pageSource.indexOf('if (view === "story")'),
+      slateBranchStart,
+      pageSource.indexOf('if (view === "story")', slateBranchStart),
     );
     assert.match(
       slateBranch,
-      /sidebarHeader=\{renderSharedAppletSidebarHeader\("slate"\)\}/,
-    );
-    assert.match(
-      slateBranch,
-      /navigationHeader=\{renderSharedAppletNavbar\("Slate tools"\)\}/,
+      /navigationHeader=\{renderSharedAppletNavbar\("Slate tools", \{[\s\S]*brandAppletId: "slate",[\s\S]*modelControls: renderSharedAccountRoutingControls\([\s\S]{0,120}"Slate",[\s\S]{0,120}slateActualAutoRoute,[\s\S]{0,120}\),[\s\S]*\}\)\}/u,
     );
     assert.match(
       slateBranch,
@@ -326,7 +354,7 @@ describe("Slate workspace integration", () => {
     );
     assert.match(slateBranch, /renderSharedPanels\(\)/);
     assert.match(slateBranch, /renderModeTutorialOverlay\(\)/);
-    assert.match(source, /sidebarHeader:\s*ReactNode/);
+    assert.doesNotMatch(source, /sidebarHeader:\s*ReactNode/);
     assert.match(source, /navigationHeader:\s*ReactNode/);
     assert.match(source, /data-theme=\{theme\}/);
   });

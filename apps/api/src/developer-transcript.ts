@@ -45,6 +45,14 @@ export interface BuildDeveloperTranscriptInput {
 
 type JsonRecord = Record<string, unknown>;
 
+const PRIVATE_SPEECH_INTENT_FIELDS = new Set([
+  "botPowerIntendedSpeech",
+  "powerIntendedSpeech",
+  "powerIntendedContent",
+  "powerIntendedReason",
+  "privatePowerIntendedNarrationBySceneId",
+]);
+
 const SENSITIVE_FIELD_PATTERN =
   /(?:api[_-]?key|authorization|credential|password|secret|subscription[_-]?token|token)/iu;
 
@@ -119,6 +127,79 @@ function sortedJsonValue(value: unknown): unknown {
       .sort((left, right) => left.localeCompare(right))
       .map((key) => [key, sortedJsonValue(value[key])]),
   );
+}
+
+function withoutPrivateSpeechIntentFields(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(withoutPrivateSpeechIntentFields);
+  if (!isJsonRecord(value)) return value;
+  return Object.fromEntries(
+    Object.entries(value)
+      .filter(([key]) => !PRIVATE_SPEECH_INTENT_FIELDS.has(key))
+      .map(([key, child]) => [key, withoutPrivateSpeechIntentFields(child)]),
+  );
+}
+
+function collectPrivateSpeechIntentValues(
+  value: unknown,
+  output: Set<string>,
+): void {
+  if (Array.isArray(value)) {
+    value.forEach((child) => collectPrivateSpeechIntentValues(child, output));
+    return;
+  }
+  if (!isJsonRecord(value)) return;
+  for (const [key, child] of Object.entries(value)) {
+    if (PRIVATE_SPEECH_INTENT_FIELDS.has(key)) {
+      const collectPrivateStrings = (privateValue: unknown): void => {
+        if (typeof privateValue === "string") {
+          if (privateValue) output.add(privateValue);
+          return;
+        }
+        if (Array.isArray(privateValue)) {
+          privateValue.forEach(collectPrivateStrings);
+          return;
+        }
+        if (isJsonRecord(privateValue)) {
+          Object.values(privateValue).forEach(collectPrivateStrings);
+        }
+      };
+      collectPrivateStrings(child);
+      continue;
+    }
+    collectPrivateSpeechIntentValues(child, output);
+  }
+}
+
+function privateSpeechIntentValues(
+  input: BuildDeveloperTranscriptInput,
+): string[] {
+  const values = new Set<string>();
+  for (const message of input.messages) {
+    collectPrivateSpeechIntentValues(parseJsonRecord(message.toolPayload), values);
+  }
+  for (const event of input.events) {
+    collectPrivateSpeechIntentValues(parseJsonRecord(event.payloadJson), values);
+  }
+  return [...values].sort(
+    (left, right) => right.length - left.length || left.localeCompare(right),
+  );
+}
+
+function redactPrivateSpeechIntentValues(
+  text: string,
+  values: readonly string[],
+): string {
+  let redacted = text;
+  for (const value of values) {
+    const escaped = JSON.stringify(value).slice(1, -1);
+    redacted = redacted.split(value).join("[PRIVATE_SPEECH_INTENT_REDACTED]");
+    if (escaped !== value) {
+      redacted = redacted
+        .split(escaped)
+        .join("[PRIVATE_SPEECH_INTENT_REDACTED]");
+    }
+  }
+  return redacted;
 }
 
 function stableJson(value: unknown): string {
@@ -260,9 +341,148 @@ function ambientPayloads(messages: readonly DeveloperTranscriptMessage[]): Array
   return ambient;
 }
 
+function transcriptEffortLabel(value: unknown): string | null {
+  if (typeof value !== "string" || !value.trim()) return null;
+  const normalized = value.trim();
+  return normalized === "xhigh"
+    ? "XHigh"
+    : normalized.charAt(0).toUpperCase() + normalized.slice(1);
+}
+
+/** Human-readable per-turn provenance; the full payload remains below it. */
+function canonicalMessageGeneration(
+  message: DeveloperTranscriptMessage,
+  payload: JsonRecord | null,
+): string | null {
+  if (message.role !== "assistant") return null;
+  if (payload?.botPowerExactResponse !== undefined) {
+    return "Not model-generated (deterministic response).";
+  }
+  const autoRoute = isJsonRecord(payload?.autoRoute) ? payload.autoRoute : null;
+  const autoRecovery = isJsonRecord(payload?.autoRecovery)
+    ? payload.autoRecovery
+    : null;
+  const provider =
+    nullableText(autoRecovery?.finalProvider) ??
+    message.provider ??
+    nullableText(autoRoute?.provider);
+  const model =
+    nullableText(autoRecovery?.finalModel) ??
+    message.model ??
+    nullableText(autoRoute?.model);
+  if (!provider || !model) return "Not recorded as model-generated.";
+
+  const details: string[] = [];
+  const recoveredAttempt = Array.isArray(autoRecovery?.attempts)
+    ? autoRecovery.attempts.at(-1)
+    : undefined;
+  const effort = transcriptEffortLabel(
+    autoRecovery
+      ? isJsonRecord(recoveredAttempt)
+        ? recoveredAttempt.reasoningEffort ?? "none"
+        : "none"
+      : (payload?.reasoningEffort ?? autoRoute?.reasoningEffort),
+  );
+  if (effort) details.push(`Effort ${effort}`);
+  if (!autoRecovery && payload?.turbo === true) details.push("Turbo");
+  if (autoRecovery) {
+    const attempts = Array.isArray(autoRecovery.attempts)
+      ? autoRecovery.attempts.length
+      : null;
+    details.push(
+      attempts === null
+        ? "Recovered"
+        : `Recovered after ${attempts} ${attempts === 1 ? "attempt" : "attempts"}`,
+    );
+  }
+  return `${autoRoute ? "Auto → " : ""}${provider}/${model}${details.length > 0 ? ` · ${details.join(" · ")}` : ""}`;
+}
+
+function coffeeDeveloperTranscriptCounts(
+  messages: readonly DeveloperTranscriptMessage[],
+): {
+  visibleMessages: number;
+  storedEvents: number;
+  dialogue: number;
+  systemRows: number;
+  actions: number;
+  silence: number;
+  interruptionSegments: number;
+} {
+  let visibleStoredRows = 0;
+  let dialogue = 0;
+  let systemRows = 0;
+  let actions = 0;
+  let silence = 0;
+  let interruptionSegments = 0;
+  for (const message of messages) {
+    const payload = parseJsonRecord(message.toolPayload);
+    const marker = payload?.socialSilence as
+      | SocialSilenceMarkerV1
+      | undefined;
+    const markedSilence = socialSilenceMessageIsMarkedV1({
+      content: message.content,
+      marker,
+      mode: "coffee",
+    });
+    if (markedSilence) silence += 1;
+    if (
+      payload?.coffeeAmbientAction !== undefined ||
+      payload?.coffeeStageAction !== undefined ||
+      payload?.coffeeUserAction !== undefined
+    ) {
+      actions += 1;
+    }
+    const interruption = isJsonRecord(payload?.coffeeInterruption)
+      ? payload.coffeeInterruption
+      : null;
+    if (interruption?.kind === "botInterruptsBot") {
+      if (nullableText(interruption.publicInterrupterCue ?? interruption.interrupterCue)) {
+        interruptionSegments += 1;
+      }
+      if (
+        nullableText(
+          interruption.publicInterruptedSpeakerCue ??
+            interruption.interruptedSpeakerCue,
+        )
+      ) {
+        interruptionSegments += 1;
+      }
+    }
+    if (message.role === "system") {
+      systemRows += 1;
+      const publicSystemRow =
+        message.content.trim().length > 0 &&
+        !/\b(?:your\s+)?account\s+(?:display\s+name\s+is|has\s+not\s+provided\s+a\s+display\s+name\s+yet)\b/iu.test(
+          message.content,
+        );
+      if (publicSystemRow) visibleStoredRows += 1;
+      continue;
+    }
+    if (markedSilence) continue;
+    const hasDialogue = /[\p{L}\p{N}]/u.test(voiceSpokenText(message.content));
+    if (!hasDialogue) continue;
+    visibleStoredRows += 1;
+    if (message.role === "user" || message.role === "assistant") dialogue += 1;
+  }
+  return {
+    visibleMessages: visibleStoredRows + interruptionSegments,
+    storedEvents: messages.length,
+    dialogue: dialogue + interruptionSegments,
+    systemRows,
+    actions,
+    silence,
+    interruptionSegments,
+  };
+}
+
 export function buildDeveloperTranscript(input: BuildDeveloperTranscriptInput): string {
   const exportedAt = input.exportedAt ?? new Date().toISOString();
   const messageById = new Map(input.messages.map((message) => [message.id, message]));
+  const coffeeCounts =
+    input.conversation.mode === "coffee"
+      ? coffeeDeveloperTranscriptCounts(input.messages)
+      : null;
   const lines: string[] = [
     "# PRISM Developer Transcript",
     `> Exported ${exportedAt}`,
@@ -279,6 +499,19 @@ export function buildDeveloperTranscript(input: BuildDeveloperTranscriptInput): 
     `- Stored messages: ${input.messages.length}`,
     `- Recorded external calls: ${input.events.length}`,
     "",
+    ...(coffeeCounts
+      ? [
+          "## Coffee Event Accounting",
+          "",
+          `- ${coffeeCounts.visibleMessages} visible messages · ${coffeeCounts.storedEvents} stored events`,
+          `- Dialogue: ${coffeeCounts.dialogue}`,
+          `- System rows: ${coffeeCounts.systemRows}`,
+          `- Actions: ${coffeeCounts.actions}`,
+          `- Silence: ${coffeeCounts.silence}`,
+          `- Interruption segments: ${coffeeCounts.interruptionSegments}`,
+          "",
+        ]
+      : []),
     "## LLM, Search, and Tool Calls",
     "",
   ];
@@ -358,6 +591,8 @@ export function buildDeveloperTranscript(input: BuildDeveloperTranscriptInput): 
   lines.push("## Canonical Message Records", "");
   if (input.messages.length === 0) lines.push("(No stored messages.)", "");
   input.messages.forEach((message, index) => {
+    const parsedToolPayload = parseJsonRecord(message.toolPayload);
+    const generation = canonicalMessageGeneration(message, parsedToolPayload);
     lines.push(`### Message ${index + 1}`);
     lines.push("");
     lines.push(`- ID: ${message.id}`);
@@ -365,16 +600,20 @@ export function buildDeveloperTranscript(input: BuildDeveloperTranscriptInput): 
     lines.push(`- Role: ${message.role}`);
     lines.push(`- Provider: ${message.provider ?? "unavailable"}`);
     lines.push(`- Model: ${message.model ?? "unavailable"}`);
+    if (generation) lines.push(`- Generation: ${generation}`);
     lines.push(`- Bot ID: ${message.botId ?? "none"}`);
     lines.push(
       `- Mention resolution / audience bot IDs: ${message.audienceBotIds ?? "none recorded"}`,
     );
     lines.push("", "Content / parsed visible output:", ...fenced(message.content), "");
     if (message.toolPayload) {
-      const parsedToolPayload = parseJsonRecord(message.toolPayload);
       lines.push(
         "Tool calls, search results, routing metadata, and retry state:",
-        ...fenced(parsedToolPayload ?? message.toolPayload),
+        ...fenced(
+          parsedToolPayload
+            ? withoutPrivateSpeechIntentFields(parsedToolPayload)
+            : message.toolPayload,
+        ),
         "",
       );
     }
@@ -400,7 +639,13 @@ export function buildDeveloperTranscript(input: BuildDeveloperTranscriptInput): 
   }
 
   const rendered = lines.join("\n").trimEnd() + "\n";
-  return redactDeveloperTranscript(rendered, { secretValues: input.secretValues });
+  return redactDeveloperTranscript(
+    redactPrivateSpeechIntentValues(
+      rendered,
+      privateSpeechIntentValues(input),
+    ),
+    { secretValues: input.secretValues },
+  );
 }
 
 export function sensitiveEnvironmentValues(
@@ -411,3 +656,8 @@ export function sensitiveEnvironmentValues(
     .map(([, value]) => value!)
     .filter((value) => value.trim().length >= 4);
 }
+import {
+  socialSilenceMessageIsMarkedV1,
+  voiceSpokenText,
+  type SocialSilenceMarkerV1,
+} from "@localai/shared";

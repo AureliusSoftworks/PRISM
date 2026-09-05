@@ -27,11 +27,7 @@ async function readImageGenerationResponse(
 ): Promise<ImageGenerationResult> {
   if (!response.ok) {
     const detail = await readOpenAiErrorMessage(response);
-    console.error(
-      `[openai] image ${operation} failed status=${response.status} detail=${
-        detail || "<empty body>"
-      }`
-    );
+    console.error(`[openai] image ${operation} failed status=${response.status}.`);
     const suffix = detail ? `: ${detail}` : "";
     throw new Error(
       `OpenAI image ${operation} failed (${response.status})${suffix}`
@@ -73,6 +69,7 @@ export async function generateImage(
     quality?: string;
     background?: "transparent" | "opaque" | "auto";
     signal?: AbortSignal;
+    fetchImpl?: typeof fetch;
   } = {}
 ): Promise<ImageGenerationResult> {
   const key = apiKey ?? config.openAiApiKey;
@@ -108,7 +105,9 @@ export async function generateImage(
     body.background = request.background;
   }
 
-  const response = await fetch("https://api.openai.com/v1/images/generations", {
+  const response = await (request.fetchImpl ?? fetch)(
+    "https://api.openai.com/v1/images/generations",
+    {
     method: "POST",
     headers: {
       "content-type": "application/json",
@@ -116,7 +115,8 @@ export async function generateImage(
     },
     body: JSON.stringify(body),
     signal: request.signal,
-  });
+    },
+  );
 
   return readImageGenerationResponse(response, prompt, "generation", normalized.model);
 }

@@ -39,7 +39,7 @@ test("menu interaction contract includes keyboard, submenu, and focus restoratio
   assert.match(menuSource, /event\.key === "Tab"[\s\S]*?restoreFocus: false/u);
   assert.match(
     menuSource,
-    /event\.key === "ArrowRight" && activeEntry\?\.kind === "submenu"/u,
+    /!navbarPicker &&\s*event\.key === "ArrowRight" &&\s*activeEntry\?\.kind === "submenu"/u,
   );
   assert.match(menuSource, /preferredPlacement: "right-start"/u);
   assert.match(menuSource, /claimSurface/u);
@@ -70,6 +70,23 @@ test("visual shell follows the PRISM instrument-glass contract", () => {
     /\.menu\[data-theme="light"\] \.item\[data-tone="danger"\]/u,
   );
   assert.doesNotMatch(menuCss, /dashed/u);
+});
+
+test("menu checkmarks own selection while pointer hover owns the row fill", () => {
+  assert.match(menuSource, /checked\s*\?\s*<Check aria-hidden="true"/u);
+  assert.doesNotMatch(menuSource, /data-active=/u);
+  assert.match(
+    menuCss,
+    /\.item:hover\s*\{[^}]*border-color:[^}]*background:/u,
+  );
+  assert.match(
+    menuCss,
+    /\.item:focus-visible\s*\{[^}]*outline:\s*2px solid[^}]*outline-offset:\s*-2px/u,
+  );
+  assert.doesNotMatch(
+    menuCss,
+    /\.item:hover,\s*\.item:focus-visible/u,
+  );
 });
 
 test("approved control changes are pinned", () => {

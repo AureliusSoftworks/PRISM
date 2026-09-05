@@ -125,6 +125,17 @@ test("Signal atmosphere prompt stays within ElevenLabs' 450-character limit", ()
   assert.match(prompt, /smooth the loop boundary/iu);
 });
 
+test("Signal atmosphere prompt carries up to five producer keyword cues", () => {
+  const prompt = buildSignalAtmospherePrompt({
+    showName: "The Long View",
+    studioIdentity: "A timber observatory with brass shutters.",
+    keywords: ["rain-dark", "clockwork", "tactile"],
+  });
+  assert.match(prompt, /Producer cues: rain-dark, clockwork, tactile/u);
+  assert.match(prompt, /associative|shape its sparse material sounds/iu);
+  assert.ok(prompt.length <= SIGNAL_ELEVENLABS_SOUND_PROMPT_MAX_CHARACTERS);
+});
+
 test("Signal atmosphere request asks ElevenLabs for a 30-second loop", async () => {
   let body: Record<string, unknown> | null = null;
   const result = await requestSignalElevenLabsAtmosphere({

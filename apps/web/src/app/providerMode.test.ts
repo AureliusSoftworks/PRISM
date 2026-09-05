@@ -4,13 +4,16 @@ import { describe, it } from "node:test";
 import { DISABLED_MODEL_CHOICE } from "@localai/shared";
 
 import {
+  applyModelChoiceForResponseMode,
   applyOnlineModelChoice,
   autoResponseModeForProvider,
+  blocksOnlineCapabilities,
   combinedOnlineModelOptions,
   fallbackOnlineModelIdsForProvider,
   filterVisibleModelOptions,
   filterVisibleOnlineModelOptions,
   inferOnlineProviderForModelChoice,
+  markStructuredOutputModelsUnavailable,
   nextResponseMode,
   resolveModelChoiceForResponseMode,
   responseModeForProvider,
@@ -27,6 +30,10 @@ const anthropicModels: ProviderModeModelOption[] = [
   { id: "claude-opus-4-1", provider: "anthropic" },
 ];
 
+const ollamaCloudModels: ProviderModeModelOption[] = [
+  { id: "minimax-m2.5:cloud", provider: "ollama_cloud" },
+];
+
 const localModels: ProviderModeModelOption[] = [
   { id: "llama3.2", provider: "local" },
   { id: "mistral:latest", provider: "local" },
@@ -35,19 +42,26 @@ const localModels: ProviderModeModelOption[] = [
 describe("provider mode helpers", () => {
   it("maps provider ids onto a binary Local/Online response mode", () => {
     assert.equal(responseModeForProvider("local"), "local");
+    assert.equal(responseModeForProvider("ollama_cloud"), "online");
     assert.equal(responseModeForProvider("openai"), "online");
     assert.equal(responseModeForProvider("anthropic"), "online");
     assert.equal(nextResponseMode("local"), "online");
     assert.equal(nextResponseMode("online"), "local");
   });
 
-  it("adds Auto only for surfaces that explicitly allow it", () => {
-    assert.equal(autoResponseModeForProvider("local", true), "auto");
-    assert.equal(autoResponseModeForProvider("openai", true), "auto");
+  it("keeps response routing binary even when legacy Auto flags are present", () => {
+    assert.equal(autoResponseModeForProvider("local", true), "local");
+    assert.equal(autoResponseModeForProvider("openai", true), "online");
     assert.equal(autoResponseModeForProvider("openai", true, false), "online");
   });
 
-  it("combines OpenAI and Anthropic model lists without hiding provider identity", () => {
+  it("blocks online capabilities only for hard LOCAL privacy", () => {
+    assert.equal(blocksOnlineCapabilities("local"), true);
+    assert.equal(blocksOnlineCapabilities("auto"), false);
+    assert.equal(blocksOnlineCapabilities("online"), false);
+  });
+
+  it("combines manual ONLINE model lists without hiding provider identity", () => {
     const combined = combinedOnlineModelOptions(openAiModels, anthropicModels);
     assert.deepEqual(
       combined.map((model) => `${model.provider}:${model.id}`),
@@ -60,8 +74,14 @@ describe("provider mode helpers", () => {
     );
   });
 
-  it("infers the online provider from a concrete selected model", () => {
-    const combined = combinedOnlineModelOptions(openAiModels, anthropicModels);
+  it("keeps explicit Cloud choices in the global foreground picker while Auto skips Cloud", () => {
+    const combined = combinedOnlineModelOptions(
+      ollamaCloudModels,
+      openAiModels,
+      anthropicModels,
+    );
+    assert.equal(inferOnlineProviderForModelChoice("minimax-m2.5:cloud", combined), "ollama_cloud");
+    assert.equal(inferOnlineProviderForModelChoice("auto", combined), "openai");
     assert.equal(
       inferOnlineProviderForModelChoice("claude-sonnet-4-6", combined),
       "anthropic"
@@ -133,6 +153,42 @@ describe("provider mode helpers", () => {
     );
   });
 
+  it("omits picker-hidden enabled models from manual options", () => {
+    const visible = filterVisibleModelOptions(
+      [
+        { id: "gpt-4o-mini", provider: "openai" as const },
+        {
+          id: "gpt-4o",
+          provider: "openai" as const,
+          showInGlobalPicker: false,
+        },
+      ],
+      [],
+    );
+    assert.deepEqual(visible.map((model) => model.id), ["gpt-4o-mini"]);
+  });
+
+  it("keeps checked capability-limited models visible with an explanation", () => {
+    const candidates: ProviderModeModelOption[] = [
+      { id: "gpt-5.6-sol", provider: "openai" },
+      {
+        id: "ollama-cloud-direct:kimi-k2.7-code:cloud",
+        provider: "ollama_cloud",
+        supportsStructuredOutput: false,
+      },
+    ];
+    const options = markStructuredOutputModelsUnavailable(
+      candidates,
+      "Debate and Whodunnit",
+    );
+    assert.equal(options.length, 2);
+    assert.equal(options[0]?.disabledReason, undefined);
+    assert.match(
+      options[1]?.disabledReason ?? "",
+      /Debate and Whodunnit requires structured output/u,
+    );
+  });
+
   it("resolves legacy state with both online provider slots populated", () => {
     const combined = combinedOnlineModelOptions(openAiModels, anthropicModels);
     assert.deepEqual(
@@ -178,6 +234,7 @@ describe("provider mode helpers", () => {
         provider: "anthropic",
         choices: {
           local: "llama3.2",
+          ollama_cloud: "auto",
           openai: "auto",
           anthropic: "claude-sonnet-4-6",
         },
@@ -185,7 +242,91 @@ describe("provider mode helpers", () => {
     );
   });
 
-  it("keeps a disabled local choice explicit for local response mode", () => {
+  it("persists an explicit Cloud selection without making it an Auto candidate", () => {
+    const combined = combinedOnlineModelOptions(
+      ollamaCloudModels,
+      openAiModels,
+      anthropicModels,
+    );
+    assert.deepEqual(
+      applyOnlineModelChoice({
+        currentChoices: { local: "llama3.2", openai: "gpt-4o" },
+        nextChoice: "minimax-m2.5:cloud",
+        onlineOptions: combined,
+        providerPreference: "openai",
+      }),
+      {
+        provider: "ollama_cloud",
+        choices: {
+          local: "llama3.2",
+          ollama_cloud: "minimax-m2.5:cloud",
+          openai: "auto",
+          anthropic: "auto",
+        },
+      },
+    );
+    assert.deepEqual(
+      resolveModelChoiceForResponseMode({
+        responseMode: "online",
+        providerPreference: "ollama_cloud",
+        choices: { ollama_cloud: "minimax-m2.5:cloud" },
+        onlineOptions: combined,
+      }),
+      { provider: "ollama_cloud", modelChoice: "minimax-m2.5:cloud" },
+    );
+  });
+
+  it("lets Auto choose a local model as its primary without dropping online choices", () => {
+    assert.deepEqual(
+      applyModelChoiceForResponseMode({
+        responseMode: "auto",
+        currentChoices: {
+          local: "auto",
+          openai: "gpt-4o",
+          anthropic: "auto",
+        },
+        nextChoice: "mistral:latest",
+        options: [...localModels, ...openAiModels, ...anthropicModels],
+        providerPreference: "openai",
+      }),
+      {
+        provider: "local",
+        choices: {
+          local: "mistral:latest",
+          ollama_cloud: "auto",
+          openai: "gpt-4o",
+          anthropic: "auto",
+        },
+      },
+    );
+  });
+
+  it("lets Auto choose an online model as its primary", () => {
+    assert.deepEqual(
+      applyModelChoiceForResponseMode({
+        responseMode: "auto",
+        currentChoices: {
+          local: "mistral:latest",
+          openai: "gpt-4o",
+          anthropic: "auto",
+        },
+        nextChoice: "claude-sonnet-4-6",
+        options: [...localModels, ...openAiModels, ...anthropicModels],
+        providerPreference: "local",
+      }),
+      {
+        provider: "anthropic",
+        choices: {
+          local: "mistral:latest",
+          ollama_cloud: "auto",
+          openai: "auto",
+          anthropic: "claude-sonnet-4-6",
+        },
+      },
+    );
+  });
+
+  it("normalizes a legacy disabled local text selection to Auto", () => {
     assert.deepEqual(
       resolveModelChoiceForResponseMode({
         responseMode: "local",
@@ -197,11 +338,11 @@ describe("provider mode helpers", () => {
         },
         onlineOptions: combinedOnlineModelOptions(openAiModels, anthropicModels),
       }),
-      { provider: "local", modelChoice: DISABLED_MODEL_CHOICE }
+      { provider: "local", modelChoice: "auto" }
     );
   });
 
-  it("keeps a disabled online choice attached to the selected online provider", () => {
+  it("normalizes a legacy disabled online text selection to Auto", () => {
     const combined = combinedOnlineModelOptions(openAiModels, anthropicModels);
     assert.deepEqual(
       applyOnlineModelChoice({
@@ -215,11 +356,12 @@ describe("provider mode helpers", () => {
         providerPreference: "anthropic",
       }),
       {
-        provider: "anthropic",
+        provider: "openai",
         choices: {
           local: "llama3.2",
+          ollama_cloud: "auto",
           openai: "auto",
-          anthropic: DISABLED_MODEL_CHOICE,
+          anthropic: "auto",
         },
       }
     );
@@ -233,7 +375,7 @@ describe("provider mode helpers", () => {
         },
         onlineOptions: combined,
       }),
-      { provider: "anthropic", modelChoice: DISABLED_MODEL_CHOICE }
+      { provider: "openai", modelChoice: "auto" }
     );
   });
 

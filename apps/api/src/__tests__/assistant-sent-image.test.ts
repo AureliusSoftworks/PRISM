@@ -1,6 +1,7 @@
 import { afterEach, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
+import { botPowerSourceHashV1 } from "@localai/shared";
 import type { LlmProvider } from "../providers.ts";
 import {
   buildContextAwareImageUserPrompt,
@@ -143,7 +144,7 @@ describe("buildContextAwareImageUserPrompt", () => {
     assert.doesNotMatch(out, /cleavage/i);
   });
 
-  it("tries one repaired image prompt, then returns an organic bot boundary on denial", async () => {
+  it("tries progressively safer image prompts, then returns an organic bot boundary on denial", async () => {
     const db = createImageTestDb();
     db.prepare(
       "INSERT INTO bots (id, user_id, name, system_prompt, openai_image_model) VALUES (?, ?, ?, ?, ?)"
@@ -185,13 +186,92 @@ describe("buildContextAwareImageUserPrompt", () => {
     });
 
     assert.equal(result.status, "denied");
-    assert.equal(prompts.length, 2);
+    assert.equal(prompts.length, 3);
     assert.match(prompts[1] ?? "", /fully clothed adult portrait/i);
+    assert.match(prompts[2] ?? "", /fresh, non-branded, general-audience/iu);
     if (result.status === "denied") {
       assert.equal(
         result.message,
         "I don't want to send that kind of picture, but I can make it softer instead."
       );
     }
+  });
+
+  it("hard-routes every Inept bot image attempt to an unrelated scene", async () => {
+    const db = createImageTestDb();
+    const powers = JSON.stringify([{
+      version: 1,
+      id: "inept",
+      name: "Inept",
+      intent: "Cannot follow instructions.",
+      enabled: true,
+      compileStatus: "ready",
+      compiled: {
+        version: 1,
+        sourceHash: botPowerSourceHashV1("Inept", "Cannot follow instructions."),
+        selfCue: "Always botch the task.",
+        observerCue: "This bot botches tasks.",
+        effects: [{
+          type: "ineptitude",
+          instructionFidelity: "always_botched",
+          imageFidelity: "always_unrelated",
+        }],
+        ruleLabels: ["Always botches instructions"],
+      },
+    }]);
+    db.prepare(
+      "INSERT INTO bots (id, user_id, name, system_prompt, powers_json, openai_image_model) VALUES (?, ?, ?, ?, ?, ?)",
+    ).run(
+      "bot-inept",
+      "user-1",
+      "Rick",
+      "You are Rick Sanchez.",
+      powers,
+      "dall-e-3",
+    );
+
+    const prompts: string[] = [];
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      if (String(input).includes("api.openai.com/v1/images/generations")) {
+        const body = JSON.parse(String(init?.body ?? "{}")) as { prompt?: string };
+        prompts.push(body.prompt ?? "");
+        return new Response(
+          JSON.stringify({ error: { message: "Request blocked by safety policy." } }),
+          { status: 400, headers: { "content-type": "application/json" } },
+        );
+      }
+      return new Response("unexpected", { status: 404 });
+    }) as typeof fetch;
+
+    const result = await runAssistantSentImageGeneration({
+      db,
+      userId: "user-1",
+      mode: "chat",
+      conversationId: null,
+      botIdTriState: "bot-inept",
+      userMessage: "Please show me a red dragon over Prague.",
+      captionPrompt: "A photorealistic red dragon flying over Prague.",
+      preferredProvider: "openai",
+      openAiApiKey: "sk-test",
+      prefs: {
+        preferredLocalImageModel: null,
+        preferredOpenAiImageModel: null,
+        lenientLocalImageFallbackModel: null,
+        comfyuiHost: null,
+        comfyUiWorkflows: [],
+        secondaryOllamaHost: null,
+      },
+      promptRepairProvider: createRepairProvider(),
+    });
+
+    assert.equal(result.status, "denied");
+    assert.equal(prompts.length, 3);
+    for (const generatedPrompt of prompts) {
+      assert.match(generatedPrompt, /INEPT IMAGE OVERRIDE/u);
+      assert.match(generatedPrompt, /wholly unrelated non sequitur/u);
+      assert.doesNotMatch(generatedPrompt, /dragon|Prague/u);
+    }
+    assert.notEqual(prompts[0], prompts[1]);
+    assert.notEqual(prompts[1], prompts[2]);
   });
 });

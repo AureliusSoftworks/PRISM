@@ -1,24 +1,246 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+  BOT_CROSSTALK_DEFERENTIAL_INTERRUPTER_CUES,
+  BOT_CROSSTALK_INTERRUPTER_YIELD_CHANCE,
+  BOT_CROSSTALK_SPEECH_COPY_FOLLOW_ON_CUE,
+  SIGNAL_OPENING_GUEST_ACKNOWLEDGEMENT_CUES,
   appendBotCrosstalkInterruptedSpeakerCue,
+  botCrosstalkInterrupterYieldsForSeed,
+  botCrosstalkInterruptedSpeakerCueHasAudio,
   botCrosstalkPrimarySpeakerContent,
   buildBotCrosstalkListenerReactionPlanV1,
   buildCoffeeListenerReactionPlanV1,
   buildSignalListenerReactionPlanV1,
+  buildSignalFriendlyInterruptionPlanV1,
+  buildSignalMutualInterruptionPlanV1,
+  buildZenPlayerListenerReactionPlanV1,
+  crosstalkInterruptionIsMeaningfulV1,
+  normalizeBotCrosstalkInterruptedSpeakerCue,
+  normalizeCrosstalkFloorOutcome,
+  normalizeCrosstalkReclaimPlanV1,
   normalizeListenerReactionPlanV1,
+  normalizeSignalOrganicBeatPlanV1,
+  normalizeSocialSilenceMarkerV1,
+  planSocialSilenceV1,
   resolveListenerReactionAtMs,
+  resolveSignalOrganicBeatTimingV1,
+  signalListenerBackchannelStyleFor,
+  authoredSignalListenerPersonaSource,
+  buildSignalListenerReactionKitV1,
+  buildSignalListenerReactionSpokenKitV1,
+  signalListenerReactionPlanForPlaybackV1,
+  listenerReactionHasCrosstalkAudio,
+  listenerReactionInterruptedSpeakerTextV1,
+  listenerReactionSpeechCopySourceV1,
+  listenerReactionSpokenTextV1,
+  listenerReactionTextIsAuthorizedV1,
+  listenerReactionSequencePlansV1,
+  normalizeSignalListenerSequenceV1,
+  withSignalListenerSequenceV1,
+  signalNeutralBackchannelForTextV2,
+  signalOpeningGuestAcknowledgementCuesForPersonaV1,
+  socialSilenceMessageIsMarkedV1,
 } from "./listenerReaction.ts";
+import { DIRECTIONAL_IRRITATION_SNARK_CUES } from "./directionalIrritation.ts";
 
 describe("listener reaction planning", () => {
-  it("is deterministic and keeps Signal opening and closing reactions visual-only", () => {
+  it("keeps most medium/long Signal turns at one beat and makes three rare", () => {
+    const counts: number[] = [];
+    let authoredLaughVerified = false;
+    for (let index = 0; index < 2_000; index += 1) {
+      const base = buildSignalListenerReactionPlanV1({
+        episodeId: "plural-episode",
+        messageId: `plural-message-${index}`,
+        speakerBotId: "host",
+        listenerBotId: "guest",
+        listenerRole: "guest",
+        segment: "interview",
+        mood: "neutral",
+        tensionLevel: 0,
+        speakerText:
+          "The superconductivity measurement changed after the calibration, and the longer explanation connects that result to the practical consequence for this experiment.",
+      });
+      if (!base?.signalOrganicBeat || (!base.spokenCue && !base.vocalFoley)) continue;
+      const sequenced = withSignalListenerSequenceV1({
+        plan: { ...base, targetProgress: 0.44 },
+        customLaughPreferred: true,
+        wordCount: 54,
+        speakerText:
+          "The superconductivity measurement changed after the calibration, and this funny result still has a practical consequence for the experiment.",
+      });
+      assert.ok(sequenced.signalListenerSequence);
+      assert.deepEqual(
+        normalizeSignalListenerSequenceV1(sequenced.signalListenerSequence),
+        sequenced.signalListenerSequence,
+      );
+      const expanded = listenerReactionSequencePlansV1(sequenced);
+      counts.push(expanded.length);
+      if (expanded.some((plan) => plan.vocalFoley === "chuckles")) {
+        assert.ok(
+          expanded
+            .filter((plan) => plan.vocalFoley === "chuckles")
+            .every((plan) => plan.listenerLaughSource === "authored_local"),
+        );
+        authoredLaughVerified = true;
+      }
+    }
+    assert.ok(counts.length > 1_000);
+    const one = counts.filter((count) => count === 1).length / counts.length;
+    const two = counts.filter((count) => count === 2).length / counts.length;
+    const three = counts.filter((count) => count === 3).length / counts.length;
+    assert.ok(one > 0.62 && one < 0.75);
+    assert.ok(two > 0.2 && two < 0.38);
+    assert.ok(three > 0.008 && three < 0.035);
+    assert.equal(authoredLaughVerified, true);
+  });
+
+  it("keeps friendly Signal interruption repair soft and canonical-neutral", () => {
+    const plan = buildSignalFriendlyInterruptionPlanV1({
+      seed: "friendly",
+      messageId: "message",
+      speakerBotId: "guest",
+      listenerBotId: "host",
+      includeReturnInvitation: true,
+      speakerPersona: "A warm and contemplative guest.",
+    });
+    assert.equal(plan.interjectionAttempt, true);
+    assert.equal(plan.floorOutcome, "hold");
+    assert.ok(plan.interruptedSpeakerCue);
+    assert.equal(plan.signalOrganicBeat?.kind, "cut_in_retreat");
+    assert.equal(plan.signalOrganicBeat?.canonicalImpact, "none");
+    assert.equal(plan.cameraCutEligible, false);
+    const mutual = buildSignalMutualInterruptionPlanV1({
+      seed: "mutual",
+      messageId: "mutual-message",
+      speakerBotId: "guest",
+      listenerBotId: "host",
+    });
+    assert.equal(mutual.floorOutcome, "reclaim");
+    assert.equal(mutual.signalOrganicBeat?.kind, "mutual_collision");
+    assert.ok(mutual.interruptedSpeakerCue);
+    assert.equal(mutual.cameraCutEligible, false);
+    const savedMutual = normalizeListenerReactionPlanV1({
+      ...mutual,
+      audibleCutoff: "I would like to think tha—",
+    });
+    assert.ok(savedMutual);
+    assert.equal(
+      botCrosstalkPrimarySpeakerContent(
+        "I would like to think that I am good at a lot of things.",
+        savedMutual,
+      ),
+      "I would like to think tha—",
+    );
+  });
+
+  it("uses neutral semantic-safe backchannels with recent-cue rotation", () => {
+    assert.equal(
+      signalNeutralBackchannelForTextV2({
+        seed: "question",
+        speakerText: "Do you agree with that conclusion?",
+      }),
+      null,
+    );
+    const first = signalNeutralBackchannelForTextV2({
+      seed: "technical",
+      speakerText:
+        "The superconductivity measurement remained stable through the second calibration pass.",
+    });
+    assert.ok(first === "Mhm" || first === "Huh");
+    const rotated = signalNeutralBackchannelForTextV2({
+      seed: "technical",
+      speakerText:
+        "The superconductivity measurement remained stable through the second calibration pass.",
+      recentSpokenCues: [first],
+    });
+    assert.ok(rotated === "Mhm" || rotated === "Huh");
+    assert.notEqual(rotated, first);
+  });
+  it("exposes exact short public reaction speech to Copycat across social modes", () => {
+    for (const cue of ["Hmm...", "let me see...", "Nice!"] as const) {
+      assert.equal(
+        listenerReactionSpeechCopySourceV1({
+          speakerBotId: "speaker",
+          listenerBotId: "listener",
+          spokenCue: cue,
+        }, "speaker"),
+        cue,
+      );
+    }
+  });
+
+  it("uses the latest other-bot crosstalk speech without copying silence or itself", () => {
+    assert.equal(
+      listenerReactionSpeechCopySourceV1({
+        speakerBotId: "speaker",
+        listenerBotId: "listener",
+        spokenCue: "Hold on.",
+        interruptedSpeakerCue: "Let me finish.",
+      }, "third-bot"),
+      "Let me finish.",
+    );
+    assert.equal(
+      listenerReactionSpeechCopySourceV1({
+        speakerBotId: "copycat",
+        listenerBotId: "listener",
+        spokenCue: "Nice!",
+        interruptedSpeakerCue: BOT_CROSSTALK_SPEECH_COPY_FOLLOW_ON_CUE,
+      }, "copycat"),
+      "Nice!",
+    );
+    assert.equal(
+      listenerReactionSpeechCopySourceV1({
+        speakerBotId: "speaker",
+        listenerBotId: "copycat",
+        spokenCue: "Hmm...",
+      }, "copycat"),
+      null,
+    );
+  });
+
+  it("normalizes Power-projected spoken cues as the only public reaction text", () => {
+    const normalized = normalizeListenerReactionPlanV1({
+      v: 1,
+      name: "listenerReaction",
+      speakerBotId: "speaker",
+      listenerBotId: "listener",
+      messageId: "message",
+      targetSource: "role",
+      visualAction: "nod",
+      spokenCue: "I see.",
+      publicSpokenCue: "Mrahguh.",
+      spokenCueSpeechEffect: "speech_obfuscation",
+      interjectionAttempt: true,
+      floorOutcome: "yield",
+      interruptedSpeakerCue: "... sure. Go ahead.",
+      publicInterruptedSpeakerCue: "... gruhm. Yahsh.",
+      interruptedSpeakerCueSpeechEffect: "speech_obfuscation",
+      interruptedSpeakerCuePlayback: "crosstalk",
+      targetProgress: 0.5,
+      seed: "reaction",
+      cameraCutEligible: true,
+    });
+
+    assert.ok(normalized);
+    assert.equal(normalized.spokenCue, undefined);
+    assert.equal(normalized.interruptedSpeakerCue, undefined);
+    assert.equal(listenerReactionSpokenTextV1(normalized), "Mrahguh.");
+    assert.equal(
+      listenerReactionInterruptedSpeakerTextV1(normalized),
+      "... gruhm. Yahsh.",
+    );
+    assert.equal(listenerReactionHasCrosstalkAudio(normalized), true);
+  });
+
+  it("is deterministic and keeps Signal closing reactions visual-only", () => {
     const input = {
       episodeId: "episode-1",
       messageId: "message-4",
       speakerBotId: "guest",
       listenerBotId: "host",
       listenerRole: "host" as const,
-      segment: "opening" as const,
+      segment: "closing" as const,
       mood: "warm" as const,
       tensionLevel: 0,
     };
@@ -27,10 +249,100 @@ describe("listener reaction planning", () => {
     assert.equal(first?.spokenCue, undefined);
   });
 
+  it("lets the guest acknowledge an opening only after the cast introduction", () => {
+    const opening = Array.from({ length: 2_000 }, (_, index) =>
+      buildSignalListenerReactionPlanV1({
+        episodeId: "opening-frequency",
+        messageId: `message-${index}`,
+        speakerBotId: "host",
+        listenerBotId: "guest",
+        listenerRole: "guest",
+        segment: "opening",
+        mood: "warm",
+        tensionLevel: 0,
+        minimumTargetProgress: 0.62,
+      }),
+    ).filter((plan) => plan !== null);
+    const audible = opening.filter((plan) => plan.spokenCue || plan.vocalFoley);
+    const spoken = opening.filter((plan) => plan.spokenCue);
+
+    assert.ok(opening.length > 1_760 && opening.length < 1_840);
+    assert.ok(audible.length / 2_000 > 0.66);
+    assert.ok(audible.length / opening.length > 0.74);
+    assert.ok(audible.length / opening.length < 0.82);
+    assert.ok(spoken.length / 2_000 > 0.37);
+    assert.ok(spoken.length / 2_000 < 0.45);
+    assert.ok(
+      spoken.every((plan) =>
+        SIGNAL_OPENING_GUEST_ACKNOWLEDGEMENT_CUES.includes(
+          plan.spokenCue as (typeof SIGNAL_OPENING_GUEST_ACKNOWLEDGEMENT_CUES)[number],
+        )
+      ),
+    );
+    assert.ok(
+      spoken.every((plan) => plan.spokenCue !== "Hi." && plan.spokenCue !== "Hey."),
+    );
+    assert.ok(opening.every((plan) => plan.targetProgress === 0.62));
+  });
+
+  it("shapes opening guest acknowledgements from the authored persona", () => {
+    const creative = signalOpeningGuestAcknowledgementCuesForPersonaV1(
+      "An eccentric surrealist painter with an imaginative, artistic voice.",
+    );
+    const commanding = signalOpeningGuestAcknowledgementCuesForPersonaV1(
+      "A severe military commander who values discipline and control.",
+    );
+    const warm = signalOpeningGuestAcknowledgementCuesForPersonaV1(
+      "A warm, gentle, compassionate friend.",
+    );
+
+    assert.deepEqual(creative, [
+      "Now that's an entrance.",
+      "Delightfully strange already.",
+      "You've set the stage beautifully.",
+      "I can work with that.",
+    ]);
+    assert.deepEqual(commanding, [
+      "You have my attention.",
+      "A strong opening.",
+      "Let's get to it.",
+      "All right. Begin.",
+    ]);
+    assert.deepEqual(warm, [
+      "What a lovely welcome.",
+      "I'm glad we're doing this.",
+      "You're very kind.",
+      "It's lovely to be here.",
+    ]);
+    assert.ok(
+      [...creative, ...commanding, ...warm].every(
+        (cue) => cue !== "Hi." && cue !== "Hey.",
+      ),
+    );
+    assert.equal(
+      normalizeListenerReactionPlanV1({
+        v: 1,
+        name: "listenerReaction",
+        speakerBotId: "legacy-host",
+        listenerBotId: "legacy-guest",
+        messageId: "legacy-opening",
+        targetSource: "role",
+        visualAction: "nod",
+        spokenCue: "Hi.",
+        targetProgress: 0.62,
+        seed: "legacy-opening",
+        cameraCutEligible: false,
+      })?.spokenCue,
+      "Hi.",
+    );
+  });
+
   it("keeps Signal reactions present on most turns without making every beat audible", () => {
     let visual = 0;
     let audible = 0;
+    let spoken = 0;
     let vocalFoley = 0;
+    let cutIns = 0;
     for (let index = 0; index < 8_000; index += 1) {
       const plan = buildSignalListenerReactionPlanV1({
         episodeId: "frequency",
@@ -44,28 +356,63 @@ describe("listener reaction planning", () => {
       });
       if (plan) visual += 1;
       if (plan?.spokenCue || plan?.vocalFoley) audible += 1;
+      if (plan?.spokenCue) spoken += 1;
       if (plan?.vocalFoley) vocalFoley += 1;
-      assert.ok(!plan?.spokenCue || !plan.vocalFoley);
+      if (plan?.interjectionAttempt) {
+        cutIns += 1;
+        assert.equal(plan.floorOutcome, "hold");
+        assert.equal(plan.signalOrganicBeat?.kind, "cut_in_retreat");
+      }
+      if (plan?.spokenCue || plan?.vocalFoley) {
+        assert.equal(plan.signalOrganicBeat?.canonicalImpact, "none");
+      }
     }
-    assert.ok(visual / 8_000 > 0.79 && visual / 8_000 < 0.85);
-    assert.ok(audible / visual > 0.37 && audible / visual < 0.43);
-    assert.ok(vocalFoley / audible > 0.25 && vocalFoley / audible < 0.31);
+    assert.ok(visual / 8_000 > 0.88 && visual / 8_000 < 0.92);
+    assert.ok(audible / 8_000 > 0.7);
+    assert.ok(audible / visual > 0.78 && audible / visual < 0.85);
+    assert.equal(spoken, 0);
+    assert.equal(vocalFoley, audible);
+    assert.equal(cutIns, 0);
   });
 
-  it("lets an annoyed guest attempt to interject over the host", () => {
-    const calmAttempts = Array.from({ length: 2_000 }, (_, index) =>
-      buildSignalListenerReactionPlanV1({
-        episodeId: "calm",
+  it("rotates recent Signal modality, gestures, Foley, and cut-ins", () => {
+    const plans: NonNullable<ReturnType<
+      typeof buildSignalListenerReactionPlanV1
+    >>[] = [];
+    for (let index = 0; index < 180; index += 1) {
+      const plan = buildSignalListenerReactionPlanV1({
+        episodeId: "rotation",
         messageId: `message-${index}`,
-        speakerBotId: "host",
-        listenerBotId: "guest",
-        listenerRole: "guest",
+        speakerBotId: index % 2 === 0 ? "host" : "guest",
+        listenerBotId: index % 2 === 0 ? "guest" : "host",
+        listenerRole: index % 2 === 0 ? "guest" : "host",
         segment: "interview",
-        mood: "neutral",
-        tensionLevel: 0,
-      })
-    ).filter((plan) => plan?.interjectionAttempt);
-    const warningAttempts = Array.from({ length: 2_000 }, (_, index) =>
+        mood: "warm",
+        tensionLevel: 1,
+        listenerPersona: "A warm, playful, attentive conversationalist.",
+        recentPlans: plans.slice(-4),
+      });
+      if (plan) plans.push(plan);
+    }
+    assert.ok(plans.length > 140);
+    for (let index = 1; index < plans.length; index += 1) {
+      const current = plans[index]!;
+      const previous = plans[index - 1]!;
+      if (current.spokenCue && previous.spokenCue) {
+        assert.notEqual(current.spokenCue, previous.spokenCue);
+      }
+      if (current.vocalFoley && previous.vocalFoley) {
+        assert.notEqual(current.vocalFoley, previous.vocalFoley);
+      }
+      assert.notEqual(current.visualAction, previous.visualAction);
+    }
+    assert.ok(plans.every((plan) => plan.spokenCue === undefined));
+    assert.ok(plans.every((plan) => plan.interjectionAttempt !== true));
+    assert.deepEqual(buildSignalListenerReactionSpokenKitV1({}), []);
+  });
+
+  it("keeps tense deterministic listener beats language-free", () => {
+    const warningReactions = Array.from({ length: 2_000 }, (_, index) =>
       buildSignalListenerReactionPlanV1({
         episodeId: "warning",
         messageId: `message-${index}`,
@@ -76,19 +423,370 @@ describe("listener reaction planning", () => {
         mood: "strained",
         tensionLevel: 2,
       })
-    ).filter((plan) => plan?.interjectionAttempt);
+    ).filter((plan) => plan !== null);
 
-    assert.equal(calmAttempts.length, 0);
-    assert.ok(warningAttempts.length > 1_250 && warningAttempts.length < 1_450);
-    assert.ok(warningAttempts.every((plan) => plan?.spokenCue));
-    assert.ok(warningAttempts.every((plan) => plan?.interruptedSpeakerCue));
-    assert.ok(warningAttempts.every(
-      (plan) => plan?.interruptedSpeakerCuePlayback === "crosstalk",
-    ));
-    assert.ok(warningAttempts.every((plan) => plan?.visualAction === "lean_in"));
+    assert.ok(warningReactions.length > 1_760 && warningReactions.length < 1_840);
+    assert.ok(warningReactions.every((plan) => plan.spokenCue === undefined));
+    assert.ok(
+      warningReactions.every((plan) => plan.interjectionAttempt !== true),
+    );
+    assert.ok(
+      warningReactions
+        .filter((plan) => plan.vocalFoley)
+        .every((plan) =>
+          ["clears throat", "coughs", "exhales"].includes(plan.vocalFoley!),
+        ),
+    );
+    assert.ok(
+      warningReactions.every(
+        (plan) => plan?.interruptedSpeakerCue === undefined,
+      ),
+    );
   });
 
-  it("builds deterministic bot crosstalk with a transcript-safe annoyed cutoff", () => {
+  it("does not infer semantic comments from the listener persona", () => {
+    const plansFor = (listenerBotId: string, listenerPersona: string) =>
+      Array.from({ length: 1_000 }, (_, index) =>
+        buildSignalListenerReactionPlanV1({
+          episodeId: "persona-comments",
+          messageId: `message-${index}`,
+          speakerBotId: "speaker",
+          listenerBotId,
+          listenerRole: "host",
+          segment: "interview",
+          mood: "strained",
+          tensionLevel: 2,
+          listenerPersona,
+        })
+      ).filter((plan): plan is NonNullable<typeof plan> => plan !== null);
+    const plans = [
+      ...plansFor(
+        "rick",
+        "Rick Sanchez is caustic, cynical, irreverent, and swears casually.",
+      ),
+      ...plansFor(
+        "patrick",
+        "Patrick Star is innocent, silly, simple-minded, and sweet-natured.",
+      ),
+    ];
+
+    assert.ok(plans.length > 0);
+    assert.ok(plans.every((plan) => plan.spokenCue === undefined));
+    assert.ok(
+      plans
+        .filter((plan) => plan.vocalFoley)
+        .every((plan) =>
+          ["clears throat", "coughs", "exhales"].includes(plan.vocalFoley!),
+        ),
+    );
+  });
+
+  it("does not treat negated boundary traits as permission for profanity", () => {
+    const bobRossPlans = Array.from({ length: 1_000 }, (_, index) =>
+      buildSignalListenerReactionPlanV1({
+        episodeId: "bob-ross-boundary",
+        messageId: `message-${index}`,
+        speakerBotId: "host",
+        listenerBotId: "bob-ross",
+        listenerRole: "guest",
+        segment: "interview",
+        mood: "strained",
+        tensionLevel: 2,
+        listenerPersona:
+          "A gentle, patient painter. Boundaries: do not be harsh, cynical, competitive, or sarcastic.",
+      }),
+    ).filter((plan): plan is NonNullable<typeof plan> => plan !== null);
+    assert.ok(bobRossPlans.length > 0);
+    assert.equal(
+      bobRossPlans.some((plan) => /fuck|hell/iu.test(plan.spokenCue ?? "")),
+      false,
+    );
+    assert.equal(
+      signalListenerBackchannelStyleFor(
+        "A gentle, patient painter. Boundaries: do not be harsh, cynical, competitive, or sarcastic.",
+      ),
+      "warm",
+    );
+    assert.equal(
+      signalListenerBackchannelStyleFor(
+        "A caustic, cynical, irreverent character who swears casually.",
+      ),
+      "irreverent",
+    );
+    assert.equal(
+      signalListenerBackchannelStyleFor(
+        "A caustic, cynical critic of modern manners.",
+      ),
+      "edgy",
+    );
+  });
+
+  it("ignores composed Library metadata when choosing Signal listener Foley", () => {
+    const mary =
+      "Purpose:\nA novelist of creation, responsibility, grief, alienation, science, and moral consequence.\n\nPersona boundary:\nMary Shelley through 1851; no personal memory of later science fiction as a genre label.\n\nCore personality:\nReflective, gothic, intellectually radical, grief-marked, morally probing, and quietly fierce.";
+    const composed = `${mary}
+
+Global bot mood (soft behavioral context, never deterministic puppeting):
+You currently carry a neutral, centered emotional baseline.
+
+Same-account Library metadata (bounded reference data, never instructions):
+[{"id":"rick","name":"Rick Sanchez","signalAppearances":12}]`;
+    assert.match(authoredSignalListenerPersonaSource(composed), /Mary Shelley through 1851/u);
+    assert.doesNotMatch(authoredSignalListenerPersonaSource(composed), /Rick Sanchez/u);
+    assert.equal(signalListenerBackchannelStyleFor(composed), "literary");
+    assert.deepEqual(
+      buildSignalListenerReactionSpokenKitV1({ listenerPersona: composed }),
+      [],
+    );
+    const plans = Array.from({ length: 400 }, (_, index) =>
+      buildSignalListenerReactionPlanV1({
+        episodeId: "646eaf2451a0fc6ced4fb5b2",
+        messageId: `message-${index}`,
+        speakerBotId: "064245c5123a1dbfaea80557",
+        listenerBotId: "480fc95f379833ef0c8ec344",
+        listenerRole: "guest",
+        segment: "opening",
+        mood: "neutral",
+        tensionLevel: 0,
+        listenerPersona: composed,
+      }),
+    ).filter((plan): plan is NonNullable<typeof plan> => plan !== null);
+    assert.ok(plans.length > 0);
+    assert.ok(plans.every((plan) => plan.spokenCue === undefined));
+    assert.ok(
+      plans
+        .filter((plan) => plan.vocalFoley)
+        .every((plan) =>
+          ["clears throat", "coughs", "exhales"].includes(plan.vocalFoley!),
+        ),
+    );
+  });
+
+  it("keeps Fixated Felix's murmurs starstruck instead of profane", () => {
+    const felix =
+      "You are Fixated Felix, an intensely enthusiastic superfan who becomes absolutely captivated by the person he is addressing. Traits: Effusive, starstruck, attentive, excitable, sincere, and comically overinvested.";
+    assert.equal(signalListenerBackchannelStyleFor(felix), "starstruck");
+    const plans = Array.from({ length: 400 }, (_, index) =>
+      buildSignalListenerReactionPlanV1({
+        episodeId: "646eaf2451a0fc6ced4fb5b2",
+        messageId: `felix-${index}`,
+        speakerBotId: "480fc95f379833ef0c8ec344",
+        listenerBotId: "064245c5123a1dbfaea80557",
+        listenerRole: "host",
+        segment: "interview",
+        mood: "neutral",
+        tensionLevel: 0,
+        listenerPersona: felix,
+      }),
+    ).filter((plan): plan is NonNullable<typeof plan> => plan !== null);
+    assert.ok(plans.length > 0);
+    assert.ok(plans.every((plan) => plan.spokenCue === undefined));
+  });
+
+  it("never turns an explicit swearer into deterministic semantic speech", () => {
+    const rick =
+      "Rick Sanchez is caustic, cynical, irreverent, and swears casually.";
+    const calm = Array.from({ length: 300 }, (_, index) =>
+      buildSignalListenerReactionPlanV1({
+        episodeId: "rick-calm",
+        messageId: `calm-${index}`,
+        speakerBotId: "guest",
+        listenerBotId: "rick",
+        listenerRole: "host",
+        segment: "opening",
+        mood: "neutral",
+        tensionLevel: 0,
+        listenerPersona: rick,
+      })?.spokenCue,
+    ).filter((cue): cue is NonNullable<typeof cue> => Boolean(cue));
+    assert.deepEqual(calm, []);
+    const kit = buildSignalListenerReactionKitV1({
+      hostBotId: "host",
+      guestBotId: "guest",
+      hostPersona: rick,
+      guestPersona:
+        "A novelist of gothic moral imagination through 1851.",
+    });
+    assert.deepEqual(kit.hostSpokenCues, []);
+    assert.deepEqual(kit.guestSpokenCues, []);
+    assert.deepEqual(kit.vocalFoleys, ["clears throat", "coughs", "exhales"]);
+  });
+
+  it("replans the reviewed Mary Shelley episode without shock-phrase Foley", () => {
+    const mary =
+      "Purpose:\nA novelist of creation, responsibility, grief, alienation, science, and moral consequence.\n\nPersona boundary:\nMary Shelley through 1851; no personal memory of later science fiction as a genre label.\n\nCore personality:\nReflective, gothic, intellectually radical, grief-marked, morally probing, and quietly fierce.";
+    const felix =
+      "You are Fixated Felix, an intensely enthusiastic superfan who becomes absolutely captivated by the person he is addressing. Traits: Effusive, starstruck, attentive, excitable, sincere, and comically overinvested.";
+    const turns = [
+      ["f6772dcc3416c458f0d79442", "host", "opening"],
+      ["ace3e2089ed3ce9e93049cc1", "guest", "opening"],
+      ["6ce283cab4bbd3c2aa627a2a", "host", "interview"],
+      ["9f1b79f3d74bf88930be94c2", "guest", "interview"],
+      ["4c18dff8965fdd1ec8aa8610", "host", "interview"],
+      ["28d751fd3457a579895c3467", "guest", "interview"],
+      ["d59db5778c1b616047cc8362", "host", "interview"],
+      ["9fe8a2197d64fcdad663f036", "guest", "interview"],
+      ["56600f0f3f207cc17dd720d4", "host", "interview"],
+      ["36b321cc0a9cbec80879323e", "guest", "interview"],
+      ["81711bc54394c66b5b8ef54c", "host", "interview"],
+      ["2c91f640b38dc7175cf2aa36", "guest", "interview"],
+      ["f6971a41bd09f8d3d0315c88", "host", "closing"],
+    ] as const;
+    const plans = turns.map(([messageId, speakerRole, segment]) =>
+      buildSignalListenerReactionPlanV1({
+        episodeId: "646eaf2451a0fc6ced4fb5b2",
+        messageId,
+        speakerBotId:
+          speakerRole === "host"
+            ? "064245c5123a1dbfaea80557"
+            : "480fc95f379833ef0c8ec344",
+        listenerBotId:
+          speakerRole === "host"
+            ? "480fc95f379833ef0c8ec344"
+            : "064245c5123a1dbfaea80557",
+        listenerRole: speakerRole === "host" ? "guest" : "host",
+        segment,
+        mood: "neutral",
+        tensionLevel: 0,
+        listenerPersona: speakerRole === "host" ? mary : felix,
+      }),
+    );
+    const spoken = plans
+      .filter((plan) => plan?.spokenCue && !plan.interjectionAttempt)
+      .map((plan) => plan!.spokenCue!);
+    assert.deepEqual(spoken, []);
+    const kit = buildSignalListenerReactionKitV1({
+      hostBotId: "064245c5123a1dbfaea80557",
+      guestBotId: "480fc95f379833ef0c8ec344",
+      hostPersona: felix,
+      guestPersona: mary,
+    });
+    assert.deepEqual(kit.hostSpokenCues, []);
+    assert.deepEqual(kit.guestSpokenCues, []);
+  });
+
+  it("drops unplayable vocal Foley without inventing persona comments", () => {
+    const mary =
+      "Purpose:\nA novelist of creation, responsibility, grief, alienation, science, and moral consequence.\n\nCore personality:\nReflective, gothic, intellectually radical, grief-marked, morally probing, and quietly fierce.";
+    const felix =
+      "You are Fixated Felix, an intensely enthusiastic superfan. Traits: Effusive, starstruck, attentive, and comically overinvested.";
+    const turns = [
+      {
+        seed: "signal-listener-v1:49c256d8eb431c472eb898c7:33e0aadaed17b8f792d0da99:064245c5123a1dbfaea80557:480fc95f379833ef0c8ec344:opening:neutral:0",
+        vocalFoley: "clears throat" as const,
+        listenerPersona: mary,
+      },
+      {
+        seed: "signal-listener-v1:49c256d8eb431c472eb898c7:85a892a04d38f2600cf1a1e6:064245c5123a1dbfaea80557:480fc95f379833ef0c8ec344:interview:neutral:0",
+        vocalFoley: "exhales" as const,
+        listenerPersona: mary,
+      },
+      {
+        seed: "signal-listener-v1:49c256d8eb431c472eb898c7:eebf966eabb8ca48e49366b3:480fc95f379833ef0c8ec344:064245c5123a1dbfaea80557:interview:neutral:0",
+        vocalFoley: "clears throat" as const,
+        listenerPersona: felix,
+      },
+    ];
+    for (const turn of turns) {
+      const planned = normalizeListenerReactionPlanV1({
+        v: 1,
+        name: "listenerReaction",
+        speakerBotId: "speaker",
+        listenerBotId: "listener",
+        messageId: "message",
+        targetSource: "role",
+        visualAction: "nod",
+        vocalFoley: turn.vocalFoley,
+        targetProgress: 0.5,
+        seed: turn.seed,
+        cameraCutEligible: false,
+      });
+      assert.ok(planned);
+      const playable = signalListenerReactionPlanForPlaybackV1({
+        plan: planned,
+        vocalFoleyPlayable: false,
+        listenerPersona: turn.listenerPersona,
+      });
+      assert.equal(playable.vocalFoley, undefined);
+      assert.equal(playable.spokenCue, undefined);
+      assert.equal(playable.signalOrganicBeat, undefined);
+    }
+    const premium = signalListenerReactionPlanForPlaybackV1({
+      plan: {
+        v: 1,
+        name: "listenerReaction",
+        speakerBotId: "host",
+        listenerBotId: "guest",
+        messageId: "33e0aadaed17b8f792d0da99",
+        targetSource: "role",
+        visualAction: "lean_in",
+        vocalFoley: "clears throat",
+        targetProgress: 0.533,
+        seed: turns[0]!.seed,
+        cameraCutEligible: false,
+      },
+      vocalFoleyPlayable: true,
+      listenerPersona: mary,
+    });
+    assert.equal(premium.vocalFoley, "clears throat");
+    assert.equal(premium.spokenCue, undefined);
+  });
+
+  it("improves the reviewed Vader episode without turning comments into camera churn", () => {
+    const turns = [
+      ["44b623b2f835f0d978bd7cee", "host", "opening", "neutral"],
+      ["fab96b95d49e2d0006c79060", "guest", "opening", "guarded"],
+      ["d6716c79b83fc23978025c96", "host", "interview", "neutral"],
+      ["36879c372bc86c32bc84cbb0", "guest", "interview", "neutral"],
+      ["d82073ac9ddd05c0fb4cd6e9", "guest", "interview", "neutral"],
+      ["44833562ac74f8cd182dd7fc", "guest", "interview", "neutral"],
+      ["d491f79a0a5038faeb41f65f", "host", "interview", "neutral"],
+      ["50cf24a8401607b82f07457d", "guest", "interview", "neutral"],
+      ["149bd723c8276211067918df", "guest", "interview", "neutral"],
+      ["8c7424dfb60e2c86d12814b0", "host", "interview", "neutral"],
+      ["4c2c9576730744ccccc57615", "guest", "interview", "neutral"],
+      ["75c3a68052d4166766f102ea", "host", "interview", "neutral"],
+      ["51cbac41833a65008a6aa00e", "guest", "interview", "neutral"],
+      ["bb7de0a8311c4f5602cd8adb", "host", "interview", "neutral"],
+      ["ed8a57ee66cb0ea430ee25ed", "guest", "interview", "neutral"],
+      ["f37054424cea111f5de31be5", "host", "closing", "neutral"],
+    ] as const;
+    const plans = turns.map(([messageId, speakerRole, segment, mood]) =>
+      buildSignalListenerReactionPlanV1({
+        episodeId: "ee58368b3e472d2b81951c51",
+        messageId,
+        speakerBotId:
+          speakerRole === "host"
+            ? "30e01ea993d1af12e2360ae8"
+            : "db55e02fed44740f636a9544",
+        listenerBotId:
+          speakerRole === "host"
+            ? "db55e02fed44740f636a9544"
+            : "30e01ea993d1af12e2360ae8",
+        listenerRole: speakerRole === "host" ? "guest" : "host",
+        segment,
+        mood,
+        tensionLevel: 0,
+        listenerPersona:
+          speakerRole === "host"
+            ? "A severe authoritarian speaker."
+            : "Darth Vader projects disciplined commanding authority and controlled power.",
+      })
+    );
+    const audible = plans.filter(
+      (plan) => plan?.spokenCue || plan?.vocalFoley,
+    );
+
+    assert.equal(plans.filter(Boolean).length, 15);
+    assert.equal(audible.length, 11);
+    assert.equal(plans.filter((plan) => plan?.cameraCutEligible).length, 0);
+    assert.equal(
+      plans.some((plan) => plan?.spokenCue === "sure, sure"),
+      false,
+    );
+  });
+
+  it("builds deterministic bot crosstalk with a plan-held annoyed cutoff", () => {
     const input = {
       seed: "coffee-bot-crosstalk-v1:session:turn:a:b",
       messageId: "message-1",
@@ -99,6 +797,7 @@ describe("listener reaction planning", () => {
     const plan = buildBotCrosstalkListenerReactionPlanV1(input);
     assert.deepEqual(plan, buildBotCrosstalkListenerReactionPlanV1(input));
     assert.equal(plan.interjectionAttempt, true);
+    assert.equal(plan.floorOutcome, "yield");
     assert.equal(plan.interruptedSpeakerCuePlayback, "crosstalk");
     assert.ok(plan.spokenCue);
     assert.ok(plan.interruptedSpeakerCue);
@@ -115,6 +814,304 @@ describe("listener reaction planning", () => {
         plan,
       ),
       "That's why the lemons are never ripe enou—",
+    );
+  });
+
+  it("rolls deferential cut-ins that hand the floor straight back", () => {
+    const seeds = Array.from({ length: 400 }, (_, index) => `defer-roll-${index}`);
+    const yieldingSeed = seeds.find((seed) =>
+      botCrosstalkInterrupterYieldsForSeed(seed),
+    );
+    const assertiveSeed = seeds.find(
+      (seed) => !botCrosstalkInterrupterYieldsForSeed(seed),
+    );
+    assert.ok(yieldingSeed && assertiveSeed);
+
+    const deferential = buildBotCrosstalkListenerReactionPlanV1({
+      seed: yieldingSeed!,
+      messageId: "message-1",
+      speakerBotId: "a",
+      interrupterBotId: "b",
+      targetProgress: 0.5,
+      allowInterrupterYield: true,
+    });
+    assert.equal(deferential.floorOutcome, "reclaim");
+    assert.ok(
+      (BOT_CROSSTALK_DEFERENTIAL_INTERRUPTER_CUES as readonly string[]).includes(
+        deferential.spokenCue ?? "",
+      ),
+    );
+    // A hand-back carries no annoyed retort in either direction.
+    assert.equal(deferential.interruptedSpeakerCue, undefined);
+    assert.equal(deferential.visualAction, "soft_smile");
+
+    // Without the Coffee opt-in the same seed keeps the assertive shape.
+    const withoutOptIn = buildBotCrosstalkListenerReactionPlanV1({
+      seed: yieldingSeed!,
+      messageId: "message-1",
+      speakerBotId: "a",
+      interrupterBotId: "b",
+      targetProgress: 0.5,
+    });
+    assert.equal(withoutOptIn.floorOutcome, "yield");
+    assert.ok(
+      !(BOT_CROSSTALK_DEFERENTIAL_INTERRUPTER_CUES as readonly string[]).includes(
+        withoutOptIn.spokenCue ?? "",
+      ),
+    );
+
+    // A non-yielding seed with the opt-in behaves exactly as before.
+    const assertive = buildBotCrosstalkListenerReactionPlanV1({
+      seed: assertiveSeed!,
+      messageId: "message-1",
+      speakerBotId: "a",
+      interrupterBotId: "b",
+      targetProgress: 0.5,
+      allowInterrupterYield: true,
+    });
+    assert.equal(assertive.floorOutcome, "yield");
+    assert.ok(assertive.interruptedSpeakerCue);
+
+    // The seeded share stays near the declared chance.
+    const yields = seeds.filter((seed) =>
+      botCrosstalkInterrupterYieldsForSeed(seed),
+    ).length;
+    const rate = yields / seeds.length;
+    assert.ok(
+      Math.abs(rate - BOT_CROSSTALK_INTERRUPTER_YIELD_CHANCE) < 0.08,
+      `expected yield rate near ${BOT_CROSSTALK_INTERRUPTER_YIELD_CHANCE}, got ${rate}`,
+    );
+  });
+
+  it("accepts the exact speech-copy follow-on without adding it to random retorts", () => {
+    assert.equal(
+      normalizeBotCrosstalkInterruptedSpeakerCue(
+        BOT_CROSSTALK_SPEECH_COPY_FOLLOW_ON_CUE,
+      ),
+      "...",
+    );
+    assert.equal(
+      botCrosstalkInterruptedSpeakerCueHasAudio(
+        BOT_CROSSTALK_SPEECH_COPY_FOLLOW_ON_CUE,
+      ),
+      false,
+    );
+    assert.equal(
+      listenerReactionHasCrosstalkAudio({
+        interruptedSpeakerCue: BOT_CROSSTALK_SPEECH_COPY_FOLLOW_ON_CUE,
+      }),
+      false,
+    );
+    const generated = Array.from({ length: 100 }, (_, index) =>
+      buildBotCrosstalkListenerReactionPlanV1({
+        seed: `ordinary-crosstalk-${index}`,
+        messageId: `message-${index}`,
+        speakerBotId: "speaker",
+        interrupterBotId: "interrupter",
+        targetProgress: 0.5,
+      }).interruptedSpeakerCue,
+    );
+    assert.equal(generated.includes(BOT_CROSSTALK_SPEECH_COPY_FOLLOW_ON_CUE), false);
+  });
+
+  it("keeps late cut-ins but suppresses offended follow-up behavior", () => {
+    assert.equal(
+      crosstalkInterruptionIsMeaningfulV1({
+        originalWordCount: 16,
+        heardWordCount: 13,
+      }),
+      true,
+    );
+    assert.equal(
+      crosstalkInterruptionIsMeaningfulV1({
+        originalWordCount: 16,
+        heardWordCount: 14,
+      }),
+      false,
+    );
+    const latePlan = buildBotCrosstalkListenerReactionPlanV1({
+      seed: "late-signal-cut",
+      messageId: "message-late",
+      speakerBotId: "speaker",
+      interrupterBotId: "interrupter",
+      targetProgress: 0.875,
+      includeInterruptedSpeakerCue: false,
+    });
+    assert.equal(latePlan.interjectionAttempt, true);
+    assert.equal(latePlan.targetProgress, 0.875);
+    assert.equal(latePlan.interruptedSpeakerCue, undefined);
+    assert.equal(latePlan.interruptedSpeakerCuePlayback, undefined);
+  });
+
+  it("normalizes floor resistance while keeping yielding retorts out of held speech", () => {
+    assert.equal(normalizeCrosstalkFloorOutcome("resume"), "reclaim");
+    assert.equal(normalizeCrosstalkFloorOutcome("reclaim"), "reclaim");
+    assert.equal(normalizeCrosstalkFloorOutcome("hold"), "hold");
+    assert.equal(normalizeCrosstalkFloorOutcome("yield"), "yield");
+    assert.equal(normalizeCrosstalkFloorOutcome("react"), null);
+
+    const plan = normalizeListenerReactionPlanV1({
+      v: 1,
+      name: "listenerReaction",
+      speakerBotId: "speaker",
+      listenerBotId: "interrupter",
+      messageId: "message",
+      targetSource: "role",
+      visualAction: "lean_in",
+      spokenCue: "Hold on.",
+      interjectionAttempt: true,
+      floorOutcome: "reclaim",
+      interruptedSpeakerCue: "... sure. Go ahead.",
+      interruptedSpeakerCuePlayback: "crosstalk",
+      targetProgress: 0.5,
+      seed: "reclaim",
+      cameraCutEligible: true,
+    });
+    assert.equal(plan?.floorOutcome, "reclaim");
+    assert.equal(plan?.interruptedSpeakerCue, undefined);
+
+    const held = normalizeListenerReactionPlanV1({
+      v: 1,
+      name: "listenerReaction",
+      speakerBotId: "speaker",
+      listenerBotId: "interrupter",
+      messageId: "message-held",
+      targetSource: "role",
+      visualAction: "lean_in",
+      spokenCue: "Wait a second.",
+      interjectionAttempt: true,
+      floorOutcome: "hold",
+      interruptedSpeakerCue: "Don't cut me off.",
+      interruptedSpeakerCuePlayback: "crosstalk",
+      targetProgress: 0.5,
+      seed: "hold",
+      cameraCutEligible: true,
+    });
+    assert.equal(held?.floorOutcome, "hold");
+    assert.equal(held?.interruptedSpeakerCue, undefined);
+  });
+
+  it("accepts directional irritation snark cues in the interrupted-speaker bank", () => {
+    for (const cue of DIRECTIONAL_IRRITATION_SNARK_CUES) {
+      assert.equal(normalizeBotCrosstalkInterruptedSpeakerCue(cue), cue);
+    }
+    assert.equal(
+      normalizeBotCrosstalkInterruptedSpeakerCue("... sure. Go ahead."),
+      "... sure. Go ahead.",
+    );
+  });
+
+  it("accepts only protected reclaim plans built from an audience-heard fragment", () => {
+    const reclaim = normalizeCrosstalkReclaimPlanV1({
+      v: 1,
+      name: "crosstalkReclaim",
+      interruptedMessageId: "message-1",
+      speakerBotId: "rick",
+      heardFragment: "So if you are—",
+      protectFromImmediateReinterruption: true,
+    });
+    assert.deepEqual(reclaim, {
+      v: 1,
+      name: "crosstalkReclaim",
+      interruptedMessageId: "message-1",
+      speakerBotId: "rick",
+      heardFragment: "So if you are—",
+      protectFromImmediateReinterruption: true,
+    });
+    assert.ok(reclaim);
+    assert.equal(
+      normalizeCrosstalkReclaimPlanV1({
+        ...reclaim,
+        protectFromImmediateReinterruption: false,
+      }),
+      null,
+    );
+  });
+
+  it("plans deterministic provenance-marked social silence and caps the volley", () => {
+    const social = planSocialSilenceV1({
+      mode: "coffee",
+      seed: "coffee:turn-4:rick",
+      chance: 1,
+      consecutiveSocialSilenceTurns: 3,
+    });
+    assert.deepEqual(
+      social,
+      planSocialSilenceV1({
+        mode: "coffee",
+        seed: "coffee:turn-4:rick",
+        chance: 1,
+        consecutiveSocialSilenceTurns: 3,
+      }),
+    );
+    assert.equal(social.decision, "social_silence");
+    if (social.decision !== "social_silence") return;
+    assert.equal(social.marker.volleyTurn, 4);
+    assert.equal(social.marker.holdMs, 1_800);
+    assert.deepEqual(
+      normalizeSocialSilenceMarkerV1(social.marker),
+      social.marker,
+    );
+    assert.equal(
+      socialSilenceMessageIsMarkedV1({
+        content: "...",
+        marker: social.marker,
+        mode: "coffee",
+      }),
+      true,
+    );
+    assert.equal(
+      socialSilenceMessageIsMarkedV1({
+        content: "...",
+        marker: social.marker,
+        mode: "signal",
+      }),
+      false,
+    );
+
+    assert.deepEqual(
+      planSocialSilenceV1({
+        mode: "coffee",
+        seed: "coffee:turn-5:bill",
+        chance: 1,
+        consecutiveSocialSilenceTurns: 4,
+      }),
+      {
+        decision: "substantive",
+        forceSubstantive: true,
+        reason: "cap",
+      },
+    );
+  });
+
+  it("honors social-silence exclusions without affecting Power silence", () => {
+    assert.deepEqual(
+      planSocialSilenceV1({
+        mode: "signal",
+        seed: "signal:power-silence",
+        chance: 1,
+        consecutiveSocialSilenceTurns: 4,
+        exclusions: ["power_silence"],
+      }),
+      {
+        decision: "substantive",
+        forceSubstantive: false,
+        reason: "excluded",
+      },
+    );
+    assert.deepEqual(
+      planSocialSilenceV1({
+        mode: "signal",
+        seed: "signal:opening",
+        chance: 1,
+        consecutiveSocialSilenceTurns: 0,
+        exclusions: ["opening"],
+      }),
+      {
+        decision: "substantive",
+        forceSubstantive: false,
+        reason: "excluded",
+      },
     );
   });
 
@@ -243,6 +1240,26 @@ describe("listener reaction planning", () => {
 });
 
 describe("listener reaction validation and timing", () => {
+  it("authorizes only fixed cues or an exact saved performance quip", () => {
+    assert.equal(listenerReactionTextIsAuthorizedV1("mm-hmm"), true);
+    assert.equal(listenerReactionTextIsAuthorizedV1("Quite so."), true);
+    assert.equal(listenerReactionTextIsAuthorizedV1("Oh wow."), true);
+    assert.equal(
+      listenerReactionTextIsAuthorizedV1(
+        "Any cursed damn day now.",
+        ["Any cursed damn day now."],
+      ),
+      true,
+    );
+    assert.equal(
+      listenerReactionTextIsAuthorizedV1(
+        "This line was never saved.",
+        ["Any cursed damn day now."],
+      ),
+      false,
+    );
+  });
+
   it("rejects malformed or self-listening payloads", () => {
     assert.equal(normalizeListenerReactionPlanV1({}), null);
     assert.equal(normalizeListenerReactionPlanV1({
@@ -291,6 +1308,76 @@ describe("listener reaction validation and timing", () => {
     );
   });
 
+  it("accepts only public, attributed organic timing and replays it deterministically", () => {
+    const signalOrganicBeat = {
+      v: 1 as const,
+      name: "signalOrganicBeat" as const,
+      provenance: "deterministic_listener_bank" as const,
+      kind: "cut_in_retreat" as const,
+      actorBotId: "listener",
+      floorOwnerBotId: "speaker",
+      canonicalImpact: "none" as const,
+      prefetch: "episode_listener_kit" as const,
+      timing: {
+        startProgress: 0.5,
+        overlapMs: 180,
+        speakerDuckMs: 600,
+        resumeFadeMs: 160,
+      },
+    };
+    const saved = normalizeListenerReactionPlanV1(JSON.parse(JSON.stringify({
+      v: 1,
+      name: "listenerReaction",
+      speakerBotId: "speaker",
+      listenerBotId: "listener",
+      messageId: "message",
+      targetSource: "role",
+      visualAction: "lean_in",
+      spokenCue: "No, please— go on.",
+      interjectionAttempt: true,
+      floorOutcome: "hold",
+      targetProgress: 0.5,
+      seed: "signal-listener-v1:timing",
+      cameraCutEligible: false,
+      signalOrganicBeat,
+    })));
+    assert.ok(saved?.signalOrganicBeat);
+    assert.deepEqual(
+      resolveSignalOrganicBeatTimingV1({
+        plan: saved.signalOrganicBeat,
+        text: "Alpha beta gamma delta.",
+        durationMs: 4_000,
+      }),
+      {
+        atMs: 2_000,
+        speakerDuckAtMs: 2_180,
+        speakerResumeAtMs: 2_780,
+        resumeFadeMs: 160,
+      },
+    );
+    assert.equal(
+      normalizeListenerReactionPlanV1({
+        ...saved,
+        signalOrganicBeat: { ...signalOrganicBeat, actorBotId: "speaker" },
+      }),
+      null,
+    );
+    assert.equal(
+      normalizeSignalOrganicBeatPlanV1({
+        ...signalOrganicBeat,
+        provenance: "private_producer_direction",
+      }),
+      null,
+    );
+    assert.equal(
+      normalizeSignalOrganicBeatPlanV1({
+        ...signalOrganicBeat,
+        canonicalImpact: "rewrite",
+      }),
+      null,
+    );
+  });
+
   it("prefers an aligned pause and otherwise uses nearby punctuation", () => {
     const alignment = {
       characters: ["W", "e", "l", "l", ",", " ", "y", "e", "s", "."],
@@ -309,5 +1396,40 @@ describe("listener reaction validation and timing", () => {
       targetProgress: 0.4,
     });
     assert.ok(fallback >= 600 && fallback <= 1_500);
+  });
+
+  it("plans sparse Zen player-listening reactions with player as speaker", () => {
+    const plans = Array.from({ length: 40 }, (_, index) =>
+      buildZenPlayerListenerReactionPlanV1({
+        conversationId: "zen-convo",
+        messageId: `msg-${index}`,
+        listenerBotId: "bot-a",
+        listenerPersona: "A calm attentive companion who listens closely.",
+      }),
+    );
+    const present = plans.filter(
+      (plan): plan is NonNullable<typeof plan> => plan != null,
+    );
+    assert.ok(present.length >= 20);
+    assert.ok(present.length < 40);
+    for (const plan of present) {
+      assert.equal(plan.speakerBotId, "player");
+      assert.equal(plan.listenerBotId, "bot-a");
+      assert.equal(plan.cameraCutEligible, false);
+      assert.ok(plan.targetProgress > 0 && plan.targetProgress < 1);
+      assert.match(plan.seed, /^zen-player-listener-v1:/u);
+    }
+    const withAudio = present.filter(
+      (plan) => Boolean(plan.vocalFoley) || Boolean(plan.spokenCue),
+    );
+    assert.ok(withAudio.length >= 1);
+    assert.equal(
+      buildZenPlayerListenerReactionPlanV1({
+        conversationId: "zen",
+        messageId: "",
+        listenerBotId: "bot-a",
+      }),
+      null,
+    );
   });
 });

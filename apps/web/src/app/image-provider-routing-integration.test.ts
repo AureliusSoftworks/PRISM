@@ -29,11 +29,12 @@ describe("independent image provider routing", () => {
 
   it("routes image generation through the image lane, not the chat lane", () => {
     const generation = sourceBetween(
-      "async function runImageGeneration",
-      "async function generateImg",
+      "function createQueuedImageGeneration",
+      "function drainImageGenerationQueue",
     );
-    assert.match(generation, /provider: effectiveImageProvider/u);
+    assert.match(generation, /let provider = effectiveImageProvider/u);
     assert.match(generation, /if \(effectiveImageProvider !== "local"\)/u);
+    assert.match(generation, /requestBody\.preferredProvider/u);
     assert.doesNotMatch(generation, /effectivePreferredProvider/u);
   });
 

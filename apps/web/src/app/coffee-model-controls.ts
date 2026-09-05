@@ -1,10 +1,12 @@
-export const COFFEE_ACCOUNT_DEFAULT_MODEL_LABEL = "Account default";
+export const COFFEE_AUTO_MODEL_LABEL = "Auto";
 
-export const COFFEE_ACCOUNT_DEFAULT_MODEL_META =
-  "uses the model saved in Settings";
+export const COFFEE_AUTO_MODEL_META = "Picks model & effort";
 
 export function coffeeModelPickerAriaLabel(
-  provider: "local" | "online",
+  provider: "local" | "online" | "auto",
 ): string {
-  return `Coffee session model for ${provider} replies. Account default uses the model saved in Settings.`;
+  if (provider === "auto") {
+    return "Coffee session model. Auto lets Prism choose the model and Effort inside the selected privacy lane.";
+  }
+  return `Coffee session model for ${provider} replies. Auto lets Prism choose the model and Effort contextually.`;
 }

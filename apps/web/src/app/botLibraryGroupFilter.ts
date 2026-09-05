@@ -7,11 +7,16 @@ export interface BotLibraryGroupFilterGroup {
   botIds: readonly string[];
 }
 
+export type BotLibrarySearchTextForBot<TBot> = (
+  bot: TBot
+) => readonly (string | null | undefined)[];
+
 export const BOT_LIBRARY_CUSTOM_GROUP_MIN_BOTS = 2;
 
 export interface BotLibraryGroupMaintenanceGroup {
   id: string;
   botIds: string[];
+  leaderBotId?: string | null;
   builtIn?: boolean;
   marketplaceThemeId?: string | null;
   updatedAt?: string;
@@ -92,6 +97,23 @@ export function filterBotsByLibraryGroup<TBot extends BotLibraryGroupFilterBot>(
   return bots.filter((bot) => allowedBotIds.has(bot.id));
 }
 
+export function filterBotsByLibrarySearch<TBot>(
+  bots: readonly TBot[],
+  query: string,
+  searchTextForBot: BotLibrarySearchTextForBot<TBot>
+): TBot[] {
+  const normalizedQuery = query.trim().toLocaleLowerCase();
+  if (!normalizedQuery) return [...bots];
+
+  return bots.filter((bot) =>
+    searchTextForBot(bot).some(
+      (value) =>
+        typeof value === "string" &&
+        value.toLocaleLowerCase().includes(normalizedQuery)
+    )
+  );
+}
+
 export function groupedBotIdsForLibraryGroups(
   groups: readonly BotLibraryGroupFilterGroup[]
 ): Set<string> {
@@ -144,6 +166,10 @@ export function pruneBotLibraryGroupsForExistingBots<
       return {
         ...group,
         botIds,
+        leaderBotId:
+          group.leaderBotId && botIds.includes(group.leaderBotId)
+            ? group.leaderBotId
+            : null,
       } as TGroup;
     }),
     minimumCustomBots
@@ -253,4 +279,31 @@ export function upsertBotLibraryGroup<
       updatedAt: now,
     } as TGroup,
   ];
+}
+
+/**
+ * Element-wise identity check for a group list.
+ *
+ * `pruneBotLibraryGroupsForExistingBots` returns each unchanged group by
+ * reference but always allocates a fresh outer array, and
+ * `normalizeBotLibraryGroups` rebuilds every object. Feeding that straight
+ * into `setBotLibraryGroups` produced a state value that was never `Object.is`
+ * equal to the previous one, so React could never bail out: the library-group
+ * maintenance effect re-rendered the entire app surface on a loop — a fresh
+ * load of Coffee sat at 4 FPS with `HomeContent` committing ~7 times a second
+ * and `busy` around 2000ms/s, on an idle screen with nothing animating.
+ *
+ * Comparing before normalizing is what lets the common case (nothing to prune)
+ * return the previous array unchanged.
+ */
+export function botLibraryGroupListsMatch(
+  left: readonly unknown[],
+  right: readonly unknown[],
+): boolean {
+  if (left === right) return true;
+  if (left.length !== right.length) return false;
+  for (let index = 0; index < left.length; index += 1) {
+    if (left[index] !== right[index]) return false;
+  }
+  return true;
 }

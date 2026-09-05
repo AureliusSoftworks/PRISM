@@ -5,11 +5,11 @@ export type ZenFallbackWallpaperVariant = {
 };
 
 export const ZEN_FALLBACK_WALLPAPER_ASSETS = [
-  "/zen-fallback-wallpapers/soft-glass-light.png",
-  "/zen-fallback-wallpapers/paper-grain-wash.png",
-  "/zen-fallback-wallpapers/ocean-haze.png",
-  "/zen-fallback-wallpapers/prismatic-mist.png",
-  "/zen-fallback-wallpapers/mineral-aurora.png",
+  "/zen-fallback-wallpapers/soft-glass-light.webp",
+  "/zen-fallback-wallpapers/paper-grain-wash.webp",
+  "/zen-fallback-wallpapers/ocean-haze.webp",
+  "/zen-fallback-wallpapers/prismatic-mist.webp",
+  "/zen-fallback-wallpapers/mineral-aurora.webp",
 ] as const;
 
 export interface ZenFallbackWallpaperEligibilityArgs {
@@ -60,9 +60,12 @@ export function shouldShowZenFallbackWallpaper({
   hasRememberedWallpaper,
   hasConversationMessages,
 }: ZenFallbackWallpaperEligibilityArgs): boolean {
+  // Bot rooms use blank persona gradients as the Atmosphere fallback. Stock
+  // preset images only fill Prism-default Zen (no bot) while Atmosphere is on.
   return (
     chatSurface &&
-    (atmosphereEnabled || hasConversationBot) &&
+    atmosphereEnabled &&
+    !hasConversationBot &&
     hasConversationMessages &&
     !hasRememberedWallpaper
   );

@@ -6,7 +6,10 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import sharp from "sharp";
 import { getAppConfig } from "@localai/config";
-import { GROUP_ROOM_WALLPAPER_IMAGE_PURPOSE } from "@localai/shared";
+import {
+  GROUP_ROOM_WALLPAPER_IMAGE_PURPOSE,
+  HUB_ATMOSPHERE_IMAGE_PURPOSE,
+} from "@localai/shared";
 import {
   createFetchRecorder,
   createTestDatabase,
@@ -159,8 +162,14 @@ describe("group-room wallpaper image generation route", () => {
     assert.equal(payload.image.origin, "bot_group_room");
     assert.match(payload.composedPrompt, /widescreen 16:9/u);
     assert.match(payload.composedPrompt, /Group: Night Shift/u);
-    assert.match(payload.composedPrompt, /Ada; accent #abcdef/u);
-    assert.match(payload.composedPrompt, /Bram; accent #123456/u);
+    assert.match(
+      payload.composedPrompt,
+      /Ada; primary color #abcdef; atmosphere cues:/u,
+    );
+    assert.match(
+      payload.composedPrompt,
+      /Bram; primary color #123456; atmosphere cues:/u,
+    );
     assert.match(payload.composedPrompt, /Painterly fog, soft grain/u);
     assert.doesNotMatch(payload.composedPrompt, /Untrusted Fake Name/u);
 
@@ -202,11 +211,23 @@ describe("group-room wallpaper image generation route", () => {
     assert.equal(stored.purpose, GROUP_ROOM_WALLPAPER_IMAGE_PURPOSE);
     assert.equal(stored.size, "1536x1024");
 
+    const typedLibrary = await client.request(
+      "/api/assets?kind=group_room_atmosphere&q=Night%20Shift",
+    );
+    const typedPayload = await json(typedLibrary);
+    assert.equal(typedLibrary.status, 200, JSON.stringify(typedPayload));
+    assert.equal(
+      typedPayload.assets.some((asset: { members?: Array<{ imageId?: string }> }) =>
+        asset.members?.some((member) => member.imageId === payload.image.id),
+      ),
+      true,
+    );
+
     const gallery = await client.request("/api/images");
     assert.equal(gallery.status, 200);
     assert.equal(
       (await json(gallery)).images.some((image: { id?: unknown }) => image.id === payload.image.id),
-      true
+      false
     );
     const generalGallery = await client.request("/api/images?general=1");
     assert.equal(
@@ -223,7 +244,7 @@ describe("group-room wallpaper image generation route", () => {
         (await json(botGallery)).images.some(
           (image: { id?: unknown }) => image.id === payload.image.id,
         ),
-        true,
+        false,
       );
     }
 
@@ -262,6 +283,134 @@ describe("group-room wallpaper image generation route", () => {
       ),
       undefined
     );
+  });
+
+  it("routes Home atmosphere through the account image lane instead of the Zen wallpaper lane", async () => {
+    const client = createClient();
+    const register = await client.request(
+      "/api/auth/register",
+      jsonInit({
+        username: "home-atmosphere-provider@example.com",
+        password: "home-atmosphere-provider-password",
+      }),
+    );
+    assert.equal(register.status, 201);
+    const userId = String((await json(register)).user.id);
+    db.prepare(
+      `UPDATE users
+          SET preferred_provider = 'local',
+              preferred_image_provider = 'openai',
+              preferred_openai_image_model = 'gpt-image-1',
+              preferred_zen_wallpaper_openai_image_model = 'disabled'
+        WHERE id = ?`,
+    ).run(userId);
+
+    const callStart = fetchRecorder.calls.length;
+    const response = await client.request(
+      "/api/images/generate",
+      jsonInit({
+        purpose: HUB_ATMOSPHERE_IMAGE_PURPOSE,
+        atmosphereStyle: "dreamscape",
+        direction: "Let violet light gather near the upper corners.",
+      }),
+    );
+    const payload = await json(response);
+    assert.equal(response.status, 200, JSON.stringify(payload));
+    assert.equal(payload.image.origin, "hub_atmosphere");
+    assert.equal(payload.image.purpose, HUB_ATMOSPHERE_IMAGE_PURPOSE);
+    assert.match(payload.composedPrompt, /Atmosphere style: dreamscape/u);
+
+    const providerCalls = fetchRecorder.calls.slice(callStart);
+    assert.equal(providerCalls.length, 1);
+    const providerBody = JSON.parse(
+      String(providerCalls[0]!.init?.body),
+    ) as { model: string; prompt: string };
+    assert.equal(providerBody.model, "gpt-image-1");
+    assert.match(
+      providerBody.prompt,
+      /Creative direction for this pass: Let violet light gather near the upper corners\.$/u,
+    );
+    assert.doesNotMatch(payload.composedPrompt, /violet light/iu);
+    const canonicalHomePrompt = db
+      .prepare("SELECT prompt FROM images WHERE id = ? AND user_id = ?")
+      .get(payload.image.id, userId) as { prompt: string };
+    assert.equal(canonicalHomePrompt.prompt, payload.composedPrompt);
+
+    const saved = db
+      .prepare(
+        `SELECT preferred_provider, hub_atmosphere_image_id, hub_atmosphere_image_style
+           FROM users WHERE id = ?`,
+      )
+      .get(userId) as {
+      preferred_provider: string;
+      hub_atmosphere_image_id: string | null;
+      hub_atmosphere_image_style: string | null;
+    };
+    assert.equal(saved.preferred_provider, "local");
+    assert.equal(saved.hub_atmosphere_image_id, payload.image.id);
+    assert.equal(saved.hub_atmosphere_image_style, "dreamscape");
+
+    const uploadCallStart = fetchRecorder.calls.length;
+    const uploaded = await client.request(
+      "/api/assets/upload",
+      jsonInit({
+        kind: "home_atmosphere",
+        title: "My quiet violet room",
+        dataUrl: `data:image/png;base64,${imageBytes.toString("base64")}`,
+      }),
+    );
+    const uploadedPayload = await json(uploaded);
+    assert.equal(uploaded.status, 201, JSON.stringify(uploadedPayload));
+    assert.equal(uploadedPayload.asset.kind, "home_atmosphere");
+    assert.equal(uploadedPayload.asset.source, "uploaded");
+    const uploadProviderCalls = fetchRecorder.calls.slice(uploadCallStart);
+    assert.equal(uploadProviderCalls.length, 1);
+    assert.equal(
+      uploadProviderCalls[0]?.input,
+      "http://localhost:11434/api/chat",
+    );
+    const reused = await client.request(
+      `/api/home/atmosphere/assets/${encodeURIComponent(String(uploadedPayload.asset.id))}/reuse`,
+      jsonInit({ atmosphereStyle: "dreamscape" }),
+    );
+    const reusedPayload = await json(reused);
+    assert.equal(reused.status, 200, JSON.stringify(reusedPayload));
+    assert.equal(
+      reusedPayload.imageId,
+      uploadedPayload.asset.members[0].imageId,
+    );
+    assert.ok(
+      db.prepare("SELECT 1 FROM images WHERE id = ? AND user_id = ?").get(
+        payload.image.id,
+        userId,
+      ),
+      "replacing a Home Atmosphere must leave the prior asset reusable",
+    );
+    const homeLibrary = await client.request(
+      "/api/assets?kind=home_atmosphere&sort=recency",
+    );
+    assert.equal((await json(homeLibrary)).assets.length, 2);
+
+    db.prepare(
+      `UPDATE users
+          SET preferred_openai_image_model = 'disabled',
+              preferred_zen_wallpaper_openai_image_model = 'gpt-image-1-mini'
+        WHERE id = ?`,
+    ).run(userId);
+    const unavailableCallStart = fetchRecorder.calls.length;
+    const unavailable = await client.request(
+      "/api/images/generate",
+      jsonInit({
+        purpose: HUB_ATMOSPHERE_IMAGE_PURPOSE,
+        atmosphereStyle: "sanctuary",
+      }),
+    );
+    assert.equal(unavailable.status, 400);
+    assert.match(
+      (await json(unavailable)).error,
+      /Online image generation is disabled/u,
+    );
+    assert.equal(fetchRecorder.calls.length, unavailableCallStart);
   });
 
   it("rejects bot or conversation attribution and cross-account member IDs before generation", async () => {
@@ -351,7 +500,10 @@ describe("group-room wallpaper image generation route", () => {
       })
     );
     assert.equal(response.status, 400);
-    assert.match((await json(response)).error, /Local image generation is disabled/u);
+    assert.match(
+      (await json(response)).error,
+      /Pick a local image model in the Images panel header/u,
+    );
     assert.equal(fetchRecorder.calls.length, callStart);
   });
 
@@ -440,7 +592,7 @@ describe("group-room wallpaper image generation route", () => {
     const hostGallery = await client.request("/api/images?botId=host-bot");
     assert.deepEqual(
       (await json(hostGallery)).images.map((image: { id: string }) => image.id),
-      [signalPayload.image.id],
+      [],
     );
   });
 });

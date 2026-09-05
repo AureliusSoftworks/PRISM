@@ -6,9 +6,13 @@
  * strips the suffix before building provider prompts.
  */
 
+import { normalizeBotResponseCueProfileV1 } from "./responseCue.ts";
+
 /// Sentinel block embedded at the end of `system_prompt` for structured bots.
 export const BOT_PROFILE_META_START = "<<<PRISM_BOT_META>>>";
 export const BOT_PROFILE_META_END = "<<<END_PRISM_BOT_META>>>";
+/** The compact Purpose editor is intentionally a single, readable thought. */
+export const BOT_PROFILE_PURPOSE_STATEMENT_MAX_LENGTH = 120;
 
 export type BotProfileCategoryId =
   | "purpose"
@@ -41,7 +45,9 @@ export type BotVoicePreset =
   | "warm"
   | "concise"
   | "playful"
-  | "formal";
+  | "formal"
+  | "reflective"
+  | "direct";
 
 export type BotProfileScaleValue = -2 | -1 | 0 | 1 | 2;
 
@@ -55,6 +61,8 @@ export interface BotPurposeProfile {
 export interface BotCoreProfile {
   traits: string;
   communicationStyle: BotVoicePreset;
+  /** Presentation-only microline preferences. Excluded from model-facing prose. */
+  responseCues?: import("./responseCue.ts").BotResponseCueProfileV1;
   openness: BotProfileScaleValue | null;
   conscientiousness: BotProfileScaleValue | null;
   extraversion: BotProfileScaleValue | null;
@@ -170,6 +178,8 @@ const VOICE_ORDER: readonly BotVoicePreset[] = [
   "concise",
   "playful",
   "formal",
+  "reflective",
+  "direct",
 ] as const;
 
 export const BOT_VOICE_PRESET_LABELS: Record<BotVoicePreset, string> = {
@@ -178,6 +188,8 @@ export const BOT_VOICE_PRESET_LABELS: Record<BotVoicePreset, string> = {
   concise: "Concise - short answers, lean into clarity",
   playful: "Playful - light wit when it fits",
   formal: "Formal - structured and precise",
+  reflective: "Reflective - thoughtful and probing",
+  direct: "Direct - frank and to the point",
 };
 
 const SCALE_VALUES: readonly BotProfileScaleValue[] = [-2, -1, 0, 1, 2] as const;
@@ -237,7 +249,20 @@ function cloneDefaultBotProfile(): BotProfileFields {
   return {
     v: 2,
     purpose: { ...DEFAULT_BOT_PROFILE_FIELDS.purpose },
-    core: { ...DEFAULT_BOT_PROFILE_FIELDS.core },
+    core: {
+      ...DEFAULT_BOT_PROFILE_FIELDS.core,
+      ...(DEFAULT_BOT_PROFILE_FIELDS.core.responseCues
+        ? {
+            responseCues: {
+              ...DEFAULT_BOT_PROFILE_FIELDS.core.responseCues,
+              interruption: [...DEFAULT_BOT_PROFILE_FIELDS.core.responseCues.interruption],
+              redirect: [...DEFAULT_BOT_PROFILE_FIELDS.core.responseCues.redirect],
+              waiting: [...DEFAULT_BOT_PROFILE_FIELDS.core.responseCues.waiting],
+              blockedDefaults: [...DEFAULT_BOT_PROFILE_FIELDS.core.responseCues.blockedDefaults],
+            },
+          }
+        : {}),
+    },
     identity: { ...DEFAULT_BOT_PROFILE_FIELDS.identity },
     worldview: { ...DEFAULT_BOT_PROFILE_FIELDS.worldview },
     appearance: { ...DEFAULT_BOT_PROFILE_FIELDS.appearance },
@@ -260,8 +285,14 @@ function describeVoiceForModel(voice: BotVoicePreset): string {
       return "You may use gentle humor when it helps the user; stay respectful.";
     case "formal":
       return "Use precise, structured language suitable for professional contexts.";
-    default:
-      return "";
+    case "reflective":
+      return "Think aloud carefully; ask probing questions and leave room for nuance.";
+    case "direct":
+      return "Be frank and to the point; say the hard thing cleanly without cruelty.";
+    default: {
+      const _exhaustive: never = voice;
+      return _exhaustive;
+    }
   }
 }
 
@@ -882,6 +913,7 @@ function parseV2(parsed: Record<string, unknown>): BotProfileFields {
     core: {
       traits: readString(core, "traits"),
       communicationStyle: readVoicePreset(core, "communicationStyle"),
+      responseCues: normalizeBotResponseCueProfileV1(core.responseCues),
       openness: readScaleValue(core, "openness"),
       conscientiousness: readScaleValue(core, "conscientiousness"),
       extraversion: readScaleValue(core, "extraversion"),

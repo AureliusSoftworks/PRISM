@@ -240,7 +240,7 @@ describe("PRISM WebGL recovery", () => {
     }
   });
 
-  it("settles fixed Low scenes without preventing adaptive High recovery sampling", async () => {
+  it("observes frame pressure without changing High and settles explicit Low", async () => {
     const previousResizeObserver = globalThis.ResizeObserver;
     Object.defineProperty(globalThis, "ResizeObserver", {
       configurable: true,
@@ -309,27 +309,23 @@ describe("PRISM WebGL recovery", () => {
         }
       };
       recordBadWindows(2);
-      assert.equal(controller.quality, "balanced");
-      nowMs += 10_001;
-      controller.noteDiscontinuity(nowMs);
-      nowMs += 2_001;
-      recordBadWindows(2);
-      assert.equal(controller.quality, "minimal");
+      assert.equal(controller.quality, "full");
 
-      const stoppedBeforeAdaptiveReconcile = app.stopped;
+      const stoppedBeforeExplicitReconcile = app.stopped;
       host.setActivity("ambient");
       assert.equal(
         app.stopped,
-        stoppedBeforeAdaptiveReconcile,
-        "an adaptively minimal High scene must keep its ticker alive",
+        stoppedBeforeExplicitReconcile,
+        "diagnostic pressure must not stop a High scene",
       );
 
       host.setQualityCeiling("minimal");
       assert.equal(
         app.stopped,
-        stoppedBeforeAdaptiveReconcile + 1,
-        "switching to fixed Low must settle even when effective quality was already minimal",
+        stoppedBeforeExplicitReconcile + 1,
+        "switching to explicit Low must settle the scene",
       );
+      assert.equal(host.quality.quality, "minimal");
       assert.equal(app.rendered > 0, true, "Low still renders invalidations");
     } finally {
       host.destroy();

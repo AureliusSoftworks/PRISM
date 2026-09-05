@@ -9,8 +9,13 @@ const textFieldSource = readFileSync(new URL("./TextFieldContextMenu.tsx", impor
 
 test("message, bot, canvas, and click-open menus share an opaque light shell", () => {
   assert.match(pageSource, /theme: resolvedTheme/);
-  assert.match(menuSource, /data-theme=\{request\.theme \?\? "dark"\}/);
+  assert.match(menuSource, /data-theme=\{request\.theme\}/);
+  assert.doesNotMatch(menuSource, /request\.theme \?\? "dark"/);
   assert.match(menuCss, /\.menu\[data-theme="light"\][\s\S]*--prism-menu-bg: #f8fbfe/);
+  assert.match(
+    menuCss,
+    /:global\(body\[data-prism-theme="light"\]\) \.menu/u,
+  );
   assert.match(menuCss, /\.menu\[data-theme="light"\][\s\S]*backdrop-filter: none/);
   assert.match(menuCss, /--prism-menu-muted: #637386/);
 });

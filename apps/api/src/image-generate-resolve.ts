@@ -1,4 +1,69 @@
 import type { DatabaseSync } from "node:sqlite";
+import {
+  GROUP_ROOM_WALLPAPER_IMAGE_PURPOSE,
+  HUB_ATMOSPHERE_IMAGE_PURPOSE,
+} from "@localai/shared";
+
+export interface ImageGenerateModelPreferenceSource {
+  preferredLocalImageModel: string | null | undefined;
+  preferredOpenAiImageModel: string | null | undefined;
+  preferredZenWallpaperLocalImageModel: string | null | undefined;
+  preferredZenWallpaperOpenAiImageModel: string | null | undefined;
+  preferredHomeAtmosphereImageModel?: string | null | undefined;
+  preferredHomeAtmosphereImageProvider?: string | null | undefined;
+}
+
+/**
+ * Group rooms intentionally share Zen's wallpaper model lane. Home/Chat
+ * atmosphere uses the dedicated home lane when both provider + model are set;
+ * otherwise it falls back to the account image lane.
+ */
+export function resolveImageGenerateModelPreferences(
+  purpose: string,
+  source: ImageGenerateModelPreferenceSource,
+): {
+  preferredLocalImageModel: string;
+  preferredOpenAiImageModel: string;
+} {
+  const accountLocal = source.preferredLocalImageModel?.trim() || "";
+  const accountOpenAi = source.preferredOpenAiImageModel?.trim() || "";
+
+  if (purpose === GROUP_ROOM_WALLPAPER_IMAGE_PURPOSE) {
+    return {
+      preferredLocalImageModel:
+        source.preferredZenWallpaperLocalImageModel?.trim() || accountLocal,
+      preferredOpenAiImageModel:
+        source.preferredZenWallpaperOpenAiImageModel?.trim() || accountOpenAi,
+    };
+  }
+
+  if (purpose === HUB_ATMOSPHERE_IMAGE_PURPOSE) {
+    const homeModel = source.preferredHomeAtmosphereImageModel?.trim() || "";
+    const homeProvider =
+      source.preferredHomeAtmosphereImageProvider?.trim() || "";
+    if (homeProvider === "local" && homeModel) {
+      return {
+        preferredLocalImageModel: homeModel,
+        preferredOpenAiImageModel: accountOpenAi,
+      };
+    }
+    if (homeProvider === "openai" && homeModel) {
+      return {
+        preferredLocalImageModel: accountLocal,
+        preferredOpenAiImageModel: homeModel,
+      };
+    }
+    return {
+      preferredLocalImageModel: accountLocal,
+      preferredOpenAiImageModel: accountOpenAi,
+    };
+  }
+
+  return {
+    preferredLocalImageModel: accountLocal,
+    preferredOpenAiImageModel: accountOpenAi,
+  };
+}
 
 export type ConversationImageGateRow =
   | { ok: true; lockedBotId: string | null }
@@ -65,16 +130,17 @@ export function imageContextIncludesOfflineOnlyBot(
 
 export function conversationHasAssistantWithBotId(
   db: DatabaseSync,
+  userId: string,
   conversationId: string,
   botId: string
 ): boolean {
   const row = db
     .prepare(
       `SELECT 1 AS ok FROM messages
-       WHERE conversation_id = ? AND role = 'assistant' AND bot_id = ?
+       WHERE user_id = ? AND conversation_id = ? AND role = 'assistant' AND bot_id = ?
        LIMIT 1`
     )
-    .get(conversationId, botId) as { ok?: number } | undefined;
+    .get(userId, conversationId, botId) as { ok?: number } | undefined;
   return Boolean(row?.ok);
 }
 
@@ -112,6 +178,7 @@ export function resolveSandboxImageBotAttribution(options: {
     options.conversationLockedBotId === botId;
   const spokeInThread = conversationHasAssistantWithBotId(
     options.db,
+    options.userId,
     options.conversationId,
     botId
   );

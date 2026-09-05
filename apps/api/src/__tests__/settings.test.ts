@@ -1,6 +1,9 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { DISABLED_MODEL_CHOICE } from "@localai/shared";
+import {
+  DEFAULT_HUB_ATMOSPHERE_STYLE,
+  DISABLED_MODEL_CHOICE,
+} from "@localai/shared";
 import {
   DEFAULT_ZEN_CANVAS_TYPING_SPEED,
   DEFAULT_ZEN_FRESH_START_GAP_MS,
@@ -51,6 +54,11 @@ function baseline(overrides: Partial<CurrentSettings> = {}): CurrentSettings {
     displayName: "Alex",
     theme: "dark",
     graphicsQuality: "high",
+    crtFocus: 50,
+    typographyScale: "standard",
+    atmosphereStyle: DEFAULT_HUB_ATMOSPHERE_STYLE,
+    hubAtmosphereEnabled: 1,
+    startupPreference: "home",
     preferredProvider: "local",
     ephemeralChatProviderPreferences: "{}",
     preferredImageProvider: "local",
@@ -60,10 +68,17 @@ function baseline(overrides: Partial<CurrentSettings> = {}): CurrentSettings {
     experimentalDualOllamaEnabled: 0,
     experimentalAllModelEffortEnabled: 0,
     coffeeExperimentalTableAngleEnabled: 0,
+    debateWhodunnitReuseSynthesizedExhibits: 0,
+    debateWhodunnitTextVoiceMode: "bottish",
+    debateWhodunnitSpeechType: "english",
+    debateWhodunnitPerspective: "first_person",
     psychicModeEnabled: 0,
     autoSwitchModel: 0,
     autoFallbackChain: null,
+    onlineAutoProviderBias: 0,
+    onlineAutoProviderWeights: null,
     hiddenBotModelIds: "[]",
+    hiddenGlobalPickerModelIds: "[]",
     hiddenComfyUiWorkflowIds: "[]",
     preferredLocalModel: null,
     preferredOnlineModel: null,
@@ -74,6 +89,8 @@ function baseline(overrides: Partial<CurrentSettings> = {}): CurrentSettings {
     preferredOpenAiImageModel: null,
     preferredZenWallpaperLocalImageModel: null,
     preferredZenWallpaperOpenAiImageModel: null,
+    preferredHomeAtmosphereImageModel: null,
+    preferredHomeAtmosphereImageProvider: null,
     zenWallpaperOpacity: DEFAULT_ZEN_WALLPAPER_OPACITY,
     zenWallpaperTextMaskEnabled: DEFAULT_ZEN_WALLPAPER_TEXT_MASK_ENABLED ? 1 : 0,
     zenWallpaperGrayscaleEnabled: DEFAULT_ZEN_WALLPAPER_GRAYSCALE_ENABLED ? 1 : 0,
@@ -94,7 +111,9 @@ function baseline(overrides: Partial<CurrentSettings> = {}): CurrentSettings {
     zenPersonaTransitionChoice: "random",
     comfyUiWorkflows: [],
     prismDefaultLlmModel: null,
+    prismCloudLlmModel: null,
     prismImageToolLlmModel: null,
+    textModelDisplayNames: null,
     voiceMode: "mute",
     voiceEffectsEnabled: 1,
     voiceVolume: 1,
@@ -105,10 +124,79 @@ function baseline(overrides: Partial<CurrentSettings> = {}): CurrentSettings {
     elevenLabsVoiceBank: "{}",
     elevenLabsVoiceModel: null,
     elevenLabsVoiceCollectionId: null,
+    zenPlayerVoiceEnabled: 0,
+    playerAudioVoiceProfile: null,
+    playerNamePronunciation: "",
     primaryOllamaHost: "http://localhost:11434",
     ...overrides,
   };
 }
+
+describe("resolveNextSettings — living shell startup", () => {
+  it("persists only Home, Slate, or Last workspace", () => {
+    assert.equal(
+      resolveNextSettings({ startupPreference: "slate" }, baseline())
+        .startupPreference,
+      "slate",
+    );
+    assert.equal(
+      resolveNextSettings(
+        { startupPreference: "last_workspace" },
+        baseline(),
+      ).startupPreference,
+      "last_workspace",
+    );
+  });
+
+  it("preserves the saved value for missing or invalid patches", () => {
+    const current = baseline({ startupPreference: "slate" });
+    assert.equal(resolveNextSettings({}, current).startupPreference, "slate");
+    assert.equal(
+      resolveNextSettings({ startupPreference: "coffee" }, current)
+        .startupPreference,
+      "slate",
+    );
+  });
+});
+
+describe("resolveNextSettings — atmosphere style", () => {
+  it("persists known global styles and preserves the current style for invalid patches", () => {
+    assert.equal(
+      resolveNextSettings({ atmosphereStyle: "sanctuary" }, baseline())
+        .atmosphereStyle,
+      "sanctuary",
+    );
+    assert.equal(
+      resolveNextSettings(
+        { atmosphereStyle: "custom prompt injection" },
+        baseline({ atmosphereStyle: "minimal" }),
+      ).atmosphereStyle,
+      "minimal",
+    );
+  });
+
+  it("saves the Home wallpaper toggle and defaults missing legacy values to enabled", () => {
+    assert.equal(
+      resolveNextSettings(
+        { hubAtmosphereEnabled: false },
+        baseline(),
+      ).hubAtmosphereEnabled,
+      0,
+    );
+    assert.equal(
+      resolveNextSettings({}, baseline({ hubAtmosphereEnabled: 0 }))
+        .hubAtmosphereEnabled,
+      0,
+    );
+    assert.equal(
+      resolveNextSettings(
+        { hubAtmosphereEnabled: "false" },
+        baseline({ hubAtmosphereEnabled: null }),
+      ).hubAtmosphereEnabled,
+      1,
+    );
+  });
+});
 
 describe("resolveNextSettings — ephemeral chat providers", () => {
   it("inherits the global toggle by default and saves valid per-mode overrides", () => {
@@ -120,6 +208,7 @@ describe("resolveNextSettings — ephemeral chat providers", () => {
         coffee: "global",
         botcast: "global",
         slate: "global",
+        debate: "global",
       },
     );
 
@@ -142,6 +231,7 @@ describe("resolveNextSettings — ephemeral chat providers", () => {
         coffee: "global",
         botcast: "online",
         slate: "global",
+        debate: "global",
       },
     );
   });
@@ -163,12 +253,21 @@ describe("resolveNextSettings — ephemeral chat providers", () => {
         coffee: "local",
         botcast: "online",
         slate: "global",
+        debate: "global",
       },
     );
   });
 });
 
 describe("resolveNextSettings — voice foundation", () => {
+  it("retires Mute from the account Speech Type setting", () => {
+    assert.equal(
+      resolveNextSettings({ voiceMode: "mute" }, baseline({ voiceMode: "mute" }))
+        .voiceMode,
+      "english",
+    );
+  });
+
   it("persists the selected English engine while preserving the legacy five-slot provider bank", () => {
     const next = resolveNextSettings(
       {
@@ -255,6 +354,36 @@ describe("resolveNextSettings — voice foundation", () => {
   });
 });
 
+describe("resolveNextSettings — Zen player voice", () => {
+  it("defaults muted and persists the selected player identity independently", () => {
+    const next = resolveNextSettings(
+      {
+        zenPlayerVoiceEnabled: true,
+        playerAudioVoiceProfile: {
+          v: 1,
+          baseVoiceId: "voice-8",
+          pitch: 0,
+          warmth: 0,
+          pace: 0,
+          lilt: 0,
+          signal: 0,
+          speechprintInfluence: "korean-influenced-english",
+          speechprintStrength: "strong",
+          speechprintVariationSeed: "zen-seed",
+        },
+      },
+      baseline(),
+    );
+    assert.equal(next.zenPlayerVoiceEnabled, true);
+    assert.equal(next.playerAudioVoiceProfile.baseVoiceId, "voice-8");
+    assert.equal(
+      next.playerAudioVoiceProfile.speechprintInfluence,
+      "korean-influenced-english",
+    );
+    assert.equal(resolveNextSettings({}, baseline()).zenPlayerVoiceEnabled, false);
+  });
+});
+
 describe("resolveNextSettings — theme", () => {
   it("accepts 'light'", () => {
     const next = resolveNextSettings({ theme: "light" }, baseline());
@@ -312,6 +441,50 @@ describe("resolveNextSettings — graphics quality", () => {
   });
 });
 
+describe("resolveNextSettings — CRT focus", () => {
+  it("accepts a bounded global focus and preserves a valid stored value", () => {
+    assert.equal(resolveNextSettings({ crtFocus: 70 }, baseline()).crtFocus, 70);
+    assert.equal(
+      resolveNextSettings({ crtFocus: "soft" }, baseline({ crtFocus: 35 }))
+        .crtFocus,
+      35,
+    );
+    assert.equal(resolveNextSettings({ crtFocus: 140 }, baseline()).crtFocus, 100);
+  });
+});
+
+describe("resolveNextSettings — typography scale", () => {
+  it("accepts all five presets and keeps a valid stored preset on invalid input", () => {
+    for (const typographyScale of [
+      "compact",
+      "small",
+      "standard",
+      "large",
+      "extra-large",
+    ] as const) {
+      assert.equal(
+        resolveNextSettings({ typographyScale }, baseline()).typographyScale,
+        typographyScale,
+      );
+    }
+    assert.equal(
+      resolveNextSettings(
+        { typographyScale: "giant" },
+        baseline({ typographyScale: "large" }),
+      ).typographyScale,
+      "large",
+    );
+  });
+
+  it("defaults legacy accounts without a stored preset to Standard", () => {
+    assert.equal(
+      resolveNextSettings({}, baseline({ typographyScale: null }))
+        .typographyScale,
+      "standard",
+    );
+  });
+});
+
 describe("resolveNextSettings — displayName", () => {
   it("stores trimmed displayName", () => {
     const next = resolveNextSettings({ displayName: "  Jordan  " }, baseline());
@@ -335,11 +508,34 @@ describe("resolveNextSettings — displayName", () => {
   });
 });
 
+describe("resolveNextSettings — playerNamePronunciation", () => {
+  it("normalizes a supplied pronunciation and permits an explicit blank fallback", () => {
+    const current = baseline({ playerNamePronunciation: "Old phonetic name" });
+    assert.equal(
+      resolveNextSettings(
+        { playerNamePronunciation: "  Jair-id   Lee  " },
+        current,
+      ).playerNamePronunciation,
+      "Jair-id Lee",
+    );
+    assert.equal(
+      resolveNextSettings({ playerNamePronunciation: "   " }, current)
+        .playerNamePronunciation,
+      "",
+    );
+  });
+});
+
 describe("resolveNextSettings — preferredProvider", () => {
-  it("accepts 'local', 'openai', and 'anthropic'", () => {
+  it("keeps global foreground provider selection", () => {
     assert.equal(
       resolveNextSettings({ preferredProvider: "local" }, baseline()).preferredProvider,
       "local"
+    );
+    assert.equal(
+      resolveNextSettings({ preferredProvider: "ollama_cloud" }, baseline())
+        .preferredProvider,
+      "ollama_cloud",
     );
     assert.equal(
       resolveNextSettings({ preferredProvider: "openai" }, baseline()).preferredProvider,
@@ -354,6 +550,11 @@ describe("resolveNextSettings — preferredProvider", () => {
   it("keeps the stored provider when the field is missing or invalid", () => {
     const current = baseline({ preferredProvider: "openai" });
     assert.equal(resolveNextSettings({}, current).preferredProvider, "openai");
+    assert.equal(
+      resolveNextSettings({}, baseline({ preferredProvider: "ollama_cloud" }))
+        .preferredProvider,
+      "ollama_cloud",
+    );
     assert.equal(
       resolveNextSettings({ preferredProvider: "azure" }, current).preferredProvider,
       "openai"
@@ -553,6 +754,125 @@ describe("resolveNextSettings — coffeeExperimentalTableAngleEnabled", () => {
   });
 });
 
+describe("resolveNextSettings — debateWhodunnitReuseSynthesizedExhibits", () => {
+  it("persists boolean values", () => {
+    assert.equal(
+      resolveNextSettings(
+        { debateWhodunnitReuseSynthesizedExhibits: true },
+        baseline({ debateWhodunnitReuseSynthesizedExhibits: 0 }),
+      ).debateWhodunnitReuseSynthesizedExhibits,
+      1,
+    );
+    assert.equal(
+      resolveNextSettings(
+        { debateWhodunnitReuseSynthesizedExhibits: false },
+        baseline({ debateWhodunnitReuseSynthesizedExhibits: 1 }),
+      ).debateWhodunnitReuseSynthesizedExhibits,
+      0,
+    );
+  });
+
+  it("keeps the stored value when the field is missing or invalid", () => {
+    const current = baseline({ debateWhodunnitReuseSynthesizedExhibits: 1 });
+    assert.equal(
+      resolveNextSettings({}, current).debateWhodunnitReuseSynthesizedExhibits,
+      1,
+    );
+    assert.equal(
+      resolveNextSettings(
+        { debateWhodunnitReuseSynthesizedExhibits: "true" as unknown as boolean },
+        current,
+      ).debateWhodunnitReuseSynthesizedExhibits,
+      1,
+    );
+  });
+});
+
+describe("resolveNextSettings — debateWhodunnitSpeechType", () => {
+  it("persists English and Premium while defaulting anything else to English", () => {
+    assert.equal(
+      resolveNextSettings(
+        { debateWhodunnitSpeechType: "premium" },
+        baseline(),
+      ).debateWhodunnitSpeechType,
+      "premium",
+    );
+    assert.equal(
+      resolveNextSettings(
+        { debateWhodunnitSpeechType: "english" },
+        baseline({ debateWhodunnitSpeechType: "premium" }),
+      ).debateWhodunnitSpeechType,
+      "english",
+    );
+    assert.equal(
+      resolveNextSettings(
+        { debateWhodunnitSpeechType: "elevenlabs" },
+        baseline({ debateWhodunnitSpeechType: null }),
+      ).debateWhodunnitSpeechType,
+      "english",
+    );
+    assert.equal(
+      resolveNextSettings({}, baseline({ debateWhodunnitSpeechType: "premium" }))
+        .debateWhodunnitSpeechType,
+      "premium",
+      "an absent key keeps the saved choice",
+    );
+  });
+});
+
+describe("resolveNextSettings — debateWhodunnitTextVoiceMode", () => {
+  it("persists Off, Babble, and Bottish while defaulting absent values to Babble", () => {
+    assert.equal(
+      resolveNextSettings(
+        { debateWhodunnitTextVoiceMode: "off" },
+        baseline(),
+      ).debateWhodunnitTextVoiceMode,
+      "off",
+    );
+    assert.equal(
+      resolveNextSettings(
+        { debateWhodunnitTextVoiceMode: "babble" },
+        baseline(),
+      ).debateWhodunnitTextVoiceMode,
+      "bottish",
+      "Babble is no longer offered: a patch naming it resolves to Bottish",
+    );
+    assert.equal(
+      resolveNextSettings(
+        { debateWhodunnitTextVoiceMode: "bottish" },
+        baseline({ debateWhodunnitTextVoiceMode: "babble" }),
+      ).debateWhodunnitTextVoiceMode,
+      "bottish",
+    );
+    assert.equal(
+      resolveNextSettings(
+        { debateWhodunnitTextVoiceMode: "english" },
+        baseline({ debateWhodunnitTextVoiceMode: null }),
+      ).debateWhodunnitTextVoiceMode,
+      "bottish",
+    );
+  });
+
+  it("preserves a valid saved value when the patch omits or rejects the field", () => {
+    for (const mode of ["off", "bottish"] as const) {
+      assert.equal(resolveNextSettings({}, baseline({ debateWhodunnitTextVoiceMode: mode })).debateWhodunnitTextVoiceMode, mode);
+    }
+    // A row saved while Babble was offered reads back as Bottish.
+    const current = baseline({ debateWhodunnitTextVoiceMode: "babble" });
+    assert.equal(
+      resolveNextSettings({}, current).debateWhodunnitTextVoiceMode,
+      "bottish",
+    );
+    assert.equal(
+      resolveNextSettings(
+        { debateWhodunnitTextVoiceMode: true },
+        current,
+      ).debateWhodunnitTextVoiceMode,
+      "bottish",
+    );
+  });
+});
+
 describe("resolveNextSettings — psychicModeEnabled", () => {
   it("persists boolean values", () => {
     assert.equal(
@@ -599,7 +919,7 @@ describe("resolveNextSettings — retired text fallback settings", () => {
 });
 
 describe("resolveNextSettings — Auto model chain", () => {
-  it("stores Auto-off by default and accepts a versioned two-model chain", () => {
+  it("stores separate lane chains without reviving the retired Auto switch", () => {
     const next = resolveNextSettings(
       {
         autoModeEnabled: true,
@@ -613,13 +933,11 @@ describe("resolveNextSettings — Auto model chain", () => {
       },
       baseline()
     );
-    assert.equal(next.autoSwitchModel, 1);
+    assert.equal(next.autoSwitchModel, 0);
     assert.deepEqual(JSON.parse(next.autoFallbackChain ?? "null"), {
-      v: 1,
-      fallbacks: [
-        { provider: "local", model: "qwen3:8b" },
-        { provider: "openai", model: "gpt-5-mini" },
-      ],
+      v: 2,
+      local: [{ provider: "local", model: "qwen3:8b" }],
+      online: [{ provider: "openai", model: "gpt-5-mini" }],
     });
   });
 
@@ -639,10 +957,11 @@ describe("resolveNextSettings — Auto model chain", () => {
       baseline(),
     );
 
-    assert.equal(next.autoSwitchModel, 1);
+    assert.equal(next.autoSwitchModel, 0);
     assert.deepEqual(JSON.parse(next.autoFallbackChain ?? "null"), {
-      v: 1,
-      fallbacks,
+      v: 2,
+      local: [fallbacks[0], fallbacks[3]],
+      online: [fallbacks[1], fallbacks[2], fallbacks[4]],
     });
   });
 
@@ -666,7 +985,14 @@ describe("resolveNextSettings — Auto model chain", () => {
       },
       baseline({ autoFallbackChain: stored })
     );
-    assert.equal(next.autoFallbackChain, stored);
+    assert.equal(
+      next.autoFallbackChain,
+      JSON.stringify({
+        v: 2,
+        local: [{ provider: "local", model: "qwen3:8b" }],
+        online: [{ provider: "openai", model: "gpt-5-mini" }],
+      }),
+    );
   });
 
   it("cannot enable Auto without a valid saved chain", () => {
@@ -676,6 +1002,75 @@ describe("resolveNextSettings — Auto model chain", () => {
     );
     assert.equal(next.autoSwitchModel, 0);
     assert.equal(next.autoFallbackChain, null);
+  });
+});
+
+describe("resolveNextSettings — onlineAutoProviderBias", () => {
+  it("persists a clamped OpenAI↔Anthropic lean", () => {
+    assert.equal(
+      resolveNextSettings({ onlineAutoProviderBias: -0.4 }, baseline())
+        .onlineAutoProviderBias,
+      -0.4,
+    );
+    assert.equal(
+      resolveNextSettings({ onlineAutoProviderBias: 2 }, baseline())
+        .onlineAutoProviderBias,
+      1,
+    );
+    assert.equal(
+      resolveNextSettings({ onlineAutoProviderBias: -3 }, baseline())
+        .onlineAutoProviderBias,
+      -1,
+    );
+  });
+
+  it("keeps the stored lean when the field is missing or invalid", () => {
+    const current = baseline({ onlineAutoProviderBias: 0.25 });
+    assert.equal(
+      resolveNextSettings({}, current).onlineAutoProviderBias,
+      0.25,
+    );
+    assert.equal(
+      resolveNextSettings({ onlineAutoProviderBias: "nope" }, current)
+        .onlineAutoProviderBias,
+      0,
+    );
+  });
+});
+
+describe("resolveNextSettings — onlineAutoProviderWeights", () => {
+  it("normalizes three-provider weights and migrates a legacy lean", () => {
+    assert.deepEqual(
+      resolveNextSettings(
+        { onlineAutoProviderWeights: { openai: 6, anthropic: 3, ollama_cloud: 1 } },
+        baseline(),
+      ).onlineAutoProviderWeights,
+      { v: 1, openai: 0.6, anthropic: 0.3, ollama_cloud: 0.1 },
+    );
+    assert.deepEqual(
+      resolveNextSettings({}, baseline({ onlineAutoProviderBias: 1 }))
+        .onlineAutoProviderWeights,
+      { v: 1, openai: 0, anthropic: 2 / 3, ollama_cloud: 1 / 3 },
+    );
+  });
+});
+
+describe("resolveNextSettings — onlineAutoQualityPosture", () => {
+  it("defaults legacy accounts to Quality first and persists the selected posture", () => {
+    assert.equal(
+      resolveNextSettings({}, baseline()).onlineAutoQualityPosture,
+      "quality",
+    );
+    assert.equal(
+      resolveNextSettings({ onlineAutoQualityPosture: "open" }, baseline())
+        .onlineAutoQualityPosture,
+      "open",
+    );
+    assert.equal(
+      resolveNextSettings({ onlineAutoQualityPosture: "economy" }, baseline())
+        .onlineAutoQualityPosture,
+      "economy",
+    );
   });
 });
 
@@ -711,6 +1106,40 @@ describe("resolveNextSettings — hiddenBotModelIds", () => {
   });
 });
 
+describe("resolveNextSettings — hiddenGlobalPickerModelIds", () => {
+  it("persists picker visibility independently from model availability", () => {
+    const next = resolveNextSettings(
+      {
+        hiddenBotModelIds: [],
+        hiddenGlobalPickerModelIds: [" gpt-4o-mini ", "gpt-4o-mini"],
+      },
+      baseline(),
+    );
+    assert.deepEqual(next.hiddenBotModelIds, []);
+    assert.deepEqual(next.hiddenGlobalPickerModelIds, ["gpt-4o-mini"]);
+  });
+
+  it("allows the required local fallback to stay enabled but leave pickers", () => {
+    const next = resolveNextSettings(
+      {
+        hiddenBotModelIds: ["llama3.2"],
+        hiddenGlobalPickerModelIds: ["llama3.2"],
+      },
+      baseline(),
+    );
+    assert.deepEqual(next.hiddenBotModelIds, []);
+    assert.deepEqual(next.hiddenGlobalPickerModelIds, ["llama3.2"]);
+  });
+
+  it("defaults missing legacy state to picker-visible", () => {
+    const current = baseline({ hiddenGlobalPickerModelIds: undefined });
+    assert.deepEqual(
+      resolveNextSettings({}, current).hiddenGlobalPickerModelIds,
+      [],
+    );
+  });
+});
+
 describe("resolveNextSettings — prismDefaultLlmModel", () => {
   it("stores trimmed override and clears with empty string", () => {
     const next = resolveNextSettings({ prismDefaultLlmModel: " mistral:latest " }, baseline());
@@ -728,6 +1157,20 @@ describe("resolveNextSettings — prismDefaultLlmModel", () => {
       baseline()
     );
     assert.equal(next.prismDefaultLlmModel, DISABLED_MODEL_CHOICE);
+  });
+});
+
+describe("resolveNextSettings — paired background models", () => {
+  it("preserves Local and Ollama Cloud choices independently", () => {
+    const next = resolveNextSettings(
+      {
+        prismDefaultLlmModel: " llama3.2 ",
+        prismCloudLlmModel: " ollama-cloud-direct:gpt-oss ",
+      },
+      baseline(),
+    );
+    assert.equal(next.prismDefaultLlmModel, "llama3.2");
+    assert.equal(next.prismCloudLlmModel, "ollama-cloud-direct:gpt-oss");
   });
 });
 
@@ -754,8 +1197,35 @@ describe("resolveNextSettings — prismImageToolLlmModel", () => {
   });
 });
 
-describe("resolveNextSettings — preferred auto models", () => {
-  it("stores trimmed values for local + online model hints", () => {
+describe("resolveNextSettings — textModelDisplayNames", () => {
+  it("persists normalized aliases and clears blank aliases back to catalog labels", () => {
+    const stored = resolveNextSettings(
+      {
+        textModelDisplayNames: {
+          "openai:gpt-5-mini": "  Fast Writer  ",
+          "anthropic:claude-sonnet-4-6": "Analysis",
+        },
+      },
+      baseline(),
+    );
+    assert.deepEqual(stored.textModelDisplayNames, {
+      "openai:gpt-5-mini": "Fast Writer",
+      "anthropic:claude-sonnet-4-6": "Analysis",
+    });
+    assert.deepEqual(
+      resolveNextSettings(
+        { textModelDisplayNames: { "openai:gpt-5-mini": "   " } },
+        baseline({
+          textModelDisplayNames: '{"openai:gpt-5-mini":"Fast Writer"}',
+        }),
+      ).textModelDisplayNames,
+      {},
+    );
+  });
+});
+
+describe("resolveNextSettings — global account text models", () => {
+  it("stores global local and online model selections", () => {
     const next = resolveNextSettings(
       { preferredLocalModel: " llama3.2 ", preferredOnlineModel: " gpt-4o-mini " },
       baseline()
@@ -764,7 +1234,7 @@ describe("resolveNextSettings — preferred auto models", () => {
     assert.equal(next.preferredOnlineModel, "gpt-4o-mini");
   });
 
-  it("stores disabled as an explicit local + online model hint", () => {
+  it("never stores Disabled as a global model selection", () => {
     const next = resolveNextSettings(
       {
         preferredLocalModel: DISABLED_MODEL_CHOICE,
@@ -772,11 +1242,11 @@ describe("resolveNextSettings — preferred auto models", () => {
       },
       baseline()
     );
-    assert.equal(next.preferredLocalModel, DISABLED_MODEL_CHOICE);
-    assert.equal(next.preferredOnlineModel, DISABLED_MODEL_CHOICE);
+    assert.equal(next.preferredLocalModel, null);
+    assert.equal(next.preferredOnlineModel, null);
   });
 
-  it("clears each preference independently with empty string", () => {
+  it("clears global selections back to Auto", () => {
     const current = baseline({
       preferredLocalModel: "llama3.2",
       preferredOnlineModel: "gpt-4o-mini",
@@ -787,6 +1257,16 @@ describe("resolveNextSettings — preferred auto models", () => {
     );
     assert.equal(next.preferredLocalModel, null);
     assert.equal(next.preferredOnlineModel, null);
+  });
+
+  it("persists an explicit Ollama Cloud foreground selection", () => {
+    assert.equal(
+      resolveNextSettings(
+        { preferredOnlineModel: "minimax-m2.5:cloud" },
+        baseline(),
+      ).preferredOnlineModel,
+      "minimax-m2.5:cloud",
+    );
   });
 
   it("keeps existing values when invalid types are sent", () => {
@@ -1586,6 +2066,28 @@ describe("resolveNextSettings — anthropicApiKey", () => {
       action: "replace",
       plaintext: "sk-ant-api03-abc",
     });
+  });
+});
+
+describe("resolveNextSettings — ollamaCloudApiKey", () => {
+  it("supports replace, keep, clear, and pasted env syntax", () => {
+    assert.deepEqual(
+      resolveNextSettings(
+        { ollamaCloudApiKey: "OLLAMA_API_KEY=cloud-test-key" },
+        baseline(),
+      ).ollamaCloudKeyIntent,
+      { action: "replace", plaintext: "cloud-test-key" },
+    );
+    assert.deepEqual(
+      resolveNextSettings({ ollamaCloudApiKey: "   " }, baseline())
+        .ollamaCloudKeyIntent,
+      { action: "keep" },
+    );
+    assert.deepEqual(
+      resolveNextSettings({ ollamaCloudApiKey: null }, baseline())
+        .ollamaCloudKeyIntent,
+      { action: "clear" },
+    );
   });
 });
 

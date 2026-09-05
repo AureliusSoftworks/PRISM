@@ -330,6 +330,157 @@ describe("Slate Continuity version upgrades", () => {
     );
   });
 
+  it("promotes and rolls back one active generation across every book in a series", () => {
+    seedProject(db, "author-a", "book-a-two", "Sibling book prose.\n");
+    seedActiveGeneration(db, "author-a", "book-a");
+    seedActiveGeneration(db, "author-a", "book-a-two");
+    db.prepare(
+      `UPDATE slate_series
+          SET continuity_active_generation = 1,
+              continuity_previous_generation = NULL
+        WHERE id = 'author-a-series' AND user_id = 'author-a'`,
+    ).run();
+
+    const shadow = buildSlateContinuityShadowGeneration(
+      db,
+      "author-a",
+      "book-a",
+      { sourceFingerprint: "whole-series-sources" },
+    ).generation;
+    assert.equal(shadow.generation, 2);
+    assert.throws(
+      () =>
+        buildSlateContinuityShadowGeneration(
+          db,
+          "author-a",
+          "book-a-two",
+          { sourceFingerprint: "competing-series-shadow" },
+        ),
+      /already in progress/i,
+    );
+    completeSlateContinuityShadowGeneration(
+      db,
+      "author-a",
+      "book-a",
+      shadow.generation,
+      "Both books resolve to the same source-derived ledger.",
+    );
+    activateSlateContinuityGeneration(
+      db,
+      "author-a",
+      "book-a",
+      shadow.generation,
+    );
+
+    const activatedSeries = db.prepare(
+      `SELECT continuity_active_generation, continuity_previous_generation
+         FROM slate_series
+        WHERE id = 'author-a-series' AND user_id = 'author-a'`,
+    ).get();
+    assert.deepEqual({ ...(activatedSeries as Record<string, unknown>) }, {
+      continuity_active_generation: 2,
+      continuity_previous_generation: 1,
+    });
+    const activatedProjects = db.prepare(
+      `SELECT id, continuity_active_generation, continuity_previous_generation
+         FROM slate_projects
+        WHERE user_id = 'author-a' AND series_id = 'author-a-series'
+        ORDER BY id`,
+    ).all();
+    assert.deepEqual(
+      activatedProjects.map((row) => ({
+        ...(row as Record<string, unknown>),
+      })),
+      [
+        {
+          id: "book-a",
+          continuity_active_generation: 2,
+          continuity_previous_generation: 1,
+        },
+        {
+          id: "book-a-two",
+          continuity_active_generation: 2,
+          continuity_previous_generation: 1,
+        },
+      ],
+    );
+    assert.equal(
+      getSlateContinuityUpgradeState(
+        db,
+        "author-a",
+        "book-a-two",
+      ).activeGeneration,
+      2,
+    );
+
+    const rolledBack = rollbackSlateContinuityGeneration(
+      db,
+      "author-a",
+      "book-a-two",
+    );
+    assert.equal(rolledBack.activeGeneration, 1);
+    assert.equal(rolledBack.previousGeneration, 2);
+    const rolledBackProjects = db.prepare(
+      `SELECT id, continuity_active_generation, continuity_previous_generation
+         FROM slate_projects
+        WHERE user_id = 'author-a' AND series_id = 'author-a-series'
+        ORDER BY id`,
+    ).all();
+    assert.deepEqual(
+      rolledBackProjects.map((row) => ({
+        ...(row as Record<string, unknown>),
+      })),
+      [
+        {
+          id: "book-a",
+          continuity_active_generation: 1,
+          continuity_previous_generation: 2,
+        },
+        {
+          id: "book-a-two",
+          continuity_active_generation: 1,
+          continuity_previous_generation: 2,
+        },
+      ],
+    );
+    assert.deepEqual(generationStatuses(db, "author-a", "book-a"), [
+      [1, "active"],
+      [2, "superseded"],
+    ]);
+    assert.deepEqual(generationStatuses(db, "author-a", "book-a-two"), [
+      [1, "active"],
+    ]);
+  });
+
+  it("refuses to collapse conflicting legacy project pointers into one series", () => {
+    seedProject(db, "author-a", "book-a-two", "Sibling book prose.\n");
+    seedActiveGeneration(db, "author-a", "book-a");
+    insertGeneration(
+      db,
+      "author-a",
+      "book-a-two",
+      2,
+      "active",
+      legacyVersions(),
+    );
+    db.prepare(
+      `UPDATE slate_projects
+          SET continuity_active_generation = 2
+        WHERE id = 'book-a-two' AND user_id = 'author-a'`,
+    ).run();
+
+    assert.throws(
+      () =>
+        buildSlateContinuityShadowGeneration(
+          db,
+          "author-a",
+          "book-a",
+          { sourceFingerprint: "ambiguous-legacy-series" },
+        ),
+      /pointers disagree/i,
+    );
+  });
+
   it("leaves the active generation intact when an upgrade is deferred or fails", () => {
     seedActiveGeneration(db, "author-a", "book-a");
     const deferredShadow = buildSlateContinuityShadowGeneration(

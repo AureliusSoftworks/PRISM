@@ -2,11 +2,14 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 import {
+  BOTTISH_NOTE_GAIN,
   buildBottishPlaybackPlan,
   buildBottishPlan,
+  bottishPerformanceText,
   buildBabbleRoboticPlan,
   encodeBottishPlanWave,
   enqueueBabbleVoice,
+  enqueueChunkedBabbleVoice,
   FIXED_BOTTISH_TONE,
   fitBottishPlanToDuration,
   pcmWaveDurationMs,
@@ -64,6 +67,30 @@ describe("Bottish speech plan", () => {
     assert.deepEqual(
       buildBottishPlan("Hello, bot!", neutral, "message-1"),
       buildBottishPlan("Hello, bot!", neutral, "message-1")
+    );
+  });
+
+  it("replaces only Cursed Tongue masks with a locally gated carrier plan", () => {
+    const source = "Say bleep normally, then d•••!";
+    const plan = buildBottishPlan(source, neutral, "cursed-bottish");
+    assert.equal(plan.alignment.characters.join(""), "Say bleep normally, then bleep!");
+    assert.deepEqual(plan.censorPlan, {
+      textLength: 31,
+      ranges: [{ start: 25, end: 30 }],
+    });
+    assert.equal(source, "Say bleep normally, then d•••!");
+  });
+
+  it("turns marked vocal actions into aligned procedural motifs", () => {
+    const source = "Well—*laughs nervously*—okay.";
+    const performed = bottishPerformanceText(source);
+    assert.equal(performed.length, source.length);
+    assert.doesNotMatch(performed, /laughs/u);
+    assert.match(performed, /ha ha/u);
+    assert.equal(bottishPerformanceText("They laugh at noon."), "They laugh at noon.");
+    assert.equal(
+      buildBottishPlan(source, neutral, "action").alignment.characters.length,
+      Array.from(source).length,
     );
   });
 
@@ -202,9 +229,10 @@ describe("Bottish speech plan", () => {
     assert.notDeepEqual(legacyValues.notes, base.notes);
   });
 
-  it("keeps the neutral mix bright and clearly audible", () => {
+  it("keeps the robot carrier quieter than speech-bus unity", () => {
     const plan = buildBottishPlan("Hello, bot!", neutral, "audibility");
-    assert.ok((plan.notes[0]?.gain ?? 0) >= 0.25);
+    assert.equal(plan.notes[0]?.gain, BOTTISH_NOTE_GAIN);
+    assert.ok(BOTTISH_NOTE_GAIN <= 0.08);
     assert.ok((plan.notes[0]?.lowpassHz ?? 0) >= 6000);
   });
 
@@ -245,6 +273,10 @@ describe("Bottish speech plan", () => {
     assert.match(
       source,
       /export async function prepareBottishVoice\(\)[\s\S]*?if \(preparedMedia\)[\s\S]*?return;[\s\S]*?beginMediaUnlock\(\);/
+    );
+    assert.match(
+      source,
+      /prismLiveVoicePerformanceBudgetActive\(\)[\s\S]*?prepareRealtimeVoiceAudio\(\{ loadRealtimeProcessing: false \}\)[\s\S]*?releasePreparedMedia\(\);[\s\S]*?return;/u,
     );
     assert.match(source, /const audio = preparedMedia \?\? new Audio\(\)/);
     assert.match(source, /releaseActiveMedia\(!error\)/);
@@ -315,7 +347,11 @@ describe("Bottish speech plan", () => {
     assert.match(liveBottishEffect, /liveBottishRevealKeyRef\.current = revealKey;/);
     assert.match(
       liveBottishEffect,
-      /stopBottishVoice\(\{ preservePreparedMedia: true \}\);/
+      /handoffVoicePlaybackPreservingPreparedMode\(liveRobotVoiceMode\);/,
+    );
+    assert.match(
+      pageSource,
+      /function handoffVoicePlaybackPreservingPreparedMode[\s\S]*?preservePreparedMedia: mode === "bottish" \|\| mode === "babble"[\s\S]*?preserveCompletedTails: true/,
     );
     assert.match(liveBottishEffect, /enqueueRobotVoiceMode\(\{/);
     assert.match(liveBottishEffect, /mode: liveRobotVoiceMode/);
@@ -379,6 +415,10 @@ describe("Bottish speech plan", () => {
       targetDurationMs: 2_260,
       maximumCompressionRate: 1.24,
     });
+    assert.equal(
+      signalRobotVoiceCadenceTiming("...").targetDurationMs,
+      3_200,
+    );
     const natural = buildBottishPlan(text, neutral, "signal-cadence");
     const fitted = buildBottishPlaybackPlan(
       text,
@@ -562,11 +602,149 @@ describe("Bottish speech plan", () => {
       const media = mediaInstances[0];
       assert.ok(media);
       assert.equal(media.playbackRate, 1.24);
+      media.listeners.get("playing")?.();
       assert.deepEqual(starts, [1_613]);
       media.currentTime = 0.62;
       assert.equal(typeof frameCallback, "function");
       (frameCallback as unknown as () => void)();
       assert.ok(Math.abs((progress.at(-1) ?? 0) - 500) < 0.001);
+      media.listeners.get("ended")?.();
+      await playback;
+    } finally {
+      stopBottishVoice();
+      for (const [target, key, descriptor] of [
+        [globalThis, "Audio", originalAudio],
+        [globalThis, "window", originalWindow],
+        [URL, "createObjectURL", originalCreateObjectUrl],
+        [URL, "revokeObjectURL", originalRevokeObjectUrl],
+      ] as const) {
+        if (descriptor) Object.defineProperty(target, key, descriptor);
+        else Reflect.deleteProperty(target, key);
+      }
+    }
+  });
+
+  it("reports the exact generated Babble transcript without inventing alignment", async () => {
+    const originalAudio = Object.getOwnPropertyDescriptor(globalThis, "Audio");
+    const originalWindow = Object.getOwnPropertyDescriptor(globalThis, "window");
+    const originalCreateObjectUrl = Object.getOwnPropertyDescriptor(URL, "createObjectURL");
+    const originalRevokeObjectUrl = Object.getOwnPropertyDescriptor(URL, "revokeObjectURL");
+    const mediaInstances: FakeAudio[] = [];
+    class FakeAudio {
+      duration = 0.4;
+      currentTime = 0;
+      playbackRate = 1;
+      preservesPitch = true;
+      preload = "";
+      src = "";
+      volume = 1;
+      readonly listeners = new Map<string, () => void>();
+
+      constructor() {
+        mediaInstances.push(this);
+      }
+
+      addEventListener(name: string, listener: () => void): void {
+        this.listeners.set(name, listener);
+      }
+      pause(): void {}
+      removeAttribute(name: string): void {
+        if (name === "src") this.src = "";
+      }
+      load(): void {}
+      play(): Promise<void> {
+        return Promise.resolve();
+      }
+    }
+    Object.defineProperty(globalThis, "Audio", {
+      configurable: true,
+      writable: true,
+      value: FakeAudio,
+    });
+    Object.defineProperty(globalThis, "window", {
+      configurable: true,
+      writable: true,
+      value: {
+        AudioContext: undefined,
+        setTimeout: globalThis.setTimeout.bind(globalThis),
+        clearTimeout: globalThis.clearTimeout.bind(globalThis),
+        requestAnimationFrame: () => 1,
+        cancelAnimationFrame: () => undefined,
+      },
+    });
+    Object.defineProperty(URL, "createObjectURL", {
+      configurable: true,
+      writable: true,
+      value: () => "blob:babble-transcript",
+    });
+    Object.defineProperty(URL, "revokeObjectURL", {
+      configurable: true,
+      writable: true,
+      value: () => undefined,
+    });
+    stopBottishVoice();
+    try {
+      const wave = encodeBottishPlanWave({
+        notes: [],
+        durationMs: 400,
+        alignment: {
+          characters: [],
+          characterStartTimesSeconds: [],
+          characterEndTimesSeconds: [],
+        },
+      });
+      const generatedText = "Zhae-pruk noi.";
+      const response = new Response(
+        `${JSON.stringify({
+          index: 0,
+          characterCount: 12,
+          text: generatedText,
+          sourceStart: 4,
+          sourceEnd: 16,
+          audioBase64: Buffer.from(wave).toString("base64"),
+        })}\n`,
+        {
+          headers: {
+            "content-type": "application/x-ndjson; charset=utf-8",
+            "x-prism-voice-stream": "wav-chunks-v1",
+            "x-prism-voice-characters": "12",
+          },
+        },
+      );
+      const synthesizedSegments: Array<{
+        text: string;
+        sourceStart: number | null;
+        sourceEnd: number | null;
+        startMs: number;
+        endMs: number;
+        alignment: unknown;
+      }> = [];
+      const playback = enqueueChunkedBabbleVoice(
+        response,
+        "Original English.",
+        neutral,
+        "babble-transcript",
+        false,
+        1,
+        {
+          onSynthesizedSpeechSegment: (segment) =>
+            synthesizedSegments.push(segment),
+        },
+      );
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      const media = mediaInstances[0];
+      assert.ok(media);
+      media.listeners.get("playing")?.();
+      assert.deepEqual(synthesizedSegments, [
+        {
+          text: generatedText,
+          sourceStart: 4,
+          sourceEnd: 16,
+          startMs: 0,
+          endMs: 400,
+          alignment: null,
+        },
+      ]);
       media.listeners.get("ended")?.();
       await playback;
     } finally {

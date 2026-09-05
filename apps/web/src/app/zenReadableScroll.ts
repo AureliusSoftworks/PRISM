@@ -28,6 +28,54 @@ export function zenReadableAnchorMessageIds(
 }
 
 /**
+ * Matches Zen's restored bottom veil height
+ * (`messagesFrame::before`: clamp(168px, 24dvh, 280px)) so follow + tail
+ * padding keep the latest prose clear of the composer band.
+ */
+export const ZEN_READABLE_COMPOSER_CLEARANCE_MIN_PX = 168;
+export const ZEN_READABLE_COMPOSER_CLEARANCE_MAX_PX = 280;
+export const ZEN_READABLE_COMPOSER_CLEARANCE_RATIO = 0.24;
+export const ZEN_READABLE_LATEST_ANCHOR_TARGET_RATIO = 0.58;
+export const ZEN_READABLE_LATEST_ANCHOR_MIN_PX = 280;
+
+/**
+ * Composer / bottom-fade clearance for Zen readable follow.
+ * Kept in sync with the CSS veil so opening turns retain downward scroll room.
+ */
+export function zenReadableComposerClearancePx(clientHeight: number): number {
+  const height = Math.max(0, clientHeight);
+  return Math.max(
+    ZEN_READABLE_COMPOSER_CLEARANCE_MIN_PX,
+    Math.min(
+      ZEN_READABLE_COMPOSER_CLEARANCE_MAX_PX,
+      height * ZEN_READABLE_COMPOSER_CLEARANCE_RATIO,
+    ),
+  );
+}
+
+/**
+ * Viewport Y where the latest turn's follow point should settle.
+ * Always leaves at least the composer-clearance band below the anchor.
+ */
+export function zenReadableAnchorViewportY(
+  clientHeight: number,
+  options?: {
+    targetRatio?: number;
+    minPx?: number;
+  },
+): number {
+  const height = Math.max(0, clientHeight);
+  const composerSafeViewportY = height - zenReadableComposerClearancePx(height);
+  const targetRatio =
+    options?.targetRatio ?? ZEN_READABLE_LATEST_ANCHOR_TARGET_RATIO;
+  const minPx = options?.minPx ?? ZEN_READABLE_LATEST_ANCHOR_MIN_PX;
+  return Math.min(
+    composerSafeViewportY,
+    Math.max(minPx, height * targetRatio),
+  );
+}
+
+/**
  * Zen may add tail space so the latest turn can settle above the composer, but
  * it must never shrink the browser's native scroll range. A synthetic bottom
  * can become stale during opening-session layout and cause wheel input to be

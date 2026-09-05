@@ -13,13 +13,64 @@ import type {
   AutoRecoveryTraceV1,
 } from "./autoFallback.js";
 import {
+  normalizeAutoRouteDecisionV1,
+  type AutoRouteDecisionV1,
+} from "./modelRouting.ts";
+import {
+  normalizeProviderReasoningEffort,
+  type ProviderReasoningEffort,
+} from "./reasoningEffort.ts";
+import {
   normalizeBotIdentityMirrorStateV1,
   type BotIdentityMirrorStateV1,
 } from "./botIdentityMirror.ts";
+import {
+  normalizeBotIdentityShapeshiftStateV1,
+  type BotIdentityShapeshiftStateV1,
+} from "./botIdentityShapeshift.ts";
+import {
+  normalizeBotFalseNameStateV1,
+  type BotFalseNameStateV1,
+} from "./botFalseName.ts";
+import {
+  normalizeBotPowerMutePerformanceV1,
+  type BotPowerMutePerformanceV1,
+} from "./botPower.ts";
+import {
+  normalizeBotPowerTrollPresentationV1,
+  type BotPowerTrollPresentationV1,
+} from "./trollPower.ts";
+import {
+  normalizeBotCrosstalkInterruptedSpeakerCue,
+  normalizePowerProjectedReactionCueV1,
+  normalizeCrosstalkFloorOutcome,
+  normalizeCrosstalkReclaimPlanV1,
+  normalizeListenerReactionPlanV1,
+  normalizeListenerReactionSpokenCue,
+  normalizeSocialSilenceMarkerV1,
+  type CrosstalkReclaimPlanV1,
+  type ListenerReactionPlanV1,
+  type SocialSilenceMarkerV1,
+} from "./listenerReaction.ts";
+import {
+  normalizeDirectionalIrritationDeliveryPlanV1,
+  normalizeDirectionalIrritationTransitionV1,
+  type DirectionalIrritationDeliveryPlanV1,
+  type DirectionalIrritationTransitionV1,
+} from "./directionalIrritation.ts";
+import {
+  normalizeCoffeeStageActionPayload,
+  normalizeZenStageActionPayload,
+  type CoffeeStageActionPayload,
+  type ZenStageActionPayload,
+} from "./stageActionDirector.ts";
 import type {
-  ListenerReactionPlanV1,
-  ListenerReactionVocalFoley,
-} from "./listenerReaction.js";
+  CoffeeInterruptionEvent,
+  CoffeeInterruptionSocialDelta,
+  CoffeeTurnRouteV1,
+} from "./index.js";
+
+export type { CoffeeStageActionPayload, ZenStageActionPayload };
 
 function normalizeStoredAutoRecoveryTrace(
   value: unknown
@@ -149,11 +200,61 @@ export interface WebSearchPayload {
   results: WebSearchResult[];
 }
 
+/** Soft limits for personal notes (Prism `userNotes` tool). */
+export const USER_NOTE_TITLE_MAX = 120;
+export const USER_NOTE_BODY_MAX = 8_000;
+
+export type UserNotesAction = "save" | "list" | "get" | "delete";
+
+/**
+ * Model request stub for the personal notes tool (Chat + floating Ask Prism).
+ * Server executes and persists a privacy-safe `UserNotesPayload` receipt.
+ */
+export interface UserNotesRequestPayload {
+  v: 1;
+  name: "userNotes";
+  action: UserNotesAction;
+  id?: string;
+  title?: string;
+  body?: string;
+}
+
+/** Id + title only — never store note bodies on message tool_payload receipts. */
+export interface UserNotesReceiptItem {
+  id: string;
+  title: string;
+}
+
+export type UserNotesReceiptStatus =
+  | "saved"
+  | "updated"
+  | "deleted"
+  | "listed"
+  | "retrieved"
+  | "error";
+
+/**
+ * Persisted receipt for a completed `userNotes` action (shown as an in-chat card).
+ * Bodies are never included — only ids/titles/status.
+ */
+export interface UserNotesPayload {
+  v: 1;
+  name: "userNotes";
+  action: UserNotesAction;
+  status: UserNotesReceiptStatus;
+  at: string;
+  id?: string;
+  title?: string;
+  noteCount?: number;
+  notes?: UserNotesReceiptItem[];
+  error?: string;
+}
+
 export interface CoffeeAmbientActionPayload {
   v: 1;
   name: "coffeeAmbientAction";
   source: "scripted";
-  category: "sip" | "cup" | "power";
+  category: "sip" | "cup" | "power" | "gesture";
   action: string;
 }
 
@@ -229,6 +330,20 @@ export interface CoffeeReplayPowerMoodDrainEventPayload {
   occurredAt: string;
 }
 
+export interface CoffeeReplayPowerAnnoyanceEventPayload {
+  v: 1;
+  name: "coffeeReplayEvent";
+  kind: "powerAnnoyance";
+  /** The one eligible audible peer affected by this line. */
+  botId: string;
+  sourceBotId: string;
+  sourceMessageId: string;
+  strength: "small";
+  dispositionBefore: number;
+  dispositionAfter: number;
+  occurredAt: string;
+}
+
 export interface CoffeeReplayTopOffEventPayload {
   v: 1;
   name: "coffeeReplayEvent";
@@ -276,6 +391,20 @@ export interface CoffeeReplayListenerReactionEventPayload {
   plan: ListenerReactionPlanV1;
 }
 
+export interface CoffeeReplayPerceptionOverlapEventPayload {
+  v: 1;
+  name: "coffeeReplayEvent";
+  kind: "perceptionOverlap";
+  /** The line that begins while the preceding speaker is still talking. */
+  botId: string;
+  precedingBotId: string;
+  precedingMessageId: string;
+  overlappingMessageId: string;
+  startRatio: number;
+  maxSimultaneousVoices: 2;
+  occurredAt: string;
+}
+
 export interface CoffeeReplayIdentityMirrorEventPayload {
   v: 1;
   name: "coffeeReplayEvent";
@@ -286,17 +415,94 @@ export interface CoffeeReplayIdentityMirrorEventPayload {
   state: BotIdentityMirrorStateV1;
 }
 
+export interface CoffeeReplayIdentityShapeshiftEventPayload {
+  v: 1;
+  name: "coffeeReplayEvent";
+  kind: "identityShapeshift";
+  /** Holder bot id, retained as the common replay-event bot key. */
+  botId: string;
+  occurredAt: string;
+  state: BotIdentityShapeshiftStateV1;
+}
+
+export interface CoffeeReplayFalseNameEventPayload {
+  v: 1;
+  name: "coffeeReplayEvent";
+  kind: "falseName";
+  /** Holder bot id, retained as the common replay-event bot key. */
+  botId: string;
+  occurredAt: string;
+  state: BotFalseNameStateV1;
+}
+
+export interface CoffeeReplayBaristaDeliveryEventPayload {
+  v: 1;
+  name: "coffeeReplayEvent";
+  kind: "baristaDelivery";
+  botId: string;
+  occurredAt: string;
+  barista: {
+    id: string | null;
+    name: string;
+    color: string | null;
+    glyph: string | null;
+    fallback: boolean;
+  };
+  drink: {
+    choice: "house" | "custom" | "surprise";
+    name: string;
+    description: string;
+    imageId: string | null;
+    fallback: boolean;
+  };
+  line: string;
+  voiceTakeId?: string;
+}
+
+export interface CoffeeReplayPlayerSipEventPayload {
+  v: 1;
+  name: "coffeeReplayEvent";
+  kind: "playerSip";
+  occurredAt: string;
+  fillId: string;
+  sipCount: number;
+  drinkName: string;
+  imageId: string | null;
+  /** Composer sends deterministically stage the sip immediately before or after speech. */
+  timing?: "before" | "after";
+  source?: "composer" | "manual";
+}
+
+export interface CoffeeReplayDirectionalIrritationEventPayload {
+  v: 1;
+  name: "coffeeReplayEvent";
+  kind: "directionalIrritation";
+  /** Subject bot that holds directed irritation (interrupted or rebuffed). */
+  botId: string;
+  targetBotId: string;
+  occurredAt: string;
+  transition: DirectionalIrritationTransitionV1;
+  delivery?: DirectionalIrritationDeliveryPlanV1;
+}
+
 export type CoffeeReplayEventPayload =
   | CoffeeReplayArrivalEventPayload
   | CoffeeReplayMoodEventPayload
   | CoffeeReplayPowerMoodBoostEventPayload
   | CoffeeReplayPowerMoodDrainEventPayload
+  | CoffeeReplayPowerAnnoyanceEventPayload
   | CoffeeReplayTopOffEventPayload
   | CoffeeReplayEmptyCupAttemptEventPayload
   | CoffeeReplayPlayerDepartureEventPayload
   | CoffeeReplayBotDepartureEventPayload
   | CoffeeReplayListenerReactionEventPayload
-  | CoffeeReplayIdentityMirrorEventPayload;
+  | CoffeeReplayPerceptionOverlapEventPayload
+  | CoffeeReplayIdentityMirrorEventPayload
+  | CoffeeReplayIdentityShapeshiftEventPayload
+  | CoffeeReplayFalseNameEventPayload
+  | CoffeeReplayBaristaDeliveryEventPayload
+  | CoffeeReplayPlayerSipEventPayload
+  | CoffeeReplayDirectionalIrritationEventPayload;
 
 export type ZenDisplayAlign = "start" | "center" | "end";
 
@@ -352,16 +558,44 @@ export interface StoredAssistantToolEnvelope {
   sentGeneratedImage?: SentGeneratedImagePayload;
   /** Persisted web results shown as an assistant-side source card. */
   webSearch?: WebSearchPayload;
+  /** Persisted chat-only personal note receipt (ids/titles only). */
+  userNotes?: UserNotesPayload;
   /** Coffee-only scripted ambient action shown as table UI, not transcript prose. */
   coffeeAmbientAction?: CoffeeAmbientActionPayload;
+  /** Coffee-only canonical stage action (Director / LLM / Power) for exact-once display. */
+  coffeeStageAction?: CoffeeStageActionPayload;
+  /** Zen-only canonical stage action provenance for reload and plate presentation. */
+  zenStageAction?: ZenStageActionPayload;
   /** Coffee-only user action cue shown as ambient context, not a table turn. */
   coffeeUserAction?: CoffeeUserActionPayload;
+  /** Coffee-only spoken interruption metadata carried by a hidden pause row. */
+  coffeeInterruption?: CoffeeInterruptionEvent;
+  /** Coffee-only quiet side remark to one seated peer (half-volume playback). */
+  coffeeAside?: CoffeeAsidePayload;
   /** Coffee-only hidden state beats used by replay, not visible transcript prose. */
   coffeeReplayEvents?: CoffeeReplayEventPayload[];
   /** Privacy-safe record of a successful Auto recovery. */
   autoRecovery?: AutoRecoveryTraceV1;
+  /** Privacy-safe record of contextual model and effort selection. */
+  autoRoute?: AutoRouteDecisionV1;
+  /** Concrete provider effort used by a fixed-model turn. */
+  reasoningEffort?: ProviderReasoningEffort;
+  /** True when the concrete model used Turbo for this turn. */
+  turbo?: boolean;
   /** Internal marker for deterministic Power output that must not be sanitized on reload. */
   botPowerExactResponse?: "speech_copy" | "hearing_repeat" | "intermittent_mute" | "speech_obfuscation";
+  /** Public replay-stable timed Mute presentation; contains no intended speech. */
+  botPowerMutePerformance?: BotPowerMutePerformanceV1;
+  /** Chat/Zen sticky Library/Marketplace shapeshift form for the speaking holder. */
+  identityShapeshift?: BotIdentityShapeshiftStateV1;
+  /** Chat/Zen sticky John/Jane Doe alias for the speaking holder. */
+  falseName?: BotFalseNameStateV1;
+  /** Provenance for an exact ordinary social-silence turn. */
+  socialSilence?: SocialSilenceMarkerV1;
+  /** Links a protected reclaim turn to its audience-heard source fragment. */
+  crosstalkReclaim?: CrosstalkReclaimPlanV1;
+  /** Public Troll runtime projection; never includes private model instructions. */
+  botPowerTrollPresentation?: BotPowerTrollPresentationV1;
 }
 
 /** Narrow storage shape for SQLite `messages.tool_payload` rows. */
@@ -383,6 +617,8 @@ export interface ParsedAssistantTurn {
   sendGeneratedImage?: { prompt: string };
   /** Model asked Prism to fetch fresh web context before answering. */
   webSearch?: WebSearchRequestPayload;
+  /** Model asked Prism to save/list/get/delete a personal note. */
+  userNotes?: UserNotesRequestPayload;
 }
 
 export interface ParsedStoredAssistantToolPayload {
@@ -394,11 +630,81 @@ export interface ParsedStoredAssistantToolPayload {
   zenTurn?: StoredZenAssistantTurnPayload;
   sentGeneratedImage?: SentGeneratedImagePayload;
   webSearch?: WebSearchPayload;
+  userNotes?: UserNotesPayload;
   coffeeAmbientAction?: CoffeeAmbientActionPayload;
+  coffeeStageAction?: CoffeeStageActionPayload;
+  zenStageAction?: ZenStageActionPayload;
   coffeeUserAction?: CoffeeUserActionPayload;
+  coffeeInterruption?: CoffeeInterruptionEvent;
+  coffeeAside?: CoffeeAsidePayload;
   coffeeReplayEvents?: CoffeeReplayEventPayload[];
   autoRecovery?: AutoRecoveryTraceV1;
+  coffeeTurnRoute?: CoffeeTurnRouteV1;
+  autoRoute?: AutoRouteDecisionV1;
+  reasoningEffort?: ProviderReasoningEffort;
+  turbo?: boolean;
   botPowerExactResponse?: "speech_copy" | "hearing_repeat" | "intermittent_mute" | "speech_obfuscation";
+  botPowerMutePerformance?: BotPowerMutePerformanceV1;
+  identityShapeshift?: BotIdentityShapeshiftStateV1;
+  falseName?: BotFalseNameStateV1;
+  socialSilence?: SocialSilenceMarkerV1;
+  crosstalkReclaim?: CrosstalkReclaimPlanV1;
+  botPowerTrollPresentation?: BotPowerTrollPresentationV1;
+}
+
+function normalizeCoffeeTurnRouteV1(value: unknown): CoffeeTurnRouteV1 | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const row = value as Record<string, unknown>;
+  const sources = new Set<CoffeeTurnRouteV1["source"]>([
+    "hearing_repeat",
+    "directed_speaker",
+    "player_direct_address",
+    "peer_direct_address",
+    "router_model",
+    "deterministic_fallback",
+    "speaker_balance",
+    "autonomous_handoff",
+    "power_override",
+  ]);
+  const selectedSpeakerBotId =
+    typeof row.selectedSpeakerBotId === "string"
+      ? row.selectedSpeakerBotId.trim()
+      : "";
+  if (
+    row.v !== 1 ||
+    row.name !== "coffeeTurnRoute" ||
+    !sources.has(row.source as CoffeeTurnRouteV1["source"]) ||
+    !selectedSpeakerBotId
+  ) {
+    return undefined;
+  }
+  const addressedBotId =
+    typeof row.addressedBotId === "string" ? row.addressedBotId.trim() : "";
+  const playerAddressKind =
+    row.playerAddressKind === "mention" ||
+    row.playerAddressKind === "plain_text" ||
+    row.playerAddressKind === "followup"
+      ? row.playerAddressKind
+      : undefined;
+  return {
+    v: 1,
+    name: "coffeeTurnRoute",
+    source: row.source as CoffeeTurnRouteV1["source"],
+    selectedSpeakerBotId,
+    ...(addressedBotId ? { addressedBotId } : {}),
+    ...(playerAddressKind ? { playerAddressKind } : {}),
+  };
+}
+
+function normalizeStoredFalseNameStateV1(
+  root: Record<string, unknown> | null | undefined,
+): BotFalseNameStateV1 | undefined {
+  if (!root) return undefined;
+  return (
+    normalizeBotFalseNameStateV1(root.falseName) ??
+    normalizeBotFalseNameStateV1(root.identityFalseName) ??
+    undefined
+  );
 }
 
 /// Many models wrap the envelope in a markdown fence; raw fences make JSON.parse fail
@@ -664,6 +970,169 @@ function normalizeStoredWebSearchPayload(value: unknown): WebSearchPayload | und
   };
 }
 
+function truncateUserNoteText(text: string, maxLength: number): string {
+  const collapsed = text.replace(/\s+/g, " ").trim();
+  return collapsed.length > maxLength ? collapsed.slice(0, maxLength).trimEnd() : collapsed;
+}
+
+function normalizeUserNotesAction(value: unknown): UserNotesAction | undefined {
+  if (typeof value !== "string") return undefined;
+  const action = value.trim().toLowerCase();
+  if (action === "save" || action === "list" || action === "get" || action === "delete") {
+    return action;
+  }
+  return undefined;
+}
+
+/**
+ * Normalize a model-emitted `userNotes` request from a Prism tool JSON object.
+ */
+export function normalizeUserNotesRequestFromRecord(
+  row: Record<string, unknown>
+): UserNotesRequestPayload | undefined {
+  const rawName = typeof row.name === "string" ? row.name.trim().toLowerCase() : "";
+  const raw =
+    rawName === "usernotes"
+      ? row
+      : row.userNotes && typeof row.userNotes === "object"
+        ? (row.userNotes as Record<string, unknown>)
+        : undefined;
+  if (!raw) return undefined;
+  const action = normalizeUserNotesAction(raw.action);
+  if (!action) return undefined;
+  const idRaw = typeof raw.id === "string" ? raw.id.trim() : "";
+  const titleRaw =
+    typeof raw.title === "string" ? truncateUserNoteText(raw.title, USER_NOTE_TITLE_MAX) : "";
+  // Preserve newlines in body; only trim ends and hard-cap length.
+  const bodyRaw =
+    typeof raw.body === "string"
+      ? raw.body.trim().slice(0, USER_NOTE_BODY_MAX)
+      : "";
+  if (action === "save") {
+    if (idRaw) {
+      if (!titleRaw && !bodyRaw) return undefined;
+      return {
+        v: 1,
+        name: "userNotes",
+        action,
+        id: idRaw,
+        ...(titleRaw ? { title: titleRaw } : {}),
+        ...(bodyRaw ? { body: bodyRaw } : {}),
+      };
+    }
+    if (!titleRaw || !bodyRaw) return undefined;
+    return {
+      v: 1,
+      name: "userNotes",
+      action,
+      title: titleRaw,
+      body: bodyRaw,
+    };
+  }
+  if (action === "list") {
+    return { v: 1, name: "userNotes", action };
+  }
+  if (action === "get") {
+    if (!idRaw && !titleRaw) return undefined;
+    return {
+      v: 1,
+      name: "userNotes",
+      action,
+      ...(idRaw ? { id: idRaw } : {}),
+      ...(titleRaw ? { title: titleRaw } : {}),
+    };
+  }
+  // delete
+  if (!idRaw && !titleRaw) return undefined;
+  return {
+    v: 1,
+    name: "userNotes",
+    action,
+    ...(idRaw ? { id: idRaw } : {}),
+    ...(titleRaw ? { title: titleRaw } : {}),
+  };
+}
+
+/**
+ * Normalize a persisted `userNotes` receipt from `messages.tool_payload`.
+ */
+export function normalizeStoredUserNotesPayload(
+  value: unknown
+): UserNotesPayload | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const row = value as Record<string, unknown>;
+  const rawName = typeof row.name === "string" ? row.name.trim().toLowerCase() : "";
+  if (rawName && rawName !== "usernotes") return undefined;
+  const action = normalizeUserNotesAction(row.action);
+  const statusRaw = typeof row.status === "string" ? row.status.trim().toLowerCase() : "";
+  const status: UserNotesReceiptStatus | undefined =
+    statusRaw === "saved" ||
+    statusRaw === "updated" ||
+    statusRaw === "deleted" ||
+    statusRaw === "listed" ||
+    statusRaw === "retrieved" ||
+    statusRaw === "error"
+      ? statusRaw
+      : undefined;
+  const at = typeof row.at === "string" ? row.at.trim() : "";
+  if (!action || !status || !at) return undefined;
+  const id = typeof row.id === "string" ? row.id.trim() : "";
+  const title =
+    typeof row.title === "string" ? truncateUserNoteText(row.title, USER_NOTE_TITLE_MAX) : "";
+  const noteCount =
+    typeof row.noteCount === "number" && Number.isFinite(row.noteCount)
+      ? Math.max(0, Math.round(row.noteCount))
+      : undefined;
+  const notes = Array.isArray(row.notes)
+    ? row.notes
+        .map((item): UserNotesReceiptItem | null => {
+          if (!item || typeof item !== "object") return null;
+          const note = item as Record<string, unknown>;
+          const noteId = typeof note.id === "string" ? note.id.trim() : "";
+          const noteTitle =
+            typeof note.title === "string"
+              ? truncateUserNoteText(note.title, USER_NOTE_TITLE_MAX)
+              : "";
+          if (!noteId || !noteTitle) return null;
+          return { id: noteId, title: noteTitle };
+        })
+        .filter((item): item is UserNotesReceiptItem => Boolean(item))
+        .slice(0, 50)
+    : undefined;
+  const error =
+    typeof row.error === "string" ? truncateUserNoteText(row.error, 240) : "";
+  return {
+    v: 1,
+    name: "userNotes",
+    action,
+    status,
+    at,
+    ...(id ? { id } : {}),
+    ...(title ? { title } : {}),
+    ...(noteCount !== undefined ? { noteCount } : {}),
+    ...(notes && notes.length > 0 ? { notes } : {}),
+    ...(error ? { error } : {}),
+  };
+}
+
+function prismToolBlockHasContent(block: {
+  askQuestion?: AskQuestionPayload;
+  tellFictionalStory?: TellFictionalStoryPayload;
+  sendGeneratedImage?: { prompt: string };
+  webSearch?: WebSearchRequestPayload;
+  userNotes?: UserNotesRequestPayload;
+  zenDisplay?: ZenDisplayMetadata;
+}): boolean {
+  return Boolean(
+    block.askQuestion ||
+      block.tellFictionalStory ||
+      block.sendGeneratedImage ||
+      block.webSearch ||
+      block.userNotes ||
+      block.zenDisplay
+  );
+}
+
 function normalizeCoffeeAmbientActionPayload(
   value: unknown
 ): CoffeeAmbientActionPayload | undefined {
@@ -673,7 +1142,10 @@ function normalizeCoffeeAmbientActionPayload(
     return undefined;
   }
   const category =
-    row.category === "sip" || row.category === "cup" || row.category === "power"
+    row.category === "sip" ||
+    row.category === "cup" ||
+    row.category === "power" ||
+    row.category === "gesture"
       ? row.category
       : undefined;
   const action = typeof row.action === "string" ? row.action.replace(/\s+/g, " ").trim() : "";
@@ -703,6 +1175,207 @@ function normalizeCoffeeUserActionPayload(value: unknown): CoffeeUserActionPaylo
     source: "user",
     action,
     occurredAt: new Date(occurredAtMs).toISOString(),
+  };
+}
+
+function normalizeCoffeeInterruptionId(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const normalized = value.trim();
+  return normalized.length > 0 && normalized.length <= 160
+    ? normalized
+    : undefined;
+}
+
+function normalizeCoffeeInterruptionText(
+  value: unknown,
+  maxLength = 8_000,
+): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const normalized = value.replace(/\s+/gu, " ").trim();
+  return normalized.length > 0 && normalized.length <= maxLength
+    ? normalized
+    : undefined;
+}
+
+function normalizeCoffeeInterruptionSocialDelta(
+  value: unknown,
+): CoffeeInterruptionSocialDelta | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const row = value as Record<string, unknown>;
+  const botId = normalizeCoffeeInterruptionId(row.botId);
+  const dispositionDelta =
+    typeof row.dispositionDelta === "number" &&
+    Number.isFinite(row.dispositionDelta)
+      ? Math.max(-1, Math.min(1, row.dispositionDelta))
+      : null;
+  const valuesFrictionDelta =
+    typeof row.valuesFrictionDelta === "number" &&
+    Number.isFinite(row.valuesFrictionDelta)
+      ? Math.max(-1, Math.min(1, row.valuesFrictionDelta))
+      : null;
+  if (!botId || dispositionDelta === null || valuesFrictionDelta === null) {
+    return null;
+  }
+  return { botId, dispositionDelta, valuesFrictionDelta };
+}
+
+/**
+ * Normalize persisted Coffee interruption metadata without turning its
+ * transcript-only cues into ordinary assistant conversation rows.
+ */
+/**
+ * Coffee-only quiet aside: this line is a low-voiced side remark aimed at one
+ * seated peer. The whole table can still hear it — players hear it at half
+ * volume — so it is presentation metadata, never an audience restriction.
+ */
+export interface CoffeeAsidePayload {
+  toBotId: string;
+  toName: string;
+}
+
+export function normalizeCoffeeAsidePayload(
+  value: unknown,
+): CoffeeAsidePayload | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return undefined;
+  }
+  const row = value as Record<string, unknown>;
+  const toBotId =
+    typeof row.toBotId === "string" ? row.toBotId.trim().slice(0, 180) : "";
+  const toName =
+    typeof row.toName === "string"
+      ? row.toName.replace(/\s+/gu, " ").trim().slice(0, 100)
+      : "";
+  return toBotId && toName ? { toBotId, toName } : undefined;
+}
+
+export function normalizeCoffeeInterruptionEvent(
+  value: unknown,
+): CoffeeInterruptionEvent | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return undefined;
+  }
+  const row = value as Record<string, unknown>;
+  const kind =
+    row.kind === "playerInterruptsBot" ||
+    row.kind === "botInterruptsPlayer" ||
+    row.kind === "botInterruptsBot"
+      ? row.kind
+      : null;
+  const interruptedBotId = normalizeCoffeeInterruptionId(row.interruptedBotId);
+  const interrupterBotId = normalizeCoffeeInterruptionId(row.interrupterBotId);
+  if (
+    !kind ||
+    !interruptedBotId ||
+    (kind === "botInterruptsBot" && !interrupterBotId)
+  ) {
+    return undefined;
+  }
+
+  const activeTurnId = normalizeCoffeeInterruptionId(row.activeTurnId);
+  const interruptedMessageId = normalizeCoffeeInterruptionId(
+    row.interruptedMessageId,
+  );
+  const targetPhase =
+    row.targetPhase === "thinking" || row.targetPhase === "speaking"
+      ? row.targetPhase
+      : undefined;
+  const visibleTokenCount =
+    typeof row.visibleTokenCount === "number" &&
+    Number.isFinite(row.visibleTokenCount)
+      ? Math.max(0, Math.floor(row.visibleTokenCount))
+      : undefined;
+  const visibleProgress =
+    typeof row.visibleProgress === "number" &&
+    Number.isFinite(row.visibleProgress)
+      ? Math.max(0, Math.min(1, row.visibleProgress))
+      : undefined;
+  const reactionOutcome =
+    row.reactionOutcome === "silence" ||
+    row.reactionOutcome === "react" ||
+    row.reactionOutcome === "yield" ||
+    row.reactionOutcome === "resume"
+      ? row.reactionOutcome
+      : row.reactionOutcome === "reclaim"
+        ? "resume"
+        : undefined;
+  const resumeOutcome =
+    row.resumeOutcome === "none" ||
+    row.resumeOutcome === "yielded" ||
+    row.resumeOutcome === "continued" ||
+    row.resumeOutcome === "invited"
+      ? row.resumeOutcome
+      : undefined;
+  const reclaim =
+    normalizeCrosstalkReclaimPlanV1(row.reclaim) ?? undefined;
+  const floorOutcome =
+    normalizeCrosstalkFloorOutcome(
+      row.floorOutcome ?? row.reactionOutcome,
+    ) ?? (reclaim ? "reclaim" : undefined);
+  const interruptedSnippet = normalizeCoffeeInterruptionText(
+    row.interruptedSnippet,
+  );
+  const reactionText = normalizeCoffeeInterruptionText(row.reactionText);
+  const interrupterCue =
+    normalizeListenerReactionSpokenCue(row.interrupterCue) ?? undefined;
+  const publicInterrupterCue = normalizePowerProjectedReactionCueV1(
+    row.publicInterrupterCue,
+    row.interrupterCueSpeechEffect,
+  );
+  const interruptedSpeakerCue =
+    normalizeBotCrosstalkInterruptedSpeakerCue(
+      row.interruptedSpeakerCue,
+    ) ?? undefined;
+  const publicInterruptedSpeakerCue = normalizePowerProjectedReactionCueV1(
+    row.publicInterruptedSpeakerCue,
+    row.interruptedSpeakerCueSpeechEffect,
+  );
+  const socialConsequences = Array.isArray(row.socialConsequences)
+    ? row.socialConsequences
+        .slice(0, 50)
+        .map(normalizeCoffeeInterruptionSocialDelta)
+        .filter(
+          (
+            consequence,
+          ): consequence is CoffeeInterruptionSocialDelta =>
+            consequence !== null,
+        )
+    : [];
+
+  return {
+    kind,
+    interruptedBotId,
+    ...(interrupterBotId ? { interrupterBotId } : {}),
+    ...(activeTurnId ? { activeTurnId } : {}),
+    ...(targetPhase ? { targetPhase } : {}),
+    ...(interruptedMessageId ? { interruptedMessageId } : {}),
+    ...(visibleTokenCount !== undefined ? { visibleTokenCount } : {}),
+    ...(visibleProgress !== undefined ? { visibleProgress } : {}),
+    ...(interruptedSnippet ? { interruptedSnippet } : {}),
+    ...(row.pauseBeat === true ? { pauseBeat: true } : {}),
+    ...(reactionOutcome ? { reactionOutcome } : {}),
+    ...(resumeOutcome ? { resumeOutcome } : {}),
+    ...(floorOutcome ? { floorOutcome } : {}),
+    ...(reclaim ? { reclaim } : {}),
+    ...(reactionText ? { reactionText } : {}),
+    ...(publicInterrupterCue
+      ? {
+          publicInterrupterCue,
+          interrupterCueSpeechEffect: "speech_obfuscation" as const,
+        }
+      : interrupterCue
+        ? { interrupterCue }
+        : {}),
+    ...(publicInterruptedSpeakerCue
+      ? {
+          publicInterruptedSpeakerCue,
+          interruptedSpeakerCueSpeechEffect:
+            "speech_obfuscation" as const,
+        }
+      : interruptedSpeakerCue
+        ? { interruptedSpeakerCue }
+        : {}),
+    socialConsequences,
   };
 }
 
@@ -757,61 +1430,6 @@ function normalizeCoffeeReplaySocialSnapshot(
   };
 }
 
-function normalizeStoredListenerReactionPlan(
-  value: unknown,
-): ListenerReactionPlanV1 | undefined {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
-  const row = value as Record<string, unknown>;
-  const id = (candidate: unknown): string | undefined =>
-    typeof candidate === "string" && candidate.trim() && candidate.trim().length <= 160
-      ? candidate.trim()
-      : undefined;
-  const speakerBotId = id(row.speakerBotId);
-  const listenerBotId = id(row.listenerBotId);
-  const messageId = id(row.messageId);
-  const seed = id(row.seed);
-  const targetSource = row.targetSource === "role" ||
-      row.targetSource === "direct" || row.targetSource === "inferred"
-    ? row.targetSource
-    : undefined;
-  const visualAction = row.visualAction === "nod" ||
-      row.visualAction === "lean_in" || row.visualAction === "head_tilt" ||
-      row.visualAction === "soft_smile" || row.visualAction === "thoughtful_hmm"
-    ? row.visualAction
-    : undefined;
-  const spokenCue = row.spokenCue === "mm-hm" || row.spokenCue === "I see" ||
-      row.spokenCue === "hmm" || row.spokenCue === "right" ||
-      row.spokenCue === "oh" || row.spokenCue === "go on"
-    ? row.spokenCue
-    : undefined;
-  const vocalFoley = row.vocalFoley === "clears throat" ||
-      row.vocalFoley === "coughs" || row.vocalFoley === "sighs" ||
-      row.vocalFoley === "exhales" || row.vocalFoley === "chuckles"
-    ? row.vocalFoley as ListenerReactionVocalFoley
-    : undefined;
-  if (
-    row.v !== 1 || row.name !== "listenerReaction" || !speakerBotId ||
-    !listenerBotId || speakerBotId === listenerBotId || !messageId || !seed ||
-    !targetSource || !visualAction || typeof row.targetProgress !== "number" ||
-    !Number.isFinite(row.targetProgress) || row.targetProgress < 0.3 ||
-    row.targetProgress > 0.75 || typeof row.cameraCutEligible !== "boolean"
-  ) return undefined;
-  return {
-    v: 1,
-    name: "listenerReaction",
-    speakerBotId,
-    listenerBotId,
-    messageId,
-    targetSource,
-    visualAction,
-    ...(spokenCue ? { spokenCue } : {}),
-    ...(!spokenCue && vocalFoley ? { vocalFoley } : {}),
-    targetProgress: row.targetProgress,
-    seed,
-    cameraCutEligible: row.cameraCutEligible,
-  };
-}
-
 export function normalizeCoffeeReplayEventPayload(
   value: unknown
 ): CoffeeReplayEventPayload | undefined {
@@ -826,6 +1444,117 @@ export function normalizeCoffeeReplayEventPayload(
       name: "coffeeReplayEvent",
       kind: "playerDeparture",
       occurredAt,
+    };
+  }
+  if (row.kind === "playerSip") {
+    const fillId = typeof row.fillId === "string" ? row.fillId.trim().slice(0, 120) : "";
+    const sipCount =
+      typeof row.sipCount === "number" && Number.isInteger(row.sipCount)
+        ? Math.min(6, Math.max(1, row.sipCount))
+        : 0;
+    const drinkName =
+      typeof row.drinkName === "string"
+        ? row.drinkName.replace(/\s+/gu, " ").trim().slice(0, 100)
+        : "";
+    const imageId =
+      typeof row.imageId === "string" && row.imageId.trim()
+        ? row.imageId.trim().slice(0, 180)
+        : null;
+    if (!fillId || sipCount < 1 || !drinkName) return undefined;
+    return {
+      v: 1,
+      name: "coffeeReplayEvent",
+      kind: "playerSip",
+      occurredAt,
+      fillId,
+      sipCount,
+      drinkName,
+      imageId,
+      ...(row.timing === "before" || row.timing === "after"
+        ? { timing: row.timing }
+        : {}),
+      ...(row.source === "composer" || row.source === "manual"
+        ? { source: row.source }
+        : {}),
+    };
+  }
+  if (row.kind === "baristaDelivery") {
+    const botId = normalizeCoffeeReplayBotId(row.botId);
+    const baristaRow =
+      row.barista && typeof row.barista === "object"
+        ? row.barista as Record<string, unknown>
+        : null;
+    const drinkRow =
+      row.drink && typeof row.drink === "object"
+        ? row.drink as Record<string, unknown>
+        : null;
+    const baristaName =
+      typeof baristaRow?.name === "string"
+        ? baristaRow.name.replace(/\s+/gu, " ").trim().slice(0, 100)
+        : "";
+    const drinkName =
+      typeof drinkRow?.name === "string"
+        ? drinkRow.name.replace(/\s+/gu, " ").trim().slice(0, 100)
+        : "";
+    const description =
+      typeof drinkRow?.description === "string"
+        ? drinkRow.description.replace(/\s+/gu, " ").trim().slice(0, 280)
+        : "";
+    const line =
+      typeof row.line === "string"
+        ? row.line.replace(/\s+/gu, " ").trim().slice(0, 240)
+        : "";
+    const choice =
+      drinkRow?.choice === "custom" || drinkRow?.choice === "surprise"
+        ? drinkRow.choice
+        : drinkRow?.choice === "house"
+          ? "house"
+          : undefined;
+    if (!botId || !baristaRow || !drinkRow || !baristaName || !drinkName || !line || !choice) {
+      return undefined;
+    }
+    const baristaId =
+      typeof baristaRow.id === "string" && baristaRow.id.trim()
+        ? baristaRow.id.trim().slice(0, 180)
+        : null;
+    const color =
+      typeof baristaRow.color === "string" && baristaRow.color.trim()
+        ? baristaRow.color.trim().slice(0, 40)
+        : null;
+    const glyph =
+      typeof baristaRow.glyph === "string" && baristaRow.glyph.trim()
+        ? baristaRow.glyph.trim().slice(0, 40)
+        : null;
+    const imageId =
+      typeof drinkRow.imageId === "string" && drinkRow.imageId.trim()
+        ? drinkRow.imageId.trim().slice(0, 180)
+        : null;
+    const voiceTakeId =
+      typeof row.voiceTakeId === "string" && row.voiceTakeId.trim()
+        ? row.voiceTakeId.trim().slice(0, 180)
+        : undefined;
+    return {
+      v: 1,
+      name: "coffeeReplayEvent",
+      kind: "baristaDelivery",
+      botId,
+      occurredAt,
+      barista: {
+        id: baristaId,
+        name: baristaName,
+        color,
+        glyph,
+        fallback: baristaRow.fallback === true,
+      },
+      drink: {
+        choice,
+        name: drinkName,
+        description,
+        imageId,
+        fallback: drinkRow.fallback === true,
+      },
+      line,
+      ...(voiceTakeId ? { voiceTakeId } : {}),
     };
   }
   const botId = normalizeCoffeeReplayBotId(row.botId);
@@ -849,8 +1578,46 @@ export function normalizeCoffeeReplayEventPayload(
       state,
     };
   }
+  if (row.kind === "identityShapeshift") {
+    const state = normalizeBotIdentityShapeshiftStateV1(row.state);
+    if (
+      !state ||
+      state.surface !== "coffee" ||
+      state.holderBotId !== botId ||
+      state.occurredAt !== occurredAt
+    ) {
+      return undefined;
+    }
+    return {
+      v: 1,
+      name: "coffeeReplayEvent",
+      kind: "identityShapeshift",
+      botId,
+      occurredAt,
+      state,
+    };
+  }
+  if (row.kind === "falseName") {
+    const state = normalizeBotFalseNameStateV1(row.state);
+    if (
+      !state ||
+      state.surface !== "coffee" ||
+      state.holderBotId !== botId ||
+      state.occurredAt !== occurredAt
+    ) {
+      return undefined;
+    }
+    return {
+      v: 1,
+      name: "coffeeReplayEvent",
+      kind: "falseName",
+      botId,
+      occurredAt,
+      state,
+    };
+  }
   if (row.kind === "listenerReaction") {
-    const plan = normalizeStoredListenerReactionPlan(row.plan);
+    const plan = normalizeListenerReactionPlanV1(row.plan) ?? undefined;
     if (!plan || plan.listenerBotId !== botId) return undefined;
     return {
       v: 1,
@@ -859,6 +1626,67 @@ export function normalizeCoffeeReplayEventPayload(
       botId,
       occurredAt,
       plan,
+    };
+  }
+  if (row.kind === "perceptionOverlap") {
+    const precedingBotId = normalizeCoffeeReplayBotId(row.precedingBotId);
+    const precedingMessageId = normalizeCoffeeReplayBotId(row.precedingMessageId);
+    const overlappingMessageId = normalizeCoffeeReplayBotId(row.overlappingMessageId);
+    const startRatio = typeof row.startRatio === "number" && Number.isFinite(row.startRatio)
+      ? Math.min(0.72, Math.max(0.58, row.startRatio))
+      : undefined;
+    if (
+      !precedingBotId ||
+      precedingBotId === botId ||
+      !precedingMessageId ||
+      !overlappingMessageId ||
+      startRatio === undefined ||
+      row.maxSimultaneousVoices !== 2
+    ) {
+      return undefined;
+    }
+    return {
+      v: 1,
+      name: "coffeeReplayEvent",
+      kind: "perceptionOverlap",
+      botId,
+      precedingBotId,
+      precedingMessageId,
+      overlappingMessageId,
+      startRatio,
+      maxSimultaneousVoices: 2,
+      occurredAt,
+    };
+  }
+  if (row.kind === "directionalIrritation") {
+    const targetBotId = normalizeCoffeeReplayBotId(row.targetBotId);
+    const transition = normalizeDirectionalIrritationTransitionV1(row.transition);
+    if (
+      !targetBotId ||
+      targetBotId === botId ||
+      !transition ||
+      transition.subjectBotId !== botId ||
+      transition.targetBotId !== targetBotId ||
+      transition.occurredAt !== occurredAt
+    ) {
+      return undefined;
+    }
+    const delivery = normalizeDirectionalIrritationDeliveryPlanV1(row.delivery);
+    if (
+      delivery &&
+      (delivery.subjectBotId !== botId || delivery.targetBotId !== targetBotId)
+    ) {
+      return undefined;
+    }
+    return {
+      v: 1,
+      name: "coffeeReplayEvent",
+      kind: "directionalIrritation",
+      botId,
+      targetBotId,
+      occurredAt,
+      transition,
+      ...(delivery ? { delivery } : {}),
     };
   }
   if (row.kind === "botDeparture") {
@@ -993,6 +1821,35 @@ export function normalizeCoffeeReplayEventPayload(
       powerName,
       strength,
       ...(theme ? { theme } : {}),
+      dispositionBefore,
+      dispositionAfter,
+      occurredAt,
+    };
+  }
+  if (row.kind === "powerAnnoyance") {
+    const sourceBotId = normalizeCoffeeReplayBotId(row.sourceBotId);
+    const sourceMessageId = normalizeCoffeeReplayBotId(row.sourceMessageId);
+    const dispositionBefore = clampCoffeeReplayUnitValue(row.dispositionBefore);
+    const dispositionAfter = clampCoffeeReplayUnitValue(row.dispositionAfter);
+    if (
+      !sourceBotId ||
+      sourceBotId === botId ||
+      !sourceMessageId ||
+      row.strength !== "small" ||
+      dispositionBefore === undefined ||
+      dispositionAfter === undefined ||
+      dispositionAfter > dispositionBefore
+    ) {
+      return undefined;
+    }
+    return {
+      v: 1,
+      name: "coffeeReplayEvent",
+      kind: "powerAnnoyance",
+      botId,
+      sourceBotId,
+      sourceMessageId,
+      strength: "small",
       dispositionBefore,
       dispositionAfter,
       occurredAt,
@@ -1183,17 +2040,20 @@ function normalizePrismToolBlockPayload(parsed: unknown): {
   tellFictionalStory?: TellFictionalStoryPayload;
   sendGeneratedImage?: { prompt: string };
   webSearch?: WebSearchRequestPayload;
+  userNotes?: UserNotesRequestPayload;
   zenDisplay?: ZenDisplayMetadata;
 } {
   const askFlat = normalizeAskQuestionEnvelope(parsed);
   const storyFlat = normalizeTellFictionalStoryEnvelope(parsed);
   let pairSend: { prompt: string } | undefined;
   let webSearch: WebSearchRequestPayload | undefined;
+  let userNotes: UserNotesRequestPayload | undefined;
   let zenDisplay: ZenDisplayMetadata | undefined;
   if (parsed && typeof parsed === "object") {
     const row = parsed as Record<string, unknown>;
     pairSend = normalizeSendGeneratedImageRequestFromRecord(row);
     webSearch = normalizeWebSearchRequestFromRecord(row);
+    userNotes = normalizeUserNotesRequestFromRecord(row);
     zenDisplay = normalizeZenDisplayMetadata(row.zenDisplay);
   }
   if (askFlat || storyFlat) {
@@ -1202,6 +2062,7 @@ function normalizePrismToolBlockPayload(parsed: unknown): {
       ...(storyFlat ? { tellFictionalStory: storyFlat } : {}),
       ...(pairSend ? { sendGeneratedImage: pairSend } : {}),
       ...(webSearch ? { webSearch } : {}),
+      ...(userNotes ? { userNotes } : {}),
       ...(zenDisplay ? { zenDisplay } : {}),
     };
   }
@@ -1213,17 +2074,20 @@ function normalizePrismToolBlockPayload(parsed: unknown): {
   }
   const storyNested = normalizeTellFictionalStoryEnvelope(row.tellFictionalStory);
   pairSend = normalizeSendGeneratedImageRequestFromRecord(row);
+  userNotes = normalizeUserNotesRequestFromRecord(row);
   const out: {
     askQuestion?: AskQuestionPayload;
     tellFictionalStory?: TellFictionalStoryPayload;
     sendGeneratedImage?: { prompt: string };
     webSearch?: WebSearchRequestPayload;
+    userNotes?: UserNotesRequestPayload;
     zenDisplay?: ZenDisplayMetadata;
   } = {};
   if (askNested) out.askQuestion = askNested;
   if (storyNested) out.tellFictionalStory = storyNested;
   if (pairSend) out.sendGeneratedImage = pairSend;
   if (webSearch) out.webSearch = webSearch;
+  if (userNotes) out.userNotes = userNotes;
   if (zenDisplay) out.zenDisplay = zenDisplay;
   return out;
 }
@@ -1370,7 +2234,7 @@ function extractLastStandaloneFencedToolJson(raw: string): {
     try {
       const parsed = JSON.parse(jsonCandidate) as unknown;
       const block = normalizePrismToolBlockPayload(parsed);
-      if (!block.askQuestion && !block.sendGeneratedImage && !block.zenDisplay) {
+      if (!prismToolBlockHasContent(block)) {
         continue;
       }
       const prose = `${raw.slice(0, idx)}${raw.slice(idx + fenceLen)}`.trimEnd();
@@ -1447,7 +2311,7 @@ function extractLastAltSendGeneratedImageSpan(raw: string): { innerJson: string;
     try {
       const parsed = JSON.parse(tail) as unknown;
       const block = normalizePrismToolBlockPayload(parsed);
-      if (block.askQuestion || block.sendGeneratedImage || block.zenDisplay) {
+      if (prismToolBlockHasContent(block)) {
         const spanEnd = tokenStart + last[0].length + leadingWs + openIdx + tail.length;
         const prose = `${raw.slice(0, tokenStart)}${raw.slice(spanEnd)}`.trimEnd();
         return { innerJson: tail, prose };
@@ -1482,7 +2346,7 @@ function extractTrailingBareToolJson(raw: string): { innerJson: string; prose: s
     try {
       const parsed = JSON.parse(tail) as unknown;
       const block = normalizePrismToolBlockPayload(parsed);
-      if (!block.askQuestion && !block.sendGeneratedImage && !block.zenDisplay) continue;
+      if (!prismToolBlockHasContent(block)) continue;
       return {
         innerJson: tail,
         prose: s.slice(0, openIdx).trimEnd(),
@@ -1562,7 +2426,7 @@ export function parseAssistantPrismTools(rawAssistantText: string): ParsedAssist
   const jsonText = stripMarkdownFences(innerJson);
   try {
     const block = normalizePrismToolBlockPayload(JSON.parse(jsonText) as unknown);
-    if (!block.askQuestion && !block.tellFictionalStory && !block.sendGeneratedImage && !block.webSearch && !block.zenDisplay) {
+    if (!prismToolBlockHasContent(block)) {
       return { displayContent: cleanedProse };
     }
     return {
@@ -1571,6 +2435,7 @@ export function parseAssistantPrismTools(rawAssistantText: string): ParsedAssist
       ...(block.tellFictionalStory ? { tellFictionalStory: block.tellFictionalStory } : {}),
       ...(block.sendGeneratedImage ? { sendGeneratedImage: block.sendGeneratedImage } : {}),
       ...(block.webSearch ? { webSearch: block.webSearch } : {}),
+      ...(block.userNotes ? { userNotes: block.userNotes } : {}),
       ...(block.zenDisplay ? { zenDisplay: block.zenDisplay } : {}),
     };
   } catch {
@@ -1610,11 +2475,26 @@ export function parseStoredAssistantToolPayload(
       const webSearch = root
         ? normalizeStoredWebSearchPayload(root.webSearch)
         : undefined;
+      const userNotes = root
+        ? normalizeStoredUserNotesPayload(root.userNotes)
+        : undefined;
       const coffeeAmbientAction = root
         ? normalizeCoffeeAmbientActionPayload(root.coffeeAmbientAction)
         : undefined;
+      const coffeeStageAction = root
+        ? normalizeCoffeeStageActionPayload(root.coffeeStageAction)
+        : undefined;
+      const zenStageAction = root
+        ? normalizeZenStageActionPayload(root.zenStageAction)
+        : undefined;
       const coffeeUserAction = root
         ? normalizeCoffeeUserActionPayload(root.coffeeUserAction)
+        : undefined;
+      const coffeeInterruption = root
+        ? normalizeCoffeeInterruptionEvent(root.coffeeInterruption)
+        : undefined;
+      const coffeeAside = root
+        ? normalizeCoffeeAsidePayload(root.coffeeAside)
         : undefined;
       const coffeeReplayEvents = root
         ? normalizeCoffeeReplayEventPayloads(root.coffeeReplayEvents)
@@ -1622,6 +2502,20 @@ export function parseStoredAssistantToolPayload(
       const autoRecovery = root
         ? normalizeStoredAutoRecoveryTrace(root.autoRecovery)
         : undefined;
+      const coffeeTurnRoute = root
+        ? normalizeCoffeeTurnRouteV1(root.coffeeTurnRoute)
+        : undefined;
+      const autoRoute = root
+        ? normalizeAutoRouteDecisionV1(root.autoRoute)
+        : undefined;
+      const normalizedReasoningEffort = root
+        ? normalizeProviderReasoningEffort(root.reasoningEffort)
+        : "auto";
+      const reasoningEffort =
+        normalizedReasoningEffort === "auto"
+          ? undefined
+          : normalizedReasoningEffort;
+      const turbo = root?.turbo === true;
       const botPowerExactResponse =
       root?.botPowerExactResponse === "speech_copy" ||
         root?.botPowerExactResponse === "hearing_repeat" ||
@@ -1629,18 +2523,49 @@ export function parseStoredAssistantToolPayload(
         root?.botPowerExactResponse === "speech_obfuscation"
           ? root.botPowerExactResponse
           : undefined;
+      const botPowerMutePerformance = root
+        ? normalizeBotPowerMutePerformanceV1(root.botPowerMutePerformance) ?? undefined
+        : undefined;
+      const identityShapeshift = root
+        ? normalizeBotIdentityShapeshiftStateV1(root.identityShapeshift) ?? undefined
+        : undefined;
+      const falseName = root ? normalizeStoredFalseNameStateV1(root) : undefined;
+      const socialSilence = root
+        ? normalizeSocialSilenceMarkerV1(root.socialSilence) ?? undefined
+        : undefined;
+      const crosstalkReclaim = root
+        ? normalizeCrosstalkReclaimPlanV1(root.crosstalkReclaim) ?? undefined
+        : undefined;
+      const botPowerTrollPresentation = root
+        ? normalizeBotPowerTrollPresentationV1(root.botPowerTrollPresentation) ?? undefined
+        : undefined;
       return {
         askQuestion: normalizedAsk,
         ...(sent ? { sentGeneratedImage: sent } : {}),
         ...(story ? { tellFictionalStory: story } : {}),
         ...(webSearch ? { webSearch } : {}),
+        ...(userNotes ? { userNotes } : {}),
         ...(zenDisplay ? { zenDisplay } : {}),
         ...(zenTurn ? { zenTurn } : {}),
         ...(coffeeAmbientAction ? { coffeeAmbientAction } : {}),
+        ...(coffeeStageAction ? { coffeeStageAction } : {}),
+        ...(zenStageAction ? { zenStageAction } : {}),
         ...(coffeeUserAction ? { coffeeUserAction } : {}),
+        ...(coffeeInterruption ? { coffeeInterruption } : {}),
+        ...(coffeeAside ? { coffeeAside } : {}),
         ...(coffeeReplayEvents.length > 0 ? { coffeeReplayEvents } : {}),
         ...(autoRecovery ? { autoRecovery } : {}),
+        ...(coffeeTurnRoute ? { coffeeTurnRoute } : {}),
+        ...(autoRoute ? { autoRoute } : {}),
+        ...(reasoningEffort ? { reasoningEffort } : {}),
+        ...(turbo ? { turbo: true } : {}),
         ...(botPowerExactResponse ? { botPowerExactResponse } : {}),
+        ...(botPowerMutePerformance ? { botPowerMutePerformance } : {}),
+        ...(identityShapeshift ? { identityShapeshift } : {}),
+        ...(falseName ? { falseName } : {}),
+        ...(socialSilence ? { socialSilence } : {}),
+        ...(crosstalkReclaim ? { crosstalkReclaim } : {}),
+        ...(botPowerTrollPresentation ? { botPowerTrollPresentation } : {}),
       };
     }
     if (!parsed || typeof parsed !== "object") return {};
@@ -1648,13 +2573,30 @@ export function parseStoredAssistantToolPayload(
     const askQuestion = normalizeAskQuestionEnvelope(row.askQuestion);
     const sentOnly = normalizeStoredSentGeneratedImagePayload(row.sentGeneratedImage);
     const webSearch = normalizeStoredWebSearchPayload(row.webSearch);
+    const userNotes = normalizeStoredUserNotesPayload(row.userNotes);
     const story = normalizeTellFictionalStoryEnvelope(row.tellFictionalStory);
     const zenDisplay = normalizeZenDisplayMetadata(row.zenDisplay);
     const zenTurn = normalizeStoredZenAssistantTurnPayload(row.zenTurn);
     const coffeeAmbientAction = normalizeCoffeeAmbientActionPayload(row.coffeeAmbientAction);
+    const coffeeStageAction = normalizeCoffeeStageActionPayload(row.coffeeStageAction);
+    const zenStageAction = normalizeZenStageActionPayload(row.zenStageAction);
     const coffeeUserAction = normalizeCoffeeUserActionPayload(row.coffeeUserAction);
+    const coffeeInterruption = normalizeCoffeeInterruptionEvent(
+      row.coffeeInterruption,
+    );
+    const coffeeAside = normalizeCoffeeAsidePayload(row.coffeeAside);
     const coffeeReplayEvents = normalizeCoffeeReplayEventPayloads(row.coffeeReplayEvents);
     const autoRecovery = normalizeStoredAutoRecoveryTrace(row.autoRecovery);
+    const coffeeTurnRoute = normalizeCoffeeTurnRouteV1(row.coffeeTurnRoute);
+    const autoRoute = normalizeAutoRouteDecisionV1(row.autoRoute);
+    const normalizedReasoningEffort = normalizeProviderReasoningEffort(
+      row.reasoningEffort,
+    );
+    const reasoningEffort =
+      normalizedReasoningEffort === "auto"
+        ? undefined
+        : normalizedReasoningEffort;
+    const turbo = row.turbo === true;
     const botPowerExactResponse =
       row.botPowerExactResponse === "speech_copy" ||
       row.botPowerExactResponse === "hearing_repeat" ||
@@ -1662,6 +2604,17 @@ export function parseStoredAssistantToolPayload(
       row.botPowerExactResponse === "speech_obfuscation"
         ? row.botPowerExactResponse
         : undefined;
+    const botPowerMutePerformance =
+      normalizeBotPowerMutePerformanceV1(row.botPowerMutePerformance) ?? undefined;
+    const identityShapeshift =
+      normalizeBotIdentityShapeshiftStateV1(row.identityShapeshift) ?? undefined;
+    const falseName = normalizeStoredFalseNameStateV1(row);
+    const socialSilence =
+      normalizeSocialSilenceMarkerV1(row.socialSilence) ?? undefined;
+    const crosstalkReclaim =
+      normalizeCrosstalkReclaimPlanV1(row.crosstalkReclaim) ?? undefined;
+    const botPowerTrollPresentation =
+      normalizeBotPowerTrollPresentationV1(row.botPowerTrollPresentation) ?? undefined;
     const moodRow = row.mood;
     let moodKey: StoredMoodKey | undefined;
     let moodConfidence: number | undefined;
@@ -1691,11 +2644,26 @@ export function parseStoredAssistantToolPayload(
       ...(zenTurn ? { zenTurn } : {}),
       ...(sentOnly ? { sentGeneratedImage: sentOnly } : {}),
       ...(webSearch ? { webSearch } : {}),
+      ...(userNotes ? { userNotes } : {}),
       ...(coffeeAmbientAction ? { coffeeAmbientAction } : {}),
+      ...(coffeeStageAction ? { coffeeStageAction } : {}),
+      ...(zenStageAction ? { zenStageAction } : {}),
       ...(coffeeUserAction ? { coffeeUserAction } : {}),
+      ...(coffeeInterruption ? { coffeeInterruption } : {}),
+      ...(coffeeAside ? { coffeeAside } : {}),
       ...(coffeeReplayEvents.length > 0 ? { coffeeReplayEvents } : {}),
       ...(autoRecovery ? { autoRecovery } : {}),
+      ...(coffeeTurnRoute ? { coffeeTurnRoute } : {}),
+      ...(autoRoute ? { autoRoute } : {}),
+      ...(reasoningEffort ? { reasoningEffort } : {}),
+      ...(turbo ? { turbo: true } : {}),
       ...(botPowerExactResponse ? { botPowerExactResponse } : {}),
+      ...(botPowerMutePerformance ? { botPowerMutePerformance } : {}),
+      ...(identityShapeshift ? { identityShapeshift } : {}),
+      ...(falseName ? { falseName } : {}),
+      ...(socialSilence ? { socialSilence } : {}),
+      ...(crosstalkReclaim ? { crosstalkReclaim } : {}),
+      ...(botPowerTrollPresentation ? { botPowerTrollPresentation } : {}),
     };
   } catch {
     return {};
@@ -1714,11 +2682,26 @@ export function hydrateAssistantMessageParts(args: {
   zenDisplay?: ZenDisplayMetadata;
   sentGeneratedImage?: SentGeneratedImagePayload;
   webSearch?: WebSearchPayload;
+  userNotes?: UserNotesPayload;
   coffeeAmbientAction?: CoffeeAmbientActionPayload;
+  coffeeStageAction?: CoffeeStageActionPayload;
+  zenStageAction?: ZenStageActionPayload;
   coffeeUserAction?: CoffeeUserActionPayload;
+  coffeeInterruption?: CoffeeInterruptionEvent;
+  coffeeAside?: CoffeeAsidePayload;
   coffeeReplayEvents?: CoffeeReplayEventPayload[];
   autoRecovery?: AutoRecoveryTraceV1;
+  coffeeTurnRoute?: CoffeeTurnRouteV1;
+  autoRoute?: AutoRouteDecisionV1;
+  reasoningEffort?: ProviderReasoningEffort;
+  turbo?: boolean;
   botPowerExactResponse?: "speech_copy" | "hearing_repeat" | "intermittent_mute" | "speech_obfuscation";
+  botPowerMutePerformance?: BotPowerMutePerformanceV1;
+  identityShapeshift?: BotIdentityShapeshiftStateV1;
+  falseName?: BotFalseNameStateV1;
+  socialSilence?: SocialSilenceMarkerV1;
+  crosstalkReclaim?: CrosstalkReclaimPlanV1;
+  botPowerTrollPresentation?: BotPowerTrollPresentationV1;
 } {
   const stored = parseStoredAssistantToolPayload(args.toolPayload);
   const reparsed = parseAssistantPrismTools(args.content);
@@ -1736,16 +2719,45 @@ export function hydrateAssistantMessageParts(args: {
     ...(stored.zenDisplay ? { zenDisplay: stored.zenDisplay } : {}),
     ...(stored.sentGeneratedImage ? { sentGeneratedImage: stored.sentGeneratedImage } : {}),
     ...(stored.webSearch ? { webSearch: stored.webSearch } : {}),
+    ...(stored.userNotes ? { userNotes: stored.userNotes } : {}),
     ...(stored.coffeeAmbientAction
       ? { coffeeAmbientAction: stored.coffeeAmbientAction }
       : {}),
+    ...(stored.coffeeStageAction
+      ? { coffeeStageAction: stored.coffeeStageAction }
+      : {}),
+    ...(stored.zenStageAction ? { zenStageAction: stored.zenStageAction } : {}),
     ...(stored.coffeeUserAction ? { coffeeUserAction: stored.coffeeUserAction } : {}),
+    ...(stored.coffeeInterruption
+      ? { coffeeInterruption: stored.coffeeInterruption }
+      : {}),
+    ...(stored.coffeeAside ? { coffeeAside: stored.coffeeAside } : {}),
     ...(stored.coffeeReplayEvents && stored.coffeeReplayEvents.length > 0
       ? { coffeeReplayEvents: stored.coffeeReplayEvents }
       : {}),
     ...(stored.autoRecovery ? { autoRecovery: stored.autoRecovery } : {}),
+    ...(stored.coffeeTurnRoute ? { coffeeTurnRoute: stored.coffeeTurnRoute } : {}),
+    ...(stored.autoRoute ? { autoRoute: stored.autoRoute } : {}),
+    ...(stored.reasoningEffort
+      ? { reasoningEffort: stored.reasoningEffort }
+      : {}),
+    ...(stored.turbo ? { turbo: true } : {}),
     ...(stored.botPowerExactResponse
       ? { botPowerExactResponse: stored.botPowerExactResponse }
+      : {}),
+    ...(stored.botPowerMutePerformance
+      ? { botPowerMutePerformance: stored.botPowerMutePerformance }
+      : {}),
+    ...(stored.identityShapeshift
+      ? { identityShapeshift: stored.identityShapeshift }
+      : {}),
+    ...(stored.falseName ? { falseName: stored.falseName } : {}),
+    ...(stored.socialSilence ? { socialSilence: stored.socialSilence } : {}),
+    ...(stored.crosstalkReclaim
+      ? { crosstalkReclaim: stored.crosstalkReclaim }
+      : {}),
+    ...(stored.botPowerTrollPresentation
+      ? { botPowerTrollPresentation: stored.botPowerTrollPresentation }
       : {}),
   };
 }
@@ -1765,11 +2777,24 @@ export function serializeAssistantToolPayload(args: {
   zenTurn?: StoredZenAssistantTurnPayload;
   sentGeneratedImage?: SentGeneratedImagePayload;
   webSearch?: WebSearchPayload;
+  userNotes?: UserNotesPayload;
   coffeeAmbientAction?: CoffeeAmbientActionPayload;
+  coffeeStageAction?: CoffeeStageActionPayload;
+  zenStageAction?: ZenStageActionPayload;
   coffeeUserAction?: CoffeeUserActionPayload;
+  coffeeAside?: CoffeeAsidePayload;
   coffeeReplayEvents?: CoffeeReplayEventPayload[];
   autoRecovery?: AutoRecoveryTraceV1;
+  autoRoute?: AutoRouteDecisionV1;
+  reasoningEffort?: ProviderReasoningEffort;
+  turbo?: boolean;
   botPowerExactResponse?: "speech_copy" | "hearing_repeat" | "intermittent_mute" | "speech_obfuscation";
+  botPowerMutePerformance?: BotPowerMutePerformanceV1;
+  identityShapeshift?: BotIdentityShapeshiftStateV1;
+  falseName?: BotFalseNameStateV1;
+  socialSilence?: SocialSilenceMarkerV1;
+  crosstalkReclaim?: CrosstalkReclaimPlanV1;
+  botPowerTrollPresentation?: BotPowerTrollPresentationV1;
 }): string | null {
   const hasAsk = args.askQuestion !== undefined;
   const hasStory = args.tellFictionalStory !== undefined;
@@ -1777,18 +2802,37 @@ export function serializeAssistantToolPayload(args: {
   const hasImage = args.sentGeneratedImage !== undefined;
   const webSearch = normalizeStoredWebSearchPayload(args.webSearch);
   const hasWebSearch = webSearch !== undefined;
+  const userNotes = normalizeStoredUserNotesPayload(args.userNotes);
+  const hasUserNotes = userNotes !== undefined;
   const zenDisplay = normalizeZenDisplayMetadata(args.zenDisplay);
   const hasZenDisplay = zenDisplay !== undefined;
   const zenTurn = normalizeStoredZenAssistantTurnPayload(args.zenTurn);
   const hasZenTurn = zenTurn !== undefined;
   const coffeeAmbientAction = normalizeCoffeeAmbientActionPayload(args.coffeeAmbientAction);
   const hasCoffeeAmbientAction = coffeeAmbientAction !== undefined;
+  const coffeeStageAction = normalizeCoffeeStageActionPayload(args.coffeeStageAction);
+  const hasCoffeeStageAction = coffeeStageAction !== undefined;
+  const zenStageAction = normalizeZenStageActionPayload(args.zenStageAction);
+  const hasZenStageAction = zenStageAction !== undefined;
   const coffeeUserAction = normalizeCoffeeUserActionPayload(args.coffeeUserAction);
   const hasCoffeeUserAction = coffeeUserAction !== undefined;
+  const coffeeAside = normalizeCoffeeAsidePayload(args.coffeeAside);
+  const hasCoffeeAside = coffeeAside !== undefined;
   const coffeeReplayEvents = normalizeCoffeeReplayEventPayloads(args.coffeeReplayEvents);
   const hasCoffeeReplayEvents = coffeeReplayEvents.length > 0;
   const autoRecovery = normalizeStoredAutoRecoveryTrace(args.autoRecovery);
   const hasAutoRecovery = autoRecovery !== undefined;
+  const autoRoute = normalizeAutoRouteDecisionV1(args.autoRoute);
+  const hasAutoRoute = autoRoute !== undefined;
+  const normalizedReasoningEffort = normalizeProviderReasoningEffort(
+    args.reasoningEffort,
+  );
+  const reasoningEffort =
+    normalizedReasoningEffort === "auto"
+      ? undefined
+      : normalizedReasoningEffort;
+  const hasReasoningEffort = reasoningEffort !== undefined;
+  const hasTurbo = args.turbo === true;
   const botPowerExactResponse =
     args.botPowerExactResponse === "speech_copy" ||
     args.botPowerExactResponse === "hearing_repeat" ||
@@ -1797,19 +2841,49 @@ export function serializeAssistantToolPayload(args: {
       ? args.botPowerExactResponse
       : undefined;
   const hasBotPowerExactResponse = botPowerExactResponse !== undefined;
+  const botPowerMutePerformance =
+    normalizeBotPowerMutePerformanceV1(args.botPowerMutePerformance) ?? undefined;
+  const hasBotPowerMutePerformance = botPowerMutePerformance !== undefined;
+  const identityShapeshift =
+    normalizeBotIdentityShapeshiftStateV1(args.identityShapeshift) ?? undefined;
+  const hasIdentityShapeshift = identityShapeshift !== undefined;
+  const falseName = normalizeBotFalseNameStateV1(args.falseName) ?? undefined;
+  const hasFalseName = falseName !== undefined;
+  const socialSilence =
+    normalizeSocialSilenceMarkerV1(args.socialSilence) ?? undefined;
+  const hasSocialSilence = socialSilence !== undefined;
+  const crosstalkReclaim =
+    normalizeCrosstalkReclaimPlanV1(args.crosstalkReclaim) ?? undefined;
+  const hasCrosstalkReclaim = crosstalkReclaim !== undefined;
+  const botPowerTrollPresentation =
+    normalizeBotPowerTrollPresentationV1(args.botPowerTrollPresentation) ?? undefined;
+  const hasBotPowerTrollPresentation = botPowerTrollPresentation !== undefined;
   if (
     !hasAsk &&
     !hasStory &&
     !hasMood &&
     !hasImage &&
     !hasWebSearch &&
+    !hasUserNotes &&
     !hasZenDisplay &&
     !hasZenTurn &&
     !hasCoffeeAmbientAction &&
+    !hasCoffeeStageAction &&
+    !hasZenStageAction &&
     !hasCoffeeUserAction &&
+    !hasCoffeeAside &&
     !hasCoffeeReplayEvents &&
     !hasAutoRecovery &&
-    !hasBotPowerExactResponse
+    !hasAutoRoute &&
+    !hasReasoningEffort &&
+    !hasTurbo &&
+    !hasBotPowerExactResponse &&
+    !hasBotPowerMutePerformance &&
+    !hasIdentityShapeshift &&
+    !hasFalseName &&
+    !hasSocialSilence &&
+    !hasCrosstalkReclaim &&
+    !hasBotPowerTrollPresentation
   ) {
     return null;
   }
@@ -1819,13 +2893,26 @@ export function serializeAssistantToolPayload(args: {
     !hasStory &&
     !hasMood &&
     !hasWebSearch &&
+    !hasUserNotes &&
     !hasZenDisplay &&
     !hasZenTurn &&
     !hasCoffeeAmbientAction &&
+    !hasCoffeeStageAction &&
+    !hasZenStageAction &&
     !hasCoffeeUserAction &&
+    !hasCoffeeAside &&
     !hasCoffeeReplayEvents &&
     !hasAutoRecovery &&
+    !hasAutoRoute &&
+    !hasReasoningEffort &&
+    !hasTurbo &&
     !hasBotPowerExactResponse &&
+    !hasBotPowerMutePerformance &&
+    !hasIdentityShapeshift &&
+    !hasFalseName &&
+    !hasSocialSilence &&
+    !hasCrosstalkReclaim &&
+    !hasBotPowerTrollPresentation &&
     hasImage
   ) {
     return JSON.stringify({ v: 1 as const, sentGeneratedImage: args.sentGeneratedImage! });
@@ -1836,13 +2923,26 @@ export function serializeAssistantToolPayload(args: {
     !hasMood &&
     !hasImage &&
     !hasWebSearch &&
+    !hasUserNotes &&
     !hasZenDisplay &&
     !hasZenTurn &&
     !hasCoffeeAmbientAction &&
+    !hasCoffeeStageAction &&
+    !hasZenStageAction &&
     !hasCoffeeUserAction &&
+    !hasCoffeeAside &&
     !hasCoffeeReplayEvents &&
     !hasAutoRecovery &&
-    !hasBotPowerExactResponse
+    !hasAutoRoute &&
+    !hasReasoningEffort &&
+    !hasTurbo &&
+    !hasBotPowerExactResponse &&
+    !hasBotPowerMutePerformance &&
+    !hasIdentityShapeshift &&
+    !hasFalseName &&
+    !hasSocialSilence &&
+    !hasCrosstalkReclaim &&
+    !hasBotPowerTrollPresentation
   ) {
     return serializeAskQuestionTool(args.askQuestion!);
   }
@@ -1866,11 +2966,24 @@ export function serializeAssistantToolPayload(args: {
     ...(hasZenTurn ? { zenTurn } : {}),
     ...(hasImage ? { sentGeneratedImage: args.sentGeneratedImage! } : {}),
     ...(hasWebSearch ? { webSearch } : {}),
+    ...(hasUserNotes ? { userNotes } : {}),
     ...(hasCoffeeAmbientAction ? { coffeeAmbientAction } : {}),
+    ...(hasCoffeeStageAction ? { coffeeStageAction } : {}),
+    ...(hasZenStageAction ? { zenStageAction } : {}),
     ...(hasCoffeeUserAction ? { coffeeUserAction } : {}),
+    ...(hasCoffeeAside ? { coffeeAside } : {}),
     ...(hasCoffeeReplayEvents ? { coffeeReplayEvents } : {}),
     ...(hasAutoRecovery ? { autoRecovery } : {}),
+    ...(hasAutoRoute ? { autoRoute } : {}),
+    ...(hasReasoningEffort ? { reasoningEffort } : {}),
+    ...(hasTurbo ? { turbo: true } : {}),
     ...(hasBotPowerExactResponse ? { botPowerExactResponse } : {}),
+    ...(hasBotPowerMutePerformance ? { botPowerMutePerformance } : {}),
+    ...(hasIdentityShapeshift ? { identityShapeshift } : {}),
+    ...(hasFalseName ? { falseName } : {}),
+    ...(hasSocialSilence ? { socialSilence } : {}),
+    ...(hasCrosstalkReclaim ? { crosstalkReclaim } : {}),
+    ...(hasBotPowerTrollPresentation ? { botPowerTrollPresentation } : {}),
   };
   return JSON.stringify(payload);
 }

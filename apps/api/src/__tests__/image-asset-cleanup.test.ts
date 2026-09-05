@@ -8,6 +8,7 @@ import { describe, it } from "node:test";
 import {
   cleanupUnreferencedImageAssets,
   ImageAssetCleanupError,
+  imageAssetUsageLabels,
   listImageAssetCleanupRecoveries,
   permanentlyDeleteImageAssetCleanupRecovery,
   previewUnreferencedImageAssets,
@@ -42,27 +43,78 @@ function fixture(): DatabaseSync {
       purpose TEXT NOT NULL,
       created_at TEXT NOT NULL
     );
-    CREATE TABLE bots (user_id TEXT NOT NULL, profile_picture_image_id TEXT);
-    CREATE TABLE conversations (
+    CREATE TABLE users (
+      id TEXT PRIMARY KEY,
+      hub_atmosphere_image_id TEXT
+    );
+    CREATE TABLE bots (
+      id TEXT NOT NULL,
       user_id TEXT NOT NULL,
+      name TEXT NOT NULL,
+      profile_picture_image_id TEXT,
+      chat_atmosphere_image_id TEXT
+    );
+    CREATE TABLE conversations (
+      id TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      title TEXT NOT NULL,
       zen_wallpaper_image_id TEXT,
-      zen_wallpaper_history TEXT NOT NULL DEFAULT '[]'
+      zen_wallpaper_history TEXT NOT NULL DEFAULT '[]',
+      coffee_settings TEXT
     );
     CREATE TABLE messages (
+      id TEXT NOT NULL,
+      conversation_id TEXT NOT NULL,
       user_id TEXT NOT NULL,
       content TEXT,
       tool_payload TEXT
     );
-    CREATE TABLE botcast_shows (user_id TEXT NOT NULL, atmosphere_json TEXT NOT NULL);
-    CREATE TABLE slate_projects (user_id TEXT NOT NULL, cover_json TEXT NOT NULL);
-    CREATE TABLE conversation_exports (user_id TEXT NOT NULL, markdown TEXT NOT NULL);
+    CREATE TABLE botcast_shows (id TEXT NOT NULL, user_id TEXT NOT NULL, name TEXT NOT NULL, atmosphere_json TEXT NOT NULL);
+    CREATE TABLE library_groups (id TEXT NOT NULL, user_id TEXT NOT NULL, name TEXT NOT NULL, atmosphere_json TEXT NOT NULL);
+    CREATE TABLE coffee_groups (id TEXT NOT NULL, user_id TEXT NOT NULL, name TEXT NOT NULL, atmosphere_json TEXT);
+    CREATE TABLE slate_projects (id TEXT NOT NULL, user_id TEXT NOT NULL, title TEXT NOT NULL, cover_json TEXT NOT NULL);
+    CREATE TABLE slate_visual_references (user_id TEXT NOT NULL, project_id TEXT NOT NULL, image_id TEXT);
+    CREATE TABLE conversation_exports (id TEXT NOT NULL, user_id TEXT NOT NULL, markdown TEXT NOT NULL);
     CREATE TABLE story_sessions (
+      id TEXT NOT NULL,
       user_id TEXT NOT NULL,
+      title TEXT NOT NULL,
       episode_json TEXT,
       progress_json TEXT,
       transcript_json TEXT
     );
+    CREATE TABLE debate_sessions (
+      id TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      motion TEXT NOT NULL,
+      session_json TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'completed'
+    );
+    CREATE TABLE debate_mystery_v2_jobs (
+      session_id TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      checkpoint_json TEXT
+    );
+    CREATE TABLE debate_mystery_mansion_bundles (
+      id TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      name TEXT NOT NULL
+    );
+    CREATE TABLE debate_mystery_mansion_bundle_assets (
+      bundle_id TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      image_id TEXT NOT NULL
+    );
+    CREATE TABLE image_asset_sets (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL
+    );
+    CREATE TABLE image_asset_set_items (
+      set_id TEXT NOT NULL,
+      image_id TEXT NOT NULL
+    );
   `);
+  db.prepare("INSERT INTO users VALUES (?, NULL)").run("user-1");
   return db;
 }
 
@@ -93,14 +145,14 @@ function seedImage(
     options.userId ?? "user-1",
     options.botId ?? null,
     JSON.stringify(options.botIds ?? []),
-    options.origin ?? "images_panel",
+    options.origin ?? "botcast",
     `Prompt for ${id}`,
     `https://example.invalid/${id}.png`,
     options.provider ?? "openai",
     options.local === false
       ? null
-      : options.localRelPath ??
-        `generated-images/${options.userId ?? "user-1"}/${id}.png`,
+      : (options.localRelPath ??
+          `generated-images/${options.userId ?? "user-1"}/${id}.png`),
     options.purpose ?? "gallery",
     options.createdAt ?? "2026-07-19T00:00:00.000Z",
   );
@@ -121,16 +173,25 @@ describe("image asset cleanup preview", () => {
         "slate-cover",
         "export-image",
         "story-image",
+        "debate-exhibit",
       ]) {
         seedImage(db, id, {
-          origin: id.startsWith("signal") || id === "unused-signal"
-            ? "botcast"
-            : "images_panel",
+          origin: id.startsWith("zen")
+            ? "zen_wallpaper"
+            : id === "profile-image"
+              ? "bot_profile_picture"
+              : id === "slate-cover"
+                ? "slate_cover"
+                : id === "debate-exhibit"
+                  ? "debate"
+                  : "botcast",
+          purpose: id === "debate-exhibit" ? "debate_exhibit" : undefined,
           botId: id === "unused-signal" ? "bot-a" : null,
           botIds: id === "unused-signal" ? ["bot-a", "bot-b"] : [],
         });
       }
       seedImage(db, "uploaded-image", { provider: "upload" });
+      seedImage(db, "intentional-library-image", { origin: "images_panel" });
       seedImage(db, "group-room-image", {
         origin: "bot_group_room",
         purpose: "group-room-wallpaper",
@@ -138,37 +199,74 @@ describe("image asset cleanup preview", () => {
       seedImage(db, "remote-only", { local: false });
       seedImage(db, "other-user-unused", { userId: "user-2" });
 
-      db.prepare("INSERT INTO bots VALUES (?, ?)").run("user-1", "profile-image");
-      db.prepare("INSERT INTO conversations VALUES (?, ?, ?)").run(
+      db.prepare(
+        "INSERT INTO bots (id, user_id, name, profile_picture_image_id) VALUES (?, ?, ?, ?)",
+      ).run(
+        "bot-profile",
         "user-1",
+        "Profile bot",
+        "profile-image",
+      );
+      db.prepare(
+        "INSERT INTO conversations (id, user_id, title, zen_wallpaper_image_id, zen_wallpaper_history) VALUES (?, ?, ?, ?, ?)",
+      ).run(
+        "conversation-1",
+        "user-1",
+        "Zen room",
         "zen-current",
         JSON.stringify([{ imageId: "zen-history" }]),
       );
-      db.prepare("INSERT INTO messages (user_id, tool_payload) VALUES (?, ?)").run(
+      db.prepare(
+        "INSERT INTO messages (id, conversation_id, user_id, tool_payload) VALUES (?, ?, ?, ?)",
+      ).run(
+        "message-1",
+        "conversation-1",
         "user-1",
         JSON.stringify({ sentGeneratedImage: { imageId: "message-image" } }),
       );
-      db.prepare("INSERT INTO messages (user_id, content) VALUES (?, ?)").run(
+      db.prepare("INSERT INTO messages (id, conversation_id, user_id, content) VALUES (?, ?, ?, ?)").run(
+        "message-2",
+        "conversation-1",
         "user-1",
         "![kept](/api/images/message-content-image/file)",
       );
-      db.prepare("INSERT INTO botcast_shows VALUES (?, ?)").run(
+      db.prepare("INSERT INTO botcast_shows VALUES (?, ?, ?, ?)").run(
+        "show-1",
         "user-1",
+        "Signal show",
         JSON.stringify({ logo: { imageId: "signal-active" } }),
       );
-      db.prepare("INSERT INTO slate_projects VALUES (?, ?)").run(
+      db.prepare("INSERT INTO slate_projects VALUES (?, ?, ?, ?)").run(
+        "slate-1",
         "user-1",
+        "Slate project",
         JSON.stringify({ imageUrl: "/api/images/slate-cover/file" }),
       );
-      db.prepare("INSERT INTO conversation_exports VALUES (?, ?)").run(
+      db.prepare("INSERT INTO conversation_exports VALUES (?, ?, ?)").run(
+        "export-1",
         "user-1",
         "![saved](/api/images/export-image/file)",
       );
-      db.prepare("INSERT INTO story_sessions VALUES (?, ?, ?, ?)").run(
+      db.prepare("INSERT INTO story_sessions VALUES (?, ?, ?, ?, ?, ?)").run(
+        "story-1",
         "user-1",
+        "Story",
         JSON.stringify({ imageId: "story-image" }),
         null,
         "[]",
+      );
+      db.prepare(
+        "INSERT INTO debate_sessions (id, user_id, motion, session_json, status) VALUES (?, ?, ?, ?, ?)",
+      ).run(
+        "debate-1",
+        "user-1",
+        "A motion",
+        JSON.stringify({
+          evidence: {
+            exhibits: [{ id: "exhibit-1", imageId: "debate-exhibit" }],
+          },
+        }),
+        "completed",
       );
 
       const before = (
@@ -186,20 +284,177 @@ describe("image asset cleanup preview", () => {
       assert.equal(preview.readOnly, true);
       assert.equal(preview.cleanupAvailable, true);
       assert.equal(before, after);
-      assert.equal(preview.scanned, 13);
+      assert.equal(preview.version, 3);
+      assert.equal(preview.scanned, 15);
       assert.equal(preview.candidateCount, 1);
-      assert.deepEqual(preview.candidates.map((candidate) => candidate.id), [
-        "unused-signal",
-      ]);
+      assert.deepEqual(
+        preview.candidates.map((candidate) => candidate.id),
+        ["unused-signal"],
+      );
       assert.deepEqual(preview.candidates[0]?.botIds, ["bot-a", "bot-b"]);
       assert.equal(preview.candidates[0]?.modeLabel, "Signal");
-      assert.match(preview.candidates[0]?.reason ?? "", /saved only in the Image Library/iu);
-      assert.equal(preview.protectedByReferenceCount, 9);
+      assert.match(
+        preview.candidates[0]?.reason ?? "",
+        /PRISM-managed asset/iu,
+      );
+      assert.equal(preview.candidates[0]?.storageBytes, 0);
+      assert.equal(preview.candidateStorageBytes, 0);
+      assert.equal(preview.protectedByReferenceCount, 10);
+      assert.equal(preview.protectedIntentionalAssetCount, 1);
       assert.equal(preview.protectedPlayerAssetCount, 1);
       assert.equal(preview.protectedUnverifiableCount, 1);
       assert.equal(preview.protectedSharedFileCount, 0);
       assert.equal(preview.remoteOnlyCount, 1);
       assert.doesNotMatch(JSON.stringify(preview), /other-user-unused/u);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("protects the current Home atmosphere cache", () => {
+    const db = fixture();
+    try {
+      seedImage(db, "home-atmosphere", {
+        origin: "hub_atmosphere",
+        purpose: "hub_atmosphere",
+      });
+      db.prepare(
+        "UPDATE users SET hub_atmosphere_image_id = ? WHERE id = ?",
+      ).run("home-atmosphere", "user-1");
+
+      const preview = previewUnreferencedImageAssets(db, "user-1");
+      assert.equal(preview.candidates.length, 0);
+      assert.equal(preview.protectedByReferenceCount, 1);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("stops protecting Debate exhibit sprites after Archive Remove soft-cancels the proceeding", () => {
+    const db = fixture();
+    try {
+      seedImage(db, "live-exhibit", {
+        origin: "debate",
+        purpose: "debate_exhibit",
+      });
+      seedImage(db, "removed-exhibit", {
+        origin: "debate",
+        purpose: "debate_exhibit",
+      });
+      const evidence = (imageId: string) =>
+        JSON.stringify({
+          evidence: {
+            exhibits: [{ id: `exhibit-${imageId}`, imageId }],
+          },
+        });
+      db.prepare(
+        "INSERT INTO debate_sessions (id, user_id, motion, session_json, status) VALUES (?, ?, ?, ?, ?)",
+      ).run(
+        "debate-live",
+        "user-1",
+        "Live motion",
+        evidence("live-exhibit"),
+        "paused",
+      );
+      db.prepare(
+        "INSERT INTO debate_sessions (id, user_id, motion, session_json, status) VALUES (?, ?, ?, ?, ?)",
+      ).run(
+        "debate-removed",
+        "user-1",
+        "Removed motion",
+        evidence("removed-exhibit"),
+        "cancelled",
+      );
+
+      const usage = imageAssetUsageLabels(db, "user-1", [
+        "live-exhibit",
+        "removed-exhibit",
+      ]);
+      assert.deepEqual(usage.get("live-exhibit"), [
+        "Debate evidence exhibit · Live motion",
+      ]);
+      assert.deepEqual(usage.get("removed-exhibit"), []);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("treats every linked set member as one cleanup unit", () => {
+    const db = fixture();
+    try {
+      seedImage(db, "studio-light", {
+        origin: "botcast",
+        purpose: "signal_studio_day",
+      });
+      seedImage(db, "studio-dark", {
+        origin: "botcast",
+        purpose: "signal_studio_night",
+      });
+      db.prepare("INSERT INTO image_asset_sets VALUES ('studio-set', 'user-1')").run();
+      db.prepare("INSERT INTO image_asset_set_items VALUES ('studio-set', 'studio-light')").run();
+      db.prepare("INSERT INTO image_asset_set_items VALUES ('studio-set', 'studio-dark')").run();
+      db.prepare("INSERT INTO botcast_shows VALUES (?, ?, ?, ?)").run(
+        "show-studio",
+        "user-1",
+        "Studio show",
+        JSON.stringify({ dayAtmosphere: { imageId: "studio-light" } }),
+      );
+
+      const protectedPreview = previewUnreferencedImageAssets(db, "user-1");
+      assert.deepEqual(protectedPreview.candidates, []);
+
+      db.prepare("DELETE FROM botcast_shows").run();
+      const atomicPreview = previewUnreferencedImageAssets(db, "user-1");
+      assert.deepEqual(
+        atomicPreview.candidates.map((candidate) => candidate.id).sort(),
+        ["studio-dark", "studio-light"],
+      );
+    } finally {
+      db.close();
+    }
+  });
+
+  it("allows only orphaned PRISM-managed applet origins", () => {
+    const db = fixture();
+    try {
+      for (const origin of [
+        "botcast",
+        "debate",
+        "hub_atmosphere",
+        "slate_cover",
+        "zen_wallpaper",
+        "bot_profile_picture",
+      ]) {
+        seedImage(db, `eligible-${origin}`, { origin });
+      }
+      for (const origin of [
+        "images_panel",
+        "zen_chat",
+        "sandbox_chat",
+        "legacy_accessory",
+      ]) {
+        seedImage(db, `intentional-${origin}`, { origin });
+      }
+      seedImage(db, "imported-image", { origin: "asset_import" });
+      seedImage(db, "imported-project-image", {
+        origin: "botcast",
+        purpose: "project_import",
+      });
+
+      const preview = previewUnreferencedImageAssets(db, "user-1");
+      assert.deepEqual(
+        preview.candidates.map((candidate) => candidate.origin).sort(),
+        [
+          "bot_profile_picture",
+          "botcast",
+          "debate",
+          "hub_atmosphere",
+          "slate_cover",
+          "zen_wallpaper",
+        ],
+      );
+      assert.equal(preview.protectedIntentionalAssetCount, 4);
+      assert.equal(preview.protectedPlayerAssetCount, 2);
     } finally {
       db.close();
     }
@@ -262,25 +517,79 @@ describe("image asset cleanup preview", () => {
       const result = cleanupUnreferencedImageAssets(
         db,
         "user-1",
-        { snapshot: preview.snapshot, imageIds: ["candidate-a"] },
+        {
+          snapshot: preview.snapshot,
+          imageIds: ["candidate-a"],
+          permanent: true,
+        },
         fileOperations,
       );
 
       assert.equal(result.deletedCount, 1);
       assert.equal(result.quarantinedAssetCount, 1);
-      assert.equal(result.recoveryId, "cleanup-test");
-      assert.deepEqual(quarantined, [["generated-images/user-1/candidate-a.png"]]);
+      assert.equal(result.permanentDeleteCompleted, true);
+      assert.equal(result.recoveryRetained, false);
+      assert.equal(result.recoveryId, null);
+      assert.deepEqual(quarantined, [
+        ["generated-images/user-1/candidate-a.png"],
+      ]);
       assert.equal(
-        (db.prepare("SELECT COUNT(*) AS count FROM images WHERE id = 'candidate-a'").get() as { count: number }).count,
+        (
+          db
+            .prepare(
+              "SELECT COUNT(*) AS count FROM images WHERE id = 'candidate-a'",
+            )
+            .get() as { count: number }
+        ).count,
         0,
       );
       assert.equal(
-        (db.prepare("SELECT COUNT(*) AS count FROM images WHERE id = 'candidate-b'").get() as { count: number }).count,
+        (
+          db
+            .prepare(
+              "SELECT COUNT(*) AS count FROM images WHERE id = 'candidate-b'",
+            )
+            .get() as { count: number }
+        ).count,
         1,
       );
-      assert.deepEqual(result.preview.candidates.map((candidate) => candidate.id), [
-        "candidate-b",
-      ]);
+      assert.deepEqual(
+        result.preview.candidates.map((candidate) => candidate.id),
+        ["candidate-b"],
+      );
+    } finally {
+      db.close();
+    }
+  });
+
+  it("requires explicit permanent-delete confirmation before mutation", () => {
+    const db = fixture();
+    try {
+      seedImage(db, "candidate-a");
+      const preview = previewUnreferencedImageAssets(db, "user-1");
+      let quarantineCalled = false;
+      assert.throws(
+        () =>
+          cleanupUnreferencedImageAssets(
+            db,
+            "user-1",
+            {
+              snapshot: preview.snapshot,
+              imageIds: ["candidate-a"],
+              permanent: false,
+            },
+            {
+              quarantine: () => {
+                quarantineCalled = true;
+                throw new Error("should not move");
+              },
+            },
+          ),
+        (error) =>
+          error instanceof ImageAssetCleanupError &&
+          error.code === "invalid_request",
+      );
+      assert.equal(quarantineCalled, false);
     } finally {
       db.close();
     }
@@ -295,22 +604,33 @@ describe("image asset cleanup preview", () => {
       let quarantineCalled = false;
 
       assert.throws(
-        () => cleanupUnreferencedImageAssets(
-          db,
-          "user-1",
-          { snapshot: preview.snapshot, imageIds: ["candidate-a"] },
-          { quarantine: () => {
-            quarantineCalled = true;
-            throw new Error("should not move");
-          } },
-        ),
+        () =>
+          cleanupUnreferencedImageAssets(
+            db,
+            "user-1",
+            {
+              snapshot: preview.snapshot,
+              imageIds: ["candidate-a"],
+              permanent: true,
+            },
+            {
+              quarantine: () => {
+                quarantineCalled = true;
+                throw new Error("should not move");
+              },
+            },
+          ),
         (error) =>
           error instanceof ImageAssetCleanupError &&
           error.code === "stale_preview",
       );
       assert.equal(quarantineCalled, false);
       assert.equal(
-        (db.prepare("SELECT COUNT(*) AS count FROM images").get() as { count: number }).count,
+        (
+          db.prepare("SELECT COUNT(*) AS count FROM images").get() as {
+            count: number;
+          }
+        ).count,
         2,
       );
     } finally {
@@ -333,7 +653,11 @@ describe("image asset cleanup preview", () => {
           cleanupUnreferencedImageAssets(
             db,
             "user-1",
-            { snapshot: preview.snapshot, imageIds: ["candidate-a"] },
+            {
+              snapshot: preview.snapshot,
+              imageIds: ["candidate-a"],
+              permanent: true,
+            },
             {
               quarantine: () => {
                 quarantineCalled = true;
@@ -363,7 +687,11 @@ describe("image asset cleanup preview", () => {
           cleanupUnreferencedImageAssets(
             db,
             "user-1",
-            { snapshot: preview.snapshot, imageIds: ["candidate-a"] },
+            {
+              snapshot: preview.snapshot,
+              imageIds: ["candidate-a"],
+              permanent: true,
+            },
             {
               quarantine: () => {
                 quarantineCalled = true;
@@ -392,34 +720,45 @@ describe("image asset cleanup preview", () => {
     try {
       seedImage(db, "candidate-a");
       seedImage(db, "profile-image");
-      db.prepare("INSERT INTO bots VALUES (?, ?)").run(
+      db.prepare(
+        "INSERT INTO bots (id, user_id, name, profile_picture_image_id) VALUES (?, ?, ?, ?)",
+      ).run(
+        "bot-profile",
         "user-1",
+        "Profile bot",
         "profile-image",
       );
       const preview = previewUnreferencedImageAssets(db, "user-1");
       let quarantineCalled = false;
 
       assert.throws(
-        () => cleanupUnreferencedImageAssets(
-          db,
-          "user-1",
-          { snapshot: preview.snapshot, imageIds: ["profile-image"] },
-          {
-            quarantine: () => {
-              quarantineCalled = true;
-              throw new Error("should not move");
+        () =>
+          cleanupUnreferencedImageAssets(
+            db,
+            "user-1",
+            {
+              snapshot: preview.snapshot,
+              imageIds: ["profile-image"],
+              permanent: true,
             },
-          },
-        ),
+            {
+              quarantine: () => {
+                quarantineCalled = true;
+                throw new Error("should not move");
+              },
+            },
+          ),
         (error) =>
           error instanceof ImageAssetCleanupError &&
           error.code === "unsafe_selection",
       );
       assert.equal(quarantineCalled, false);
       assert.equal(
-        (db.prepare("SELECT COUNT(*) AS count FROM images").get() as {
-          count: number;
-        }).count,
+        (
+          db.prepare("SELECT COUNT(*) AS count FROM images").get() as {
+            count: number;
+          }
+        ).count,
         2,
       );
     } finally {
@@ -441,27 +780,41 @@ describe("image asset cleanup preview", () => {
         END;
       `);
       let restored = false;
-      assert.throws(() => cleanupUnreferencedImageAssets(
-        db,
-        "user-1",
-        { snapshot: preview.snapshot, imageIds: ["candidate-a"] },
-        {
-          recoveryId: () => "rollback-test",
-          quarantine: (userId, paths, recoveryId) => ({
-            recoveryId,
-            recoveryRelativePath: `asset-cleanup-trash/${userId}/${recoveryId}`,
-            movedFiles: paths.map((path) => ({
-              sourceRelativePath: path,
-              quarantineRelativePath: `asset-cleanup-trash/${userId}/${recoveryId}/${path}`,
-            })),
-            missingPrimaryRelativePaths: [],
-          }),
-          restore: () => { restored = true; },
-        },
-      ));
+      assert.throws(() =>
+        cleanupUnreferencedImageAssets(
+          db,
+          "user-1",
+          {
+            snapshot: preview.snapshot,
+            imageIds: ["candidate-a"],
+            permanent: true,
+          },
+          {
+            recoveryId: () => "rollback-test",
+            quarantine: (userId, paths, recoveryId) => ({
+              recoveryId,
+              recoveryRelativePath: `asset-cleanup-trash/${userId}/${recoveryId}`,
+              movedFiles: paths.map((path) => ({
+                sourceRelativePath: path,
+                quarantineRelativePath: `asset-cleanup-trash/${userId}/${recoveryId}/${path}`,
+              })),
+              missingPrimaryRelativePaths: [],
+            }),
+            restore: () => {
+              restored = true;
+            },
+          },
+        ),
+      );
       assert.equal(restored, true);
       assert.equal(
-        (db.prepare("SELECT COUNT(*) AS count FROM images WHERE id = 'candidate-a'").get() as { count: number }).count,
+        (
+          db
+            .prepare(
+              "SELECT COUNT(*) AS count FROM images WHERE id = 'candidate-a'",
+            )
+            .get() as { count: number }
+        ).count,
         1,
       );
     } finally {
@@ -483,6 +836,8 @@ describe("image asset cleanup preview", () => {
       writeGeneratedImageBytes(primary, Buffer.from("png"));
       writeGeneratedImageBytes(thumbnail, Buffer.from("webp"));
       const preview = previewUnreferencedImageAssets(db, "user-1");
+      assert.equal(preview.candidates[0]?.storageBytes, 7);
+      assert.equal(preview.candidateStorageBytes, 7);
       db.exec(`
         CREATE TRIGGER reject_real_candidate_cleanup
         BEFORE DELETE ON images
@@ -496,7 +851,11 @@ describe("image asset cleanup preview", () => {
         cleanupUnreferencedImageAssets(
           db,
           "user-1",
-          { snapshot: preview.snapshot, imageIds: ["candidate-a"] },
+          {
+            snapshot: preview.snapshot,
+            imageIds: ["candidate-a"],
+            permanent: true,
+          },
           { recoveryId: () => "real-rollback" },
         ),
       );
@@ -539,10 +898,10 @@ describe("image asset cleanup preview", () => {
       seedImage(db, "candidate-b", { createdAt: "2026-07-19T02:00:00.000Z" });
       const changed = previewUnreferencedImageAssets(db, "user-1");
       assert.notEqual(first.snapshot, changed.snapshot);
-      assert.deepEqual(changed.candidates.map((candidate) => candidate.id), [
-        "candidate-b",
-        "candidate-a",
-      ]);
+      assert.deepEqual(
+        changed.candidates.map((candidate) => candidate.id),
+        ["candidate-b", "candidate-a"],
+      );
     } finally {
       db.close();
     }
@@ -559,7 +918,9 @@ describe("image asset cleanup preview", () => {
       const preview = previewUnreferencedImageAssets(db, "user-1");
       assert.equal(preview.candidateCount, 201);
       assert.equal(preview.truncated, true);
-      const visibleIds = new Set(preview.candidates.map((candidate) => candidate.id));
+      const visibleIds = new Set(
+        preview.candidates.map((candidate) => candidate.id),
+      );
       const hiddenId = allIds.find((id) => !visibleIds.has(id));
       assert.ok(hiddenId);
       let quarantineCalled = false;
@@ -569,7 +930,11 @@ describe("image asset cleanup preview", () => {
           cleanupUnreferencedImageAssets(
             db,
             "user-1",
-            { snapshot: preview.snapshot, imageIds: [hiddenId] },
+            {
+              snapshot: preview.snapshot,
+              imageIds: [hiddenId],
+              permanent: true,
+            },
             {
               quarantine: () => {
                 quarantineCalled = true;
@@ -587,8 +952,65 @@ describe("image asset cleanup preview", () => {
     }
   });
 
-  it("round-trips rows and files through owner-only recovery and permanent purge", () => {
-    const tempDir = mkdtempSync(join(tmpdir(), "prism-cleanup-recovery-roundtrip-"));
+  it("permanently purges quarantined PNG and thumbnail bytes after commit", () => {
+    const tempDir = mkdtempSync(
+      join(tmpdir(), "prism-cleanup-permanent-purge-"),
+    );
+    const previousDbPath = process.env.DB_PATH;
+    const previousDataDir = process.env.LOCALAI_DATA_DIR;
+    process.env.DB_PATH = join(tempDir, "localai.db");
+    delete process.env.LOCALAI_DATA_DIR;
+    const db = fixture();
+    try {
+      seedImage(db, "candidate-a");
+      const primary = "generated-images/user-1/candidate-a.png";
+      const thumbnail = thumbWebpRelativePathFromPngRelativePath(primary);
+      writeGeneratedImageBytes(primary, Buffer.from("png"));
+      writeGeneratedImageBytes(thumbnail, Buffer.from("webp"));
+      const preview = previewUnreferencedImageAssets(db, "user-1");
+      assert.equal(preview.candidates[0]?.storageBytes, 7);
+      assert.equal(preview.candidateStorageBytes, 7);
+      const cleaned = cleanupUnreferencedImageAssets(
+        db,
+        "user-1",
+        {
+          snapshot: preview.snapshot,
+          imageIds: ["candidate-a"],
+          permanent: true,
+        },
+        { recoveryId: () => "permanent-success" },
+      );
+
+      assert.equal(cleaned.selectedStorageBytes, 7);
+      assert.equal(cleaned.reclaimedBytes, 7);
+      assert.equal(cleaned.permanentDeleteCompleted, true);
+      assert.equal(cleaned.recoveryRetained, false);
+      assert.equal(cleaned.recoveryId, null);
+      assert.equal(existsSync(resolveAbsoluteUnderDataRoot(primary)), false);
+      assert.equal(existsSync(resolveAbsoluteUnderDataRoot(thumbnail)), false);
+      assert.equal(
+        existsSync(
+          resolveAbsoluteUnderDataRoot(
+            "asset-cleanup-trash/user-1/permanent-success",
+          ),
+        ),
+        false,
+      );
+      assert.equal(listImageAssetCleanupRecoveries(db, "user-1").length, 0);
+    } finally {
+      db.close();
+      if (previousDbPath === undefined) delete process.env.DB_PATH;
+      else process.env.DB_PATH = previousDbPath;
+      if (previousDataDir === undefined) delete process.env.LOCALAI_DATA_DIR;
+      else process.env.LOCALAI_DATA_DIR = previousDataDir;
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("retains a recoverable owner-only batch when final purge fails", () => {
+    const tempDir = mkdtempSync(
+      join(tmpdir(), "prism-cleanup-recovery-roundtrip-"),
+    );
     const previousDbPath = process.env.DB_PATH;
     const previousDataDir = process.env.LOCALAI_DATA_DIR;
     process.env.DB_PATH = join(tempDir, "localai.db");
@@ -604,10 +1026,23 @@ describe("image asset cleanup preview", () => {
       const cleaned = cleanupUnreferencedImageAssets(
         db,
         "user-1",
-        { snapshot: preview.snapshot, imageIds: ["candidate-a"] },
-        { recoveryId: () => "roundtrip" },
+        {
+          snapshot: preview.snapshot,
+          imageIds: ["candidate-a"],
+          permanent: true,
+        },
+        {
+          recoveryId: () => "roundtrip",
+          purge: () => {
+            throw new Error("simulated final purge failure");
+          },
+        },
       );
       assert.equal(cleaned.deletedCount, 1);
+      assert.equal(cleaned.permanentDeleteCompleted, false);
+      assert.equal(cleaned.recoveryRetained, true);
+      assert.equal(cleaned.reclaimedBytes, 0);
+      assert.equal(cleaned.recoveryId, "roundtrip");
       assert.equal(listImageAssetCleanupRecoveries(db, "user-2").length, 0);
       assert.equal(
         restoreImageAssetCleanupRecovery(db, "user-2", "roundtrip"),
@@ -624,7 +1059,11 @@ describe("image asset cleanup preview", () => {
       assert.equal(existsSync(resolveAbsoluteUnderDataRoot(primary)), true);
       assert.equal(existsSync(resolveAbsoluteUnderDataRoot(thumbnail)), true);
       assert.equal(
-        (db.prepare("SELECT COUNT(*) AS count FROM images").get() as { count: number }).count,
+        (
+          db.prepare("SELECT COUNT(*) AS count FROM images").get() as {
+            count: number;
+          }
+        ).count,
         1,
       );
 
@@ -632,22 +1071,25 @@ describe("image asset cleanup preview", () => {
       cleanupUnreferencedImageAssets(
         db,
         "user-1",
-        { snapshot: secondPreview.snapshot, imageIds: ["candidate-a"] },
-        { recoveryId: () => "permanent" },
+        {
+          snapshot: secondPreview.snapshot,
+          imageIds: ["candidate-a"],
+          permanent: true,
+        },
+        {
+          recoveryId: () => "permanent",
+          purge: () => {
+            throw new Error("retain for explicit purge test");
+          },
+        },
       );
       assert.equal(
-        permanentlyDeleteImageAssetCleanupRecovery(
-          db,
-          "user-1",
-          "permanent",
-        ),
+        permanentlyDeleteImageAssetCleanupRecovery(db, "user-1", "permanent"),
         true,
       );
       assert.equal(
         existsSync(
-          resolveAbsoluteUnderDataRoot(
-            "asset-cleanup-trash/user-1/permanent",
-          ),
+          resolveAbsoluteUnderDataRoot("asset-cleanup-trash/user-1/permanent"),
         ),
         false,
       );
@@ -681,7 +1123,11 @@ describe("image asset cleanup preview", () => {
         cleanupUnreferencedImageAssets(
           db,
           "user-1",
-          { snapshot: preview.snapshot, imageIds: ["candidate-a"] },
+          {
+            snapshot: preview.snapshot,
+            imageIds: ["candidate-a"],
+            permanent: true,
+          },
           {
             recoveryId: () => "interrupted",
             restore: () => undefined,

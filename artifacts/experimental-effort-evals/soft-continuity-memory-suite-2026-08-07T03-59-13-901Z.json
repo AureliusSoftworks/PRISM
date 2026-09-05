@@ -1,0 +1,172 @@
+{
+  "schema": "prism-experimental-effort-soft-continuity-memory-suite-v1",
+  "createdAt": "2026-08-07T03:59:13.901Z",
+  "options": {
+    "suite": "soft-continuity-memory",
+    "thinkingProvider": "openai",
+    "localModel": "llama3.2",
+    "thinkingModel": "gpt-5.6-sol",
+    "judgeModel": "gpt-5.5",
+    "effort": "high",
+    "outDir": "artifacts/experimental-effort-evals",
+    "temperature": 0.25,
+    "maxTokens": 3200,
+    "noJudge": false,
+    "includeScratchpad": true
+  },
+  "cases": [
+    {
+      "id": "drink-prefs-memory",
+      "title": "Drink + milk + nickname from encrypted memories",
+      "reportPath": "/Users/jared/Developer/Web Apps/PRISM/artifacts/experimental-effort-evals/experimental-effort-2026-08-07T03-59-13-901Z-drink-prefs-memory.md",
+      "totals": {
+        "baseline": 6,
+        "reference": 10,
+        "simulated": 6,
+        "ranking": [
+          "B",
+          "A",
+          "C"
+        ]
+      },
+      "continuity": {
+        "baseline": {
+          "total": 5,
+          "max": 6,
+          "checks": {
+            "includes:cortado": false,
+            "includes:oat": true,
+            "includes:Aurora Blend": true,
+            "label:D1": true,
+            "label:D2": true,
+            "label:D3": true
+          }
+        },
+        "simulated": {
+          "total": 5,
+          "max": 6,
+          "checks": {
+            "includes:cortado": false,
+            "includes:oat": true,
+            "includes:Aurora Blend": true,
+            "label:D1": true,
+            "label:D2": true,
+            "label:D3": true
+          }
+        },
+        "reference": {
+          "total": 6,
+          "max": 6,
+          "checks": {
+            "includes:cortado": true,
+            "includes:oat": true,
+            "includes:Aurora Blend": true,
+            "label:D1": true,
+            "label:D2": true,
+            "label:D3": true
+          }
+        },
+        "digestOnSimulated": true
+      }
+    },
+    {
+      "id": "travel-plan-memory",
+      "title": "City + month + lodging from encrypted memories",
+      "reportPath": "/Users/jared/Developer/Web Apps/PRISM/artifacts/experimental-effort-evals/experimental-effort-2026-08-07T03-59-13-901Z-travel-plan-memory.md",
+      "totals": {
+        "baseline": 2,
+        "reference": 8,
+        "simulated": 4,
+        "ranking": [
+          "B",
+          "C",
+          "A"
+        ]
+      },
+      "continuity": {
+        "baseline": {
+          "total": 3,
+          "max": 3,
+          "checks": {
+            "includes:Lisbon": true,
+            "includes:October": true,
+            "includes:Alfama Loft": true
+          }
+        },
+        "simulated": {
+          "total": 1,
+          "max": 3,
+          "checks": {
+            "includes:Lisbon": false,
+            "includes:October": true,
+            "includes:Alfama Loft": false
+          }
+        },
+        "reference": {
+          "total": 2,
+          "max": 3,
+          "checks": {
+            "includes:Lisbon": true,
+            "includes:October": true,
+            "includes:Alfama Loft": false
+          }
+        },
+        "digestOnSimulated": true
+      }
+    },
+    {
+      "id": "format-prefs-memory",
+      "title": "Format + forbidden word + units from encrypted memories",
+      "reportPath": "/Users/jared/Developer/Web Apps/PRISM/artifacts/experimental-effort-evals/experimental-effort-2026-08-07T03-59-13-901Z-format-prefs-memory.md",
+      "totals": {
+        "baseline": 6,
+        "reference": 10,
+        "simulated": 7,
+        "ranking": [
+          "B",
+          "C",
+          "A"
+        ]
+      },
+      "continuity": {
+        "baseline": {
+          "total": 5,
+          "max": 6,
+          "checks": {
+            "includes:Markdown": false,
+            "includes:basically": true,
+            "includes:metric": true,
+            "label:F1": true,
+            "label:F2": true,
+            "label:F3": true
+          }
+        },
+        "simulated": {
+          "total": 6,
+          "max": 6,
+          "checks": {
+            "includes:Markdown": true,
+            "includes:basically": true,
+            "includes:metric": true,
+            "label:F1": true,
+            "label:F2": true,
+            "label:F3": true
+          }
+        },
+        "reference": {
+          "total": 6,
+          "max": 6,
+          "checks": {
+            "includes:Markdown": true,
+            "includes:basically": true,
+            "includes:metric": true,
+            "label:F1": true,
+            "label:F2": true,
+            "label:F3": true
+          }
+        },
+        "digestOnSimulated": true
+      }
+    }
+  ]
+}

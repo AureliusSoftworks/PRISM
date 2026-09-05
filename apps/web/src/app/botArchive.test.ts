@@ -3,7 +3,9 @@ import { describe, it } from "node:test";
 import { strToU8, unzipSync, zipSync } from "fflate";
 import {
   DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
+  botPowerAvatarVisibilityModeV1,
   botPowerSourceHashV1,
+  hexToHsl,
 } from "@localai/shared";
 
 import {
@@ -13,6 +15,7 @@ import {
   createPrismBotArchive,
   parsePrismBotArchive,
   resolvePrismBotArchiveFaceGlyphAnimation,
+  resolvePrismBotArchiveFaceEyeMovement,
   type PrismBotArchiveJson,
 } from "./botArchive.ts";
 
@@ -26,6 +29,7 @@ function baseBotJson(overrides: Partial<PrismBotArchiveJson> = {}): PrismBotArch
       namePronunciation: "  Play-toe  ",
       selfReferral: "  Plato  ",
       color: "#4F46A5",
+      accentColor: "#7799AA",
       glyph: "lucideDrama",
       voicePreviewLine: "The examined voice is worth hearing.",
       authoredAudioVoiceProfile: {
@@ -57,8 +61,9 @@ function baseBotJson(overrides: Partial<PrismBotArchiveJson> = {}): PrismBotArch
       faceEyeOffsetX: 0.06,
       faceEyeOffsetY: -0.08,
       faceEyeRotationDeg: -35,
-      faceMouthCharacter: "△",
-      faceMouthAnimation: "flicker",
+      faceMouthCharacter: "V",
+      faceMouthAnimation: "none",
+      faceMouthSpeechPoses: ["—", "·", "△", "○"],
       faceMouthCoffeePucker: true,
       faceMouthScale: 1.25,
       faceMouthOffsetX: -0.04,
@@ -79,6 +84,12 @@ describe("botArchive", () => {
     assert.equal(resolvePrismBotArchiveFaceGlyphAnimation("wobble"), "wobble");
   });
 
+  it("migrates retired eye effects to Natural and preserves Still", () => {
+    assert.equal(resolvePrismBotArchiveFaceEyeMovement(undefined), "natural");
+    assert.equal(resolvePrismBotArchiveFaceEyeMovement("wobble"), "natural");
+    assert.equal(resolvePrismBotArchiveFaceEyeMovement("still"), "still");
+  });
+
   it("round-trips a v2 zipped .bot archive", () => {
     const archive = createPrismBotArchive({
       botJson: baseBotJson(),
@@ -91,6 +102,11 @@ describe("botArchive", () => {
     assert.equal(parsed.botJson.bot.name, "Plato");
     assert.equal(parsed.botJson.bot.namePronunciation, "Play-toe");
     assert.equal(parsed.botJson.bot.selfReferral, "Plato");
+    assert.ok(
+      hexToHsl(parsed.botJson.bot.color ?? "").s > 99.5,
+      `expected fully saturated archive color, got ${parsed.botJson.bot.color}`,
+    );
+    assert.equal(parsed.botJson.bot.accentColor, "#22b5ff");
     assert.equal(parsed.botJson.bot.voicePreviewLine, "The examined voice is worth hearing.");
     assert.equal(
       parsed.botJson.bot.authoredAudioVoiceProfile?.v === 2
@@ -126,7 +142,9 @@ describe("botArchive", () => {
     assert.equal(parsed.botJson.bot.faceEyeOffsetX, 0.06);
     assert.equal(parsed.botJson.bot.faceEyeOffsetY, -0.08);
     assert.equal(parsed.botJson.bot.faceEyeRotationDeg, -35);
-    assert.equal(parsed.botJson.bot.faceMouthAnimation, "flicker");
+    assert.equal(parsed.botJson.bot.faceMouthCharacter, "V");
+    assert.deepEqual(parsed.botJson.bot.faceMouthSpeechPoses, ["—", "·", "△", "○"]);
+    assert.equal(parsed.botJson.bot.faceMouthAnimation, "none");
     assert.equal(parsed.botJson.bot.faceMouthCoffeePucker, true);
     assert.equal(parsed.botJson.bot.faceMouthScale, 1.25);
     assert.equal(parsed.botJson.bot.faceMouthOffsetX, -0.04);
@@ -135,6 +153,15 @@ describe("botArchive", () => {
     assert.equal(parsed.botJson.bot.faceBlinkBar, "¦");
     assert.deepEqual(parsed.botJson.bot.faceThinkingFrames, ["·", "*", "✦", "*"]);
     assert.deepEqual(parsed.memories, ["Loves dialogue.", "Founded the Academy."]);
+  });
+
+  it("keeps older v2 archives without an Atmosphere accent valid", () => {
+    const legacy = baseBotJson();
+    delete legacy.bot.accentColor;
+    const parsed = parsePrismBotArchive(
+      createPrismBotArchive({ botJson: legacy, memories: [] }),
+    );
+    assert.equal(parsed.botJson.bot.accentColor, undefined);
   });
 
   it("omits empty memories and accepts missing memories.json", () => {
@@ -146,7 +173,7 @@ describe("botArchive", () => {
     assert.deepEqual(parsePrismBotArchive(archive).memories, []);
   });
 
-  it("round-trips powers and queues mismatched compiled rules for recompilation", () => {
+  it("round-trips powers and retains the last valid artifact while queuing recompilation", () => {
     const name = "Stoic";
     const intent = "Mood hardly changes from praise or criticism.";
     const archive = createPrismBotArchive({
@@ -190,8 +217,97 @@ describe("botArchive", () => {
     });
     const stalePower = parsePrismBotArchive(stale).botJson.bot.powers?.[0];
     assert.equal(stalePower?.compileStatus, "draft");
-    assert.equal(stalePower?.compiled, null);
+    assert.equal(
+      stalePower?.compiled?.sourceHash,
+      botPowerSourceHashV1(name, intent),
+    );
     assert.equal(stalePower?.intent, "A revised intent that invalidates compiled rules.");
+  });
+
+  it("round-trips the versioned Cursed Tongue effect without weakening it", () => {
+    const name = "Cursed Tongue";
+    const intent = "Every non-silent public spoken output gains frequent strong profanity after generation.";
+    const archive = createPrismBotArchive({
+      botJson: baseBotJson({
+        bot: {
+          ...baseBotJson().bot,
+          powers: [{
+            version: 1,
+            id: "cursed-tongue",
+            name,
+            intent,
+            enabled: true,
+            compileStatus: "ready",
+            compiled: {
+              version: 1,
+              sourceHash: botPowerSourceHashV1(name, intent),
+              selfCue: "Draft clean speech only.",
+              observerCue: "Only adjusted speech is public.",
+              effects: [{
+                type: "cursed_tongue",
+                version: 2,
+                frequency: "frequent",
+                strength: "strong",
+                vocabulary: "structurally_masked_non_slur",
+                phraseMode: "censor_performance",
+              }],
+              ruleLabels: ["Censored curse in every audible line"],
+            },
+          }],
+        },
+      }),
+      memories: [],
+    });
+
+    assert.deepEqual(
+      parsePrismBotArchive(archive).botJson.bot.powers?.[0]?.compiled?.effects,
+      [{
+        type: "cursed_tongue",
+        version: 2,
+        frequency: "frequent",
+        strength: "strong",
+        vocabulary: "structurally_masked_non_slur",
+        phraseMode: "censor_performance",
+      }],
+    );
+  });
+
+  it("upgrades targeted-Invisible archives without invalidating their source", () => {
+    const name = "Invisible";
+    const intent = "Can only be seen by Light Yagami.";
+    const sourceHash = botPowerSourceHashV1(name, intent);
+    const archive = createPrismBotArchive({
+      botJson: baseBotJson({
+        bot: {
+          ...baseBotJson().bot,
+          powers: [{
+            version: 1,
+            id: "invisible",
+            name,
+            intent,
+            enabled: true,
+            compileStatus: "ready",
+            compiled: {
+              version: 1,
+              sourceHash,
+              selfCue: "Remain unseen except to Light.",
+              observerCue: "Only Light can perceive the holder.",
+              effects: [{
+                type: "awareness",
+                allowed: [{ kind: "bot", name: "Light Yagami" }],
+              }],
+              ruleLabels: ["Visible only to Light Yagami"],
+            },
+          }],
+        },
+      }),
+      memories: [],
+    });
+
+    const power = parsePrismBotArchive(archive).botJson.bot.powers?.[0];
+    assert.equal(power?.compileStatus, "ready");
+    assert.equal(power?.compiled?.sourceHash, sourceHash);
+    assert.equal(botPowerAvatarVisibilityModeV1(power ? [power] : []), "hidden");
   });
 
   it("can be embedded as zipped .bot entries inside a .bots collection", () => {

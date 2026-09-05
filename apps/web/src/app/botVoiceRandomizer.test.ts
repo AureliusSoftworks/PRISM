@@ -19,7 +19,8 @@ describe("bot voice randomizer", () => {
     assert.equal(profile.systemVoiceName, "Fred");
     assert.equal(profile.baseVoiceId, "voice-1");
     assert.equal(profile.pitch, -0.35);
-    assert.equal(profile.lilt, 0);
+    assert.equal(profile.pace, 0);
+    assert.equal(profile.lilt, 0.35);
     assert.equal(
       profile.bottishTone,
       DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1.bottishTone,
@@ -82,6 +83,21 @@ describe("bot voice randomizer", () => {
     assert.equal(operatingSystem.systemVoiceName, "Samantha");
   });
 
+  it("clears stale provider accent metadata when Premium identity changes", () => {
+    const randomized = randomizeBotAudioVoiceProfile(
+      {
+        ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
+        elevenLabsVoiceId: "old-voice",
+        elevenLabsNativeAccentHint: "german germany",
+      },
+      "elevenlabs",
+      ["new-voice"],
+      () => 0.5,
+    );
+    assert.equal(randomized.elevenLabsVoiceId, "new-voice");
+    assert.equal(randomized.elevenLabsNativeAccentHint, undefined);
+  });
+
   it("keeps fresh bot drafts deterministic after whole-bot randomization is removed", () => {
     const pageSource = readFileSync(new URL("./page.tsx", import.meta.url), "utf8").replace(
       /\s+/gu,
@@ -110,8 +126,8 @@ describe("bot voice randomizer", () => {
     );
     assert.match(pageSource, /setNewBotColor\(DEFAULT_PRISM_BOT_CUSTOMIZER_COLOR\)/);
     assert.match(pageSource, /setNewBotGlyph\(DEFAULT_BOT_GLYPH\)/);
-    assert.match(pageSource, /const createdAudioVoiceProfile = normalizeBotAudioVoiceProfileV1\(/);
-    assert.doesNotMatch(pageSource, /const createdAudioVoiceProfile = fillMissingBotAudioVoiceIdentities\(/);
+    assert.match(pageSource, /let createdAudioVoiceProfile = normalizeBotAudioVoiceProfileV1\(/);
+    assert.doesNotMatch(pageSource, /let createdAudioVoiceProfile = fillMissingBotAudioVoiceIdentities\(/);
     assert.match(pageSource, /authoredAudioVoiceProfile: createdAudioVoiceProfile/);
   });
 });

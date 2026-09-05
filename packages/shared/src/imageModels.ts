@@ -58,7 +58,7 @@ export function isGptImageModelId(id: OpenAiImageModelId): boolean {
 }
 
 /** Sizes surfaced by Prism for the active OpenAI image models. */
-export type OpenAiImageSizeGpt = "1024x1024" | "1024x1536" | "1536x1024";
+export type OpenAiImageSizeGpt = "1024x1024" | "1024x1536" | "1536x1024" | "1280x720";
 export type NormalizedOpenAiImageSize = OpenAiImageSizeGpt;
 export type NormalizedOpenAiImageQuality = "low" | "medium" | "high";
 
@@ -68,7 +68,13 @@ export interface NormalizedOpenAiImageRequest {
   quality: NormalizedOpenAiImageQuality;
 }
 
-function coerceSizeForGptImage(raw: string): OpenAiImageSizeGpt {
+function coerceSizeForGptImage(
+  raw: string,
+  model: OpenAiImageModelId,
+): OpenAiImageSizeGpt {
+  if (raw === "1280x720") {
+    return model === "gpt-image-2" ? raw : "1536x1024";
+  }
   if (raw === "1024x1536" || raw === "1536x1024" || raw === "1024x1024") return raw;
   if (raw === "1024x1792") return "1024x1536";
   if (raw === "1792x1024") return "1536x1024";
@@ -95,7 +101,7 @@ export function normalizeOpenAiImageGenerationParams(
 
   return {
     model,
-    size: coerceSizeForGptImage(sizeRaw),
+    size: coerceSizeForGptImage(sizeRaw, model),
     quality: coerceGptImageQuality(qualityRaw),
   };
 }

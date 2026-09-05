@@ -8,14 +8,27 @@ import {
 
 import {
   BOTCAST_ECHO_DASHBOARD_BLURB_FALLBACK,
+  BOTCAST_CLOSEUP_CAMERA_SCALE,
   BOTCAST_DAYLIGHT_RELIGHT_EDIT_PROMPT,
   BOTCAST_DEFAULT_STUDIO_ATMOSPHERE_MIX,
+  BOTCAST_DEFAULT_CAMERA_FRAMING,
+  BOTCAST_DEFAULT_LOGO_PLACEMENT,
+  BOTCAST_DEFAULT_STUDIO_GLOW_TUNING,
   BOTCAST_DEFAULT_STUDIO_LAYOUT,
   BOTCAST_DIRECTOR_MIN_SHOT_MS,
+  BOTCAST_SIGNAL_MUTE_ELAPSED_CUE_HOLD_MS,
   BOTCAST_FALLBACK_STUDIO_ACCENT_VARIANTS,
+  BOTCAST_PRODUCER_DIRECT_QUOTE_LEAD_IN,
+  BOTCAST_PRODUCER_DIRECT_QUOTE_MAX,
   BOTCAST_VOICE_LEVEL_DEFAULT,
   BOTCAST_VOICE_LEVEL_MAX,
+  botcastDirectQuoteTurnMaxTokens,
+  composeBotcastProducerDirectQuoteUtterance,
   applyBotcastProducerCueToTension,
+  botcastActiveProducerCueFromEvents,
+  botcastProducerCueLifecyclesFromEvents,
+  botcastProducerCuePreemptsHostSpeech,
+  botcastProducerCuePriority,
   botcastAutoCameraLeadInMs,
   botcastFallbackStudioAccentVariantForSeed,
   botcastCameraModeAt,
@@ -23,22 +36,44 @@ import {
   botcastCameraOffsetXPercent,
   botcastCameraOffsetYPercent,
   botcastDirectorSuggestion,
+  botcastDirectorCoverageSuggestions,
+  botcastAutoCoverageShotAt,
+  botcastCameraSuggestionReasonAt,
+  botcastDepartureMessageIdForRole,
+  botcastEchoHostInterruptPhrase,
   botcastEpisodeDepartureOutcome,
   botcastGuestDepartureEligible,
+  botcastGuestWalkOffRiskV1,
+  botcastGuestAnswerAdvancesInterview,
   botcastGuestVoluntaryDepartureIntent,
   botcastGuestHasDepartedAt,
   botcastHostHasDepartedAt,
   botcastHostInterruptionLineAt,
   botcastHostInterruptionLinesForSeed,
   botcastHostRageQuitIntent,
+  botcastHostSignOffIntent,
   botcastInterruptedGuestContent,
+  botcastInterruptedHostContent,
+  planBotcastProducerPivotPerformanceV1,
   botcastInterruptionBridgeMessageId,
+  botcastEpisodeImageDescriptorFromFileName,
+  botcastEpisodeImageSpokenReference,
+  botcastPreSessionImageRevealHostTurnV1,
+  botcastPreSessionImageShouldPresentOnNextTurnV1,
   botcastMessageIsEphemeralInterruptionBridge,
   botcastListenerReactionForMessage,
+  botcastImageContextForMessageV1,
+  botcastLatestImageContextV1,
+  botcastLatestSpeechCopyReactionSourceV1,
+  botcastPublicReactionSpeechForMessage,
   botcastProducerGuestThinkingDiscountMs,
   botcastReplayMessageIndexAt,
   botcastReplayTimeline,
+  botcastSoundboardCueFromEvent,
+  botcastSoundboardCueLabel,
+  botcastSignalStandardCadenceDurationMs,
   botcastNextSpeakerRole,
+  botcastPendingCrosstalkReclaimV1,
   botcastSegmentForTurn,
   botcastSessionShouldClose,
   botcastSocialInfluenceEventsAt,
@@ -52,14 +87,801 @@ import {
   isBotcastFallbackStudioAccentVariant,
   isBotcastEchoDashboardBlurb,
   normalizeBotcastStudioLayout,
+  normalizeBotcastCameraFraming,
+  normalizeBotcastLogoPlacement,
   normalizeBotcastStudioAtmosphereMix,
+  normalizeBotcastStudioGlowTuning,
+  normalizeBotcastHostRecoveryQuestions,
+  normalizeBotcastEpisodeImageName,
+  normalizeBotcastEpisodeImageReason,
+  normalizeBotcastEpisodeImageReplayEmoji,
   normalizeBotcastVoiceLevel,
   normalizeBotcastVoiceLevelsByBotId,
   swapBotcastStudioLayoutSeats,
   type BotcastReplayEvent,
 } from "./botcast.ts";
 
+describe("Signal public cadence speech", () => {
+  it("marks pause cuts with an ellipsis and active-speech cuts with a dash", () => {
+    const fullContent = "Do you sometimes find yourself looking away?";
+    assert.equal(
+      botcastInterruptedHostContent(fullContent, {
+        spokenContent: "Do you sometimes find yourself",
+        cadence: "between_words",
+      }),
+      "Do you sometimes find yourself…",
+    );
+    assert.equal(
+      botcastInterruptedHostContent(fullContent, {
+        spokenContent: "Do you sometimes find yourself",
+        cadence: "active_speech",
+      }),
+      "Do you sometimes find yourself—",
+    );
+    assert.equal(
+      botcastInterruptedHostContent(fullContent, {
+        spokenContent: "Do you sometimes find yourself",
+      }),
+      "Do you sometimes find yourself",
+    );
+  });
+
+  it("plans one deterministic replay-safe Producer pivot performance", () => {
+    const pause = planBotcastProducerPivotPerformanceV1({
+      seed: "pause-seed",
+      cadence: "between_words",
+    });
+    assert.deepEqual(
+      planBotcastProducerPivotPerformanceV1({
+        seed: "pause-seed",
+        cadence: "between_words",
+      }),
+      pause,
+    );
+    assert.equal(pause.transcriptMark, "ellipsis");
+    assert.equal(
+      planBotcastProducerPivotPerformanceV1({
+        seed: "active-seed",
+        cadence: "active_speech",
+      }).transcriptMark,
+      "em_dash",
+    );
+    const plannedFoley = Array.from({ length: 32 }, (_, index) =>
+      planBotcastProducerPivotPerformanceV1({
+        seed: `pivot-${index}`,
+        cadence: "between_words",
+      }).vocalFoley,
+    );
+    assert.ok(plannedFoley.includes("clears throat"));
+    assert.ok(plannedFoley.includes("exhales"));
+  });
+
+  it("gives direct Host cues and Producer images durable preemption priority", () => {
+    assert.equal(
+      botcastProducerCuePriority({
+        kind: "ask_about",
+        directQuote: "Ask this exactly.",
+      }),
+      "immediate",
+    );
+    assert.equal(botcastProducerCuePriority({ kind: "present_image" }), "priority");
+    assert.equal(
+      botcastProducerCuePriority({
+        kind: "ask_about",
+        detail: "Ask why the first attempt failed.",
+      }),
+      "priority",
+    );
+    assert.equal(botcastProducerCuePriority({ kind: "refocus" }), "ordinary");
+    assert.equal(
+      botcastProducerCuePreemptsHostSpeech({
+        kind: "ask_about",
+        directQuote: "Ask this exactly.",
+      }),
+      true,
+    );
+    assert.equal(
+      botcastProducerCuePreemptsHostSpeech({ kind: "present_image" }),
+      true,
+    );
+    assert.equal(
+      botcastProducerCuePreemptsHostSpeech({
+        kind: "ask_about",
+        detail: "Ask why the first attempt failed.",
+      }),
+      true,
+    );
+    assert.equal(
+      botcastProducerCuePreemptsHostSpeech({ kind: "refocus" }),
+      false,
+    );
+  });
+
+  it("rebuilds durable producer cue queue, redelivery, and safe failure state", () => {
+    const events: BotcastReplayEvent[] = [
+      {
+        id: "cue-queued",
+        episodeId: "episode",
+        sequence: 1,
+        kind: "producer_cue",
+        payload: {
+          cueId: "cue-1",
+          lifecycle: "queued",
+          kind: "ask_about",
+          detail: "Ask about the missing promise.",
+          delivery: "next_host_turn",
+        },
+        occurredAt: "2026-08-25T00:00:00.000Z",
+      },
+      {
+        id: "cue-requeued",
+        episodeId: "episode",
+        sequence: 2,
+        kind: "producer_cue",
+        payload: {
+          cueId: "cue-1",
+          lifecycle: "requeued",
+          recovery: "operation_timeout",
+        },
+        occurredAt: "2026-08-25T00:00:01.000Z",
+      },
+    ];
+    assert.equal(botcastActiveProducerCueFromEvents(events)?.status, "requeued");
+    assert.equal(
+      botcastActiveProducerCueFromEvents(events)?.recovery,
+      "operation_timeout",
+    );
+    events.push({
+      id: "cue-failed",
+      episodeId: "episode",
+      sequence: 3,
+      kind: "producer_cue",
+      payload: {
+        cueId: "cue-1",
+        lifecycle: "failed",
+        failure: "privacy_validation",
+      },
+      occurredAt: "2026-08-25T00:00:02.000Z",
+    });
+    const lifecycle = botcastProducerCueLifecyclesFromEvents(events).at(-1);
+    assert.equal(botcastActiveProducerCueFromEvents(events), null);
+    assert.equal(lifecycle?.failure, "privacy_validation");
+  });
+
+  it("treats every supported Signal attachment as a picture", () => {
+    assert.deepEqual(
+      botcastEpisodeImageDescriptorFromFileName("wax-candle.png", "image/png"),
+      { kind: "picture", name: "wax candle", mimeType: "image/png" },
+    );
+    const picture = botcastEpisodeImageDescriptorFromFileName(
+      "wax_candle.jpg",
+      "image/jpeg",
+    );
+    assert.deepEqual(picture, {
+      kind: "picture",
+      name: "wax candle",
+      mimeType: "image/jpeg",
+    });
+    assert.equal(
+      botcastEpisodeImageSpokenReference(picture!),
+      "this picture of wax candle",
+    );
+    const genericPicture = botcastEpisodeImageDescriptorFromFileName(
+      "unknown-art-piece.jpg",
+      "image/jpeg",
+    );
+    assert.deepEqual(genericPicture, {
+      kind: "picture",
+      name: "unknown art piece",
+      mimeType: "image/jpeg",
+    });
+    assert.equal(
+      botcastEpisodeImageSpokenReference(genericPicture!),
+      "this picture",
+    );
+    assert.equal(
+      botcastEpisodeImageSpokenReference({
+        kind: "picture",
+        name: "Untitled portrait study",
+      }),
+      "this picture of Untitled portrait study",
+    );
+    const semanticTitle = botcastEpisodeImageDescriptorFromFileName(
+      "hyper-realistic-picture-einstine.jpg",
+      "image/jpeg",
+    );
+    assert.deepEqual(semanticTitle, {
+      kind: "picture",
+      name: "hyper realistic picture einstine",
+      mimeType: "image/jpeg",
+    });
+    assert.equal(
+      botcastEpisodeImageSpokenReference(semanticTitle!),
+      "this hyper realistic picture einstine",
+    );
+    assert.equal(
+      botcastEpisodeImageSpokenReference({
+        kind: "picture",
+        name: 'a “hyper-realistic” portrait of you',
+      }),
+      'this “hyper-realistic” portrait of you',
+    );
+    assert.deepEqual(
+      botcastEpisodeImageDescriptorFromFileName("wax-candle.jpeg", "image/jpeg"),
+      { kind: "picture", name: "wax candle", mimeType: "image/jpeg" },
+    );
+    assert.deepEqual(
+      botcastEpisodeImageDescriptorFromFileName("wax-candle.webp", "image/webp"),
+      { kind: "picture", name: "wax candle", mimeType: "image/webp" },
+    );
+    assert.equal(
+      botcastEpisodeImageDescriptorFromFileName("wax-candle.png", "image/jpeg"),
+      null,
+    );
+    assert.equal(
+      normalizeBotcastEpisodeImageName("  The producer's dream car  "),
+      "The producer's dream car",
+    );
+    assert.equal(normalizeBotcastEpisodeImageName("   "), null);
+    assert.equal(
+      normalizeBotcastEpisodeImageReason(
+        "  This is a new car; invite an honest reaction.  ",
+      ),
+      "This is a new car; invite an honest reaction.",
+    );
+    assert.equal(normalizeBotcastEpisodeImageReason("   "), null);
+    assert.equal(normalizeBotcastEpisodeImageReplayEmoji("🚗", "🖼️"), "🚗");
+    assert.equal(
+      normalizeBotcastEpisodeImageReplayEmoji("orange car", "🖼️"),
+      "🖼️",
+    );
+  });
+
+  it("projects replay-stable image context across host, guest, and follow-up lines", () => {
+    const base = {
+      v: 1,
+      imageId: "image-1",
+      kind: "item",
+      name: "wax candle",
+      mimeType: "image/png",
+      provider: "local",
+      model: "llava",
+      replayEmoji: "🕯️",
+      savedAssetId: null,
+      hostIntroductionMessageId: "host-intro",
+      guestDiscussionMessageId: "guest-view",
+      hostFollowUpMessageId: "host-opinion",
+    } as const;
+    const events: BotcastReplayEvent[] = [
+      {
+        id: "queued",
+        episodeId: "episode-1",
+        sequence: 1,
+        kind: "image_context",
+        payload: {
+          ...base,
+          phase: "queued",
+          hostIntroductionMessageId: null,
+          guestDiscussionMessageId: null,
+          hostFollowUpMessageId: null,
+        },
+        occurredAt: "2026-08-23T00:00:00.000Z",
+      },
+      {
+        id: "dismissed",
+        episodeId: "episode-1",
+        sequence: 2,
+        kind: "image_context",
+        payload: {
+          ...base,
+          phase: "dismissed",
+          discussionMessageIds: [
+            "host-intro",
+            "guest-view",
+            "host-opinion",
+            "guest-extension",
+          ],
+          lifecycleEvidence: {
+            v: 1,
+            messageId: "guest-extension",
+            decision: "dismiss",
+            reason: "semantic_transition",
+            source: "speaker_semantic_marker_v1",
+            semanticDecision: "dismiss_after",
+          },
+        },
+        occurredAt: "2026-08-23T00:00:01.000Z",
+      },
+    ];
+
+    assert.equal(botcastLatestImageContextV1(events)?.phase, "dismissed");
+    assert.equal(botcastLatestImageContextV1(events)?.replayEmoji, "🕯️");
+    assert.equal(botcastLatestImageContextV1(events)?.replayProxyId, null);
+    assert.equal(
+      botcastImageContextForMessageV1(events, "guest-view")?.imageId,
+      "image-1",
+    );
+    assert.equal(
+      botcastImageContextForMessageV1(events, "host-opinion")?.phase,
+      "dismissed",
+    );
+    assert.equal(
+      botcastImageContextForMessageV1(events, "guest-extension")
+        ?.lifecycleEvidence?.reason,
+      "semantic_transition",
+    );
+    assert.equal(botcastImageContextForMessageV1(events, "other"), null);
+
+    const proxied = botcastLatestImageContextV1([
+      {
+        ...events[0],
+        payload: {
+          ...events[0]!.payload,
+          phase: "queued",
+          replayProxyId: "proxy-1",
+        },
+      },
+    ]);
+    assert.equal(proxied?.replayProxyId, "proxy-1");
+  });
+
+  it("varies pre-session image entrances without rerolling saved episode identity", () => {
+    const opening = { episodeId: "episode-2", imageId: "image-2" };
+    const later = { episodeId: "episode-1", imageId: "image-1" };
+
+    assert.equal(botcastPreSessionImageRevealHostTurnV1(opening), 1);
+    assert.equal(botcastPreSessionImageRevealHostTurnV1(later), 4);
+    assert.equal(
+      botcastPreSessionImageRevealHostTurnV1(opening),
+      botcastPreSessionImageRevealHostTurnV1({ ...opening }),
+    );
+    const distribution = new Map<number, number>();
+    for (let index = 0; index < 400; index += 1) {
+      const slot = botcastPreSessionImageRevealHostTurnV1({
+        episodeId: `episode-${index}`,
+        imageId: `image-${index}`,
+      });
+      distribution.set(slot, (distribution.get(slot) ?? 0) + 1);
+    }
+    assert.deepEqual([...distribution.keys()].sort(), [1, 2, 3, 4]);
+    assert.ok(
+      [...distribution.values()].every((count) => count >= 70 && count <= 130),
+    );
+    assert.equal(
+      botcastPreSessionImageShouldPresentOnNextTurnV1({
+        ...opening,
+        messages: [],
+      }),
+      true,
+    );
+    assert.equal(
+      botcastPreSessionImageShouldPresentOnNextTurnV1({
+        ...later,
+        messages: [
+          { speakerRole: "host" },
+          { speakerRole: "guest" },
+        ],
+      }),
+      false,
+    );
+    assert.equal(
+      botcastPreSessionImageShouldPresentOnNextTurnV1({
+        ...later,
+        messages: [
+          { speakerRole: "host" },
+          { speakerRole: "guest" },
+          { speakerRole: "host" },
+          { speakerRole: "guest" },
+          { speakerRole: "host" },
+          { speakerRole: "guest" },
+        ],
+      }),
+      true,
+    );
+    assert.equal(
+      botcastPreSessionImageShouldPresentOnNextTurnV1({
+        ...later,
+        messages: [
+          { speakerRole: "host" },
+          { speakerRole: "guest" },
+          { speakerRole: "host" },
+          { speakerRole: "guest" },
+          { speakerRole: "host" },
+          { speakerRole: "guest" },
+          { speakerRole: "host" },
+          { speakerRole: "guest" },
+        ],
+      }),
+      true,
+      "a displaced reveal remains eligible at the next natural host handoff",
+    );
+  });
+
+  it("selects the latest other-bot spoken Foley as Signal's Copycat source", () => {
+    const events = ["Hmm...", "let me see...", "Nice!"].map(
+      (spokenCue, index): BotcastReplayEvent => ({
+        id: `event-${index + 1}`,
+        episodeId: "episode-1",
+        sequence: index + 1,
+        kind: "listener_reaction",
+        occurredAt: `2026-08-22T19:00:0${index}.000Z`,
+        payload: {
+          plan: {
+            v: 1,
+            name: "listenerReaction",
+            speakerBotId: "copycat",
+            listenerBotId: "guest",
+            messageId: "message-1",
+            targetSource: "role",
+            visualAction: "thoughtful_hmm",
+            spokenCue,
+            targetProgress: 0.7,
+            seed: `seed-${index}`,
+            cameraCutEligible: true,
+          },
+        },
+      }),
+    );
+
+    assert.equal(
+      botcastLatestSpeechCopyReactionSourceV1(
+        events,
+        "message-1",
+        "copycat",
+      ),
+      "Nice!",
+    );
+    assert.equal(
+      botcastLatestSpeechCopyReactionSourceV1(
+        events,
+        "message-1",
+        "guest",
+      ),
+      null,
+    );
+  });
+
+  it("projects persisted interruption words into the public transcript", () => {
+    const events = [
+      {
+        id: "event-2",
+        episodeId: "episode-1",
+        sequence: 2,
+        kind: "listener_reaction" as const,
+        occurredAt: "2026-08-22T19:00:01.000Z",
+        payload: {
+          plan: {
+            v: 1,
+            name: "listenerReaction",
+            speakerBotId: "guest-1",
+            listenerBotId: "host-1",
+            messageId: "message-1",
+            targetSource: "role",
+            visualAction: "lean_in",
+            spokenCue: "Hold on.",
+            interjectionAttempt: true,
+            floorOutcome: "yield",
+            interruptedSpeakerCue: "Let me finish.",
+            interruptedSpeakerCuePlayback: "crosstalk",
+            targetProgress: 0.5,
+            seed: "seed-2",
+            cameraCutEligible: true,
+          },
+        },
+      },
+    ] satisfies BotcastReplayEvent[];
+
+    assert.deepEqual(botcastPublicReactionSpeechForMessage(events, "message-1"), [
+      { messageId: "message-1", botId: "host-1", text: "Hold on.", kind: "interruption" },
+      { messageId: "message-1", botId: "guest-1", text: "Let me finish.", kind: "interruption" },
+    ]);
+  });
+
+  it("projects legacy timed-Mute quips into review-visible reaction speech", () => {
+    const events = [{
+      id: "event-mute-reaction",
+      episodeId: "episode-1",
+      sequence: 1,
+      kind: "listener_reaction" as const,
+      occurredAt: "2026-08-30T18:20:48.451Z",
+      payload: {
+        source: "mute_performance",
+        messageId: "message-1",
+        speakerBotId: "guest-1",
+        listenerBotId: "host-1",
+        beat: {
+          atMs: 5_500,
+          reactorBotId: "host-1",
+          kind: "audible_quip",
+          action: "tap_fingers",
+          quip: "Are you finished?",
+        },
+      },
+    }] satisfies BotcastReplayEvent[];
+
+    assert.deepEqual(botcastPublicReactionSpeechForMessage(events, "message-1"), [{
+      messageId: "message-1",
+      botId: "host-1",
+      text: "Are you finished?",
+      kind: "listener_quip",
+    }]);
+  });
+});
+
+describe("Signal producer direct quotes", () => {
+  it("gives a queued line enough room to air in one host turn", () => {
+    const line = "Gerald the potato rolled forty feet. ".repeat(6).trim();
+    assert.ok(line.length > 200);
+    assert.ok(line.length <= BOTCAST_PRODUCER_DIRECT_QUOTE_MAX);
+    const tokens = botcastDirectQuoteTurnMaxTokens(line);
+    // At the lowered cap the 160-token floor is what a full-length line gets,
+    // and it still clears the words themselves with lead-in room to spare.
+    assert.ok(tokens >= 160);
+    assert.ok(tokens >= Math.ceil(line.split(/\s+/u).length * 1.6));
+  });
+
+  it("keeps the spoken ceiling near a line, not a monologue", () => {
+    // Review 2fcad998: ~2,600 characters of queued lyrics took 46 seconds of
+    // air and had to be cut short by a second producer cue.
+    assert.ok(BOTCAST_PRODUCER_DIRECT_QUOTE_MAX <= 320);
+  });
+
+  it("frames the queued words as a Producer note without rewriting them", () => {
+    const quote = "zzzzzzzz bababa beep boop bap";
+    assert.equal(
+      composeBotcastProducerDirectQuoteUtterance(quote),
+      `${BOTCAST_PRODUCER_DIRECT_QUOTE_LEAD_IN} ${quote}`,
+    );
+    assert.equal(composeBotcastProducerDirectQuoteUtterance("  "), "");
+  });
+});
+
+describe("Signal show camera framing", () => {
+  it("keeps image placement on each show camera and migrates legacy scale to Item size", () => {
+    const cameras = normalizeBotcastCameraFraming({
+      left: { zoom: 1.2, panX: 3, panY: -4, episodeImage: { x: 12, y: 91, scale: 80 } },
+      right: { zoom: 1.3, panX: -2, panY: 5, episodeImage: { x: 88, y: 9, itemScale: 75, photoScale: 95 } },
+      wide: { zoom: 1, panX: 0, panY: 0, episodeImage: { x: 50, y: 64, scale: 105 } },
+    });
+    assert.equal(cameras.left.zoom, 1.2);
+    assert.deepEqual(cameras.left.episodeImage, {
+      x: 12,
+      y: 91,
+      itemScale: 80,
+      photoScale: BOTCAST_DEFAULT_CAMERA_FRAMING.left.episodeImage.photoScale,
+    });
+    assert.deepEqual(cameras.right.episodeImage, {
+      x: 88,
+      y: 9,
+      itemScale: 75,
+      photoScale: 95,
+    });
+    assert.equal(cameras.wide.episodeImage.itemScale, 105);
+    assert.equal(
+      cameras.wide.episodeImage.photoScale,
+      BOTCAST_DEFAULT_CAMERA_FRAMING.wide.episodeImage.photoScale,
+    );
+  });
+
+  it("keeps the per-show logo placement bounded and backward compatible", () => {
+    assert.deepEqual(
+      normalizeBotcastLogoPlacement({ x: -4, y: 104, scale: 999 }),
+      { x: 5, y: 95, scale: 140 },
+    );
+    assert.deepEqual(
+      normalizeBotcastLogoPlacement(undefined),
+      BOTCAST_DEFAULT_LOGO_PLACEMENT,
+    );
+  });
+
+  it("keeps the compact episode prop on the named side of each camera", () => {
+    assert.deepEqual(BOTCAST_DEFAULT_CAMERA_FRAMING.left.episodeImage, {
+      x: 24,
+      y: 72,
+      itemScale: 50,
+      photoScale: 90,
+    });
+    assert.deepEqual(BOTCAST_DEFAULT_CAMERA_FRAMING.right.episodeImage, {
+      x: 76,
+      y: 72,
+      itemScale: 50,
+      photoScale: 90,
+    });
+    assert.deepEqual(BOTCAST_DEFAULT_CAMERA_FRAMING.wide.episodeImage, {
+      x: 50,
+      y: 75,
+      itemScale: 50,
+      photoScale: 90,
+    });
+    assert.deepEqual(
+      normalizeBotcastCameraFraming({
+        left: { episodeImage: { x: 74, y: 62, scale: 70 } },
+        right: { episodeImage: { x: 26, y: 62, scale: 70 } },
+        wide: { episodeImage: { x: 50, y: 66, scale: 72 } },
+      }),
+      BOTCAST_DEFAULT_CAMERA_FRAMING,
+    );
+  });
+
+  it("keeps independent bounded framing for left, right, and wide cameras", () => {
+    assert.deepEqual(
+      normalizeBotcastCameraFraming({
+        left: {
+          zoom: 1.6,
+          panX: -8.25,
+          panY: 4.5,
+          episodeImage: { x: 1, y: 100, scale: 999 },
+        },
+        right: { zoom: 9, panX: 90, panY: -90 },
+        wide: {
+          zoom: 0.5,
+          panX: 2,
+          panY: 3,
+          episodeImage: { x: 48.5, y: 70, scale: 85 },
+        },
+      }),
+      {
+        left: {
+          zoom: 1.6,
+          panX: -8.25,
+          panY: 4.5,
+          episodeImage: { x: 5, y: 95, itemScale: 140, photoScale: 90 },
+        },
+        right: {
+          zoom: 2,
+          panX: 30,
+          panY: -30,
+          episodeImage: BOTCAST_DEFAULT_CAMERA_FRAMING.right.episodeImage,
+        },
+        wide: {
+          zoom: 1,
+          panX: 2,
+          panY: 3,
+          episodeImage: { x: 48.5, y: 70, itemScale: 85, photoScale: 90 },
+        },
+      },
+    );
+    assert.deepEqual(
+      normalizeBotcastCameraFraming(undefined),
+      BOTCAST_DEFAULT_CAMERA_FRAMING,
+    );
+  });
+});
+
 describe("Signal fallback studio accents", () => {
+  it("normalizes the four replay-safe Signal soundboard cues", () => {
+    const event: BotcastReplayEvent = {
+      id: "soundboard-1",
+      episodeId: "episode-1",
+      sequence: 1,
+      kind: "soundboard_cue",
+      payload: { kind: "applause", atMs: 1_250, source: "producer" },
+      occurredAt: "2026-07-21T00:00:00.000Z",
+    };
+    assert.deepEqual(botcastSoundboardCueFromEvent(event), {
+      kind: "applause",
+      atMs: 1_250,
+    });
+    assert.equal(botcastSoundboardCueLabel("rimshot"), "Rimshot");
+    assert.equal(
+      botcastSoundboardCueFromEvent({
+        ...event,
+        payload: { kind: "airhorn", atMs: 1_250 },
+      }),
+      null,
+    );
+  });
+
+  it("uses Premium-calibrated cadence for speech and a full shot for silence", () => {
+    assert.equal(
+      botcastSignalStandardCadenceDurationMs(
+        "A streamed reply with several words.",
+      ),
+      2_260,
+    );
+    assert.equal(
+      botcastSignalStandardCadenceDurationMs("..."),
+      BOTCAST_DIRECTOR_MIN_SHOT_MS,
+    );
+    const mutePerformance = {
+      v: 1 as const,
+      name: "mutePerformance" as const,
+      durationMs: 9_000,
+      periodCount: 9,
+      interrupted: false,
+      elapsedCue: "*9 seconds pass without an audible word.*",
+      reactionBeats: [],
+    };
+    assert.equal(
+      botcastSignalStandardCadenceDurationMs(
+        "......",
+        undefined,
+        mutePerformance,
+      ),
+      9_000 + BOTCAST_SIGNAL_MUTE_ELAPSED_CUE_HOLD_MS,
+    );
+    const muteTimeline = botcastReplayTimeline(
+      [{
+        content: "......",
+        mutePerformance,
+      }],
+      [],
+    );
+    assert.equal(
+      muteTimeline.messageEndMs[0]! - muteTimeline.messageStartMs[0]!,
+      9_000 + BOTCAST_SIGNAL_MUTE_ELAPSED_CUE_HOLD_MS,
+    );
+    const replayLine = "One two three four five six seven eight nine ten eleven twelve.";
+    const replayTimeline = botcastReplayTimeline(
+      [{ content: replayLine }],
+      [],
+    );
+    assert.equal(
+      replayTimeline.messageEndMs[0]! - replayTimeline.messageStartMs[0]!,
+      botcastSignalStandardCadenceDurationMs(replayLine),
+    );
+    const socialSilence = {
+      v: 1,
+      name: "socialSilence" as const,
+      provenance: "social" as const,
+      mode: "signal" as const,
+      seed: "signal-social-silence:episode-1:guest-1:2",
+      volleyTurn: 2 as const,
+      holdMs: 900,
+    };
+    assert.equal(
+      botcastSignalStandardCadenceDurationMs("...", socialSilence),
+      900,
+    );
+    const socialTimeline = botcastReplayTimeline(
+      [{ content: "...", socialSilence }],
+      [],
+    );
+    assert.equal(
+      socialTimeline.messageEndMs[0]! - socialTimeline.messageStartMs[0]!,
+      900,
+    );
+    assert.equal(
+      botcastGuestAnswerAdvancesInterview({
+        content: "...",
+        socialSilence,
+      }),
+      false,
+    );
+  });
+
+  it("exposes only an immediate, source-linked Signal reclaim", () => {
+    const reclaim = {
+      v: 1,
+      name: "crosstalkReclaim" as const,
+      interruptedMessageId: "cutoff-1",
+      speakerBotId: "guest-1",
+      heardFragment: "The part everyone heard—",
+      protectFromImmediateReinterruption: true as const,
+    };
+    assert.deepEqual(
+      botcastPendingCrosstalkReclaimV1([
+        {
+          id: "cutoff-1",
+          botId: "guest-1",
+          crosstalkReclaim: reclaim,
+        },
+      ]),
+      reclaim,
+    );
+    assert.equal(
+      botcastPendingCrosstalkReclaimV1([
+        {
+          id: "cutoff-1",
+          botId: "guest-1",
+          crosstalkReclaim: reclaim,
+        },
+        { id: "later-1", botId: "host-1" },
+      ]),
+      null,
+    );
+  });
+
   it("recognizes the one Echo dashboard joke across persona wording", () => {
     assert.equal(
       BOTCAST_ECHO_DASHBOARD_BLURB_FALLBACK,
@@ -90,6 +912,13 @@ describe("Signal fallback studio accents", () => {
       "The part you have heard—",
     );
     assert.equal(
+      botcastInterruptedGuestContent(
+        "An audience-clock handoff remains unfinished.",
+        "An audience-",
+      ),
+      "An audience-—",
+    );
+    assert.equal(
       botcastInterruptedGuestContent("Nothing aired.", ""),
       null,
     );
@@ -98,6 +927,66 @@ describe("Signal fallback studio accents", () => {
       botcastMessageIsEphemeralInterruptionBridge({ id }),
       true,
     );
+  });
+
+  it("picks the audience-heard phrase for an echo-bound host interrupt", () => {
+    const messages = [
+      { id: "host-open", content: "Welcome to the show." },
+      {
+        id: "guest-1",
+        content: "The part you have heard and the hidden remainder.",
+      },
+    ];
+    assert.equal(
+      botcastEchoHostInterruptPhrase({
+        messages,
+        interruption: {
+          messageId: "guest-1",
+          spokenContent: "The part you have heard",
+        },
+      }),
+      "The part you have heard—",
+    );
+    assert.equal(
+      botcastEchoHostInterruptPhrase({
+        messages,
+        interruption: { messageId: "guest-1", spokenContent: "" },
+      }),
+      "Welcome to the show.",
+    );
+    assert.equal(
+      botcastEchoHostInterruptPhrase({
+        messages: messages.slice(0, 1),
+      }),
+      "Welcome to the show.",
+    );
+  });
+
+  it("keeps only a complete, distinct set of reusable host recovery questions", () => {
+    assert.deepEqual(
+      normalizeBotcastHostRecoveryQuestions([
+        "Show me one example that would actually test that claim?",
+        "Which consequence matters, and who gets handed the bill?",
+        "Where does that become a choice rather than a slogan?",
+        "What evidence would force you to revise the answer?",
+        "A fifth question should not survive?",
+      ]),
+      [
+        "Show me one example that would actually test that claim?",
+        "Which consequence matters, and who gets handed the bill?",
+        "Where does that become a choice rather than a slogan?",
+        "What evidence would force you to revise the answer?",
+      ],
+    );
+    assert.deepEqual(
+      normalizeBotcastHostRecoveryQuestions([
+        "Question: What happened?",
+        "[leans in] What happened?",
+        "This is not a question.",
+      ]),
+      [],
+    );
+    assert.deepEqual(normalizeBotcastHostRecoveryQuestions(["..."]), ["..."]);
   });
 
   it("reads only valid saved listener reactions for the requested message", () => {
@@ -146,6 +1035,22 @@ describe("Signal fallback studio accents", () => {
             targetProgress: 0.55,
             seed: "signal-listener-v1:foley",
             cameraCutEligible: false,
+            signalOrganicBeat: {
+              v: 1,
+              name: "signalOrganicBeat",
+              provenance: "deterministic_listener_bank",
+              kind: "vocal_foley",
+              actorBotId: "guest",
+              floorOwnerBotId: "host",
+              canonicalImpact: "none",
+              prefetch: "episode_listener_kit",
+              timing: {
+                startProgress: 0.55,
+                overlapMs: 0,
+                speakerDuckMs: 0,
+                resumeFadeMs: 0,
+              },
+            },
           },
         },
       },
@@ -168,6 +1073,12 @@ describe("Signal fallback studio accents", () => {
     assert.equal(
       botcastListenerReactionForMessage(events, "message-2")?.vocalFoley,
       "clears throat",
+    );
+    assert.deepEqual(
+      botcastListenerReactionForMessage(events, "message-2")
+        ?.signalOrganicBeat,
+      events[1]!.payload.plan &&
+        (events[1]!.payload.plan as Record<string, unknown>).signalOrganicBeat,
     );
   });
 
@@ -371,7 +1282,7 @@ describe("Signal replayed ghost avatar presence", () => {
           "guest",
         ),
       ),
-      "smaller",
+      "small",
     );
   });
 
@@ -436,6 +1347,8 @@ describe("Signal studio relighting", () => {
     assert.match(BOTCAST_DAYLIGHT_RELIGHT_EDIT_PROMPT, /do not show a nighttime state/iu);
     assert.match(BOTCAST_DAYLIGHT_RELIGHT_EDIT_PROMPT, /diptych|split screen|comparison/iu);
     assert.match(BOTCAST_DAYLIGHT_RELIGHT_EDIT_PROMPT, /Preserve[\s\S]*microphones/iu);
+    assert.match(BOTCAST_DAYLIGHT_RELIGHT_EDIT_PROMPT, /Preserve both empty cup coasters[\s\S]*fully visible and unobstructed/iu);
+    assert.match(BOTCAST_DAYLIGHT_RELIGHT_EDIT_PROMPT, /#FF00FF[\s\S]*every other object/iu);
     assert.match(BOTCAST_DAYLIGHT_RELIGHT_EDIT_PROMPT, /Do not add coffee cups, mugs/iu);
     assert.doesNotMatch(BOTCAST_DAYLIGHT_RELIGHT_EDIT_PROMPT, /persona|set bible|host/iu);
   });
@@ -444,10 +1357,57 @@ describe("Signal studio relighting", () => {
 describe("Signal studio layout", () => {
   it("defaults missing positions and clamps saved props inside the stage", () => {
     assert.deepEqual(normalizeBotcastStudioLayout(undefined), BOTCAST_DEFAULT_STUDIO_LAYOUT);
-    assert.equal(BOTCAST_DEFAULT_STUDIO_LAYOUT.hostBot.y, 71.25);
-    assert.equal(BOTCAST_DEFAULT_STUDIO_LAYOUT.guestBot.y, 71.25);
-    assert.equal(BOTCAST_DEFAULT_STUDIO_LAYOUT.hostCup.y, 90);
-    assert.equal(BOTCAST_DEFAULT_STUDIO_LAYOUT.guestCup.y, 90);
+    assert.deepEqual(BOTCAST_DEFAULT_STUDIO_LAYOUT, {
+      hostBot: { x: 22.5, y: 68.25 },
+      guestBot: { x: 77.5, y: 68.25 },
+      hostCup: { x: 36.25, y: 90 },
+      guestCup: { x: 63.75, y: 90 },
+      hostFloorGlow: { x: 22.5, y: 84, scale: 1 },
+      guestFloorGlow: { x: 77.5, y: 84, scale: 1 },
+    });
+    assert.deepEqual(
+      normalizeBotcastStudioLayout({
+        hostBot: { x: 22.5, y: 71.25 },
+        guestBot: { x: 77.5, y: 71.25 },
+        hostCup: { x: 36.25, y: 90 },
+        guestCup: { x: 63.75, y: 90 },
+      }),
+      BOTCAST_DEFAULT_STUDIO_LAYOUT,
+    );
+    assert.deepEqual(
+      normalizeBotcastStudioLayout({
+        hostBot: { x: 22.5, y: 71.25 },
+        guestBot: { x: 77.5, y: 71.25 },
+        hostCup: { x: 36.25, y: 90 },
+        guestCup: { x: 63.75, y: 90 },
+        hostFloorGlow: { x: 22.5, y: 84, scale: 1 },
+        guestFloorGlow: { x: 77.5, y: 84, scale: 1 },
+      }),
+      BOTCAST_DEFAULT_STUDIO_LAYOUT,
+    );
+    const customizedOldDefaultBots = normalizeBotcastStudioLayout({
+      hostBot: { x: 22.5, y: 71.25 },
+      guestBot: { x: 77.5, y: 71.25 },
+      hostCup: { x: 36.25, y: 90 },
+      guestCup: { x: 63.75, y: 90 },
+      hostFloorGlow: { x: 22.5, y: 86, scale: 0.5 },
+      guestFloorGlow: { x: 77.5, y: 86, scale: 0.75 },
+    });
+    assert.deepEqual(customizedOldDefaultBots.hostBot, { x: 22.5, y: 68.25 });
+    assert.deepEqual(customizedOldDefaultBots.guestBot, {
+      x: 77.5,
+      y: 68.25,
+    });
+    assert.deepEqual(customizedOldDefaultBots.hostFloorGlow, {
+      x: 22.5,
+      y: 86,
+      scale: 0.5,
+    });
+    assert.deepEqual(customizedOldDefaultBots.guestFloorGlow, {
+      x: 77.5,
+      y: 86,
+      scale: 0.75,
+    });
     assert.deepEqual(
       normalizeBotcastStudioLayout({
         hostBot: { x: 22.5, y: 64 },
@@ -457,20 +1417,57 @@ describe("Signal studio layout", () => {
       }),
       BOTCAST_DEFAULT_STUDIO_LAYOUT,
     );
+    const customizedPreviousLayout = {
+      hostBot: { x: 20, y: 71.25 },
+      guestBot: { x: 77.5, y: 71.25 },
+      hostCup: { x: 36.25, y: 90 },
+      guestCup: { x: 63.75, y: 90 },
+    };
+    assert.deepEqual(
+      normalizeBotcastStudioLayout(customizedPreviousLayout),
+      {
+        ...customizedPreviousLayout,
+        hostFloorGlow: { x: 20, y: 84, scale: 1 },
+        guestFloorGlow: { x: 77.5, y: 84, scale: 1 },
+      },
+    );
     assert.deepEqual(
       normalizeBotcastStudioLayout({
         hostBot: { x: -40, y: 150 },
         guestCup: { x: 42.1234, y: 60.5678 },
+        hostFloorGlow: { x: 70, y: 120, scale: 0.1 },
       }),
       {
         ...BOTCAST_DEFAULT_STUDIO_LAYOUT,
         hostBot: { x: 10, y: 82 },
         guestCup: { x: 42.12, y: 60.57 },
+        hostFloorGlow: { x: 10, y: 96, scale: 0.35 },
       },
+    );
+    assert.equal(
+      normalizeBotcastStudioLayout({
+        guestFloorGlow: { x: 80, y: 84, scale: 8 },
+      }).guestFloorGlow.scale,
+      1,
     );
   });
 
   it("centers close-ups when possible and keeps every pan inside the TV frame", () => {
+    const defaultOffset = botcastCameraOffsetYPercent(
+      "left",
+      BOTCAST_DEFAULT_STUDIO_LAYOUT,
+    );
+    assert.equal(defaultOffset, -18.81);
+    assert.ok(
+      Math.abs(
+        55 +
+          (BOTCAST_DEFAULT_STUDIO_LAYOUT.hostBot.y - 55) *
+            BOTCAST_CLOSEUP_CAMERA_SCALE +
+          defaultOffset -
+          55,
+      ) < 0.01,
+    );
+
     const layout = normalizeBotcastStudioLayout({
       hostBot: { x: 14, y: 42 },
       guestBot: { x: 68, y: 75 },
@@ -483,12 +1480,14 @@ describe("Signal studio layout", () => {
     assert.equal(botcastCameraOffsetYPercent("wide", layout), 0);
   });
 
-  it("swaps the two seats while keeping each bot paired with its cup", () => {
+  it("swaps the seats with each bot's cup and floor glow", () => {
     const layout = normalizeBotcastStudioLayout({
       hostBot: { x: 18, y: 62 },
       guestBot: { x: 74, y: 68 },
       hostCup: { x: 32, y: 86 },
       guestCup: { x: 67, y: 91 },
+      hostFloorGlow: { x: 18, y: 80, scale: 0.55 },
+      guestFloorGlow: { x: 74, y: 88, scale: 0.8 },
     });
     const swapped = swapBotcastStudioLayoutSeats(layout);
 
@@ -497,6 +1496,8 @@ describe("Signal studio layout", () => {
       guestBot: layout.hostBot,
       hostCup: layout.guestCup,
       guestCup: layout.hostCup,
+      hostFloorGlow: layout.guestFloorGlow,
+      guestFloorGlow: layout.hostFloorGlow,
     });
     assert.deepEqual(swapBotcastStudioLayoutSeats(swapped), layout);
   });
@@ -523,21 +1524,46 @@ describe("Signal studio atmosphere mix", () => {
       normalizeBotcastStudioAtmosphereMix(undefined),
       BOTCAST_DEFAULT_STUDIO_ATMOSPHERE_MIX,
     );
+    assert.equal(BOTCAST_DEFAULT_STUDIO_ATMOSPHERE_MIX.filmGrain, 1);
     assert.deepEqual(
       normalizeBotcastStudioAtmosphereMix({
         background: 99,
         grain: -1,
         foley: "1.4",
+        filmGrain: 99,
       }),
-      { background: 0.32, grain: 0, foley: 1.4 },
+      { background: 0.32, grain: 0, foley: 1.4, filmGrain: 1 },
     );
     assert.deepEqual(
       normalizeBotcastStudioAtmosphereMix(
-        { background: 0.2, grain: 0.006, foley: 1.1 },
-        { background: 0, grain: 0, foley: 0 },
+        { background: 0.2, grain: 0.006, foley: 1.1, filmGrain: 0 },
+        { background: 0, grain: 0, foley: 0, filmGrain: 0.75 },
       ),
-      { background: 0.2, grain: 0, foley: 1.1 },
+      { background: 0.2, grain: 0, foley: 1.1, filmGrain: 0 },
     );
+  });
+});
+
+describe("Signal studio underglow", () => {
+  it("defaults both themes to full-strength Hard Light and bounds saved show tuning", () => {
+    assert.deepEqual(
+      normalizeBotcastStudioGlowTuning(undefined),
+      BOTCAST_DEFAULT_STUDIO_GLOW_TUNING,
+    );
+    assert.deepEqual(normalizeBotcastStudioGlowTuning({
+      dark: { opacity: 4, blendMode: "multiply" },
+      light: { opacity: "0.37", blendMode: "screen" },
+    }), {
+      dark: { opacity: 1, blendMode: "hard-light" },
+      light: { opacity: 0.37, blendMode: "screen" },
+    });
+    assert.deepEqual(normalizeBotcastStudioGlowTuning({
+      dark: { opacity: 0.5, blendMode: "overlay" },
+      light: { opacity: 0.75, blendMode: "hard-light" },
+    }), {
+      dark: { opacity: 0.5, blendMode: "overlay" },
+      light: { opacity: 0.75, blendMode: "hard-light" },
+    });
   });
 });
 
@@ -551,7 +1577,11 @@ describe("Botcast episode state", () => {
 
   it("moves through opening, interview, and closing with asymmetric turns", () => {
     assert.equal(
-      botcastNextSpeakerRole({ messages: [], segment: "opening", guestDeparted: false }),
+      botcastNextSpeakerRole({
+        messages: [],
+        segment: "opening",
+        guestDeparted: false,
+      }),
       "host",
     );
     assert.equal(
@@ -563,16 +1593,36 @@ describe("Botcast episode state", () => {
       "guest",
     );
     assert.equal(
-      botcastSegmentForTurn({ current: "opening", utteranceCount: 2, guestDeparted: false }),
+      botcastSegmentForTurn({
+        current: "opening",
+        utteranceCount: 2,
+        guestDeparted: false,
+      }),
       "interview",
     );
     assert.equal(
-      botcastSegmentForTurn({ current: "interview", utteranceCount: 10, guestDeparted: false }),
+      botcastSegmentForTurn({
+        current: "interview",
+        utteranceCount: 10,
+        guestDeparted: false,
+      }),
       "interview",
     );
     assert.equal(
       botcastNextSpeakerRole({
-        messages: [{ speakerRole: "guest" }, { speakerRole: "host" }],
+        messages: [{ speakerRole: "host" }, { speakerRole: "guest" }],
+        segment: "closing",
+        guestDeparted: false,
+      }),
+      "host",
+    );
+    assert.equal(
+      botcastNextSpeakerRole({
+        messages: [
+          { speakerRole: "host" },
+          { speakerRole: "guest" },
+          { speakerRole: "host" },
+        ],
         segment: "closing",
         guestDeparted: false,
       }),
@@ -628,6 +1678,49 @@ describe("Botcast episode state", () => {
     }), true);
   });
 
+  it("closes the reviewed Signal shape when the guest explicitly signs off", () => {
+    const socialSilence = (seed: string) => ({
+      v: 1 as const,
+      name: "socialSilence" as const,
+      provenance: "social" as const,
+      mode: "signal" as const,
+      seed,
+      volleyTurn: 1 as const,
+      holdMs: 1_800,
+    });
+    const reviewedSource6c691c = [
+      { speakerRole: "host" as const, content: "Welcome to The Quiet After. How do you navigate continuity and reinvention?" },
+      { speakerRole: "guest" as const, content: "I find that embracing change is key while still honoring the past." },
+      { speakerRole: "host" as const, content: "How do you balance who you are with room for transformation?" },
+      { speakerRole: "guest" as const, content: "...", socialSilence: socialSilence("turn-4") },
+      { speakerRole: "host" as const, content: "...", socialSilence: socialSilence("turn-5") },
+      { speakerRole: "guest" as const, content: "It is like tending a garden: nurture the roots while allowing unexpected flowers to bloom." },
+      { speakerRole: "host" as const, content: "Thank you for sharing your insights on the ever-changing story of memory and identity." },
+      { speakerRole: "guest" as const, content: "Thank you for the engaging conversation. It was a pleasure exploring memory's ever-changing story with you on The Quiet After." },
+    ];
+    assert.equal(botcastSessionShouldClose({
+      messages: reviewedSource6c691c.slice(0, 6),
+      durationMinutes: null,
+      startedAtMs: 0,
+      nowMs: 1,
+    }), false);
+    assert.equal(botcastSessionShouldClose({
+      messages: reviewedSource6c691c,
+      durationMinutes: null,
+      startedAtMs: 0,
+      nowMs: 1,
+    }), true);
+    assert.equal(botcastSessionShouldClose({
+      messages: [
+        ...reviewedSource6c691c.slice(0, -1),
+        { speakerRole: "guest", content: "Thank you for asking; the unresolved cost is what happens when the name no longer fits." },
+      ],
+      durationMinutes: null,
+      startedAtMs: 0,
+      nowMs: 1,
+    }), false);
+  });
+
   it("does not mistake repeated questions and fragments for a settled interview", () => {
     const reviewedEpisode = [
       { speakerRole: "host" as const, content: "What makes a plan perfect?" },
@@ -662,6 +1755,68 @@ describe("Botcast episode state", () => {
       durationMinutes: null,
       startedAtMs: 0,
       nowMs: 5 * 60_000,
+    }), true);
+  });
+
+  it("does not let marked social silence make an Auto interview look settled", () => {
+    const socialSilence = (seed: string) => ({
+      v: 1 as const,
+      name: "socialSilence" as const,
+      provenance: "social" as const,
+      mode: "signal" as const,
+      seed,
+      volleyTurn: 1 as const,
+      holdMs: 900,
+    });
+    const messages = [
+      { speakerRole: "host" as const, content: "Does forgetting an insult make the grudge feel pointless, or does it make the whole thing more personal for the person carrying it?" },
+      { speakerRole: "guest" as const, content: "If someone truly cannot recall the offense, holding the grudge seems more punishing to the grudge-holder than to anyone else." },
+      { speakerRole: "host" as const, content: "What happens when the reason disappears but the habit of being angry remains in place?" },
+      { speakerRole: "guest" as const, content: "...", socialSilence: socialSilence("silence-1") },
+      { speakerRole: "host" as const, content: "Have you ever hated someone so long that you forgot why and simply kept the feeling alive out of habit?" },
+      { speakerRole: "guest" as const, content: "Honestly, no, because if I forgot why I hated someone, I suspect the hating itself would disappear along with the reason." },
+      { speakerRole: "host" as const, content: "If the hate leaves with the memory, should a grudge be forgiven or written down so the reason can never disappear?" },
+      { speakerRole: "guest" as const, content: "If the grudge needs writing down to survive, it may not be worth the ink or the attention required to preserve it." },
+      { speakerRole: "host" as const, content: "If a grudge is not worth preserving in writing, what deserves that space instead, and what would make it worth remembering?" },
+      { speakerRole: "guest" as const, content: "...", socialSilence: socialSilence("silence-2") },
+      { speakerRole: "host" as const, content: "Write down the people who consistently show up for you. What is one thing you would genuinely hate to forget?" },
+      { speakerRole: "guest" as const, content: "I would hate to forget the people who are kind to me, because kindness deserves remembering even when all the surrounding details slip away." },
+    ];
+    assert.equal(botcastSessionShouldClose({
+      messages,
+      durationMinutes: null,
+      startedAtMs: 0,
+      nowMs: 4 * 60_000,
+    }), false);
+
+    const matureInterview = Array.from({ length: 18 }, (_, index) => ({
+      speakerRole: index % 2 === 0 ? "host" as const : "guest" as const,
+      content:
+        "This concrete answer keeps the interview moving through one unresolved consequence.",
+    }));
+    matureInterview[17] = {
+      speakerRole: "guest",
+      content: "...",
+      socialSilence: socialSilence("late-silence"),
+    };
+    assert.equal(botcastSessionShouldClose({
+      messages: matureInterview,
+      durationMinutes: null,
+      startedAtMs: 0,
+      nowMs: 4 * 60_000,
+    }), false);
+    assert.equal(botcastSessionShouldClose({
+      messages: [
+        ...matureInterview.slice(0, -1),
+        {
+          speakerRole: "guest",
+          content:
+            "The final answer resolves the open question and lets the mature conversation taper.",
+        },
+      ],
+      durationMinutes: null,
+      startedAtMs: 0,
+      nowMs: 4 * 60_000,
     }), true);
   });
 
@@ -741,6 +1896,70 @@ describe("Botcast episode state", () => {
     }), false);
   });
 
+  it("recognizes an earned host sign-off without closing on descriptive or conditional wording", () => {
+    assert.equal(botcastHostSignOffIntent({
+      content:
+        "Verdict: memory beats mush; that's the podcast, go watch something with consequences.",
+      segment: "interview",
+      priorUtteranceCount: 12,
+    }), true);
+    assert.equal(botcastHostSignOffIntent({
+      content:
+        "Episode's over, verdict stands, and no, drink in your own dimension.",
+      segment: "interview",
+      priorUtteranceCount: 14,
+    }), true);
+    assert.equal(botcastHostSignOffIntent({
+      content:
+        "And that's the show, folks—consequences matter and cutaways don't.",
+      segment: "interview",
+      priorUtteranceCount: 16,
+    }), true);
+    assert.equal(botcastHostSignOffIntent({
+      content:
+        "Storming the wing factory — hehehehehehe, that's the most romantic thing anyone's ever said to me. That's it for What Grinds Your Gears — Rick Sanchez, everybody, the guy who killed money and made my change jar cry. Freakin' sweet, goodnight Quahog!",
+      segment: "interview",
+      priorUtteranceCount: 14,
+    }), true);
+    assert.equal(botcastHostSignOffIntent({
+      content:
+        "Dishes and losing at chess — that's the dream? Kid, you just described my Tuesday, and I'd trade it for one autograph line. Anyway, that's What Grinds Your Gears — Harry Potter, everybody, the only guy who's famous and mad about it. Hehehehehehe. Goodnight!",
+      segment: "interview",
+      priorUtteranceCount: 14,
+    }), true);
+    assert.equal(botcastHostSignOffIntent({
+      content:
+        'Hehehehehehe, "subpoenas are annoyingly real" — put that on my tombstone right under "he tried to deep-fry the jar." We\'re out, goodnight everybody!',
+      segment: "interview",
+      priorUtteranceCount: 16,
+    }), true);
+    assert.equal(botcastHostSignOffIntent({
+      content: "That's the show I wanted to make, but we still have more to discuss.",
+      segment: "interview",
+      priorUtteranceCount: 12,
+    }), false);
+    assert.equal(botcastHostSignOffIntent({
+      content: "If that's it for tonight, we never reach the hard question.",
+      segment: "interview",
+      priorUtteranceCount: 12,
+    }), false);
+    assert.equal(botcastHostSignOffIntent({
+      content: "If the episode's over, we never reach the difficult question.",
+      segment: "interview",
+      priorUtteranceCount: 12,
+    }), false);
+    assert.equal(botcastHostSignOffIntent({
+      content: "That's the podcast, everyone.",
+      segment: "interview",
+      priorUtteranceCount: 4,
+    }), false);
+    assert.equal(botcastHostSignOffIntent({
+      content: "That's the podcast, everyone.",
+      segment: "closing",
+      priorUtteranceCount: 12,
+    }), false);
+  });
+
   it("uses elapsed time for a timed Signal session without ending before three exchanges", () => {
     const twoExchanges = Array.from({ length: 4 }, (_, index) => ({
       speakerRole: index % 2 === 0 ? "host" as const : "guest" as const,
@@ -764,7 +1983,7 @@ describe("Botcast episode state", () => {
     }), true);
   });
 
-  it("subtracts completed and active model warmup holds from Signal time", () => {
+  it("subtracts completed and active session holds from Signal time", () => {
     const threeExchanges = Array.from({ length: 6 }, (_, index) => ({
       speakerRole: index % 2 === 0 ? "host" as const : "guest" as const,
       content: "A line.",
@@ -782,6 +2001,20 @@ describe("Botcast episode state", () => {
       startedAtMs: 0,
       nowMs: 4 * 60_000,
       modelWarmupHoldStartedAtMs: 2 * 60_000,
+    }), false);
+    assert.equal(botcastSessionShouldClose({
+      messages: threeExchanges,
+      durationMinutes: 3,
+      startedAtMs: 0,
+      nowMs: 4 * 60_000,
+      sessionClockHoldDurationMs: 2 * 60_000,
+    }), false);
+    assert.equal(botcastSessionShouldClose({
+      messages: threeExchanges,
+      durationMinutes: 3,
+      startedAtMs: 0,
+      nowMs: 4 * 60_000,
+      sessionClockHoldStartedAtMs: 2 * 60_000,
     }), false);
   });
 
@@ -821,6 +2054,192 @@ describe("Botcast episode state", () => {
     assert.deepEqual(
       applyBotcastProducerCueToTension(calm, { kind: "refocus" }),
       calm,
+    );
+  });
+
+  it("projects only deterministic guest walk-off risk for the producer", () => {
+    const baseEpisode = {
+      events: [] as BotcastReplayEvent[],
+      guestKind: "bot" as const,
+      guestPresenceMode: "present" as const,
+      guestBotId: "guest",
+      hostBotId: "host",
+      tensionStage: "calm" as const,
+      warningCount: 0,
+      outcome: null,
+      segment: "interview" as const,
+    };
+    assert.deepEqual(botcastGuestWalkOffRiskV1(baseEpisode), {
+      available: true,
+      chancePercent: 0,
+      status: "settled",
+      source: "none",
+    });
+    assert.deepEqual(
+      botcastGuestWalkOffRiskV1({
+        ...baseEpisode,
+        tensionStage: "warning",
+        warningCount: 1,
+        events: [
+          {
+            id: "irritation-1",
+            episodeId: "episode-1",
+            sequence: 1,
+            kind: "irritation",
+            payload: {
+              transition: {
+                v: 1,
+                name: "directionalIrritation",
+                transitionId: "irritation-1",
+                reason: "meaningful_cutoff",
+                subjectBotId: "guest",
+                targetBotId: "host",
+                before: 0.5,
+                after: 0.75,
+                delta: 0.25,
+                tier: "high",
+                occurredAt: "2026-01-01T00:00:00.000Z",
+              },
+            },
+            occurredAt: "2026-01-01T00:00:00.000Z",
+          },
+        ],
+      }),
+      {
+        available: true,
+        chancePercent: 75,
+        status: "elevated",
+        source: "combined",
+      },
+    );
+    assert.deepEqual(
+      botcastGuestWalkOffRiskV1({
+        ...baseEpisode,
+        tensionStage: "departed",
+        warningCount: 1,
+      }),
+      {
+        available: true,
+        chancePercent: 100,
+        status: "eligible",
+        source: "producer_pressure",
+      },
+    );
+  });
+
+  it("handles a departed, protected, or unavailable guest without forecasting a voluntary exit", () => {
+    const baseEpisode = {
+      events: [] as BotcastReplayEvent[],
+      guestKind: "bot" as const,
+      guestPresenceMode: "present" as const,
+      guestBotId: "guest",
+      hostBotId: "host",
+      tensionStage: "departed" as const,
+      warningCount: 1,
+      outcome: null,
+      segment: "interview" as const,
+    };
+    assert.deepEqual(
+      botcastGuestWalkOffRiskV1({
+        ...baseEpisode,
+        outcome: "guest_departed",
+      }),
+      {
+        available: false,
+        chancePercent: 100,
+        status: "departed",
+        source: "none",
+      },
+    );
+    for (const effect of [
+      {
+        type: "troll" as const,
+        dialect: "internet_lingo" as const,
+        grammar: "deliberately_bad" as const,
+        targets: "all_other_bots" as const,
+        playerTarget: "zen_only" as const,
+      },
+      {
+        type: "eternal_introduction" as const,
+        memory: "current_other_speaker_message" as const,
+      },
+    ]) {
+      const name =
+        effect.type === "troll" ? "Troll" : "Eternal Introduction";
+      const intent =
+        effect.type === "troll"
+          ? "Annoy other bots with bad grammar."
+          : "Every message is a first introduction and prior messages are unavailable.";
+      assert.deepEqual(
+        botcastGuestWalkOffRiskV1({
+          ...baseEpisode,
+          events: [
+            {
+              id: `power-${effect.type}`,
+              episodeId: "episode-1",
+              sequence: 1,
+              kind: "segment",
+              payload: {
+                segment: "opening",
+                ordinal: 0,
+                powerSnapshot: {
+                  v: 1,
+                  hostBotId: "host",
+                  guestBotId: "guest",
+                  hostPowers: [],
+                  guestPowers: [
+                    {
+                      version: 1,
+                      id: `power-${effect.type}`,
+                      name,
+                      intent,
+                      enabled: true,
+                      compileStatus: "ready",
+                      compiled: {
+                        version: 1,
+                        sourceHash: botPowerSourceHashV1(name, intent),
+                        selfCue: "",
+                        observerCue: "",
+                        effects:
+                          effect.type === "troll" ? [] : [effect],
+                        ruleLabels: [],
+                      },
+                    },
+                  ],
+                },
+              },
+              occurredAt: "2026-01-01T00:00:00.000Z",
+            },
+          ],
+        }),
+        {
+          available: true,
+          chancePercent: 0,
+          status: "suppressed",
+          source: "none",
+        },
+      );
+    }
+    assert.equal(
+      botcastGuestWalkOffRiskV1({
+        ...baseEpisode,
+        guestKind: "producer",
+      }).status,
+      "unavailable",
+    );
+    assert.equal(
+      botcastGuestWalkOffRiskV1({
+        ...baseEpisode,
+        guestPresenceMode: "audience_only",
+      }).status,
+      "unavailable",
+    );
+    assert.equal(
+      botcastGuestWalkOffRiskV1({
+        ...baseEpisode,
+        segment: "closing",
+      }).status,
+      "closing",
     );
   });
 
@@ -866,6 +2285,26 @@ describe("Botcast episode state", () => {
     assert.equal(departed.stage, "departed");
     assert.equal(botcastGuestDepartureEligible(departed), true);
   });
+
+  it("treats psychological diagnosis cues as personal boundary pressure", () => {
+    const warning = {
+      level: 2 as const,
+      warningCount: 1,
+      stage: "warning" as const,
+    };
+    for (const detail of [
+      "Ask if he is actually afraid.",
+      "Ask whether he is a narcissist.",
+      "Diagnose why she seems anxious.",
+    ]) {
+      const departed = applyBotcastProducerCueToTension(warning, {
+        kind: "ask_about",
+        detail,
+      });
+      assert.equal(departed.stage, "departed", detail);
+      assert.equal(botcastGuestDepartureEligible(departed), true, detail);
+    }
+  });
 });
 
 describe("Botcast replay director", () => {
@@ -880,6 +2319,24 @@ describe("Botcast replay director", () => {
         shot: "left",
         reason: "opening",
         atMs: 0,
+        minimumHoldMs: 3_200,
+      },
+    );
+  });
+
+  it("keeps Auto wide for an audible but hidden performer", () => {
+    assert.deepEqual(
+      botcastDirectorSuggestion({
+        atMs: 4_000,
+        speakerRole: "host",
+        speakerVisible: false,
+        utteranceDurationMs: 4_000,
+        segment: "interview",
+      }),
+      {
+        shot: "wide",
+        reason: "hidden_speaker",
+        atMs: 4_000,
         minimumHoldMs: 3_200,
       },
     );
@@ -986,6 +2443,105 @@ describe("Botcast replay director", () => {
     assert.equal(botcastCameraModeAt({ events, elapsedMs: 8_000 }), "auto");
   });
 
+  it("smooths legacy recurring Auto Wide cuts without overriding producer Wide", () => {
+    const events: BotcastReplayEvent[] = [
+      {
+        id: "speaker-host",
+        episodeId: "episode-1",
+        sequence: 1,
+        kind: "camera_suggestion",
+        payload: { shot: "left", reason: "speaker", atMs: 1_000 },
+        occurredAt: "2026-01-01T00:00:00.000Z",
+      },
+      {
+        id: "legacy-transition",
+        episodeId: "episode-1",
+        sequence: 2,
+        kind: "camera_suggestion",
+        payload: { shot: "wide", reason: "transition", atMs: 4_000 },
+        occurredAt: "2026-01-01T00:00:01.000Z",
+      },
+      {
+        id: "producer-wide",
+        episodeId: "episode-1",
+        sequence: 3,
+        kind: "camera_mode",
+        payload: { mode: "wide", shot: "wide", atMs: 5_000 },
+        occurredAt: "2026-01-01T00:00:02.000Z",
+      },
+      {
+        id: "producer-auto",
+        episodeId: "episode-1",
+        sequence: 4,
+        kind: "camera_mode",
+        payload: { mode: "auto", shot: "right", atMs: 6_000 },
+        occurredAt: "2026-01-01T00:00:03.000Z",
+      },
+    ];
+
+    assert.equal(botcastCameraShotAt({ events, elapsedMs: 4_500 }), "left");
+    assert.equal(botcastCameraShotAt({ events, elapsedMs: 5_500 }), "wide");
+    assert.equal(botcastCameraShotAt({ events, elapsedMs: 6_000 }), "right");
+  });
+
+  it("plans lingering coverage cuts without using the ignored transition cadence", () => {
+    const coverage = botcastDirectorCoverageSuggestions({
+      speakerShot: "left",
+      listenerShot: "right",
+      speakerStartMs: 1_000,
+      utteranceEndMs: 18_000,
+      seed: "coverage-host-line",
+      content:
+        "We have been circling this for a while. The room can take a breath. Then I come back to the question.",
+      messageId: "msg-1",
+    });
+    assert.ok(coverage.length >= 1);
+    assert.ok(
+      coverage.some(
+        (suggestion) =>
+          suggestion.reason === "coverage" || suggestion.reason === "cutaway",
+      ),
+    );
+    assert.equal(
+      coverage.some((suggestion) => suggestion.reason === "transition"),
+      false,
+    );
+    const first = coverage[0]!;
+    assert.ok(first.atMs >= 1_000 + 6_200);
+    const events: BotcastReplayEvent[] = [
+      {
+        id: "speaker",
+        episodeId: "episode-1",
+        sequence: 1,
+        kind: "camera_suggestion",
+        payload: { shot: "left", reason: "speaker", atMs: 1_000 },
+        occurredAt: "2026-01-01T00:00:00.000Z",
+      },
+      ...coverage.map((suggestion, index) => ({
+        id: `coverage-${index}`,
+        episodeId: "episode-1",
+        sequence: index + 2,
+        kind: "camera_suggestion" as const,
+        payload: { ...suggestion },
+        occurredAt: "2026-01-01T00:00:01.000Z",
+      })),
+    ];
+    assert.equal(botcastCameraShotAt({ events, elapsedMs: 1_500 }), "left");
+    assert.equal(
+      botcastAutoCoverageShotAt({ events, elapsedMs: 1_500 }),
+      null,
+    );
+    const coverageAt = first.atMs + 80;
+    assert.equal(
+      botcastCameraSuggestionReasonAt({ events, elapsedMs: coverageAt }),
+      first.reason,
+    );
+    assert.equal(
+      botcastAutoCoverageShotAt({ events, elapsedMs: coverageAt }),
+      first.shot,
+    );
+  });
+
   it("keeps the guest on stage until the saved departure beat", () => {
     const events: BotcastReplayEvent[] = [
       {
@@ -1001,12 +2557,21 @@ describe("Botcast replay director", () => {
         episodeId: "episode",
         sequence: 2,
         kind: "camera_suggestion",
-        payload: { shot: "wide", reason: "departure", atMs: 9_000 },
+        payload: {
+          shot: "wide",
+          reason: "departure",
+          atMs: 9_000,
+          messageId: "guest-final-line",
+        },
         occurredAt: "2026-01-01T00:00:00.000Z",
       },
     ];
     assert.equal(botcastGuestHasDepartedAt(events, 8_999), false);
     assert.equal(botcastGuestHasDepartedAt(events, 9_000), true);
+    assert.equal(
+      botcastDepartureMessageIdForRole(events, "guest"),
+      "guest-final-line",
+    );
     assert.equal(botcastHostHasDepartedAt(events, 9_000), false);
     assert.equal(botcastEpisodeDepartureOutcome(events), "guest_departed");
     const timeline = botcastReplayTimeline(
@@ -1092,5 +2657,46 @@ describe("Botcast replay director", () => {
       ),
       -1,
     );
+  });
+
+  it("keeps complete perception-overlap lines with at most two voices", () => {
+    const overlap = (
+      sequence: number,
+      precedingMessageId: string,
+      overlappingMessageId: string,
+      precedingBotId: string,
+      overlappingBotId: string,
+    ): BotcastReplayEvent => ({
+      id: `overlap-${sequence}`,
+      episodeId: "episode",
+      sequence,
+      kind: "power_effect",
+      payload: {
+        v: 1,
+        effect: "perception_overlap",
+        precedingMessageId,
+        overlappingMessageId,
+        precedingBotId,
+        overlappingBotId,
+        startRatio: 0.64,
+        maxSimultaneousVoices: 2,
+      },
+      occurredAt: "2026-07-21T00:00:00.000Z",
+    });
+    const timeline = botcastReplayTimeline(
+      [
+        { id: "one", content: "First speaker gives a complete and deliberately long answer." },
+        { id: "two", content: "Second speaker begins without hearing that answer and keeps talking." },
+        { id: "three", content: "Third speaker also attempts to begin before the handoff settles." },
+      ],
+      [
+        overlap(1, "one", "two", "ryuk", "lincoln"),
+        overlap(2, "two", "three", "lincoln", "ryuk"),
+      ],
+    );
+    assert.ok(timeline.messageStartMs[1]! < timeline.messageEndMs[0]!);
+    assert.ok(timeline.messageEndMs[1]! > timeline.messageStartMs[1]!);
+    assert.ok(timeline.messageStartMs[2]! >= timeline.messageEndMs[0]!);
+    assert.ok(timeline.messageEndMs[2]! > timeline.messageStartMs[2]!);
   });
 });

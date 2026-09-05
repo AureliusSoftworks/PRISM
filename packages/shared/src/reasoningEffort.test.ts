@@ -3,21 +3,235 @@ import assert from "node:assert/strict";
 import {
   anthropicModelSupportsReasoningEffort,
   anthropicReasoningEffortForRequest,
+  effectiveModelReasoningEffort,
+  modelReasoningEffortPreferenceKey,
   modelSupportsNativeReasoningEffort,
+  modelReasoningEffortMaxUnlockLevel,
+  modelReasoningEffortRungProvenance,
+  modelSupportsTurboMode,
+  ollamaModelIsKnownToSupportNativeThinking,
+  normalizeModelReasoningEffortPreference,
+  normalizeProviderReasoningEffort,
   normalizeReasoningEffort,
   openAiModelSupportsReasoningEffort,
+  openAiModelSupportsMaxReasoningEffort,
+  openAiReasoningEffortForRequest,
+  openAiReasoningEffortLevels,
+  reasoningGenerationBudgetMs,
   reasoningEffortForRequest,
+  resolveModelReasoningEffortCapability,
+  simulatedPsychicAnswerGuidanceMaxChars,
+  simulatedPsychicPlanningMaxTokens,
+  simulatedPsychicPrivateArtifactMaxChars,
+  simulatedEffortLadderPasses,
+  simulatedPsychicPrivatePassMaxTokens,
+  simulatedPsychicScratchpadMaxChars,
+  simulatedSurfacePreparationMaxTokens,
+  simulatedSurfacePreparationNoteMaxChars,
+  getSimulatedEffortBudgetProfile,
+  simulatedEffortUsesThriftyPrompting,
+  withSimulatedEffortBudgetProfile,
 } from "./reasoningEffort.ts";
 
 describe("reasoning effort helpers", () => {
+  it("gates Turbo to OpenAI Priority and eligible Anthropic Fast models", () => {
+    for (const modelId of [
+      "gpt-6-astra",
+      "gpt-6-astra-2026-09-03",
+      "gpt-5.6",
+      "gpt-5.6-sol",
+      "gpt-5.6-terra",
+      "gpt-5.6-luna",
+      "gpt-5.4-mini",
+      "gpt-5.2-2025-12-11",
+      "gpt-4.1-mini",
+      "gpt-4o-2024-11-20",
+      "o3",
+      "o4-mini",
+    ]) {
+      assert.equal(modelSupportsTurboMode("openai", modelId), true, modelId);
+    }
+    for (const modelId of [
+      "gpt-5.5-pro",
+      "gpt-5-search-api",
+      "gpt-4o-audio-preview",
+      "text-embedding-3-large",
+    ]) {
+      assert.equal(modelSupportsTurboMode("openai", modelId), false, modelId);
+    }
+    for (const modelId of [
+      "claude-opus-4-8",
+      "claude-opus-4-8-20260201",
+      "claude-opus-5",
+      "claude-opus-5-20260801",
+    ]) {
+      assert.equal(modelSupportsTurboMode("anthropic", modelId), true, modelId);
+    }
+    for (const modelId of [
+      "claude-opus-4-7",
+      "claude-sonnet-5",
+      "claude-fable-5",
+      "claude-mythos-5",
+    ]) {
+      assert.equal(modelSupportsTurboMode("anthropic", modelId), false, modelId);
+    }
+    assert.equal(modelSupportsTurboMode("local", "gpt-5.6-sol"), false);
+  });
+
   it("normalizes supported effort values", () => {
     assert.equal(normalizeReasoningEffort(undefined), "auto");
     assert.equal(normalizeReasoningEffort("HIGH"), "high");
     assert.equal(normalizeReasoningEffort(" xhigh "), "xhigh");
     assert.equal(normalizeReasoningEffort("fast"), "auto");
     assert.equal(reasoningEffortForRequest("auto"), null);
-    assert.equal(reasoningEffortForRequest("none"), null);
+    assert.equal(reasoningEffortForRequest("none"), "none");
     assert.equal(reasoningEffortForRequest("minimal"), "minimal");
+    assert.equal(normalizeProviderReasoningEffort(" MAX "), "max");
+    assert.equal(normalizeModelReasoningEffortPreference("max"), null);
+  });
+
+  it("keeps simulated-effort token budgets thrifty at low tiers and richer at high", () => {
+    assert.equal(getSimulatedEffortBudgetProfile(), "thrifty");
+    assert.equal(simulatedSurfacePreparationMaxTokens("minimal"), 72);
+    assert.equal(simulatedSurfacePreparationMaxTokens("low"), 96);
+    assert.equal(simulatedSurfacePreparationMaxTokens("medium"), 140);
+    assert.equal(simulatedSurfacePreparationMaxTokens("high"), 220);
+    assert.equal(simulatedSurfacePreparationMaxTokens("xhigh"), 320);
+    assert.ok(
+      simulatedSurfacePreparationNoteMaxChars("medium") <
+        simulatedSurfacePreparationNoteMaxChars("high"),
+    );
+    assert.ok(
+      simulatedPsychicPlanningMaxTokens("low") <
+        simulatedPsychicPlanningMaxTokens("high"),
+    );
+    assert.equal(simulatedPsychicPlanningMaxTokens("minimal"), 300);
+    assert.equal(simulatedPsychicPlanningMaxTokens("low"), 340);
+    assert.ok(
+      simulatedPsychicPlanningMaxTokens("minimal") <
+        simulatedPsychicPlanningMaxTokens("low"),
+    );
+    assert.equal(simulatedPsychicPrivatePassMaxTokens("medium", "audit"), 320);
+    assert.equal(simulatedPsychicPrivatePassMaxTokens("high", "draft"), 800);
+    assert.equal(simulatedPsychicPrivatePassMaxTokens("xhigh", "draft"), 1_200);
+    assert.equal(
+      simulatedPsychicPrivatePassMaxTokens("xhigh", "revise_draft"),
+      1_400,
+    );
+    assert.ok(
+      simulatedPsychicScratchpadMaxChars("medium") <
+        simulatedPsychicScratchpadMaxChars("xhigh"),
+    );
+    assert.ok(
+      simulatedPsychicAnswerGuidanceMaxChars("low") <
+        simulatedPsychicAnswerGuidanceMaxChars("high"),
+    );
+    assert.equal(simulatedPsychicPrivateArtifactMaxChars("medium"), 1_600);
+    assert.equal(simulatedPsychicPrivateArtifactMaxChars("xhigh"), 4_000);
+  });
+
+  it("defaults to the lean standard ladder and keeps deep as experimental", () => {
+    assert.deepEqual(simulatedEffortLadderPasses("none"), []);
+    assert.deepEqual(simulatedEffortLadderPasses("minimal"), ["plan"]);
+    assert.deepEqual(simulatedEffortLadderPasses("low"), ["plan"]);
+    assert.deepEqual(simulatedEffortLadderPasses("medium"), ["plan", "audit"]);
+    assert.deepEqual(simulatedEffortLadderPasses("high"), [
+      "plan",
+      "draft",
+      "audit",
+    ]);
+    assert.deepEqual(simulatedEffortLadderPasses("xhigh"), [
+      "plan",
+      "draft",
+      "audit",
+      "synthesis",
+    ]);
+    assert.deepEqual(simulatedEffortLadderPasses("minimal", "deep"), [
+      "plan",
+      "alternatives",
+      "draft",
+    ]);
+    assert.deepEqual(simulatedEffortLadderPasses("low", "deep"), [
+      "plan",
+      "alternatives",
+      "draft",
+      "audit",
+      "red_team",
+    ]);
+    assert.equal(simulatedEffortLadderPasses("medium", "deep").length, 7);
+    assert.equal(simulatedEffortLadderPasses("high", "deep").length, 8);
+    assert.deepEqual(simulatedEffortLadderPasses("xhigh", "deep"), [
+      "plan",
+      "alternatives",
+      "draft",
+      "audit",
+      "red_team",
+      "constraint_lock",
+      "revise_draft",
+      "compliance_sweep",
+      "synthesis",
+    ]);
+  });
+
+  it("restores legacy simulated budgets for eval A/B", async () => {
+    await withSimulatedEffortBudgetProfile("legacy", async () => {
+      assert.equal(getSimulatedEffortBudgetProfile(), "legacy");
+      assert.equal(simulatedEffortUsesThriftyPrompting(), false);
+      assert.equal(simulatedSurfacePreparationMaxTokens("minimal"), 120);
+      assert.equal(simulatedSurfacePreparationMaxTokens("high"), 220);
+      assert.equal(simulatedSurfacePreparationNoteMaxChars("low"), 1_800);
+      assert.equal(simulatedPsychicPlanningMaxTokens("medium"), 560);
+      assert.equal(simulatedPsychicPrivatePassMaxTokens("high", "draft"), 900);
+      assert.equal(simulatedPsychicScratchpadMaxChars("minimal"), 4_000);
+      assert.equal(simulatedPsychicAnswerGuidanceMaxChars("low"), 1_400);
+      assert.equal(simulatedPsychicPrivateArtifactMaxChars("medium"), 3_200);
+    });
+    assert.equal(getSimulatedEffortBudgetProfile(), "thrifty");
+    assert.equal(simulatedEffortUsesThriftyPrompting(), true);
+  });
+
+  it("budgets one complete generation attempt by effort", () => {
+    assert.equal(reasoningGenerationBudgetMs("none"), 60_000);
+    assert.equal(reasoningGenerationBudgetMs("minimal"), 120_000);
+    assert.equal(reasoningGenerationBudgetMs("low"), 180_000);
+    assert.equal(reasoningGenerationBudgetMs("medium"), 240_000);
+    assert.equal(reasoningGenerationBudgetMs("high"), 360_000);
+    assert.equal(reasoningGenerationBudgetMs("xhigh"), 480_000);
+    assert.equal(reasoningGenerationBudgetMs("max"), 600_000);
+    assert.equal(reasoningGenerationBudgetMs("auto"), 180_000);
+    assert.equal(reasoningGenerationBudgetMs(undefined), 180_000);
+    assert.equal(
+      reasoningGenerationBudgetMs(undefined, {
+        provider: "openai",
+        modelId: "gpt-5.5",
+      }),
+      180_000,
+    );
+    assert.equal(
+      reasoningGenerationBudgetMs(undefined, {
+        provider: "local",
+        modelId: "llama3.2",
+      }),
+      120_000,
+    );
+    assert.equal(
+      reasoningGenerationBudgetMs(undefined, {
+        provider: "openai",
+        modelId: "gpt-4o",
+      }),
+      120_000,
+    );
+  });
+
+  it("normalizes persisted per-model preferences without storing Default", () => {
+    assert.equal(normalizeModelReasoningEffortPreference("default"), null);
+    assert.equal(normalizeModelReasoningEffortPreference("auto"), null);
+    assert.equal(normalizeModelReasoningEffortPreference(" HIGH "), "high");
+    assert.equal(normalizeModelReasoningEffortPreference("fast"), null);
+    assert.equal(
+      modelReasoningEffortPreferenceKey("local", " ollama-secondary:qwen3 "),
+      "local:ollama-secondary:qwen3",
+    );
   });
 
   it("detects OpenAI reasoning models that support effort", () => {
@@ -63,15 +277,148 @@ describe("reasoning effort helpers", () => {
     }
   });
 
+  it("keeps known Ollama Cloud GPT-OSS on the native-thinking ladder", () => {
+    for (const modelId of [
+      "gpt-oss",
+      "gpt-oss:120b-cloud",
+      "ollama-cloud-direct:gpt-oss",
+    ]) {
+      assert.equal(ollamaModelIsKnownToSupportNativeThinking(modelId), true, modelId);
+      assert.equal(modelSupportsNativeReasoningEffort("ollama_cloud", modelId), true);
+      assert.equal(
+        resolveModelReasoningEffortCapability({
+          provider: "ollama_cloud",
+          modelId,
+          simulatedEffortEnabled: true,
+        }).mode,
+        "native-thinking",
+      );
+    }
+    assert.deepEqual(
+      resolveModelReasoningEffortCapability({
+        provider: "ollama_cloud",
+        modelId: "gpt-oss:120b-cloud",
+        simulatedEffortEnabled: true,
+      }),
+      {
+        mode: "native-thinking",
+        levels: ["low", "medium", "high", "xhigh"],
+        supportsNone: false,
+        supportsMax: false,
+        simulatedFrom: "xhigh",
+      },
+    );
+    assert.deepEqual(
+      resolveModelReasoningEffortCapability({
+        provider: "ollama_cloud",
+        modelId: "gpt-oss:120b-cloud",
+        simulatedEffortEnabled: false,
+      }).levels,
+      ["low", "medium", "high"],
+    );
+    assert.equal(
+      resolveModelReasoningEffortCapability({
+        provider: "ollama_cloud",
+        modelId: "gpt-oss:120b-cloud",
+        ollamaNativeThinking: false,
+        simulatedEffortEnabled: true,
+      }).mode,
+      "simulated",
+    );
+    for (const modelId of [
+      "kimi-k2.7-code:cloud",
+      "ollama-cloud-direct:kimi-k2.7-code:cloud",
+      "nemotron-3-super:cloud",
+    ]) {
+      const capability = resolveModelReasoningEffortCapability({
+        provider: "ollama_cloud",
+        modelId,
+        simulatedEffortEnabled: true,
+      });
+      assert.equal(capability.mode, "native-thinking", modelId);
+      assert.equal(capability.supportsNone, false, modelId);
+      assert.deepEqual(
+        capability.levels,
+        ["minimal", "low", "medium", "high"],
+        modelId,
+      );
+    }
+    assert.equal(ollamaModelIsKnownToSupportNativeThinking("qwen3:8b"), false);
+    assert.deepEqual(
+      resolveModelReasoningEffortCapability({
+        provider: "ollama_cloud",
+        modelId: "future-thinking:cloud",
+        ollamaNativeThinking: true,
+        simulatedEffortEnabled: false,
+      }).levels,
+      ["none"],
+    );
+    assert.equal(
+      resolveModelReasoningEffortCapability({
+        provider: "ollama_cloud",
+        modelId: "minimax-m2.5:cloud",
+        simulatedEffortEnabled: true,
+      }).mode,
+      "simulated",
+    );
+  });
+
   it("maps provider-neutral PRISM effort onto each Anthropic model capability", () => {
     assert.equal(anthropicReasoningEffortForRequest("claude-opus-4-8", "minimal"), "low");
     assert.equal(anthropicReasoningEffortForRequest("claude-opus-4-8", "medium"), "medium");
     assert.equal(anthropicReasoningEffortForRequest("claude-opus-4-8", "xhigh"), "xhigh");
-    assert.equal(anthropicReasoningEffortForRequest("claude-sonnet-4-6", "xhigh"), "max");
+    assert.equal(anthropicReasoningEffortForRequest("claude-opus-4-8", "max"), "max");
+    assert.equal(anthropicReasoningEffortForRequest("claude-sonnet-4-6", "xhigh"), "high");
+    assert.equal(anthropicReasoningEffortForRequest("claude-sonnet-4-6", "max"), "max");
     assert.equal(anthropicReasoningEffortForRequest("claude-opus-4-5", "xhigh"), "high");
+    assert.equal(anthropicReasoningEffortForRequest("claude-opus-4-5", "max"), null);
     assert.equal(anthropicReasoningEffortForRequest("claude-sonnet-4-6", "auto"), null);
     assert.equal(anthropicReasoningEffortForRequest("claude-sonnet-4-6", "none"), null);
     assert.equal(anthropicReasoningEffortForRequest("claude-haiku-4-5", "high"), null);
+  });
+
+  it("keeps XHigh off Claude ladders without native xhigh and parks Max above High", () => {
+    for (const modelId of [
+      "claude-opus-4-6",
+      "claude-sonnet-4-6",
+      "claude-mythos-preview",
+    ]) {
+      const capability = resolveModelReasoningEffortCapability({
+        provider: "anthropic",
+        modelId,
+      });
+      assert.deepEqual(capability.levels, ["low", "medium", "high"], modelId);
+      assert.equal(capability.supportsMax, true, modelId);
+      assert.equal(modelReasoningEffortMaxUnlockLevel(capability), "high", modelId);
+      assert.equal(anthropicReasoningEffortForRequest(modelId, "xhigh"), "high");
+      assert.equal(anthropicReasoningEffortForRequest(modelId, "max"), "max");
+    }
+    const opus45 = resolveModelReasoningEffortCapability({
+      provider: "anthropic",
+      modelId: "claude-opus-4-5",
+    });
+    assert.deepEqual(opus45.levels, ["low", "medium", "high"]);
+    assert.equal(opus45.supportsMax, false);
+    assert.equal(modelReasoningEffortMaxUnlockLevel(opus45), null);
+
+    for (const modelId of [
+      "claude-opus-4-7",
+      "claude-opus-4-8",
+      "claude-opus-5",
+      "claude-sonnet-5",
+      "claude-fable-5",
+      "claude-mythos-5",
+    ]) {
+      const capability = resolveModelReasoningEffortCapability({
+        provider: "anthropic",
+        modelId,
+      });
+      assert.deepEqual(capability.levels, ["low", "medium", "high", "xhigh"]);
+      assert.equal(capability.supportsMax, true, modelId);
+      assert.equal(modelReasoningEffortMaxUnlockLevel(capability), "xhigh", modelId);
+      assert.equal(anthropicReasoningEffortForRequest(modelId, "xhigh"), "xhigh");
+      assert.equal(anthropicReasoningEffortForRequest(modelId, "max"), "max");
+    }
   });
 
   it("exposes one provider-aware native effort capability", () => {
@@ -85,5 +432,261 @@ describe("reasoning effort helpers", () => {
       false
     );
     assert.equal(modelSupportsNativeReasoningEffort("local", "qwen3:14b"), false);
+  });
+
+  it("exposes only distinct, real effort levels for each model", () => {
+    assert.deepEqual(openAiReasoningEffortLevels("gpt-5"), [
+      "minimal",
+      "low",
+      "medium",
+      "high",
+    ]);
+    assert.deepEqual(openAiReasoningEffortLevels("gpt-5.1"), [
+      "none",
+      "low",
+      "medium",
+      "high",
+    ]);
+    for (const modelId of [
+      "gpt-5.6-sol",
+      "gpt-5.6-terra",
+      "gpt-5.6-luna",
+    ]) {
+      assert.deepEqual(openAiReasoningEffortLevels(modelId), [
+        "none",
+        "minimal",
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+      ]);
+      assert.equal(
+        openAiReasoningEffortForRequest(modelId, "minimal"),
+        "minimal",
+      );
+      assert.equal(openAiReasoningEffortForRequest(modelId, "low"), "low");
+      assert.equal(openAiModelSupportsMaxReasoningEffort(modelId), true);
+      assert.equal(openAiReasoningEffortForRequest(modelId, "max"), "max");
+      assert.equal(
+        effectiveModelReasoningEffort({
+          provider: "openai",
+          modelId,
+          preference: "minimal",
+        }),
+        "minimal",
+      );
+    }
+    assert.deepEqual(openAiReasoningEffortLevels("gpt-5.5-pro"), []);
+    assert.equal(openAiModelSupportsMaxReasoningEffort("gpt-5.5"), false);
+    assert.equal(openAiReasoningEffortForRequest("gpt-5.5", "max"), null);
+    assert.equal(openAiReasoningEffortForRequest("gpt-5", "none"), null);
+    assert.equal(openAiReasoningEffortForRequest("gpt-5.6-sol", "none"), "none");
+  });
+
+  it("recognizes GPT-6 Astra as native Low through XHigh with request-only Max", () => {
+    for (const modelId of ["gpt-6-astra", "gpt-6-astra-2026-09-03"]) {
+      assert.equal(openAiModelSupportsReasoningEffort(modelId), true, modelId);
+      assert.deepEqual(openAiReasoningEffortLevels(modelId), [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+      ]);
+      assert.equal(openAiReasoningEffortForRequest(modelId, "none"), null);
+      assert.equal(openAiReasoningEffortForRequest(modelId, "minimal"), null);
+      assert.equal(openAiReasoningEffortForRequest(modelId, "low"), "low");
+      assert.equal(openAiReasoningEffortForRequest(modelId, "xhigh"), "xhigh");
+      assert.equal(openAiModelSupportsMaxReasoningEffort(modelId), true);
+      assert.equal(openAiReasoningEffortForRequest(modelId, "max"), "max");
+      const capability = resolveModelReasoningEffortCapability({
+        provider: "openai",
+        modelId,
+      });
+      assert.equal(capability.mode, "native");
+      assert.equal(capability.supportsNone, false);
+      assert.equal(capability.supportsMax, true);
+      assert.equal(capability.simulatedFrom, undefined);
+      assert.equal(modelReasoningEffortMaxUnlockLevel(capability), "xhigh");
+      assert.equal(
+        effectiveModelReasoningEffort({
+          provider: "openai",
+          modelId,
+          preference: "minimal",
+        }),
+        null,
+      );
+    }
+    assert.equal(modelSupportsTurboMode("openai", "gpt-6-astra"), true);
+  });
+
+  it("marks each rung as native, hybrid, or simulated", () => {
+    const simulated = resolveModelReasoningEffortCapability({
+      provider: "local",
+      modelId: "llama3.2",
+    });
+    assert.equal(simulated.simulatedFrom, "minimal");
+    assert.equal(modelReasoningEffortRungProvenance(simulated, "none"), "native");
+    assert.equal(modelReasoningEffortRungProvenance(simulated, "minimal"), "simulated");
+    assert.equal(modelReasoningEffortRungProvenance(simulated, "xhigh"), "simulated");
+    const thinking = resolveModelReasoningEffortCapability({
+      provider: "local",
+      modelId: "deepseek-r1:1.5b",
+      ollamaNativeThinking: true,
+    });
+    assert.equal(thinking.simulatedFrom, "low");
+    assert.equal(modelReasoningEffortRungProvenance(thinking, "minimal"), "native");
+    assert.equal(modelReasoningEffortRungProvenance(thinking, "low"), "hybrid");
+    const tiered = resolveModelReasoningEffortCapability({
+      provider: "local",
+      modelId: "gpt-oss:20b",
+      ollamaNativeThinking: true,
+    });
+    assert.deepEqual(tiered.levels, ["low", "medium", "high", "xhigh"]);
+    assert.equal(modelReasoningEffortRungProvenance(tiered, "high"), "native");
+    assert.equal(modelReasoningEffortRungProvenance(tiered, "xhigh"), "hybrid");
+    assert.equal(
+      resolveModelReasoningEffortCapability({
+        provider: "local",
+        modelId: "gpt-oss:20b",
+        ollamaNativeThinking: true,
+        simulatedEffortEnabled: false,
+      }).simulatedFrom,
+      undefined,
+    );
+    const native = resolveModelReasoningEffortCapability({
+      provider: "openai",
+      modelId: "gpt-5.6-sol",
+    });
+    assert.equal(modelReasoningEffortRungProvenance(native, "xhigh"), "native");
+    assert.equal(modelReasoningEffortRungProvenance(native, "max"), "native");
+  });
+
+  it("simulates effort for non-native models while preserving native online effort", () => {
+    const localSimulated = resolveModelReasoningEffortCapability({
+      provider: "local",
+      modelId: "qwen3:14b",
+    });
+    assert.equal(localSimulated.mode, "simulated");
+    assert.equal(localSimulated.supportsNone, true);
+    assert.equal(localSimulated.supportsMax, false);
+    assert.deepEqual(localSimulated.levels, [
+      "none",
+      "minimal",
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+    ]);
+    assert.equal(
+      resolveModelReasoningEffortCapability({
+        provider: "local",
+        modelId: "qwen3:14b",
+        simulatedEffortEnabled: false,
+      }).mode,
+      "unavailable",
+    );
+    const openAiSimulated = resolveModelReasoningEffortCapability({
+      provider: "openai",
+      modelId: "gpt-4o",
+    });
+    assert.equal(openAiSimulated.mode, "simulated");
+    assert.equal(openAiSimulated.supportsNone, true);
+    assert.equal(
+      resolveModelReasoningEffortCapability({
+        provider: "anthropic",
+        modelId: "claude-haiku-4-5",
+        simulatedEffortEnabled: true,
+      }).mode,
+      "simulated",
+    );
+    assert.equal(
+      effectiveModelReasoningEffort({
+        provider: "anthropic",
+        modelId: "claude-haiku-4-5",
+        preference: "minimal",
+        simulatedEffortEnabled: true,
+      }),
+      "minimal",
+    );
+    assert.equal(
+      effectiveModelReasoningEffort({
+        provider: "anthropic",
+        modelId: "claude-haiku-4-5",
+        preference: "none",
+      }),
+      "none",
+    );
+  });
+
+  it("preserves None for Ollama models that can disable thinking", () => {
+    const thinkingLocal = resolveModelReasoningEffortCapability({
+      provider: "local",
+      modelId: "deepseek-r1:1.5b",
+      localNativeThinking: true,
+    });
+    assert.equal(thinkingLocal.mode, "native-thinking");
+    assert.equal(thinkingLocal.supportsNone, true);
+    assert.equal(thinkingLocal.supportsMax, false);
+    assert.deepEqual(thinkingLocal.levels, [
+      "none",
+      "minimal",
+      "low",
+      "medium",
+      "high",
+    ]);
+    // A boolean-thinking model retains native None without simulated stops.
+    assert.deepEqual(
+      resolveModelReasoningEffortCapability({
+        provider: "local",
+        modelId: "deepseek-r1:1.5b",
+        localNativeThinking: true,
+        simulatedEffortEnabled: false,
+      }).levels,
+      ["none"],
+    );
+    // Saved player-facing stops stay valid while XHigh remains unavailable.
+    assert.equal(
+      effectiveModelReasoningEffort({
+        provider: "local",
+        modelId: "deepseek-r1:1.5b",
+        preference: "minimal",
+        localNativeThinking: true,
+      }),
+      "minimal",
+    );
+    assert.equal(
+      effectiveModelReasoningEffort({
+        provider: "local",
+        modelId: "deepseek-r1:1.5b",
+        preference: "none",
+        localNativeThinking: true,
+      }),
+      "none",
+    );
+  });
+
+  it("preserves native and fixed online effort behavior when simulation is enabled", () => {
+    assert.equal(
+      resolveModelReasoningEffortCapability({
+        provider: "openai",
+        modelId: "gpt-5.6-sol",
+        simulatedEffortEnabled: true,
+      }).mode,
+      "native",
+    );
+    assert.equal(
+      resolveModelReasoningEffortCapability({
+        provider: "openai",
+        modelId: "gpt-5.6-sol",
+      }).supportsMax,
+      true,
+    );
+    const fixed = resolveModelReasoningEffortCapability({
+      provider: "openai",
+      modelId: "gpt-5.5-pro",
+      simulatedEffortEnabled: true,
+    });
+    assert.equal(fixed.mode, "unavailable");
+    assert.equal(fixed.disabledReason, "This model uses a fixed reasoning effort.");
   });
 });

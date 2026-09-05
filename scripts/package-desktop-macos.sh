@@ -60,6 +60,7 @@ fi
 
 mkdir -p "${DIST_DIR}"
 DMG_TARGET="${DIST_DIR}/Prism-Desktop-v${VERSION}.dmg"
+STEAM_ZIP_TARGET="${DIST_DIR}/Prism-Desktop-v${VERSION}-steam-macos.zip"
 cp "${DMG_SOURCE}" "${DMG_TARGET}"
 
 # Optional signing/notarization hook for CI or local secured environments.
@@ -72,3 +73,7 @@ if [ -n "${PRISM_DESKTOP_MAC_SIGN_SCRIPT:-}" ]; then
 fi
 
 echo "Wrote ${DMG_TARGET}"
+
+rm -f "${STEAM_ZIP_TARGET}"
+ditto -c -k --sequesterRsrc --keepParent "${APP_BUNDLE}" "${STEAM_ZIP_TARGET}"
+echo "Wrote ${STEAM_ZIP_TARGET}"

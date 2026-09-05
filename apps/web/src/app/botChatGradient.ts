@@ -2,12 +2,18 @@ import {
   hexToHsl,
   hslToHex,
   normalizeAccentForTheme,
+  resolveBotAccentColor,
 } from "@localai/shared";
 
 export type BotChatGradientTheme = "light" | "dark";
 
 export interface BotChatGradientVariables {
+  "--bot-primary-color": string;
+  "--bot-accent-color": string;
+  /** Compatibility alias for primary identity consumers. */
+  "--bot-color": string;
   "--bot-chat-gradient": string;
+  "--bot-chat-persona-fill": string;
 }
 
 export interface BotChatGradientPalette {
@@ -17,6 +23,22 @@ export interface BotChatGradientPalette {
   secondary: string;
   deep: string;
 }
+
+/** Message count where Home persona color wash reaches full strength. */
+export const BOT_CHAT_PERSONA_FILL_FULL_AT_MESSAGES = 22;
+
+/**
+ * Whisper of persona color at the first turn so identity is present without
+ * bleaching the reading surface.
+ */
+export const BOT_CHAT_PERSONA_FILL_START_WHISPER = 0.06;
+
+/**
+ * Empty bot rooms need a readable identity wash immediately. A true zero fill
+ * made every persona look like the same neutral Prism shell until messages
+ * stacked up or a wallpaper arrived.
+ */
+export const BOT_CHAT_PERSONA_FILL_EMPTY_ROOM = 0.42;
 
 function stableUnitValue(seed: string): number {
   let hash = 2166136261;
@@ -42,6 +64,27 @@ function hexWithAlpha(hex: string, alpha: number): string {
   const green = parseInt(clean.slice(2, 4), 16);
   const blue = parseInt(clean.slice(4, 6), 16);
   return `rgba(${red}, ${green}, ${blue}, ${clamp(alpha, 0, 1).toFixed(3)})`;
+}
+
+/**
+ * How strongly a Home conversation should carry the selected persona's color.
+ * Empty rooms keep a clear identity wash; once messages exist the fill eases
+ * upward from that floor toward full presence (never dipping back to blank).
+ */
+export function botChatPersonaFillProgress(messageCount: number): number {
+  if (!Number.isFinite(messageCount) || messageCount <= 0) {
+    return BOT_CHAT_PERSONA_FILL_EMPTY_ROOM;
+  }
+  const t = clamp(messageCount / BOT_CHAT_PERSONA_FILL_FULL_AT_MESSAGES, 0, 1);
+  // Smoothstep ease so early turns stay calm relative to a full wash, then
+  // the room fills — always at least the empty-room identity floor.
+  const eased = t * t * (3 - 2 * t);
+  return clamp(
+    BOT_CHAT_PERSONA_FILL_EMPTY_ROOM +
+      (1 - BOT_CHAT_PERSONA_FILL_EMPTY_ROOM) * eased,
+    0,
+    1,
+  );
 }
 
 /**
@@ -109,12 +152,26 @@ export function botChatGradientPalette(
   };
 }
 
+export interface BuildBotChatGradientOptions {
+  /** 0..1 presence of persona color over the neutral base. Defaults to full. */
+  fillProgress?: number;
+  /** Null/omitted resolves the stable +52 degree Auto companion hue. */
+  accentColor?: string | null;
+}
+
 /** Deterministic, local-only canvas atmosphere for one selected bot. */
 export function buildBotChatGradient(
   botId: string,
   rawColor: string,
   theme: BotChatGradientTheme,
+  options: BuildBotChatGradientOptions = {},
 ): string {
+  const fillProgress = clamp(options.fillProgress ?? 1, 0, 1);
+  const resolvedAccent = normalizeAccentForTheme(
+    resolveBotAccentColor(rawColor, options.accentColor),
+    theme,
+  );
+  const accentHsl = hexToHsl(resolvedAccent);
   const seed = `bot-chat-gradient:${botId.trim() || rawColor.trim()}:${rawColor}:${theme}`;
   const palette = botChatGradientPalette(rawColor, theme, seed);
   // Keep the procedural variation inside a composed layout: one broad light
@@ -129,10 +186,12 @@ export function buildBotChatGradient(
   const lowY = 74 + stableUnitValue(`${seed}:low-y`) * 24;
   const focalX = 44 + stableUnitValue(`${seed}:focal-x`) * 12;
   const focalY = 10 + stableUnitValue(`${seed}:focal-y`) * 16;
-  const primaryAlpha = theme === "dark" ? 0.2 : 0.12;
-  const counterAlpha = theme === "dark" ? 0.12 : 0.075;
-  const lowAlpha = theme === "dark" ? 0.08 : 0.05;
-  const focalAlpha = theme === "dark" ? 0.07 : 0.045;
+  // Color stops stay translucent so wallpaper / atmosphere texture remains
+  // visible underneath as the room slowly fills with persona hue.
+  const primaryAlpha = (theme === "dark" ? 0.2 : 0.12) * fillProgress;
+  const counterAlpha = (theme === "dark" ? 0.12 : 0.075) * fillProgress;
+  const lowAlpha = (theme === "dark" ? 0.08 : 0.05) * fillProgress;
+  const focalAlpha = (theme === "dark" ? 0.07 : 0.045) * fillProgress;
   const neutralBase =
     theme === "dark"
       ? "linear-gradient(148deg, var(--bg-deep) 0%, var(--bg) 48%, color-mix(in srgb, var(--bg-surface) 74%, #000000 26%) 100%)"
@@ -140,7 +199,7 @@ export function buildBotChatGradient(
 
   return [
     `radial-gradient(ellipse 132% 90% at ${primaryX.toFixed(1)}% ${primaryY.toFixed(1)}%, ${hexWithAlpha(palette.bloom, primaryAlpha)} 0%, ${hexWithAlpha(palette.body, primaryAlpha * 0.34)} 38%, ${hexWithAlpha(palette.bloom, 0)} 76%)`,
-    `radial-gradient(ellipse 92% 84% at ${counterX.toFixed(1)}% ${counterY.toFixed(1)}%, ${hexWithAlpha(palette.secondary, counterAlpha)} 0%, ${hexWithAlpha(palette.secondary, counterAlpha * 0.28)} 42%, ${hexWithAlpha(palette.secondary, 0)} 80%)`,
+    `radial-gradient(ellipse 92% 84% at ${counterX.toFixed(1)}% ${counterY.toFixed(1)}%, ${hexWithAlpha(resolvedAccent, counterAlpha)} 0%, ${hexWithAlpha(hslToHex(accentHsl.h, accentHsl.s * 0.72, accentHsl.l), counterAlpha * 0.28)} 42%, ${hexWithAlpha(resolvedAccent, 0)} 80%)`,
     `radial-gradient(ellipse 98% 76% at ${lowX.toFixed(1)}% ${lowY.toFixed(1)}%, ${hexWithAlpha(palette.deep, lowAlpha)} 0%, ${hexWithAlpha(palette.body, lowAlpha * 0.24)} 46%, ${hexWithAlpha(palette.deep, 0)} 82%)`,
     `radial-gradient(ellipse 64% 42% at ${focalX.toFixed(1)}% ${focalY.toFixed(1)}%, ${hexWithAlpha(palette.bloom, focalAlpha)} 0%, ${hexWithAlpha(palette.bloom, focalAlpha * 0.22)} 44%, ${hexWithAlpha(palette.bloom, 0)} 78%)`,
     neutralBase,
@@ -151,8 +210,22 @@ export function buildBotChatGradientVariables(
   botId: string,
   rawColor: string,
   theme: BotChatGradientTheme,
+  fillProgress = 1,
+  accentColor?: string | null,
 ): BotChatGradientVariables {
+  const normalizedFill = clamp(fillProgress, 0, 1);
+  const resolvedAccent = normalizeAccentForTheme(
+    resolveBotAccentColor(rawColor, accentColor),
+    theme,
+  );
   return {
-    "--bot-chat-gradient": buildBotChatGradient(botId, rawColor, theme),
+    "--bot-primary-color": normalizeAccentForTheme(rawColor, theme),
+    "--bot-accent-color": resolvedAccent,
+    "--bot-color": normalizeAccentForTheme(rawColor, theme),
+    "--bot-chat-gradient": buildBotChatGradient(botId, rawColor, theme, {
+      fillProgress: normalizedFill,
+      accentColor,
+    }),
+    "--bot-chat-persona-fill": normalizedFill.toFixed(3),
   };
 }

@@ -1,8 +1,15 @@
+import {
+  normalizeBotIdentityColor,
+  resolveBotAccentColor,
+} from "@localai/shared";
+
 type ZenWallpaperPromptArgs = {
   initialUserPrompt: string;
   recentContext: string;
   botName: string | null;
   botSystemPrompt: string | null;
+  primaryColor?: string | null;
+  accentColor?: string | null;
   styleNotes?: string | null;
   generationIndex?: number | null;
 };
@@ -418,6 +425,10 @@ export function composeZenWallpaperPrompt(args: ZenWallpaperPromptArgs): string 
   const styleNotes = clampZenWallpaperPromptText(args.styleNotes, 320);
   const personaContext = composeZenWallpaperPersonaContext(args);
   const styleOrPersonaDriven = Boolean(styleNotes || personaContext);
+  const primary = normalizeBotIdentityColor(args.primaryColor);
+  const accent = primary
+    ? resolveBotAccentColor(primary, args.accentColor)
+    : null;
 
   return [
     "Widescreen ambient wallpaper for a calm Zen chat canvas; it may be abstract, scenic, symbolic, or representational when the chat or active persona calls for it.",
@@ -425,6 +436,9 @@ export function composeZenWallpaperPrompt(args: ZenWallpaperPromptArgs): string 
       ? "Let the active style or persona choose the palette, materials, setting, and vividness; PRISM house colors are optional, not required."
       : "For default PRISM or fallback atmosphere, favor charcoal, pearl, mist-gray, soft gradients, atmospheric texture, gentle depth, and one restrained prismatic accent.",
     personaContext,
+    primary && accent
+      ? `Palette guidance: let primary ${primary} own roughly two thirds of the environmental light, with resolved Atmosphere accent ${accent} as a restrained edge glow or spatial counterbalance. These are flexible cues, not commands; materials, mood, and setting may temper them, and the image must not become a literal two-color gradient.`
+      : null,
     `Wallpaper theme ${themeNumber}/${ZEN_WALLPAPER_THEME_COUNT} - ${lane.label}: ${lane.instruction}.`,
     cues.length > 0
       ? `Make ${primaryCue} the clearest chat-derived influence${supportingCueText ? `, supported by ${supportingCueText}` : ""}; show these as recognizable broad light, material, silhouette, setting, spatial, or weather decisions rather than barely-there noise.`

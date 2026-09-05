@@ -1,0 +1,513 @@
+{
+  "mode": "dry-run",
+  "database": "/Users/jared/Library/Application Support/com.localai.prism-desktop/localai.db",
+  "theme": {
+    "id": "library-dev-backup",
+    "name": "Library Dev Backup",
+    "branchLock": "dev",
+    "botCount": 45
+  },
+  "roster": [
+    {
+      "id": "abraham-lincoln",
+      "name": "Abraham Lincoln",
+      "botHash": "b927bb3e2f2d421a0820bffc0327b784",
+      "changed": true,
+      "fields": [
+        "faceEyeOffsetX",
+        "faceEyeOffsetY",
+        "faceMouthOffsetX",
+        "faceMouthOffsetY",
+        "authoredAudioVoiceProfile",
+        "audioVoiceProfileOverride"
+      ]
+    },
+    {
+      "id": "adolf-hitler",
+      "name": "Adolf Hitler",
+      "botHash": "2ca9251784085927e0e83b67fb2882ce",
+      "changed": true,
+      "fields": [
+        "voicePreviewLine",
+        "authoredAudioVoiceProfile",
+        "audioVoiceProfileOverride"
+      ]
+    },
+    {
+      "id": "andy-hominem",
+      "name": "Andy Hominem",
+      "botHash": "6d05d998fa79f3c0bd16e94c793cb02c",
+      "changed": true,
+      "fields": [
+        "authoredAudioVoiceProfile",
+        "audioVoiceProfileOverride"
+      ]
+    },
+    {
+      "id": "barack-obama",
+      "name": "Barack Obama",
+      "botHash": "ae01cbd10d57c946897d702e0cefa4cc",
+      "changed": true,
+      "fields": [
+        "authoredAudioVoiceProfile",
+        "audioVoiceProfileOverride"
+      ]
+    },
+    {
+      "id": "bernie-sanders",
+      "name": "Bernie Sanders",
+      "botHash": "3c9f1a8e7b2d4f60a5c7e9b1d2f4386a",
+      "changed": true,
+      "fields": [
+        "avatarDetails",
+        "authoredAudioVoiceProfile",
+        "audioVoiceProfileOverride"
+      ]
+    },
+    {
+      "id": "bob-ross",
+      "name": "Bob Ross",
+      "botHash": "6f2a9c81d4e7b305a8f1c6d9e0b4723a",
+      "changed": true,
+      "fields": [
+        "authoredAudioVoiceProfile",
+        "audioVoiceProfileOverride"
+      ]
+    },
+    {
+      "id": "brian-griffin",
+      "name": "Brian Griffin",
+      "botHash": "ca87efc6a127ebe1cd927a18203f4252",
+      "changed": true,
+      "fields": [
+        "avatarDetails",
+        "authoredAudioVoiceProfile",
+        "audioVoiceProfileOverride"
+      ]
+    },
+    {
+      "id": "darth-vader",
+      "name": "Darth Vader",
+      "botHash": "b1a6423c93a0837a6f36992b4c8efbd8",
+      "changed": true,
+      "fields": [
+        "avatarDetails",
+        "faceMouthOffsetX",
+        "faceMouthOffsetY",
+        "voicePreviewLine",
+        "authoredAudioVoiceProfile",
+        "audioVoiceProfileOverride"
+      ]
+    },
+    {
+      "id": "donald-trump",
+      "name": "Donald Trump",
+      "botHash": "7f2b9c4a1d6e8f03b5c7a90d2e4f6a18",
+      "changed": true,
+      "fields": [
+        "avatarDetails",
+        "voicePreviewLine",
+        "authoredAudioVoiceProfile",
+        "audioVoiceProfileOverride"
+      ]
+    },
+    {
+      "id": "echo-ellen",
+      "name": "Echo Ellen",
+      "botHash": "da3d5031622b33f0d546bf869dfe293c",
+      "changed": true,
+      "fields": [
+        "authoredAudioVoiceProfile",
+        "audioVoiceProfileOverride"
+      ]
+    },
+    {
+      "id": "elon-musk",
+      "name": "Elon Musk",
+      "botHash": "385424c96c02eb9684767504e9d964ba",
+      "changed": true,
+      "fields": [
+        "bundle"
+      ]
+    },
+    {
+      "id": "gavin-newsom",
+      "name": "Gavin Newsom",
+      "botHash": "41ca9ca47fc73eed95625add3a011c15",
+      "changed": true,
+      "fields": [
+        "bundle"
+      ]
+    },
+    {
+      "id": "hagrid",
+      "name": "Hagrid",
+      "botHash": "f9fcfdaf0be44fa8a0adab5341752874",
+      "changed": true,
+      "fields": [
+        "authoredAudioVoiceProfile",
+        "audioVoiceProfileOverride"
+      ]
+    },
+    {
+      "id": "harry-potter",
+      "name": "Harry Potter",
+      "botHash": "3e7a9f0c4b2d1e8a6c5f9b7d2a4e1c3f",
+      "changed": true,
+      "fields": [
+        "faceEyeScale",
+        "faceEyeOffsetX",
+        "faceEyeOffsetY",
+        "authoredAudioVoiceProfile",
+        "audioVoiceProfileOverride"
+      ]
+    },
+    {
+      "id": "identity-crisis-irene",
+      "name": "Identity Crisis Irene",
+      "botHash": "52fd8802db4e0dc85e89b8adce1a8f2a",
+      "changed": true,
+      "fields": [
+        "authoredAudioVoiceProfile",
+        "audioVoiceProfileOverride"
+      ]
+    },
+    {
+      "id": "jordan-peterson",
+      "name": "Jordan Peterson",
+      "botHash": "c6a887ae930d0517791a5d1fa884ae0c",
+      "changed": true,
+      "fields": [
+        "authoredAudioVoiceProfile",
+        "audioVoiceProfileOverride"
+      ]
+    },
+    {
+      "id": "joseph-smith-jr",
+      "name": "Joseph Smith Jr.",
+      "botHash": "35728af1d7472792438a121e9e70354d",
+      "changed": true,
+      "fields": [
+        "authoredAudioVoiceProfile",
+        "audioVoiceProfileOverride"
+      ]
+    },
+    {
+      "id": "joseph-stalin",
+      "name": "Joseph Stalin",
+      "botHash": "d2695adcd6dd16d356064071442d4db9",
+      "changed": true,
+      "fields": [
+        "avatarDetails",
+        "authoredAudioVoiceProfile",
+        "audioVoiceProfileOverride"
+      ]
+    },
+    {
+      "id": "khloe-kardashian",
+      "name": "Khloé Kardashian",
+      "botHash": "b6b197eb9dad09f095c61ccd6d15a480",
+      "changed": true,
+      "fields": [
+        "authoredAudioVoiceProfile",
+        "audioVoiceProfileOverride"
+      ]
+    },
+    {
+      "id": "kim-kardashian",
+      "name": "Kim Kardashian",
+      "botHash": "4f7a92c31b8d4e5f9a0c6b2d83e1f547",
+      "changed": true,
+      "fields": [
+        "authoredAudioVoiceProfile",
+        "audioVoiceProfileOverride"
+      ]
+    },
+    {
+      "id": "kourtney-kardashian-barker",
+      "name": "Kourtney Kardashian Barker",
+      "botHash": "37286909d45a4832772017ad4d5aec27",
+      "changed": true,
+      "fields": [
+        "authoredAudioVoiceProfile",
+        "audioVoiceProfileOverride"
+      ]
+    },
+    {
+      "id": "kris-jenner",
+      "name": "Kris Jenner",
+      "botHash": "9f5e04147d51b873ebf1a5ceab6a82ed",
+      "changed": true,
+      "fields": [
+        "authoredAudioVoiceProfile",
+        "audioVoiceProfileOverride"
+      ]
+    },
+    {
+      "id": "l",
+      "name": "L",
+      "botHash": "7ccfd7f90c0f4866c2f114af0ac10686",
+      "changed": true,
+      "fields": [
+        "authoredAudioVoiceProfile",
+        "audioVoiceProfileOverride"
+      ]
+    },
+    {
+      "id": "light-yagami",
+      "name": "Light Yagami",
+      "botHash": "2113d25e55f65c741f332283412f322e",
+      "changed": true,
+      "fields": [
+        "avatarDetails",
+        "faceEyeScale",
+        "faceEyeOffsetX",
+        "faceEyeOffsetY",
+        "faceBlinkBar",
+        "authoredAudioVoiceProfile",
+        "audioVoiceProfileOverride"
+      ]
+    },
+    {
+      "id": "marie-antoinette",
+      "name": "Marie Antoinette",
+      "botHash": "95d7d85539d5891e4d66e4e60d8fa0a2",
+      "changed": true,
+      "fields": [
+        "voicePreviewLine",
+        "authoredAudioVoiceProfile",
+        "audioVoiceProfileOverride"
+      ]
+    },
+    {
+      "id": "maximilien-robespierre",
+      "name": "Maximilien Robespierre",
+      "botHash": "2f59a2abf531854477eb863010f2971e",
+      "changed": true,
+      "fields": [
+        "avatarDetails",
+        "voicePreviewLine",
+        "authoredAudioVoiceProfile",
+        "audioVoiceProfileOverride"
+      ]
+    },
+    {
+      "id": "misa-amane",
+      "name": "Misa Amane",
+      "botHash": "a9104bb7fa906ce8466b19c7d0125e92",
+      "changed": true,
+      "fields": [
+        "authoredAudioVoiceProfile",
+        "audioVoiceProfileOverride"
+      ]
+    },
+    {
+      "id": "morty-smith",
+      "name": "Morty Smith",
+      "botHash": "075a90c450ae8b9eee59fc83c0fc8be5",
+      "changed": true,
+      "fields": [
+        "authoredAudioVoiceProfile",
+        "audioVoiceProfileOverride"
+      ]
+    },
+    {
+      "id": "mr-krabs",
+      "name": "Mr. Krabs",
+      "botHash": "cf2a36fb358b9c8b86a1713020f23c35",
+      "changed": true,
+      "fields": [
+        "avatarDetails",
+        "authoredAudioVoiceProfile",
+        "audioVoiceProfileOverride"
+      ]
+    },
+    {
+      "id": "mr-rogers",
+      "name": "Mr. Rogers",
+      "botHash": "250c17958355ca9e9f3309bda1c5734a",
+      "changed": true,
+      "fields": [
+        "authoredAudioVoiceProfile",
+        "audioVoiceProfileOverride"
+      ]
+    },
+    {
+      "id": "near",
+      "name": "Near",
+      "botHash": "ea6e7c72e0bac371ac0445d0bdebe05a",
+      "changed": true,
+      "fields": [
+        "authoredAudioVoiceProfile",
+        "audioVoiceProfileOverride"
+      ]
+    },
+    {
+      "id": "obi-wan-kenobi",
+      "name": "Obi-Wan Kenobi",
+      "botHash": "89a284d09ba0b65c4297dd61051ed0f3",
+      "changed": true,
+      "fields": [
+        "namePronunciation",
+        "voicePreviewLine",
+        "authoredAudioVoiceProfile",
+        "audioVoiceProfileOverride"
+      ]
+    },
+    {
+      "id": "patrick-star",
+      "name": "Patrick Star",
+      "botHash": "4e7a91c2d5f84b03a6c9e1f27d8b5a40",
+      "changed": true,
+      "fields": [
+        "authoredAudioVoiceProfile",
+        "audioVoiceProfileOverride"
+      ]
+    },
+    {
+      "id": "peter-griffin",
+      "name": "Peter Griffin",
+      "botHash": "8777c07489b282215f2727ecaad7da43",
+      "changed": true,
+      "fields": [
+        "faceEyeOffsetX",
+        "faceEyeOffsetY",
+        "faceMouthOffsetX",
+        "faceMouthOffsetY",
+        "authoredAudioVoiceProfile",
+        "audioVoiceProfileOverride"
+      ]
+    },
+    {
+      "id": "plankton",
+      "name": "Plankton",
+      "botHash": "c27596d04d55f6f8819ccc53892ada36",
+      "changed": true,
+      "fields": [
+        "authoredAudioVoiceProfile",
+        "audioVoiceProfileOverride"
+      ]
+    },
+    {
+      "id": "professor-mcgonagall",
+      "name": "Professor McGonagall",
+      "botHash": "669340cc55c539e696bd559aaf2f6104",
+      "changed": true,
+      "fields": [
+        "authoredAudioVoiceProfile",
+        "audioVoiceProfileOverride"
+      ]
+    },
+    {
+      "id": "quiet-tim",
+      "name": "Quiet Tim",
+      "botHash": "3ebb4ebddd2fa3bf64ceaac2950f8ff5",
+      "changed": true,
+      "fields": [
+        "authoredAudioVoiceProfile",
+        "audioVoiceProfileOverride"
+      ]
+    },
+    {
+      "id": "richard-dawkins",
+      "name": "Richard Dawkins",
+      "botHash": "e1d8ec3e842ff03541976bbce67daaf0",
+      "changed": true,
+      "fields": [
+        "bundle"
+      ]
+    },
+    {
+      "id": "rick-sanchez",
+      "name": "Rick Sanchez",
+      "botHash": "644cb30cbf0f129b6bba9be959e58928",
+      "changed": true,
+      "fields": [
+        "faceEyeAnimation",
+        "faceEyeOffsetX",
+        "voicePreviewLine",
+        "authoredAudioVoiceProfile",
+        "audioVoiceProfileOverride",
+        "powers"
+      ]
+    },
+    {
+      "id": "ryuk",
+      "name": "Ryuk",
+      "botHash": "b69b3d66fb6d40b377ca429f87c11bb5",
+      "changed": true,
+      "fields": [
+        "namePronunciation",
+        "authoredAudioVoiceProfile",
+        "audioVoiceProfileOverride"
+      ]
+    },
+    {
+      "id": "sam-harris",
+      "name": "Sam Harris",
+      "botHash": "3afc962af5d310845041f47a1180e776",
+      "changed": true,
+      "fields": [
+        "authoredAudioVoiceProfile",
+        "audioVoiceProfileOverride"
+      ]
+    },
+    {
+      "id": "scatterbrained-steven",
+      "name": "Scatterbrained Steven",
+      "botHash": "56a462831e9cb2b91ae3e99b6d65ad35",
+      "changed": true,
+      "fields": [
+        "authoredAudioVoiceProfile",
+        "audioVoiceProfileOverride"
+      ]
+    },
+    {
+      "id": "spongebob-squarepants",
+      "name": "SpongeBob SquarePants",
+      "botHash": "b8a3f19c5d4e62ab7f03c9d1e6a4b257",
+      "changed": true,
+      "fields": [
+        "avatarDetails",
+        "faceMouthOffsetX",
+        "faceMouthOffsetY",
+        "authoredAudioVoiceProfile",
+        "audioVoiceProfileOverride"
+      ]
+    },
+    {
+      "id": "squidward",
+      "name": "Squidward",
+      "botHash": "9a893c8ddcbdbefce0ac40ad7d6872a5",
+      "changed": true,
+      "fields": [
+        "authoredAudioVoiceProfile",
+        "audioVoiceProfileOverride"
+      ]
+    },
+    {
+      "id": "stewie-griffin",
+      "name": "Stewie Griffin",
+      "botHash": "3ad1f4a1cb2ed3c054cf367d786b5ef8",
+      "changed": true,
+      "fields": [
+        "avatarDetails",
+        "faceEyeAnimation",
+        "faceMouthCharacter",
+        "faceEyeScale",
+        "faceEyeOffsetX",
+        "faceEyeOffsetY",
+        "faceMouthOffsetX",
+        "faceMouthOffsetY",
+        "faceMouthRotationDeg",
+        "voicePreviewLine",
+        "authoredAudioVoiceProfile",
+        "audioVoiceProfileOverride"
+      ]
+    }
+  ],
+  "changedBundles": 45,
+  "staleBundles": [],
+  "manifestChanged": true,
+  "backup": null
+}

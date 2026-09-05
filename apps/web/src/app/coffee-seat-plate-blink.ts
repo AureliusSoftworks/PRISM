@@ -17,6 +17,21 @@ export interface CoffeeSeatBlinkOptions {
   blinkBar?: BotFaceBlinkBar | null;
 }
 
+export function coffeeSeatBlinkKeepsFaceStill(
+  blinkBar: BotFaceBlinkBar | null | undefined,
+  options: Pick<CoffeeSeatBlinkOptions, "eyeCharacter"> = {},
+): boolean {
+  const normalizedBlinkBar =
+    normalizeBotFaceBlinkBar(blinkBar) ?? DEFAULT_BOT_FACE_BLINK_BAR;
+  const hasCustomEye =
+    typeof options.eyeCharacter === "string" &&
+    Array.from(options.eyeCharacter.trim()).length === 1;
+  return (
+    (normalizedBlinkBar === DEFAULT_BOT_FACE_BLINK_BAR && !hasCustomEye) ||
+    normalizedBlinkBar === "none"
+  );
+}
+
 function normalizeCoffeeSeatBlinkPhase(
   phaseOrEyesOpen: CoffeeSeatBlinkPhase | boolean
 ): CoffeeSeatBlinkPhase {
@@ -33,7 +48,7 @@ export function applyCoffeeSeatBlink(
   const phase = normalizeCoffeeSeatBlinkPhase(phaseOrEyesOpen);
   const blinkBar =
     normalizeBotFaceBlinkBar(options.blinkBar) ?? DEFAULT_BOT_FACE_BLINK_BAR;
-  if (blinkBar === "none") return text;
+  if (coffeeSeatBlinkKeepsFaceStill(blinkBar, options)) return text;
   if (phase === "open" || text.length === 0) return text;
   const [eye] = Array.from(text);
   if (!eye) return text;

@@ -43,6 +43,29 @@ describe("backend connection recovery", () => {
     );
   });
 
+  it("keeps the authenticated auxiliary lane warm without surfacing background failures", () => {
+    const pageSource = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
+    const heartbeatStart = pageSource.indexOf(
+      "if (!user?.id || backendUnavailable) return;",
+    );
+    const heartbeatEnd = pageSource.indexOf(
+      "if (!backendUnavailable) {",
+      heartbeatStart,
+    );
+    assert.notEqual(heartbeatStart, -1);
+    assert.notEqual(heartbeatEnd, -1);
+    const heartbeatSource = pageSource.slice(heartbeatStart, heartbeatEnd);
+    assert.match(heartbeatSource, /requestRunning/u);
+    assert.match(heartbeatSource, /"\/api\/models\/auxiliary\/keep-warm"/u);
+    assert.match(heartbeatSource, /scheduleKeepWarm\(0\)/u);
+    assert.match(heartbeatSource, /addEventListener\("visibilitychange"/u);
+    assert.match(heartbeatSource, /addEventListener\("online"/u);
+    assert.match(
+      heartbeatSource,
+      /settings\?\.experimentalDualOllamaEnabled,[\s\S]*?settings\?\.prismDefaultLlmModel,[\s\S]*?settings\?\.secondaryOllamaHost/u,
+    );
+  });
+
   it("keeps ordinary reconnects out of workspace hydration and browser reload paths", () => {
     const pageSource = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
     const start = pageSource.indexOf("const recoverBackendConnection");

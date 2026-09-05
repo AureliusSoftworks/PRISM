@@ -51,6 +51,16 @@ export function slateProjectTitleForCreation(
   return (title.trim() || fallback).slice(0, 180);
 }
 
+export function slateCanvasUpdateMatchesActiveSection({
+  activeSectionId,
+  documentKey,
+}: {
+  activeSectionId: string | null;
+  documentKey: string;
+}): boolean {
+  return activeSectionId !== null && activeSectionId === documentKey;
+}
+
 export function slateRevisionActionForDirection({
   direction,
   selectionLength,
@@ -129,20 +139,25 @@ export function slateExportScopeForWorkspace({
 }
 
 export function slateSectionEditableFingerprint(
-  section: Pick<SlateSectionDetail, "id" | "prose" | "lockedRanges">,
+  section: Pick<SlateSectionDetail, "id" | "prose" | "lockedRanges"> & {
+    document?: unknown;
+  },
 ): string {
   return JSON.stringify({
     id: section.id,
     prose: section.prose,
     lockedRanges: section.lockedRanges,
+    document: section.document ?? null,
   });
 }
 
-export function mergeSavedSlateSection(
-  local: SlateSectionDetail,
-  saved: SlateSectionDetail,
+export function mergeSavedSlateSection<
+  T extends SlateSectionDetail & { document?: unknown },
+>(
+  local: T,
+  saved: T,
   savedFingerprint: string,
-): SlateSectionDetail {
+): T {
   if (
     local.id !== saved.id ||
     slateSectionEditableFingerprint(local) === savedFingerprint
@@ -154,7 +169,8 @@ export function mergeSavedSlateSection(
     prose: local.prose,
     proseLength: local.prose.length,
     lockedRanges: local.lockedRanges,
-  };
+    ...(local.document ? { document: local.document } : {}),
+  } as T;
 }
 
 export function slateProjectOffsetsForSectionSelection(
@@ -189,7 +205,16 @@ export function slateProjectOffsetsForSectionSelection(
       };
     }
     offset += part.titlePrefix.length + part.prose.length;
-    if (index < projected.length - 1) offset += 3;
+    const next = projected[index + 1];
+    if (
+      next &&
+      !(
+        part.section.kind === "imported" &&
+        next.section.kind === "imported"
+      )
+    ) {
+      offset += 3;
+    }
   }
   return null;
 }

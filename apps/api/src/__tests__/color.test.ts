@@ -7,21 +7,159 @@ import {
   ACCENT_LIGHTNESS_MAX_DARK,
   ACCENT_LIGHTNESS_MIN,
   ACCENT_LIGHTNESS_MIN_DARK,
+  BOT_AUTO_ACCENT_HUE_OFFSET_DEGREES,
   accentLightnessBand,
+  blendWeightedBotIdentityColors,
+  botIdentityHueDeg,
+  circularHueDistanceDeg,
+  complementaryHueDeg,
   clampAccentLightness,
   clampLuminance,
   contrastRatio,
   ensureContrast,
+  fullySaturateBotColor,
   hexToHsl,
   hslToHex,
   normalizeAccentForTheme,
+  normalizeBotIdentityColor,
   pickReadableText,
   relativeLuminance,
+  resolveBotAccentColor,
   swatchBorderCompensation,
 } from "@localai/shared";
 
 const LIGHT_BG = "#eee7dc";
 const DARK_BG = "#0a0a0b";
+
+describe("fullySaturateBotColor", () => {
+  it("preserves hue and lightness while raising saturation to 100%", () => {
+    const before = hexToHsl("#9a7480");
+    const saturated = fullySaturateBotColor("#9a7480");
+    const after = hexToHsl(saturated);
+
+    assert.ok(Math.abs(after.h - before.h) < 0.5, `${before.h} -> ${after.h}`);
+    assert.ok(Math.abs(after.l - before.l) < 0.5, `${before.l} -> ${after.l}`);
+    assert.ok(Math.abs(after.s - 100) < 0.5, `expected full saturation, got ${after.s}`);
+  });
+
+  it("is idempotent and trims non-hex legacy CSS values", () => {
+    const saturated = fullySaturateBotColor("#ff0055");
+    assert.equal(fullySaturateBotColor(saturated), saturated);
+    assert.equal(fullySaturateBotColor("  rebeccapurple  "), "rebeccapurple");
+  });
+});
+
+describe("identity hue helpers", () => {
+  it("measures circular distance and complementary hues", () => {
+    assert.equal(circularHueDistanceDeg(10, 350), 20);
+    assert.equal(circularHueDistanceDeg(0, 180), 180);
+    assert.equal(complementaryHueDeg(10), 190);
+    assert.equal(botIdentityHueDeg("#808080"), null);
+    assert.ok((botIdentityHueDeg("#ff0033") ?? -1) > 340 || (botIdentityHueDeg("#ff0033") ?? -1) < 20);
+  });
+});
+
+describe("blendWeightedBotIdentityColors", () => {
+  it("mixes equally weighted canonical hues and keeps full saturation", () => {
+    const color = blendWeightedBotIdentityColors([
+      { color: "#ff0000", weight: 1 },
+      { color: "#00ff00", weight: 1 },
+    ]);
+    assert.equal(color, "#ffff00");
+    assert.ok(Math.abs(hexToHsl(color ?? "#000000").s - 100) < 0.5);
+  });
+
+  it("pulls the circular hue blend toward a stronger source", () => {
+    const color = blendWeightedBotIdentityColors([
+      { color: "#ff0000", weight: 3 },
+      { color: "#ffff00", weight: 1 },
+    ]);
+    const hue = hexToHsl(color ?? "#000000").h;
+    assert.ok(hue > 13 && hue < 15, `expected a red-biased amber hue, got ${hue}`);
+  });
+
+  it("wraps hues around the red seam instead of averaging through cyan", () => {
+    assert.equal(
+      blendWeightedBotIdentityColors([
+        { color: "#ff002b", weight: 1 },
+        { color: "#ff2b00", weight: 1 },
+      ]),
+      "#ff0000",
+    );
+  });
+
+  it("returns no arbitrary saturated hue for opposing or neutral inputs", () => {
+    assert.equal(
+      blendWeightedBotIdentityColors([
+        { color: "#ff0000", weight: 1 },
+        { color: "#00ffff", weight: 1 },
+      ]),
+      null,
+    );
+    assert.equal(blendWeightedBotIdentityColors([{ color: "#808080", weight: 1 }]), null);
+  });
+
+  it("ignores malformed, missing, and zero-influence sources", () => {
+    assert.equal(
+      blendWeightedBotIdentityColors([
+        { color: "not-a-color", weight: 50 },
+        { color: null, weight: 50 },
+        { color: "#00ff00", weight: 0 },
+        { color: "#ff0000", weight: 1 },
+      ]),
+      "#ff0000",
+    );
+    assert.equal(blendWeightedBotIdentityColors([{ color: undefined, weight: 1 }]), null);
+  });
+
+  it("returns one valid source in canonical fully saturated form", () => {
+    assert.equal(
+      blendWeightedBotIdentityColors([{ color: " #9a7480 ", weight: 10 }]),
+      normalizeBotIdentityColor("#9a7480"),
+    );
+  });
+});
+
+describe("bot Atmosphere accent identity", () => {
+  it("normalizes valid explicit accents and lets them win", () => {
+    assert.equal(normalizeBotIdentityColor("  #7799aa  "), "#22b5ff");
+    assert.equal(
+      resolveBotAccentColor("#ff0000", "#7799aa"),
+      "#22b5ff",
+    );
+  });
+
+  it("derives a stable fully saturated analogous Auto accent", () => {
+    const primary = "#ff0000";
+    const first = resolveBotAccentColor(primary, null);
+    const second = resolveBotAccentColor(primary, undefined);
+    const primaryHsl = hexToHsl(primary);
+    const accentHsl = hexToHsl(first);
+    assert.equal(first, second);
+    assert.ok(
+      Math.abs(
+        ((accentHsl.h - primaryHsl.h + 360) % 360) -
+          BOT_AUTO_ACCENT_HUE_OFFSET_DEGREES,
+      ) < 0.6,
+    );
+    assert.ok(Math.abs(accentHsl.s - 100) < 0.6);
+    assert.ok(Math.abs(accentHsl.l - primaryHsl.l) < 0.6);
+  });
+
+  it("uses the caller's surface fallback for an invalid primary", () => {
+    assert.equal(
+      resolveBotAccentColor("rebeccapurple", null, "#808080"),
+      "#808080",
+    );
+    assert.equal(resolveBotAccentColor(null, null), "#7c6cff");
+    assert.equal(
+      resolveBotAccentColor(undefined, "not-a-color", "#f3f3f3"),
+      "#f3f3f3",
+    );
+    assert.equal(normalizeBotIdentityColor("#abc"), null);
+    assert.equal(normalizeBotIdentityColor("red"), null);
+  });
+});
 
 /**
  * Locks in the "bright colors get dark text" contract that shipped to fix the
@@ -453,10 +591,9 @@ describe("accentLightnessBand", () => {
   });
 
   it("keeps the dark band symmetric around the midpoint (L=50)", () => {
-    // The picker's vertical alpha overlay assumes symmetry — any
-    // asymmetric band would desync the click-handler math from the
-    // visible gradient. If you deliberately break symmetry, update
-    // the `.colorSquare` CSS overlay to paint two separate alphas.
+    // The Shell hue strip pins new picks to the band midpoint. Symmetry
+    // keeps light/dark midpoints identical (L=50) so theme switches do
+    // not jump the committed hue lightness.
     const lowerGap = 50 - ACCENT_LIGHTNESS_MIN_DARK;
     const upperGap = ACCENT_LIGHTNESS_MAX_DARK - 50;
     assert.equal(lowerGap, upperGap);

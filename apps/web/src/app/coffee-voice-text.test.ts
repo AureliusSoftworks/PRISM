@@ -27,6 +27,10 @@ describe("Coffee voice text", () => {
       ),
       "Plankton, Aye, it has!"
     );
+    assert.equal(
+      coffeeVoiceSpokenText("Look [gasps] at *waves* me."),
+      "Look at me.",
+    );
   });
 
   it("returns no synthesis source for action-only turns", () => {
@@ -41,7 +45,7 @@ describe("Coffee voice text", () => {
 
   it("keeps the canonical mute ellipsis visible without giving it a voice", () => {
     assert.deepEqual(normalizeCoffeeMessageDelivery(" … "), {
-      displayText: "",
+      displayText: "…",
       spokenText: "",
       hasDialogue: false,
     });
@@ -92,6 +96,64 @@ describe("Coffee voice text", () => {
     );
   });
 
+  it("leaves same-session live voice to the synchronized table reveal", () => {
+    assert.match(
+      pageSource,
+      /const conversationChanged = coffeeVoiceConversationIdRef\.current !== coffeeConversation\.id;[\s\S]*?if \(!conversationChanged\) return;[\s\S]*?const unseen = assistantMessages\.filter/u,
+    );
+  });
+
+  it("rechecks reveal ownership inside voice preparation and before playback", () => {
+    const liveVoice = pageSource.slice(
+      pageSource.indexOf("const startCoffeeVoiceForReveal = async"),
+      pageSource.indexOf("const startCoffeePlayerVoiceForReveal = async"),
+    );
+    assert.match(
+      pageSource,
+      /const startCoffeeVoiceForReveal = async \( message: CoffeeConversationMessage, speakerBotId: string, revealDeliveryEpoch: number, \)[\s\S]*?const revealVoiceIsCurrent = \(\): boolean => coffeeVoiceSurfaceActiveRef\.current &&[\s\S]*?coffeeRevealPreparationMayCommit\(\{ preparedEpoch: revealDeliveryEpoch, currentEpoch: coffeeRevealDeliveryEpochRef\.current,/u,
+    );
+    assert.match(
+      pageSource,
+      /const revealVoiceStillValid = \(\): boolean => revealVoiceIsCurrent\(\);/u,
+    );
+    assert.match(
+      pageSource,
+      /const cancelStaleRevealVoice = \(\): boolean => \{[\s\S]*?if \(revealVoiceStillValid\(\)\) return false;[\s\S]*?controller\.abort\(\);[\s\S]*?settle\(null\);/u,
+    );
+    assert.match(
+      pageSource,
+      /if \(cancelStaleRevealVoice\(\)\) return; void enqueueRobotVoiceMode/u,
+    );
+    assert.match(
+      pageSource,
+      /if \(cancelStaleRevealVoice\(\)\) return; if \(clip\.kind === "stream"\) \{[\s\S]*?void enqueueChunkedEnglishVoice[\s\S]*?const resolvedClip = clip\.clip;[\s\S]*?void enqueueEnglishVoice/u,
+    );
+    assert.doesNotMatch(liveVoice, /\}, 1800\);/u);
+    assert.match(
+      pageSource,
+      /preSpeechBreath,[\s\S]*?0,[\s\S]*?revealVoiceStillValid,/u,
+    );
+    assert.match(
+      pageSource,
+      /startCoffeeVoiceForReveal\( pendingMessage, args\.speakerBotId, revealDeliveryEpoch, \)/u,
+    );
+  });
+
+  it("does not treat a cut-off Coffee voice ending as a finished table line", () => {
+    const liveVoice = pageSource.slice(
+      pageSource.indexOf("const startCoffeeVoiceForReveal = async"),
+      pageSource.indexOf("const startCoffeePlayerVoiceForReveal = async"),
+    );
+    assert.match(
+      liveVoice,
+      /coffeeRevealVoiceEndSealsTableLineV1\(\{[\s\S]{0,220}cutOffMessageId: coffeeCutOffRevealMessageIdRef\.current/u,
+    );
+    assert.match(
+      liveVoice,
+      /coffeeVoiceSurfaceActiveRef\.current &&/u,
+    );
+  });
+
   it("keeps muted Coffee mouths closed while preserving sip presentation", () => {
     assert.match(
       pageSource,
@@ -99,11 +161,16 @@ describe("Coffee voice text", () => {
     );
     assert.match(
       pageSource,
-      /const isTableTypingThisSeat = !seatPowerMuted && !tableTypingAssistantIsSilent/u,
+      /const isTableTypingThisSeat =\s*!seatPowerMuted &&[\s\S]{0,420}!tableTypingAssistantIsSilent/u,
     );
     assert.match(
       pageSource,
-      /isTalking=\{isTableTypingThisSeat\}[\s\S]{0,420}seatSipPresentation\.active/u,
+      /const seatMouthActive = bakedReplayMouthShape !== null \? bakedReplayMouthShape !== "closed" : \(liveSeatSpeech[\s\S]{0,280}: isTableTypingThisSeat\) \|\| seatAmbientVocalizationActive \|\| seatListenerReactionSpeaking \|\| seatFoleyOhMouth/u,
+    );
+    assert.match(pageSource, /isTalking: seatMouthActive/u);
+    assert.match(
+      pageSource,
+      /const seatSipMouthTreatmentActive = coffeeSeatSipMouthTreatmentActive/u,
     );
     assert.match(
       pageSource,

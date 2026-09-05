@@ -17,6 +17,8 @@ export const COFFEE_SEAT_SIP_PLATE_GLYPH = {
 export const COFFEE_SEAT_SIP_FACE_ACTIVE_PROGRESS = 0.68;
 /** Hold each Coffee speaking mouth pose across a few revealed characters. */
 export const COFFEE_SEAT_MOUTH_CHARACTERS_PER_PHASE = 3;
+/** Bottish typewriter fallback holds poses closer to its audible syllables. */
+export const COFFEE_SEAT_BOTTISH_MOUTH_CHARACTERS_PER_PHASE = 6;
 const COFFEE_SEAT_SIP_MOUTH_OFFSET_EM = 0.48;
 const COFFEE_SEAT_CENTER_SIP_MOUTH_OFFSET_EM = 0.36;
 const COFFEE_SEAT_SIP_MOUTH_DROP_EM = 0.17;
@@ -33,6 +35,14 @@ export interface CoffeeSeatSipPresentation {
   mouthOffsetY: string;
 }
 
+/** Keeps every sip-specific mouth effect behind the bot's explicit Coffee * option. */
+export function coffeeSeatSipMouthTreatmentActive(args: {
+  sipActive: boolean;
+  coffeePuckerEnabled: boolean;
+}): boolean {
+  return args.sipActive && args.coffeePuckerEnabled;
+}
+
 export function coffeeSeatCustomMouthCharacterForSip(args: {
   mouthCharacter: string | null;
   coffeePuckerEnabled: boolean;
@@ -43,15 +53,66 @@ export function coffeeSeatCustomMouthCharacterForSip(args: {
     args.coffeePuckerEnabled &&
     args.mouthCharacter !== null
   ) {
-    return null;
+    return "⁎";
   }
   return args.mouthCharacter;
+}
+
+export function coffeeSeatScreenRelativeFeatureRotationDeg(
+  authoredRotationDeg: number,
+  faceRotationDeg: number,
+): number {
+  const wrapped =
+    ((((authoredRotationDeg - faceRotationDeg + 180) % 360) + 360) % 360) -
+    180;
+  return Object.is(wrapped, -0) ? 0 : Number(wrapped.toFixed(3));
+}
+
+export function coffeeSeatScreenRelativeMouthRotationDeg(
+  authoredRotationDeg: number,
+  faceRotationDeg: number,
+): number {
+  return coffeeSeatScreenRelativeFeatureRotationDeg(
+    authoredRotationDeg,
+    faceRotationDeg,
+  );
+}
+
+/**
+ * Resolves the shared Coffee/Signal mouth rendering cases.
+ *
+ * Custom glyphs and sip puckers counter-rotate against the plate. Generated
+ * visemes for standard bots may apply a plate-relative authored delta, while
+ * fallback visemes temporarily replacing a configured custom glyph keep the
+ * neutral plate baseline because the custom glyph's angle is not transferable.
+ */
+export function coffeeSeatMouthRotationCssDeg(args: {
+  authoredRotationDeg: number;
+  faceRotationDeg: number;
+  configuredCustomMouth: boolean;
+  renderedCustomMouth: boolean;
+  transientSipPucker: boolean;
+}): number {
+  if (args.transientSipPucker) {
+    return coffeeSeatScreenRelativeMouthRotationDeg(0, args.faceRotationDeg);
+  }
+  if (args.renderedCustomMouth) {
+    return coffeeSeatScreenRelativeMouthRotationDeg(
+      args.authoredRotationDeg,
+      args.faceRotationDeg,
+    );
+  }
+  if (args.configuredCustomMouth) {
+    return 0;
+  }
+  return args.authoredRotationDeg;
 }
 
 export function coffeeSeatMouthShapeFromVisibleLength(
   visibleLength: number,
   speechSeedText: string,
   phonemeAware = false,
+  charactersPerPhase = COFFEE_SEAT_MOUTH_CHARACTERS_PER_PHASE,
 ): ZenLiveBotMouthShape {
   if (phonemeAware) {
     return crtSpeechMouthShapeFromVisibleTextProgress({
@@ -63,7 +124,7 @@ export function coffeeSeatMouthShapeFromVisibleLength(
   return zenLiveBotMouthShapeFromVisibleTextProgress({
     text: speechSeedText,
     visibleLength,
-    charactersPerPhase: COFFEE_SEAT_MOUTH_CHARACTERS_PER_PHASE,
+    charactersPerPhase,
   });
 }
 
@@ -184,9 +245,10 @@ function coffeeSeatOpenMouthGlyph(
   mouthShape: ZenLiveBotMouthShape,
 ): string | null {
   if (mouthShape === "speech-closed") return ":|";
-  if (mouthShape === "dot") return ":∙";
+  if (mouthShape === "dot") return ":.";
   if (mouthShape === "at") return ":@";
-  if (mouthShape === "narrow") return ":o";
+  if (mouthShape === "click") return ":ʘ";
+  if (mouthShape === "narrow") return ":ɵ";
   if (mouthShape === "open-wide") return ":0";
   if (mouthShape === "open-small") return ":o";
   if (mouthShape === "open-round") return ":O";

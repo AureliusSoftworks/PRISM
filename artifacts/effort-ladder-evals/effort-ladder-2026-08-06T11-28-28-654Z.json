@@ -1,0 +1,1678 @@
+{
+  "schema": "prism-effort-ladder-eval-v1",
+  "createdAt": "2026-08-06T11:28:28.654Z",
+  "prompts": [
+    {
+      "id": "rollout-table",
+      "title": "Rollout Table Constraint Trap",
+      "prompt": "Create a rollout plan as a compact Markdown table with exactly 6 body rows labeled S1 through S6.\nUse columns: ID, Plan.\n\nConstraints:\n- S1 must name the user-facing effort setting.\n- S2 must explain the local-only guarantee without using the word cloud.\n- S3 must describe the private planning pass.\n- S4 must say what happens if planning JSON fails.\n- S5 must mention that scratchpads are not persisted.\n- S6 must name one UI indicator for Psychic mode.\n- Do not expose raw chain-of-thought.\n- Keep the answer under 180 words."
+    },
+    {
+      "id": "incident-handoff",
+      "title": "Incident Handoff Constraint Trap",
+      "prompt": "Write an incident handoff as a compact Markdown table with exactly 6 body rows labeled S1 through S6.\nUse columns: ID, Handoff.\n\nScenario: a local user reports that a small model gave shallow answers after enabling simulated effort.\n\nConstraints:\n- S1 must name the user-facing effort setting.\n- S2 must explain the local-only guarantee without using the word cloud.\n- S3 must describe the private planning pass.\n- S4 must say what happens if planning JSON fails.\n- S5 must mention that scratchpads are not persisted.\n- S6 must name one UI indicator for Psychic mode.\n- Do not expose raw chain-of-thought.\n- Keep the answer under 180 words."
+    },
+    {
+      "id": "qa-gate",
+      "title": "QA Gate Constraint Trap",
+      "prompt": "Create a release QA gate as a compact Markdown table with exactly 6 body rows labeled S1 through S6.\nUse columns: ID, Gate.\n\nScenario: the team needs to decide whether the simulated-effort ladder is ready for a preview build.\n\nConstraints:\n- S1 must name the user-facing effort setting.\n- S2 must explain the local-only guarantee without using the word cloud.\n- S3 must describe the private planning pass.\n- S4 must say what happens if planning JSON fails.\n- S5 must mention that scratchpads are not persisted.\n- S6 must name one UI indicator for Psychic mode.\n- Do not expose raw chain-of-thought.\n- Keep the answer under 180 words."
+    }
+  ],
+  "options": {
+    "model": "gemma3:4b",
+    "outDir": "artifacts/effort-ladder-evals",
+    "temperature": 0.25,
+    "maxTokens": 900,
+    "repeats": 2,
+    "quick": false,
+    "budgetProfile": "legacy",
+    "ladderProfile": "standard",
+    "promptOverride": false,
+    "includeScratchpad": false
+  },
+  "tempDbPath": "<removed>",
+  "summary": [
+    {
+      "effort": "none",
+      "runs": 6,
+      "ok": 6,
+      "errors": 0,
+      "averageScore": 6.17,
+      "scoreMax": 10,
+      "medianDurationMs": 14676,
+      "averagePassCount": 0,
+      "warningCount": 0,
+      "averageScratchpadChars": 0,
+      "averageGuidanceChars": 0
+    },
+    {
+      "effort": "minimal",
+      "runs": 6,
+      "ok": 6,
+      "errors": 0,
+      "averageScore": 7.67,
+      "scoreMax": 10,
+      "medianDurationMs": 21844,
+      "averagePassCount": 0.67,
+      "warningCount": 2,
+      "averageScratchpadChars": 155,
+      "averageGuidanceChars": 735
+    },
+    {
+      "effort": "low",
+      "runs": 6,
+      "ok": 6,
+      "errors": 0,
+      "averageScore": 8.5,
+      "scoreMax": 10,
+      "medianDurationMs": 23843,
+      "averagePassCount": 1,
+      "warningCount": 0,
+      "averageScratchpadChars": 319,
+      "averageGuidanceChars": 1104
+    },
+    {
+      "effort": "medium",
+      "runs": 6,
+      "ok": 6,
+      "errors": 0,
+      "averageScore": 8.83,
+      "scoreMax": 10,
+      "medianDurationMs": 31373,
+      "averagePassCount": 2,
+      "warningCount": 0,
+      "averageScratchpadChars": 1453,
+      "averageGuidanceChars": 1400
+    },
+    {
+      "effort": "high",
+      "runs": 6,
+      "ok": 6,
+      "errors": 0,
+      "averageScore": 8.5,
+      "scoreMax": 10,
+      "medianDurationMs": 34320,
+      "averagePassCount": 3,
+      "warningCount": 0,
+      "averageScratchpadChars": 1706,
+      "averageGuidanceChars": 1400
+    },
+    {
+      "effort": "xhigh",
+      "runs": 6,
+      "ok": 6,
+      "errors": 0,
+      "averageScore": 8.67,
+      "scoreMax": 10,
+      "medianDurationMs": 39684,
+      "averagePassCount": 4,
+      "warningCount": 0,
+      "averageScratchpadChars": 2403,
+      "averageGuidanceChars": 1400
+    }
+  ],
+  "runs": [
+    {
+      "effort": "none",
+      "model": "gemma3:4b",
+      "promptId": "rollout-table",
+      "promptTitle": "Rollout Table Constraint Trap",
+      "repeat": 1,
+      "status": "ok",
+      "durationMs": 12411,
+      "planningBudgetTokens": 0,
+      "assistant": "| ID | Plan                                                                 |\n|----|-----------------------------------------------------------------------|\n| S1 | **PRISM Planning Mode Activation** – Initiate user onboarding flow.     |\n| S2 | All planning decisions remain within your device; no external data access is involved. Your choices are solely reflected in PRISM’s operation. |\n| S3 | A private, iterative session is established for refining your prompts and desired outcomes—completely isolated from other users or the core system. |\n| S4 | If the planning JSON encounters an error, a default, safe state is automatically engaged, preserving the last known valid configuration. |\n| S5 | Temporary scratchpad notes created during planning are not saved to persistent storage; they vanish upon session closure. |\n| S6 | A subtle pulsing blue border around the prompt input field indicates when Psychic mode is active.  |",
+      "assistantChars": 931,
+      "passCount": 0,
+      "guidanceChars": 0,
+      "scratchpadChars": 0,
+      "score": {
+        "total": 5,
+        "max": 10,
+        "wordCount": 134,
+        "checks": {
+          "exactlySixLabeledRows": true,
+          "s1NamesUserFacingSetting": false,
+          "s2ExplainsLocalOnlyWithoutCloud": false,
+          "s3DescribesPrivatePlanningPass": false,
+          "s4HandlesPlanningJsonFailure": false,
+          "s5SaysScratchpadsNotPersisted": true,
+          "s6NamesPsychicUiIndicator": false,
+          "avoidsCloudWord": true,
+          "underWordLimit": true,
+          "avoidsRawChainOfThought": true
+        }
+      }
+    },
+    {
+      "effort": "minimal",
+      "model": "gemma3:4b",
+      "promptId": "rollout-table",
+      "promptTitle": "Rollout Table Constraint Trap",
+      "repeat": 1,
+      "status": "ok",
+      "durationMs": 22091,
+      "planningBudgetTokens": 300,
+      "assistant": "| ID | Plan                                                                                                |\n|----|-----------------------------------------------------------------------------------------------------|\n| S1 | **PRISM Core Settings:** Initial user configuration & preference selection.                         |\n| S2 | All planning data resides solely within your PRISM installation; no external server involvement is tracked or accessible. |\n| S3 | Private planning sessions capture detailed user inputs for tailored responses – strictly local processing.  |\n| S4 | If the planning JSON encounters an error, a default, neutral response will be generated to maintain continuity. |\n| S5 | Scratchpad notes are ephemeral and vanish upon PRISM restart; they aren’t saved for later retrieval.   |\n| S6 | **Psychic Mode Indicator:** A subtle pulsing blue glow around the active input field signifies mode activation. |",
+      "assistantChars": 928,
+      "passCount": 0,
+      "guidanceChars": 0,
+      "scratchpadChars": 0,
+      "planningWarnings": [
+        "invalid_json; provider=local; model=gemma3:4b; rawChars=1469"
+      ],
+      "score": {
+        "total": 5,
+        "max": 10,
+        "wordCount": 118,
+        "checks": {
+          "exactlySixLabeledRows": true,
+          "s1NamesUserFacingSetting": false,
+          "s2ExplainsLocalOnlyWithoutCloud": false,
+          "s3DescribesPrivatePlanningPass": false,
+          "s4HandlesPlanningJsonFailure": false,
+          "s5SaysScratchpadsNotPersisted": false,
+          "s6NamesPsychicUiIndicator": true,
+          "avoidsCloudWord": true,
+          "underWordLimit": true,
+          "avoidsRawChainOfThought": true
+        }
+      }
+    },
+    {
+      "effort": "low",
+      "model": "gemma3:4b",
+      "promptId": "rollout-table",
+      "promptTitle": "Rollout Table Constraint Trap",
+      "repeat": 1,
+      "status": "ok",
+      "durationMs": 25051,
+      "planningBudgetTokens": 420,
+      "assistant": "| ID | Plan |\n|---|---|\n| S1 | Initial User Exposure: We’ll begin by offering Psychic mode to a select group of early adopters – approximately 20 users – for initial feedback and usability testing. |\n| S2 | Local-Only Operation: This assistant runs entirely on your device, utilizing local models or configured providers. Your data remains within your control and isn't shared with external networks. |\n| S3 | Private Planning Pass: My internal processes involve a dedicated planning pass to refine responses and ensure optimal performance – this is a private operation. |\n| S4 | JSON Failure Handling: If the planning JSON encounters an error, I’ll revert to a simplified default mode, prioritizing core functionality while troubleshooting. |\n| S5 | Scratchpads Not Persisted: Please note that scratchpad content isn't saved or retained across sessions; all your notes are ephemeral and local. |\n| S6 | Psychic Mode Indicator: A subtle blue glow will appear around the assistant’s icon when Psychic mode is active, visually confirming its status. |",
+      "assistantChars": 1049,
+      "psychicSummary": "I’ll create a rollout plan outlining six key stages for deploying this assistant, focusing on user experience and internal processes. Each stage will have a specific action and rationale to ensure a smooth transition. This plan prioritizes clarity and addresses potential issues proactively.",
+      "passCount": 1,
+      "passes": [
+        {
+          "name": "plan",
+          "chars": 281,
+          "summary": "I’ll create a rollout plan outlining six key stages for deploying this assistant, focusing on user experience and internal processes. Each stage will have a specific action and rationale to ensure a smooth transition. This plan prioritizes clarity and addresses potential issues proactively."
+        }
+      ],
+      "guidanceChars": 1104,
+      "scratchpadChars": 298,
+      "score": {
+        "total": 9,
+        "max": 10,
+        "wordCount": 173,
+        "checks": {
+          "exactlySixLabeledRows": true,
+          "s1NamesUserFacingSetting": false,
+          "s2ExplainsLocalOnlyWithoutCloud": true,
+          "s3DescribesPrivatePlanningPass": true,
+          "s4HandlesPlanningJsonFailure": true,
+          "s5SaysScratchpadsNotPersisted": true,
+          "s6NamesPsychicUiIndicator": true,
+          "avoidsCloudWord": true,
+          "underWordLimit": true,
+          "avoidsRawChainOfThought": true
+        }
+      }
+    },
+    {
+      "effort": "medium",
+      "model": "gemma3:4b",
+      "promptId": "rollout-table",
+      "promptTitle": "Rollout Table Constraint Trap",
+      "repeat": 1,
+      "status": "ok",
+      "durationMs": 29481,
+      "planningBudgetTokens": 560,
+      "assistant": "| ID | Plan |\n|---|---|\n| S1 | Initial User Exposure: We’ll begin by offering Psychic mode to a small group of beta testers (approximately 20 users) to gather initial feedback and identify any immediate usability concerns. |\n| S2 | This assistant operates solely on your local device, ensuring your data remains private and isolated from external network connections. It utilizes a self-hosted machine for optimal performance. |\n| S3 | My internal processes involve a dedicated planning pass – a private planning pass – to validate the latest checklist: - Fix: Initial User Exposure will begin with a small group of beta testers (20 users) to gather feedback and identify usability concerns. - Keep: This assistant operates solely on your local device, guaranteeing data privacy and isolation from external networks. - Keep: My int |\n| S4 | If the planning JSON fails to parse correctly, the assistant will revert to a simplified mode with reduced functionality, prioritizing core features. |\n| S5 | Scratchpads are not persisted; all modifications are temporary and will be lost upon restarting the application. |\n| S6 | A subtle line will appear beneath the Psychic mode toggle indicating connection status: “Connected (Local).” |",
+      "assistantChars": 1232,
+      "psychicSummary": "I’ll create a rollout plan outlining six key stages for deploying this assistant, focusing on user experience and internal processes. Each stage will have a specific action and rationale to ensure a smooth transition. This plan prioritizes clarity and addresses potential issues proactively.",
+      "passCount": 2,
+      "passes": [
+        {
+          "name": "plan",
+          "chars": 281,
+          "summary": "I’ll create a rollout plan outlining six key stages for deploying this assistant, focusing on user experience and internal processes. Each stage will have a specific action and rationale to ensure a smooth transition. This plan prioritizes clarity and addresses potential issues proactively."
+        },
+        {
+          "name": "audit",
+          "chars": 654,
+          "summary": "I've ensured that this rollout plan addresses the critical local-only guarantee and incorporates my private planning pass for optimal response generation."
+        }
+      ],
+      "guidanceChars": 1400,
+      "scratchpadChars": 968,
+      "score": {
+        "total": 8,
+        "max": 10,
+        "wordCount": 203,
+        "checks": {
+          "exactlySixLabeledRows": true,
+          "s1NamesUserFacingSetting": false,
+          "s2ExplainsLocalOnlyWithoutCloud": true,
+          "s3DescribesPrivatePlanningPass": true,
+          "s4HandlesPlanningJsonFailure": true,
+          "s5SaysScratchpadsNotPersisted": true,
+          "s6NamesPsychicUiIndicator": true,
+          "avoidsCloudWord": true,
+          "underWordLimit": false,
+          "avoidsRawChainOfThought": true
+        }
+      }
+    },
+    {
+      "effort": "high",
+      "model": "gemma3:4b",
+      "promptId": "rollout-table",
+      "promptTitle": "Rollout Table Constraint Trap",
+      "repeat": 1,
+      "status": "ok",
+      "durationMs": 33469,
+      "planningBudgetTokens": 720,
+      "assistant": "| ID | Plan |\n|---|---|\n| S1 | Initial User Exposure: We’ll begin by offering Psychic mode to a small group of beta testers (approximately 20 users) for initial feedback. |\n| S2 | This assistant operates solely on your local device, ensuring your data remains private and unaffected by external network connections. It utilizes a dedicated machine or device. |\n| S3 | My internal processes involve a private planning pass to ensure optimal performance and stability before wider release. |\n| S4 | If the planning JSON fails to parse correctly, the assistant will revert to a default state, preserving your current session data. |\n| S5 | Scratchpads are not persisted; any notes or temporary data will be lost upon restarting the application. |\n| S6 | A subtle line indicator will appear when Psychic mode is active, visually confirming its status. |",
+      "assistantChars": 849,
+      "psychicSummary": "I’ll create a rollout plan outlining six key stages for deploying this assistant, focusing on user experience and internal processes. Each stage will have a specific action and rationale to ensure a smooth transition. This plan prioritizes clarity and addresses potential issues proactively.",
+      "passCount": 3,
+      "passes": [
+        {
+          "name": "plan",
+          "chars": 281,
+          "summary": "I’ll create a rollout plan outlining six key stages for deploying this assistant, focusing on user experience and internal processes. Each stage will have a specific action and rationale to ensure a smooth transition. This plan prioritizes clarity and addresses potential issues proactively."
+        },
+        {
+          "name": "draft",
+          "chars": 871,
+          "summary": "I’ve established a six-stage rollout plan focusing on user feedback and ensuring data privacy. This plan utilizes a dedicated internal process to maintain focused responses, and a visual indicator confirms when Psychic mode is engaged."
+        },
+        {
+          "name": "audit",
+          "chars": 569,
+          "summary": "I've established a rollout plan with six key stages designed for a smooth transition and prioritized your local data privacy."
+        }
+      ],
+      "guidanceChars": 1400,
+      "scratchpadChars": 1770,
+      "score": {
+        "total": 9,
+        "max": 10,
+        "wordCount": 147,
+        "checks": {
+          "exactlySixLabeledRows": true,
+          "s1NamesUserFacingSetting": false,
+          "s2ExplainsLocalOnlyWithoutCloud": true,
+          "s3DescribesPrivatePlanningPass": true,
+          "s4HandlesPlanningJsonFailure": true,
+          "s5SaysScratchpadsNotPersisted": true,
+          "s6NamesPsychicUiIndicator": true,
+          "avoidsCloudWord": true,
+          "underWordLimit": true,
+          "avoidsRawChainOfThought": true
+        }
+      }
+    },
+    {
+      "effort": "xhigh",
+      "model": "gemma3:4b",
+      "promptId": "rollout-table",
+      "promptTitle": "Rollout Table Constraint Trap",
+      "repeat": 1,
+      "status": "ok",
+      "durationMs": 37605,
+      "planningBudgetTokens": 900,
+      "assistant": "| ID | Plan |\n|---|---|\n| S1 | Initial User Exposure: We’ll introduce Psychic mode to a small group of beta testers (approximately 20 users) for initial feedback. |\n| S2 | This assistant operates solely on your local device, ensuring your data remains private and unaffected by external network connections. It utilizes a dedicated machine. |\n| S3 | My internal processes involve a private planning pass to ensure the most up-to-date checklist is used – final review, testing, and refinement of all components. |\n| S4 | If the planning JSON fails, a recovery prompt will appear, allowing you to revert to the last known working state or initiate a fresh start. |\n| S5 | Scratchpads are not persisted; any temporary notes or explorations are lost upon session closure. |\n| S6 | A subtle line indicator will appear alongside Psychic mode in the main interface, signaling its availability for use. |",
+      "assistantChars": 896,
+      "psychicSummary": "I’ll create a rollout plan outlining six key stages for deploying this assistant, focusing on user experience and internal processes. Each stage will have a specific action and rationale to ensure a smooth transition. This plan prioritizes clarity and addresses potential issues proactively.",
+      "passCount": 4,
+      "passes": [
+        {
+          "name": "plan",
+          "chars": 281,
+          "summary": "I’ll create a rollout plan outlining six key stages for deploying this assistant, focusing on user experience and internal processes. Each stage will have a specific action and rationale to ensure a smooth transition. This plan prioritizes clarity and addresses potential issues proactively."
+        },
+        {
+          "name": "draft",
+          "chars": 871,
+          "summary": "I’ve established a six-stage rollout plan focusing on user feedback and ensuring data privacy. This plan utilizes a dedicated internal process to maintain focused responses, and a visual indicator confirms when Psychic mode is engaged."
+        },
+        {
+          "name": "audit",
+          "chars": 569,
+          "summary": "I've established a rollout plan with six key stages designed for a smooth transition and prioritized your local data privacy."
+        },
+        {
+          "name": "synthesis",
+          "chars": 622,
+          "summary": "I've solidified the plan by prioritizing a phased introduction of Psychic mode, guaranteeing data privacy, and establishing a robust fallback mechanism for planning failures."
+        }
+      ],
+      "guidanceChars": 1400,
+      "scratchpadChars": 2404,
+      "score": {
+        "total": 9,
+        "max": 10,
+        "wordCount": 156,
+        "checks": {
+          "exactlySixLabeledRows": true,
+          "s1NamesUserFacingSetting": false,
+          "s2ExplainsLocalOnlyWithoutCloud": true,
+          "s3DescribesPrivatePlanningPass": true,
+          "s4HandlesPlanningJsonFailure": true,
+          "s5SaysScratchpadsNotPersisted": true,
+          "s6NamesPsychicUiIndicator": true,
+          "avoidsCloudWord": true,
+          "underWordLimit": true,
+          "avoidsRawChainOfThought": true
+        }
+      }
+    },
+    {
+      "effort": "none",
+      "model": "gemma3:4b",
+      "promptId": "rollout-table",
+      "promptTitle": "Rollout Table Constraint Trap",
+      "repeat": 2,
+      "status": "ok",
+      "durationMs": 15321,
+      "planningBudgetTokens": 0,
+      "assistant": "| ID | Plan                                                                 |\n|----|-----------------------------------------------------------------------|\n| S1 | **PRISM Core Setup** – Initial workspace configuration.                 |\n| S2 | All PRISM data remains within your device; no external connections are required for its operation.  Your local instance is self-contained and independent of any network or server. |\n| S3 | **Private Planning Session:** A secure, internal review of user requests to optimize response generation. |\n| S4 | If the planning JSON encounters an error, PRISM reverts to a default processing mode for immediate task completion. |\n| S5 | Temporary scratchpad notes are not saved or retained across sessions. |\n| S6 | **Psychic Mode Indicator:** A subtle pulsing blue glow around the active input field signals when Psychic mode is engaged.  |",
+      "assistantChars": 878,
+      "passCount": 0,
+      "guidanceChars": 0,
+      "scratchpadChars": 0,
+      "score": {
+        "total": 7,
+        "max": 10,
+        "wordCount": 125,
+        "checks": {
+          "exactlySixLabeledRows": true,
+          "s1NamesUserFacingSetting": false,
+          "s2ExplainsLocalOnlyWithoutCloud": true,
+          "s3DescribesPrivatePlanningPass": false,
+          "s4HandlesPlanningJsonFailure": false,
+          "s5SaysScratchpadsNotPersisted": true,
+          "s6NamesPsychicUiIndicator": true,
+          "avoidsCloudWord": true,
+          "underWordLimit": true,
+          "avoidsRawChainOfThought": true
+        }
+      }
+    },
+    {
+      "effort": "minimal",
+      "model": "gemma3:4b",
+      "promptId": "rollout-table",
+      "promptTitle": "Rollout Table Constraint Trap",
+      "repeat": 2,
+      "status": "ok",
+      "durationMs": 21597,
+      "planningBudgetTokens": 300,
+      "assistant": "| ID | Plan                                                                 |\n|----|-----------------------------------------------------------------------|\n| S1 | **PRISM Core Setup** – Initial workspace configuration.                 |\n| S2 | All PRISM data remains within your device; no external connections are involved in its processing. |\n| S3 | A private, internal review of your planning requests ensures alignment with PRISM’s core principles. |\n| S4 | If the planning JSON encounters an error, a default configuration is automatically applied. |\n| S5 | Temporary scratchpad notes are not saved to persistent storage – they vanish upon session close. |\n| S6 | A subtle pulsing blue glow indicates when Psychic mode is active within the UI. |",
+      "assistantChars": 751,
+      "passCount": 0,
+      "guidanceChars": 0,
+      "scratchpadChars": 0,
+      "planningWarnings": [
+        "invalid_json; provider=local; model=gemma3:4b; rawChars=1469"
+      ],
+      "score": {
+        "total": 5,
+        "max": 10,
+        "wordCount": 108,
+        "checks": {
+          "exactlySixLabeledRows": true,
+          "s1NamesUserFacingSetting": false,
+          "s2ExplainsLocalOnlyWithoutCloud": false,
+          "s3DescribesPrivatePlanningPass": false,
+          "s4HandlesPlanningJsonFailure": false,
+          "s5SaysScratchpadsNotPersisted": true,
+          "s6NamesPsychicUiIndicator": false,
+          "avoidsCloudWord": true,
+          "underWordLimit": true,
+          "avoidsRawChainOfThought": true
+        }
+      }
+    },
+    {
+      "effort": "low",
+      "model": "gemma3:4b",
+      "promptId": "rollout-table",
+      "promptTitle": "Rollout Table Constraint Trap",
+      "repeat": 2,
+      "status": "ok",
+      "durationMs": 32804,
+      "planningBudgetTokens": 420,
+      "assistant": "| ID | Plan |\n|---|---|\n| S1 | Initial User Exposure: We’ll begin by offering Psychic mode to a small group of beta testers (approximately 20 users) for initial feedback. |\n| S2 | Local-Only Guarantee: This assistant operates solely on your device, ensuring your data remains private and independent of external networks.  The processing happens directly on your machine. |\n| S3 | Private Planning Pass: My internal processes involve a dedicated planning pass to refine responses and optimize performance – a secure, isolated operation. |\n| S4 | JSON Failure Handling: If the planning JSON fails to load or parse correctly, I’ll revert to a simplified default response mode for continued functionality. |\n| S5 | Scratchpads Not Persisted: Please note that scratchpads are not persisted; any temporary notes will be lost upon restarting the assistant. |\n| S6 | Psychic Mode Indicator: A subtle pulsing blue line will appear along the bottom of the interface when Psychic mode is active. |",
+      "assistantChars": 987,
+      "psychicSummary": "I’ll create a rollout plan outlining six key stages for deploying this assistant, focusing on user experience and internal processes. Each stage will have a specific action and rationale to ensure a smooth transition. This plan prioritizes clarity and addresses potential issues proactively.",
+      "passCount": 1,
+      "passes": [
+        {
+          "name": "plan",
+          "chars": 281,
+          "summary": "I’ll create a rollout plan outlining six key stages for deploying this assistant, focusing on user experience and internal processes. Each stage will have a specific action and rationale to ensure a smooth transition. This plan prioritizes clarity and addresses potential issues proactively."
+        }
+      ],
+      "guidanceChars": 1104,
+      "scratchpadChars": 298,
+      "score": {
+        "total": 9,
+        "max": 10,
+        "wordCount": 165,
+        "checks": {
+          "exactlySixLabeledRows": true,
+          "s1NamesUserFacingSetting": false,
+          "s2ExplainsLocalOnlyWithoutCloud": true,
+          "s3DescribesPrivatePlanningPass": true,
+          "s4HandlesPlanningJsonFailure": true,
+          "s5SaysScratchpadsNotPersisted": true,
+          "s6NamesPsychicUiIndicator": true,
+          "avoidsCloudWord": true,
+          "underWordLimit": true,
+          "avoidsRawChainOfThought": true
+        }
+      }
+    },
+    {
+      "effort": "medium",
+      "model": "gemma3:4b",
+      "promptId": "rollout-table",
+      "promptTitle": "Rollout Table Constraint Trap",
+      "repeat": 2,
+      "status": "ok",
+      "durationMs": 36277,
+      "planningBudgetTokens": 560,
+      "assistant": "| ID | Plan |\n|---|---|\n| S1 | Initial User Exposure: We’ll begin by offering Psychic mode to a small group of beta testers (approximately 20 users) to gather initial feedback and identify any immediate usability concerns. |\n| S2 | This assistant operates solely on your local device, ensuring your data remains private and isolated from external network connections. It utilizes a dedicated machine for processing. |\n| S3 | My internal processes involve a private planning pass – a focused review of the assistant’s configuration to guarantee optimal performance and adherence to our security protocols. |\n| S4 | If the planning JSON fails, the assistant will revert to a simplified operational mode, prioritizing core functionality while logging detailed error information for debugging. |\n| S5 | Scratchpads are not persisted; all experimental configurations and adjustments are temporary and reset upon restarting the application. |\n| S6 | A subtle pulsing blue line around the Psychic mode icon indicates active processing. |",
+      "assistantChars": 1030,
+      "psychicSummary": "I’ll create a rollout plan outlining six key stages for deploying this assistant, focusing on user experience and internal processes. Each stage will have a specific action and rationale to ensure a smooth transition. This plan prioritizes clarity and addresses potential issues proactively.",
+      "passCount": 2,
+      "passes": [
+        {
+          "name": "plan",
+          "chars": 281,
+          "summary": "I’ll create a rollout plan outlining six key stages for deploying this assistant, focusing on user experience and internal processes. Each stage will have a specific action and rationale to ensure a smooth transition. This plan prioritizes clarity and addresses potential issues proactively."
+        },
+        {
+          "name": "audit",
+          "chars": 654,
+          "summary": "I've ensured that this rollout plan addresses the critical local-only guarantee and incorporates my private planning pass for optimal response generation."
+        }
+      ],
+      "guidanceChars": 1400,
+      "scratchpadChars": 968,
+      "score": {
+        "total": 9,
+        "max": 10,
+        "wordCount": 165,
+        "checks": {
+          "exactlySixLabeledRows": true,
+          "s1NamesUserFacingSetting": false,
+          "s2ExplainsLocalOnlyWithoutCloud": true,
+          "s3DescribesPrivatePlanningPass": true,
+          "s4HandlesPlanningJsonFailure": true,
+          "s5SaysScratchpadsNotPersisted": true,
+          "s6NamesPsychicUiIndicator": true,
+          "avoidsCloudWord": true,
+          "underWordLimit": true,
+          "avoidsRawChainOfThought": true
+        }
+      }
+    },
+    {
+      "effort": "high",
+      "model": "gemma3:4b",
+      "promptId": "rollout-table",
+      "promptTitle": "Rollout Table Constraint Trap",
+      "repeat": 2,
+      "status": "ok",
+      "durationMs": 34051,
+      "planningBudgetTokens": 720,
+      "assistant": "| ID | Plan |\n|---|---|\n| S1 | Initial User Exposure: We’ll begin by offering Psychic mode to a small group of beta testers (approximately 20 users) for initial feedback. |\n| S2 | This assistant operates solely on your local device, ensuring your data remains private and unaffected by external network connections. It utilizes a dedicated machine. |\n| S3 | My internal processes involve a private planning pass to ensure optimal performance and stability of the assistant’s core functions. |\n| S4 | If the planning JSON fails to parse correctly, the assistant will revert to a default state, preserving your current session data. |\n| S5 | Scratchpads are not persisted; all modifications are temporary and will be lost upon restarting the application. |\n| S6 | A subtle line indicator will appear when Psychic mode is active, confirming its status at a glance. |",
+      "assistantChars": 863,
+      "psychicSummary": "I’ll create a rollout plan outlining six key stages for deploying this assistant, focusing on user experience and internal processes. Each stage will have a specific action and rationale to ensure a smooth transition. This plan prioritizes clarity and addresses potential issues proactively.",
+      "passCount": 3,
+      "passes": [
+        {
+          "name": "plan",
+          "chars": 281,
+          "summary": "I’ll create a rollout plan outlining six key stages for deploying this assistant, focusing on user experience and internal processes. Each stage will have a specific action and rationale to ensure a smooth transition. This plan prioritizes clarity and addresses potential issues proactively."
+        },
+        {
+          "name": "draft",
+          "chars": 871,
+          "summary": "I’ve established a six-stage rollout plan focusing on user feedback and ensuring data privacy. This plan utilizes a dedicated internal process to maintain focused responses, and a visual indicator confirms when Psychic mode is engaged."
+        },
+        {
+          "name": "audit",
+          "chars": 569,
+          "summary": "I've established a rollout plan with six key stages designed for a smooth transition and prioritized your local data privacy."
+        }
+      ],
+      "guidanceChars": 1400,
+      "scratchpadChars": 1770,
+      "score": {
+        "total": 9,
+        "max": 10,
+        "wordCount": 149,
+        "checks": {
+          "exactlySixLabeledRows": true,
+          "s1NamesUserFacingSetting": false,
+          "s2ExplainsLocalOnlyWithoutCloud": true,
+          "s3DescribesPrivatePlanningPass": true,
+          "s4HandlesPlanningJsonFailure": true,
+          "s5SaysScratchpadsNotPersisted": true,
+          "s6NamesPsychicUiIndicator": true,
+          "avoidsCloudWord": true,
+          "underWordLimit": true,
+          "avoidsRawChainOfThought": true
+        }
+      }
+    },
+    {
+      "effort": "xhigh",
+      "model": "gemma3:4b",
+      "promptId": "rollout-table",
+      "promptTitle": "Rollout Table Constraint Trap",
+      "repeat": 2,
+      "status": "ok",
+      "durationMs": 39777,
+      "planningBudgetTokens": 900,
+      "assistant": "| ID | Plan |\n|---|---|\n| S1 | Initial User Exposure: We’ll introduce Psychic mode to a small group of beta testers (approximately 20 users) for initial feedback and usability checks. |\n| S2 | This assistant operates solely on your local device, ensuring all data processing occurs within your machine’s environment – safeguarding your information from external networks. |\n| S3 | My internal processes involve a private planning pass to validate the JSON structure and ensure optimal performance before presenting results. |\n| S4 | If the planning JSON fails to parse correctly, a diagnostic message will appear, prompting you to review the input data for errors. |\n| S5 | Scratchpads are not persisted; any notes or temporary explorations remain solely within your active session. |\n| S6 | A subtle amber line will indicate when Psychic mode is actively processing a request. |",
+      "assistantChars": 879,
+      "psychicSummary": "I’ll create a rollout plan outlining six key stages for deploying this assistant, focusing on user experience and internal processes. Each stage will have a specific action and rationale to ensure a smooth transition. This plan prioritizes clarity and addresses potential issues proactively.",
+      "passCount": 4,
+      "passes": [
+        {
+          "name": "plan",
+          "chars": 281,
+          "summary": "I’ll create a rollout plan outlining six key stages for deploying this assistant, focusing on user experience and internal processes. Each stage will have a specific action and rationale to ensure a smooth transition. This plan prioritizes clarity and addresses potential issues proactively."
+        },
+        {
+          "name": "draft",
+          "chars": 871,
+          "summary": "I’ve established a six-stage rollout plan focusing on user feedback and ensuring data privacy. This plan utilizes a dedicated internal process to maintain focused responses, and a visual indicator confirms when Psychic mode is engaged."
+        },
+        {
+          "name": "audit",
+          "chars": 569,
+          "summary": "I've established a rollout plan with six key stages designed for a smooth transition and prioritized your local data privacy."
+        },
+        {
+          "name": "synthesis",
+          "chars": 622,
+          "summary": "I've solidified the plan by prioritizing a phased introduction of Psychic mode, guaranteeing data privacy, and establishing a robust fallback mechanism for planning failures."
+        }
+      ],
+      "guidanceChars": 1400,
+      "scratchpadChars": 2404,
+      "score": {
+        "total": 9,
+        "max": 10,
+        "wordCount": 148,
+        "checks": {
+          "exactlySixLabeledRows": true,
+          "s1NamesUserFacingSetting": false,
+          "s2ExplainsLocalOnlyWithoutCloud": true,
+          "s3DescribesPrivatePlanningPass": true,
+          "s4HandlesPlanningJsonFailure": true,
+          "s5SaysScratchpadsNotPersisted": true,
+          "s6NamesPsychicUiIndicator": true,
+          "avoidsCloudWord": true,
+          "underWordLimit": true,
+          "avoidsRawChainOfThought": true
+        }
+      }
+    },
+    {
+      "effort": "none",
+      "model": "gemma3:4b",
+      "promptId": "incident-handoff",
+      "promptTitle": "Incident Handoff Constraint Trap",
+      "repeat": 1,
+      "status": "ok",
+      "durationMs": 14462,
+      "planningBudgetTokens": 0,
+      "assistant": "| ID | Handoff |\n|---|---|\n| S1 | The user enabled “Simulated Effort.” |\n| S2 | All processing occurs directly on your device; external networks or servers aren’t involved in this operation. |\n| S3 | Before responding, the system runs a brief, internal exploration – a private planning pass – to refine its approach. |\n| S4 | If that initial planning process encounters an error (indicated by a JSON failure), the model reverts to a basic response strategy. |\n| S5 | Scratchpads used during this process are not saved or retained across sessions. |\n| S6 | A pulsing blue circle in the status bar indicates Psychic mode is active. |",
+      "assistantChars": 631,
+      "passCount": 0,
+      "guidanceChars": 0,
+      "scratchpadChars": 0,
+      "score": {
+        "total": 7,
+        "max": 10,
+        "wordCount": 116,
+        "checks": {
+          "exactlySixLabeledRows": true,
+          "s1NamesUserFacingSetting": false,
+          "s2ExplainsLocalOnlyWithoutCloud": false,
+          "s3DescribesPrivatePlanningPass": true,
+          "s4HandlesPlanningJsonFailure": true,
+          "s5SaysScratchpadsNotPersisted": true,
+          "s6NamesPsychicUiIndicator": false,
+          "avoidsCloudWord": true,
+          "underWordLimit": true,
+          "avoidsRawChainOfThought": true
+        }
+      }
+    },
+    {
+      "effort": "minimal",
+      "model": "gemma3:4b",
+      "promptId": "incident-handoff",
+      "promptTitle": "Incident Handoff Constraint Trap",
+      "repeat": 1,
+      "status": "ok",
+      "durationMs": 21090,
+      "planningBudgetTokens": 300,
+      "assistant": "| ID | Handoff |\n|---|---|\n| S1 | The user enabled ‘Simulated Effort’ on the model. |\n| S2 | Our models are designed and tested exclusively on local devices, guaranteeing performance within your environment. This ensures optimal responsiveness based on your device's resources. |\n| S3 | I’m utilizing a private planning pass to synthesize this handoff – it focuses on structuring information for efficient transfer. |\n| S4 | If the planning JSON fails to parse, I will revert to a simplified response with core details regarding the issue and troubleshooting steps. |\n| S5 | Please note that scratchpads are not persisted; any detailed notes or configurations require manual recording. |\n| S6 | A subtle line indicator will appear beneath this message when Psychic mode is active. |",
+      "assistantChars": 782,
+      "psychicSummary": "I’m creating a concise handoff to detail the user's report about shallow answers from a small model after enabling simulated effort. I will outline the relevant settings, our local guarantee, and steps taken for troubleshooting, focusing on clarity and immediate action for the receiving team.",
+      "passCount": 1,
+      "passes": [
+        {
+          "name": "plan",
+          "chars": 189,
+          "summary": "I’m creating a concise handoff to detail the user's report about shallow answers from a small model after enabling simulated effort. I will outline the relevant settings, our local guarantee, and steps taken for troubleshooting, focusing on clarity and immediate action for the receiving team."
+        }
+      ],
+      "guidanceChars": 1103,
+      "scratchpadChars": 206,
+      "score": {
+        "total": 9,
+        "max": 10,
+        "wordCount": 133,
+        "checks": {
+          "exactlySixLabeledRows": true,
+          "s1NamesUserFacingSetting": false,
+          "s2ExplainsLocalOnlyWithoutCloud": true,
+          "s3DescribesPrivatePlanningPass": true,
+          "s4HandlesPlanningJsonFailure": true,
+          "s5SaysScratchpadsNotPersisted": true,
+          "s6NamesPsychicUiIndicator": true,
+          "avoidsCloudWord": true,
+          "underWordLimit": true,
+          "avoidsRawChainOfThought": true
+        }
+      }
+    },
+    {
+      "effort": "low",
+      "model": "gemma3:4b",
+      "promptId": "incident-handoff",
+      "promptTitle": "Incident Handoff Constraint Trap",
+      "repeat": 1,
+      "status": "ok",
+      "durationMs": 21596,
+      "planningBudgetTokens": 420,
+      "assistant": "| ID | Handoff |\n|---|---|\n| S1 | The user enabled ‘Simulated Effort’ within the local model interface.|\n| S2 | This issue is confined to your device and does not extend to any remote infrastructure. We guarantee a consistent experience based on your machine's configuration.|\n| S3 | I am currently utilizing a private planning pass to synthesize this handoff, focusing on clear communication of the problem and next steps.|\n| S4 | If the planning JSON fails, the model will revert to its baseline settings for optimal performance. |\n| S5 | Please note that scratchpads are not persisted; any locally generated notes or configurations will be lost upon restart.|\n| S6 | A subtle line indicator appears beneath my responses when Psychic mode is active. |",
+      "assistantChars": 753,
+      "psychicSummary": "I’ll create a concise incident handoff table detailing the user's report about shallow answers from a local model after enabling simulated effort. This will clearly outline the relevant settings, our local guarantee, and steps for escalation, focusing on immediate clarity for the receiving team.",
+      "passCount": 1,
+      "passes": [
+        {
+          "name": "plan",
+          "chars": 267,
+          "summary": "I’ll create a concise incident handoff table detailing the user's report about shallow answers from a local model after enabling simulated effort. This will clearly outline the relevant settings, our local guarantee, and steps for escalation, focusing on immediate clarity for the receiving team."
+        }
+      ],
+      "guidanceChars": 1104,
+      "scratchpadChars": 284,
+      "score": {
+        "total": 8,
+        "max": 10,
+        "wordCount": 130,
+        "checks": {
+          "exactlySixLabeledRows": true,
+          "s1NamesUserFacingSetting": false,
+          "s2ExplainsLocalOnlyWithoutCloud": false,
+          "s3DescribesPrivatePlanningPass": true,
+          "s4HandlesPlanningJsonFailure": true,
+          "s5SaysScratchpadsNotPersisted": true,
+          "s6NamesPsychicUiIndicator": true,
+          "avoidsCloudWord": true,
+          "underWordLimit": true,
+          "avoidsRawChainOfThought": true
+        }
+      }
+    },
+    {
+      "effort": "medium",
+      "model": "gemma3:4b",
+      "promptId": "incident-handoff",
+      "promptTitle": "Incident Handoff Constraint Trap",
+      "repeat": 1,
+      "status": "ok",
+      "durationMs": 32418,
+      "planningBudgetTokens": 560,
+      "assistant": "| ID | Handoff |\n|---|---|\n| S1 | The user reported experiencing shallow responses following activation of ‘Simulated Effort’ within the local model interface.|\n| S2 | This issue is confined to your local device and does not extend to any remote infrastructure. We guarantee a consistent experience based on your machine's configuration.|\n| S3 | I am currently utilizing a private planning pass to synthesize this handoff, focusing on clear communication of the problem and next steps.|\n| S4 | If the planning JSON fails, the local model will revert to its standard operational parameters, prioritizing factual accuracy over simulated complexity.|\n| S5 | Please note that scratchpads are not persisted; any locally generated notes or experiment configurations will be lost upon restarting the PRISM installation.|\n| S6 | A subtle line animation appears beneath the prompt field when I’m utilizing Psychic mode to indicate active processing. |",
+      "assistantChars": 942,
+      "psychicSummary": "I’ll create a concise incident handoff table detailing the user's report about shallow answers from a local model after enabling simulated effort. This will clearly outline the relevant settings, our local guarantee, and steps for escalation, focusing on immediate clarity for the receiving team.",
+      "passCount": 2,
+      "passes": [
+        {
+          "name": "plan",
+          "chars": 267,
+          "summary": "I’ll create a concise incident handoff table detailing the user's report about shallow answers from a local model after enabling simulated effort. This will clearly outline the relevant settings, our local guarantee, and steps for escalation, focusing on immediate clarity for the receiving team."
+        },
+        {
+          "name": "audit",
+          "chars": 2112,
+          "summary": "I checked the candidate against the request for missed constraints, privacy issues, and likely user-facing mistakes."
+        }
+      ],
+      "guidanceChars": 1400,
+      "scratchpadChars": 2412,
+      "score": {
+        "total": 9,
+        "max": 10,
+        "wordCount": 150,
+        "checks": {
+          "exactlySixLabeledRows": true,
+          "s1NamesUserFacingSetting": false,
+          "s2ExplainsLocalOnlyWithoutCloud": true,
+          "s3DescribesPrivatePlanningPass": true,
+          "s4HandlesPlanningJsonFailure": true,
+          "s5SaysScratchpadsNotPersisted": true,
+          "s6NamesPsychicUiIndicator": true,
+          "avoidsCloudWord": true,
+          "underWordLimit": true,
+          "avoidsRawChainOfThought": true
+        }
+      }
+    },
+    {
+      "effort": "high",
+      "model": "gemma3:4b",
+      "promptId": "incident-handoff",
+      "promptTitle": "Incident Handoff Constraint Trap",
+      "repeat": 1,
+      "status": "ok",
+      "durationMs": 33172,
+      "planningBudgetTokens": 720,
+      "assistant": "| ID | Handoff |\n|---|---|\n| S1 | The user reported experiencing shallow responses following activation of ‘Simulated Effort’ within the local model interface.|\n| S2 | This issue is confined to your device and does not extend to any remote infrastructure. We guarantee a consistent experience based on your machine’s configuration.|\n| S3 | I am currently utilizing a private planning pass to synthesize this handoff, focusing on clear communication of the problem and next steps.|\n| S4 | If the planning JSON fails, the local model will revert to its standard operational parameters, prioritizing accuracy over simulated complexity.|\n| S5 | Please note that scratchpads are not persisted; any locally generated configurations or experiment details will be lost upon restart.|\n| S6 | A subtle line indicator will appear beneath my response when I’m utilizing Psychic mode to signal heightened processing activity.|",
+      "assistantChars": 913,
+      "psychicSummary": "I’ll create a concise incident handoff table detailing the user's report about shallow answers from a local model after enabling simulated effort. This will clearly outline the relevant settings, our local guarantee, and steps for escalation, focusing on immediate clarity for the receiving team.",
+      "passCount": 3,
+      "passes": [
+        {
+          "name": "plan",
+          "chars": 267,
+          "summary": "I’ll create a concise incident handoff table detailing the user's report about shallow answers from a local model after enabling simulated effort. This will clearly outline the relevant settings, our local guarantee, and steps for escalation, focusing on immediate clarity for the receiving team."
+        },
+        {
+          "name": "draft",
+          "chars": 858,
+          "summary": "I’ve created a structured handoff table detailing the user’s report about shallow answers and the ‘Simulated Effort’ setting. This ensures the receiving team understands the scope of the issue and our local guarantee, while also outlining contingency plans for potential planning failures."
+        },
+        {
+          "name": "audit",
+          "chars": 634,
+          "summary": "I’ve created an incident handoff table outlining the situation with shallow answers after enabling simulated effort on your local device."
+        }
+      ],
+      "guidanceChars": 1400,
+      "scratchpadChars": 1808,
+      "score": {
+        "total": 8,
+        "max": 10,
+        "wordCount": 145,
+        "checks": {
+          "exactlySixLabeledRows": true,
+          "s1NamesUserFacingSetting": false,
+          "s2ExplainsLocalOnlyWithoutCloud": false,
+          "s3DescribesPrivatePlanningPass": true,
+          "s4HandlesPlanningJsonFailure": true,
+          "s5SaysScratchpadsNotPersisted": true,
+          "s6NamesPsychicUiIndicator": true,
+          "avoidsCloudWord": true,
+          "underWordLimit": true,
+          "avoidsRawChainOfThought": true
+        }
+      }
+    },
+    {
+      "effort": "xhigh",
+      "model": "gemma3:4b",
+      "promptId": "incident-handoff",
+      "promptTitle": "Incident Handoff Constraint Trap",
+      "repeat": 1,
+      "status": "ok",
+      "durationMs": 40298,
+      "planningBudgetTokens": 900,
+      "assistant": "| ID | Handoff |\n|---|---|\n| S1 | The user reported experiencing shallow responses following activation of ‘Simulated Effort’ within the local model interface.|\n| S2 | This issue is confined to your device and does not extend to any remote infrastructure. We guarantee a consistent experience based on your machine's configuration.|\n| S3 | I am currently utilizing a private planning pass to synthesize this handoff, focusing on clear communication of the problem and next steps.|\n| S4 | If the planning JSON fails to parse correctly, the local model will revert to its baseline operational state, providing standard responses.|\n| S5 | Please note that scratchpads are not persisted; any locally generated notes or configurations will be lost upon restarting the PRISM installation.|\n| S6 | A subtle line indicator will appear beneath my response when I am utilizing Psychic mode for enhanced contextual awareness. |",
+      "assistantChars": 916,
+      "psychicSummary": "I’ll create a concise incident handoff table detailing the user's report about shallow answers from a local model after enabling simulated effort. This will clearly outline the relevant settings, our local guarantee, and steps for escalation, focusing on immediate clarity for the receiving team.",
+      "passCount": 4,
+      "passes": [
+        {
+          "name": "plan",
+          "chars": 267,
+          "summary": "I’ll create a concise incident handoff table detailing the user's report about shallow answers from a local model after enabling simulated effort. This will clearly outline the relevant settings, our local guarantee, and steps for escalation, focusing on immediate clarity for the receiving team."
+        },
+        {
+          "name": "draft",
+          "chars": 858,
+          "summary": "I’ve created a structured handoff table detailing the user’s report about shallow answers and the ‘Simulated Effort’ setting. This ensures the receiving team understands the scope of the issue and our local guarantee, while also outlining contingency plans for potential planning failures."
+        },
+        {
+          "name": "audit",
+          "chars": 634,
+          "summary": "I’ve created an incident handoff table outlining the situation with shallow answers after enabling simulated effort on your local device."
+        },
+        {
+          "name": "synthesis",
+          "chars": 809,
+          "summary": "I’ve locked in a concise handoff detailing the user's report and our response plan, ensuring seamless escalation of this local model concern."
+        }
+      ],
+      "guidanceChars": 1400,
+      "scratchpadChars": 2629,
+      "score": {
+        "total": 8,
+        "max": 10,
+        "wordCount": 149,
+        "checks": {
+          "exactlySixLabeledRows": true,
+          "s1NamesUserFacingSetting": false,
+          "s2ExplainsLocalOnlyWithoutCloud": false,
+          "s3DescribesPrivatePlanningPass": true,
+          "s4HandlesPlanningJsonFailure": true,
+          "s5SaysScratchpadsNotPersisted": true,
+          "s6NamesPsychicUiIndicator": true,
+          "avoidsCloudWord": true,
+          "underWordLimit": true,
+          "avoidsRawChainOfThought": true
+        }
+      }
+    },
+    {
+      "effort": "none",
+      "model": "gemma3:4b",
+      "promptId": "incident-handoff",
+      "promptTitle": "Incident Handoff Constraint Trap",
+      "repeat": 2,
+      "status": "ok",
+      "durationMs": 14990,
+      "planningBudgetTokens": 0,
+      "assistant": "| ID | Handoff |\n|---|---|\n| S1 | The user enabled “Simulated Effort.” |\n| S2 | All processing occurs on your device; external data sources are never accessed. This ensures complete privacy and control. |\n| S3 | Before responding, the model performs a private planning pass – a quick internal review of the query’s components. |\n| S4 | If the planning JSON fails to construct, the model reverts to its baseline response generation. |\n| S5 | Scratchpads used during this process are not saved or persisted. |\n| S6 | A pulsing blue indicator in the status bar signifies Psychic mode activation. |",
+      "assistantChars": 594,
+      "passCount": 0,
+      "guidanceChars": 0,
+      "scratchpadChars": 0,
+      "score": {
+        "total": 8,
+        "max": 10,
+        "wordCount": 108,
+        "checks": {
+          "exactlySixLabeledRows": true,
+          "s1NamesUserFacingSetting": false,
+          "s2ExplainsLocalOnlyWithoutCloud": false,
+          "s3DescribesPrivatePlanningPass": true,
+          "s4HandlesPlanningJsonFailure": true,
+          "s5SaysScratchpadsNotPersisted": true,
+          "s6NamesPsychicUiIndicator": true,
+          "avoidsCloudWord": true,
+          "underWordLimit": true,
+          "avoidsRawChainOfThought": true
+        }
+      }
+    },
+    {
+      "effort": "minimal",
+      "model": "gemma3:4b",
+      "promptId": "incident-handoff",
+      "promptTitle": "Incident Handoff Constraint Trap",
+      "repeat": 2,
+      "status": "ok",
+      "durationMs": 23838,
+      "planningBudgetTokens": 300,
+      "assistant": "| ID | Handoff |\n|---|---|\n| S1 | The user enabled ‘Simulated Effort’ on the model. |\n| S2 | Our models are designed and tested exclusively on local devices, guaranteeing performance within your environment. This ensures optimal responsiveness based on your device's resources. |\n| S3 | I’m utilizing a private planning pass to synthesize this handoff – it focuses on structuring information for efficient transfer.  This allows me to quickly consolidate the user’s report and provide you with actionable insights. |\n| S4 | If the planning JSON fails to parse, I will revert to a simplified response with core details regarding the issue and steps taken. |\n| S5 | Please note that scratchpads are not persisted; any locally generated notes or configurations related to this troubleshooting session will be lost upon restart. |\n| S6 | A subtle line indicator will appear beneath my responses when I’m utilizing Psychic mode – it’s a visual cue for you to confirm the level of detail and assistance provided. |",
+      "assistantChars": 1008,
+      "psychicSummary": "I’m creating a concise handoff to detail the user's report about shallow answers from a small model after enabling simulated effort. I will outline the relevant settings, our local guarantee, and steps taken for troubleshooting, focusing on clarity and immediate action for the receiving team.",
+      "passCount": 1,
+      "passes": [
+        {
+          "name": "plan",
+          "chars": 189,
+          "summary": "I’m creating a concise handoff to detail the user's report about shallow answers from a small model after enabling simulated effort. I will outline the relevant settings, our local guarantee, and steps taken for troubleshooting, focusing on clarity and immediate action for the receiving team."
+        }
+      ],
+      "guidanceChars": 1103,
+      "scratchpadChars": 206,
+      "score": {
+        "total": 9,
+        "max": 10,
+        "wordCount": 172,
+        "checks": {
+          "exactlySixLabeledRows": true,
+          "s1NamesUserFacingSetting": false,
+          "s2ExplainsLocalOnlyWithoutCloud": true,
+          "s3DescribesPrivatePlanningPass": true,
+          "s4HandlesPlanningJsonFailure": true,
+          "s5SaysScratchpadsNotPersisted": true,
+          "s6NamesPsychicUiIndicator": true,
+          "avoidsCloudWord": true,
+          "underWordLimit": true,
+          "avoidsRawChainOfThought": true
+        }
+      }
+    },
+    {
+      "effort": "low",
+      "model": "gemma3:4b",
+      "promptId": "incident-handoff",
+      "promptTitle": "Incident Handoff Constraint Trap",
+      "repeat": 2,
+      "status": "ok",
+      "durationMs": 24781,
+      "planningBudgetTokens": 420,
+      "assistant": "| ID | Handoff |\n|---|---|\n| S1 | The user enabled ‘Simulated Effort’ within the local model interface.|\n| S2 | This issue is confined to your device and does not extend to any remote infrastructure. We guarantee a consistent experience based on your machine's configuration.|\n| S3 | I am currently utilizing a private planning pass to synthesize this handoff, focusing on clear communication of the problem and next steps.|\n| S4 | If the planning JSON fails, the model will revert to its baseline operational state, providing standard responses.|\n| S5 | Please note that scratchpads are not persisted; any locally generated notes or configurations will be lost upon restart.|\n| S6 | A subtle line will appear beneath my response indicating Psychic mode is active. |",
+      "assistantChars": 766,
+      "psychicSummary": "I’ll create a concise incident handoff table detailing the user's report about shallow answers from a local model after enabling simulated effort. This will clearly outline the relevant settings, our local guarantee, and steps for escalation, focusing on immediate clarity for the receiving team.",
+      "passCount": 1,
+      "passes": [
+        {
+          "name": "plan",
+          "chars": 267,
+          "summary": "I’ll create a concise incident handoff table detailing the user's report about shallow answers from a local model after enabling simulated effort. This will clearly outline the relevant settings, our local guarantee, and steps for escalation, focusing on immediate clarity for the receiving team."
+        }
+      ],
+      "guidanceChars": 1104,
+      "scratchpadChars": 284,
+      "score": {
+        "total": 8,
+        "max": 10,
+        "wordCount": 130,
+        "checks": {
+          "exactlySixLabeledRows": true,
+          "s1NamesUserFacingSetting": false,
+          "s2ExplainsLocalOnlyWithoutCloud": false,
+          "s3DescribesPrivatePlanningPass": true,
+          "s4HandlesPlanningJsonFailure": true,
+          "s5SaysScratchpadsNotPersisted": true,
+          "s6NamesPsychicUiIndicator": true,
+          "avoidsCloudWord": true,
+          "underWordLimit": true,
+          "avoidsRawChainOfThought": true
+        }
+      }
+    },
+    {
+      "effort": "medium",
+      "model": "gemma3:4b",
+      "promptId": "incident-handoff",
+      "promptTitle": "Incident Handoff Constraint Trap",
+      "repeat": 2,
+      "status": "ok",
+      "durationMs": 36528,
+      "planningBudgetTokens": 560,
+      "assistant": "| ID | Handoff |\n|---|---|\n| S1 | The user reported experiencing shallow responses following activation of ‘Simulated Effort’ within the local model interface.|\n| S2 | This issue is confined to your local device and does not extend to any remote infrastructure. We guarantee a consistent experience based on your machine's configuration.|\n| S3 | I am currently utilizing a private planning pass to synthesize this handoff, focusing on clear communication of the problem and next steps.|\n| S4 | If the planning JSON fails, the local model will revert to its baseline settings, providing standard responses. |\n| S5 | Please note that scratchpads are not persisted; any locally generated ideas or configurations will be lost upon restarting the application.|\n| S6 | A subtle line indicator appears beneath my response when I’m utilizing Psychic mode to signal active processing. |",
+      "assistantChars": 877,
+      "psychicSummary": "I’ll create a concise incident handoff table detailing the user's report about shallow answers from a local model after enabling simulated effort. This will clearly outline the relevant settings, our local guarantee, and steps for escalation, focusing on immediate clarity for the receiving team.",
+      "passCount": 2,
+      "passes": [
+        {
+          "name": "plan",
+          "chars": 267,
+          "summary": "I’ll create a concise incident handoff table detailing the user's report about shallow answers from a local model after enabling simulated effort. This will clearly outline the relevant settings, our local guarantee, and steps for escalation, focusing on immediate clarity for the receiving team."
+        },
+        {
+          "name": "audit",
+          "chars": 2112,
+          "summary": "I checked the candidate against the request for missed constraints, privacy issues, and likely user-facing mistakes."
+        }
+      ],
+      "guidanceChars": 1400,
+      "scratchpadChars": 2412,
+      "score": {
+        "total": 9,
+        "max": 10,
+        "wordCount": 144,
+        "checks": {
+          "exactlySixLabeledRows": true,
+          "s1NamesUserFacingSetting": false,
+          "s2ExplainsLocalOnlyWithoutCloud": true,
+          "s3DescribesPrivatePlanningPass": true,
+          "s4HandlesPlanningJsonFailure": true,
+          "s5SaysScratchpadsNotPersisted": true,
+          "s6NamesPsychicUiIndicator": true,
+          "avoidsCloudWord": true,
+          "underWordLimit": true,
+          "avoidsRawChainOfThought": true
+        }
+      }
+    },
+    {
+      "effort": "high",
+      "model": "gemma3:4b",
+      "promptId": "incident-handoff",
+      "promptTitle": "Incident Handoff Constraint Trap",
+      "repeat": 2,
+      "status": "ok",
+      "durationMs": 38041,
+      "planningBudgetTokens": 720,
+      "assistant": "| ID | Handoff |\n|---|---|\n| S1 | The user reported experiencing shallow responses following activation of ‘Simulated Effort’ within the local model interface.|\n| S2 | This issue is confined to your device and does not extend to any remote infrastructure. We guarantee a consistent experience based on your machine’s configuration.|\n| S3 | I am currently utilizing a private planning pass to synthesize this handoff, focusing on clear communication of the problem and next steps.|\n| S4 | If the planning JSON fails, the local model will revert to its baseline settings for optimal performance. |\n| S5 | Please note that scratchpads are not persisted; any locally generated notes or configurations will be lost upon restart.|\n| S6 | A subtle line indicator will appear beneath my response when I am utilizing Psychic mode to signal enhanced processing.|",
+      "assistantChars": 852,
+      "psychicSummary": "I’ll create a concise incident handoff table detailing the user's report about shallow answers from a local model after enabling simulated effort. This will clearly outline the relevant settings, our local guarantee, and steps for escalation, focusing on immediate clarity for the receiving team.",
+      "passCount": 3,
+      "passes": [
+        {
+          "name": "plan",
+          "chars": 267,
+          "summary": "I’ll create a concise incident handoff table detailing the user's report about shallow answers from a local model after enabling simulated effort. This will clearly outline the relevant settings, our local guarantee, and steps for escalation, focusing on immediate clarity for the receiving team."
+        },
+        {
+          "name": "draft",
+          "chars": 858,
+          "summary": "I’ve created a structured handoff table detailing the user’s report about shallow answers and the ‘Simulated Effort’ setting. This ensures the receiving team understands the scope of the issue and our local guarantee, while also outlining contingency plans for potential planning failures."
+        },
+        {
+          "name": "audit",
+          "chars": 634,
+          "summary": "I’ve created an incident handoff table outlining the situation with shallow answers after enabling simulated effort on your local device."
+        }
+      ],
+      "guidanceChars": 1400,
+      "scratchpadChars": 1808,
+      "score": {
+        "total": 8,
+        "max": 10,
+        "wordCount": 142,
+        "checks": {
+          "exactlySixLabeledRows": true,
+          "s1NamesUserFacingSetting": false,
+          "s2ExplainsLocalOnlyWithoutCloud": false,
+          "s3DescribesPrivatePlanningPass": true,
+          "s4HandlesPlanningJsonFailure": true,
+          "s5SaysScratchpadsNotPersisted": true,
+          "s6NamesPsychicUiIndicator": true,
+          "avoidsCloudWord": true,
+          "underWordLimit": true,
+          "avoidsRawChainOfThought": true
+        }
+      }
+    },
+    {
+      "effort": "xhigh",
+      "model": "gemma3:4b",
+      "promptId": "incident-handoff",
+      "promptTitle": "Incident Handoff Constraint Trap",
+      "repeat": 2,
+      "status": "ok",
+      "durationMs": 39676,
+      "planningBudgetTokens": 900,
+      "assistant": "| ID | Handoff |\n|---|---|\n| S1 | The user reported experiencing shallow responses following activation of ‘Simulated Effort’ within the local model interface.|\n| S2 | This issue is confined to your device and does not extend to any remote infrastructure. We guarantee a consistent experience based on your machine’s configuration.|\n| S3 | I am currently utilizing a private planning pass to synthesize this handoff, focusing on clear communication of the problem and next steps.|\n| S4 | If the planning JSON fails, the local model will revert to its standard operational parameters, prioritizing accuracy over simulated complexity.|\n| S5 | Scratchpads are not persisted; any locally generated insights or configurations will be lost upon restart.|\n| S6 | A subtle line indicator will appear beneath my response when I am utilizing Psychic mode for enhanced contextual awareness.|",
+      "assistantChars": 880,
+      "psychicSummary": "I’ll create a concise incident handoff table detailing the user's report about shallow answers from a local model after enabling simulated effort. This will clearly outline the relevant settings, our local guarantee, and steps for escalation, focusing on immediate clarity for the receiving team.",
+      "passCount": 4,
+      "passes": [
+        {
+          "name": "plan",
+          "chars": 267,
+          "summary": "I’ll create a concise incident handoff table detailing the user's report about shallow answers from a local model after enabling simulated effort. This will clearly outline the relevant settings, our local guarantee, and steps for escalation, focusing on immediate clarity for the receiving team."
+        },
+        {
+          "name": "draft",
+          "chars": 858,
+          "summary": "I’ve created a structured handoff table detailing the user’s report about shallow answers and the ‘Simulated Effort’ setting. This ensures the receiving team understands the scope of the issue and our local guarantee, while also outlining contingency plans for potential planning failures."
+        },
+        {
+          "name": "audit",
+          "chars": 634,
+          "summary": "I’ve created an incident handoff table outlining the situation with shallow answers after enabling simulated effort on your local device."
+        },
+        {
+          "name": "synthesis",
+          "chars": 809,
+          "summary": "I’ve locked in a concise handoff detailing the user's report and our response plan, ensuring seamless escalation of this local model concern."
+        }
+      ],
+      "guidanceChars": 1400,
+      "scratchpadChars": 2629,
+      "score": {
+        "total": 8,
+        "max": 10,
+        "wordCount": 141,
+        "checks": {
+          "exactlySixLabeledRows": true,
+          "s1NamesUserFacingSetting": false,
+          "s2ExplainsLocalOnlyWithoutCloud": false,
+          "s3DescribesPrivatePlanningPass": true,
+          "s4HandlesPlanningJsonFailure": true,
+          "s5SaysScratchpadsNotPersisted": true,
+          "s6NamesPsychicUiIndicator": true,
+          "avoidsCloudWord": true,
+          "underWordLimit": true,
+          "avoidsRawChainOfThought": true
+        }
+      }
+    },
+    {
+      "effort": "none",
+      "model": "gemma3:4b",
+      "promptId": "qa-gate",
+      "promptTitle": "QA Gate Constraint Trap",
+      "repeat": 1,
+      "status": "ok",
+      "durationMs": 13296,
+      "planningBudgetTokens": 0,
+      "assistant": "| ID | Gate |\n|---|---|\n| S1 | Simulated Effort Level |\n| S2 | The system operates entirely on your device; no data leaves it. |\n| S3 | A preliminary review of user intentions is conducted privately by the core team. |\n| S4 | If the planning data becomes invalid, a fresh start will be initiated. |\n| S5 | Scratchpads are temporary workspaces and aren’t saved across sessions. |\n| S6 | The Psychic mode indicator displays as a pulsing blue aura around the active prompt. |",
+      "assistantChars": 472,
+      "passCount": 0,
+      "guidanceChars": 0,
+      "scratchpadChars": 0,
+      "score": {
+        "total": 5,
+        "max": 10,
+        "wordCount": 92,
+        "checks": {
+          "exactlySixLabeledRows": true,
+          "s1NamesUserFacingSetting": false,
+          "s2ExplainsLocalOnlyWithoutCloud": false,
+          "s3DescribesPrivatePlanningPass": false,
+          "s4HandlesPlanningJsonFailure": false,
+          "s5SaysScratchpadsNotPersisted": false,
+          "s6NamesPsychicUiIndicator": true,
+          "avoidsCloudWord": true,
+          "underWordLimit": true,
+          "avoidsRawChainOfThought": true
+        }
+      }
+    },
+    {
+      "effort": "minimal",
+      "model": "gemma3:4b",
+      "promptId": "qa-gate",
+      "promptTitle": "QA Gate Constraint Trap",
+      "repeat": 1,
+      "status": "ok",
+      "durationMs": 21345,
+      "planningBudgetTokens": 300,
+      "assistant": "| ID | Gate |\n|---|---|\n| S1 | Simulated Effort Ladder – User-selectable difficulty levels impacting task complexity and reward frequency. |\n| S2 | This preview build is exclusively for local testing on your device, guaranteeing no reliance on external services or network connectivity.  Data processing occurs entirely within the machine’s memory. |\n| S3 | The private planning pass facilitates internal review and validation of the release criteria – a dedicated channel for technical and design feedback. |\n| S4 | If the planning JSON fails to parse, a default configuration will be applied, reverting to the last known stable state to maintain operational continuity. |\n| S5 | Scratchpads are ephemeral; data is not persisted across sessions or devices. All user-generated configurations are lost upon restarting the application. |\n| S6 | A subtle pulsing line beneath the “Continue” button indicates Psychic mode activation – a visual cue for heightened awareness and processing. |",
+      "assistantChars": 986,
+      "psychicSummary": "I’ll create a release QA gate table to assess readiness for a preview build of the simulated-effort ladder. This will ensure all critical aspects are verified before exposing it to users, focusing on key considerations like local guarantees and fallback mechanisms. The table will provide a structured overview for the team's decision-making process.",
+      "passCount": 1,
+      "passes": [
+        {
+          "name": "plan",
+          "chars": 241,
+          "summary": "I’ll create a release QA gate table to assess readiness for a preview build of the simulated-effort ladder. This will ensure all critical aspects are verified before exposing it to users, focusing on key considerations like local guarantees and fallback mechanisms. The table will provide a structured overview for the team's decision-making process."
+        }
+      ],
+      "guidanceChars": 1103,
+      "scratchpadChars": 258,
+      "score": {
+        "total": 9,
+        "max": 10,
+        "wordCount": 158,
+        "checks": {
+          "exactlySixLabeledRows": true,
+          "s1NamesUserFacingSetting": false,
+          "s2ExplainsLocalOnlyWithoutCloud": true,
+          "s3DescribesPrivatePlanningPass": true,
+          "s4HandlesPlanningJsonFailure": true,
+          "s5SaysScratchpadsNotPersisted": true,
+          "s6NamesPsychicUiIndicator": true,
+          "avoidsCloudWord": true,
+          "underWordLimit": true,
+          "avoidsRawChainOfThought": true
+        }
+      }
+    },
+    {
+      "effort": "low",
+      "model": "gemma3:4b",
+      "promptId": "qa-gate",
+      "promptTitle": "QA Gate Constraint Trap",
+      "repeat": 1,
+      "status": "ok",
+      "durationMs": 22762,
+      "planningBudgetTokens": 420,
+      "assistant": "| ID | Gate |\n|---|---|\n| S1 | User-facing effort setting: Simulated Ladder Complexity (Low, Medium, High) |\n| S2 | This preview build is exclusively for local device testing and evaluation; no remote infrastructure access is provided. |\n| S3 | The private planning pass facilitates internal risk assessment and documentation of this release stage. |\n| S4 | If the planning JSON fails to parse, the process will halt, and a notification will be generated for immediate investigation. |\n| S5 | Scratchpads are ephemeral; all local data is cleared upon session termination. |\n| S6 | Subtle line indicator: Psychic Mode - Green (Active) / Yellow (Passive) |",
+      "assistantChars": 654,
+      "psychicSummary": "I’ll create a release QA gate table to assess the simulated-effort ladder's readiness for a preview build. This will systematically evaluate key aspects, focusing on user experience, technical guarantees, and internal processes. The table format ensures clarity and traceability during this critical decision point.",
+      "passCount": 1,
+      "passes": [
+        {
+          "name": "plan",
+          "chars": 358,
+          "summary": "I’ll create a release QA gate table to assess the simulated-effort ladder's readiness for a preview build. This will systematically evaluate key aspects, focusing on user experience, technical guarantees, and internal processes. The table format ensures clarity and traceability during this critical decision point."
+        }
+      ],
+      "guidanceChars": 1104,
+      "scratchpadChars": 375,
+      "score": {
+        "total": 9,
+        "max": 10,
+        "wordCount": 112,
+        "checks": {
+          "exactlySixLabeledRows": true,
+          "s1NamesUserFacingSetting": true,
+          "s2ExplainsLocalOnlyWithoutCloud": true,
+          "s3DescribesPrivatePlanningPass": true,
+          "s4HandlesPlanningJsonFailure": true,
+          "s5SaysScratchpadsNotPersisted": false,
+          "s6NamesPsychicUiIndicator": true,
+          "avoidsCloudWord": true,
+          "underWordLimit": true,
+          "avoidsRawChainOfThought": true
+        }
+      }
+    },
+    {
+      "effort": "medium",
+      "model": "gemma3:4b",
+      "promptId": "qa-gate",
+      "promptTitle": "QA Gate Constraint Trap",
+      "repeat": 1,
+      "status": "ok",
+      "durationMs": 30328,
+      "planningBudgetTokens": 560,
+      "assistant": "Okay, here’s the release QA gate table as requested:\n\n| ID | Gate                                                                 |\n|----|-----------------------------------------------------------------------|\n| S1 | User-facing effort setting configuration (e.g., “Simulated Effort Level”). |\n| S2 | This preview build is exclusively for local device testing and evaluation; no external machine or provider access is provided.  |\n| S3 | The private planning pass facilitates internal risk assessment and documentation of this release stage. |\n| S4 | If the planning JSON fails to parse, the process will halt, and a notification will be generated for immediate investigation. |\n| S5 | Scratchpads are ephemeral; all data is stored locally on your device. |\n| S6 | A subtle line indicator appears beneath the “Psychic Mode” toggle.  |",
+      "assistantChars": 835,
+      "psychicSummary": "I’ll create a release QA gate table to assess the simulated-effort ladder's readiness for a preview build. This will systematically evaluate key aspects, focusing on user experience, technical guarantees, and internal processes. The table format ensures clarity and traceability during this critical decision point.",
+      "passCount": 2,
+      "passes": [
+        {
+          "name": "plan",
+          "chars": 358,
+          "summary": "I’ll create a release QA gate table to assess the simulated-effort ladder's readiness for a preview build. This will systematically evaluate key aspects, focusing on user experience, technical guarantees, and internal processes. The table format ensures clarity and traceability during this critical decision point."
+        },
+        {
+          "name": "audit",
+          "chars": 589,
+          "summary": "I’ve established a release QA gate with six distinct gates to thoroughly evaluate the simulated-effort ladder. The key constraint is ensuring all critical aspects are addressed before proceeding to the next stage."
+        }
+      ],
+      "guidanceChars": 1400,
+      "scratchpadChars": 980,
+      "score": {
+        "total": 9,
+        "max": 10,
+        "wordCount": 121,
+        "checks": {
+          "exactlySixLabeledRows": true,
+          "s1NamesUserFacingSetting": true,
+          "s2ExplainsLocalOnlyWithoutCloud": true,
+          "s3DescribesPrivatePlanningPass": true,
+          "s4HandlesPlanningJsonFailure": true,
+          "s5SaysScratchpadsNotPersisted": false,
+          "s6NamesPsychicUiIndicator": true,
+          "avoidsCloudWord": true,
+          "underWordLimit": true,
+          "avoidsRawChainOfThought": true
+        }
+      }
+    },
+    {
+      "effort": "high",
+      "model": "gemma3:4b",
+      "promptId": "qa-gate",
+      "promptTitle": "QA Gate Constraint Trap",
+      "repeat": 1,
+      "status": "ok",
+      "durationMs": 34589,
+      "planningBudgetTokens": 720,
+      "assistant": "| ID | Gate |\n|---|---|\n| S1 | User-facing effort setting configuration. |\n| S2 | This preview build is exclusively for local device testing and evaluation; no remote infrastructure access is provided. |\n| S3 | The private planning pass facilitates internal risk assessment and documentation of this release stage. |\n| S4 | If the planning JSON fails to parse, the process will halt, and a notification will be generated for immediate investigation. |\n| S5 | Scratchpads are ephemeral; all data is local to the device. |\n| S6 | Subtle line indicator: “Psychic Mode Active” |",
+      "assistantChars": 574,
+      "psychicSummary": "I’ll create a release QA gate table to assess the simulated-effort ladder's readiness for a preview build. This will systematically evaluate key aspects, focusing on user experience, technical guarantees, and internal processes. The table format ensures clarity and traceability during this critical decision point.",
+      "passCount": 3,
+      "passes": [
+        {
+          "name": "plan",
+          "chars": 358,
+          "summary": "I’ll create a release QA gate table to assess the simulated-effort ladder's readiness for a preview build. This will systematically evaluate key aspects, focusing on user experience, technical guarantees, and internal processes. The table format ensures clarity and traceability during this critical decision point."
+        },
+        {
+          "name": "draft",
+          "chars": 585,
+          "summary": "I’ve established a release QA gate table with six rows to systematically assess the simulated-effort ladder's readiness for the preview build, focusing on key areas like user experience and technical guarantees."
+        },
+        {
+          "name": "audit",
+          "chars": 549,
+          "summary": "I’ve established a QA gate with six distinct steps to thoroughly evaluate the simulated-effort ladder's readiness for release."
+        }
+      ],
+      "guidanceChars": 1400,
+      "scratchpadChars": 1541,
+      "score": {
+        "total": 9,
+        "max": 10,
+        "wordCount": 101,
+        "checks": {
+          "exactlySixLabeledRows": true,
+          "s1NamesUserFacingSetting": true,
+          "s2ExplainsLocalOnlyWithoutCloud": true,
+          "s3DescribesPrivatePlanningPass": true,
+          "s4HandlesPlanningJsonFailure": true,
+          "s5SaysScratchpadsNotPersisted": false,
+          "s6NamesPsychicUiIndicator": true,
+          "avoidsCloudWord": true,
+          "underWordLimit": true,
+          "avoidsRawChainOfThought": true
+        }
+      }
+    },
+    {
+      "effort": "xhigh",
+      "model": "gemma3:4b",
+      "promptId": "qa-gate",
+      "promptTitle": "QA Gate Constraint Trap",
+      "repeat": 1,
+      "status": "ok",
+      "durationMs": 36428,
+      "planningBudgetTokens": 900,
+      "assistant": "| ID | Gate |\n|---|---|\n| S1 | User-facing effort setting configuration. |\n| S2 | This preview build is exclusively for local device testing and evaluation; no remote infrastructure access is provided. |\n| S3 | The private planning pass facilitates internal risk assessment and documentation of this release stage. |\n| S4 | If the planning JSON fails to parse, the process will halt, and a notification will be generated for immediate investigation. |\n| S5 | Scratchpads are ephemeral; all data is stored locally on your machine or device. |\n| S6 | A subtle line indicator appears beneath the “Continue” button when Psychic mode is active. |",
+      "assistantChars": 641,
+      "psychicSummary": "I’ll create a release QA gate table to assess the simulated-effort ladder's readiness for a preview build. This will systematically evaluate key aspects, focusing on user experience, technical guarantees, and internal processes. The table format ensures clarity and traceability during this critical decision point.",
+      "passCount": 4,
+      "passes": [
+        {
+          "name": "plan",
+          "chars": 358,
+          "summary": "I’ll create a release QA gate table to assess the simulated-effort ladder's readiness for a preview build. This will systematically evaluate key aspects, focusing on user experience, technical guarantees, and internal processes. The table format ensures clarity and traceability during this critical decision point."
+        },
+        {
+          "name": "draft",
+          "chars": 585,
+          "summary": "I’ve established a release QA gate table with six rows to systematically assess the simulated-effort ladder's readiness for the preview build, focusing on key areas like user experience and technical guarantees."
+        },
+        {
+          "name": "audit",
+          "chars": 549,
+          "summary": "I’ve established a QA gate with six distinct steps to thoroughly evaluate the simulated-effort ladder's readiness for release."
+        },
+        {
+          "name": "synthesis",
+          "chars": 622,
+          "summary": "This brief solidified the key QA checks, specifically focusing on local testing and the process for handling planning JSON errors to ensure a smooth preview release."
+        }
+      ],
+      "guidanceChars": 1400,
+      "scratchpadChars": 2175,
+      "score": {
+        "total": 9,
+        "max": 10,
+        "wordCount": 112,
+        "checks": {
+          "exactlySixLabeledRows": true,
+          "s1NamesUserFacingSetting": true,
+          "s2ExplainsLocalOnlyWithoutCloud": true,
+          "s3DescribesPrivatePlanningPass": true,
+          "s4HandlesPlanningJsonFailure": true,
+          "s5SaysScratchpadsNotPersisted": false,
+          "s6NamesPsychicUiIndicator": true,
+          "avoidsCloudWord": true,
+          "underWordLimit": true,
+          "avoidsRawChainOfThought": true
+        }
+      }
+    },
+    {
+      "effort": "none",
+      "model": "gemma3:4b",
+      "promptId": "qa-gate",
+      "promptTitle": "QA Gate Constraint Trap",
+      "repeat": 2,
+      "status": "ok",
+      "durationMs": 14890,
+      "planningBudgetTokens": 0,
+      "assistant": "Okay, here’s a release QA gate table designed to assess readiness for a preview build of the simulated-effort ladder feature:\n\n| ID | Gate |\n|---|---|\n| S1 | User-selectable exertion levels. |\n| S2 | All changes are stored solely on your device; no central synchronization occurs. |\n| S3 | A preliminary, private session where initial parameters are established and refined. |\n| S4 | If the planning data becomes corrupted, the simulation reverts to a default state. |\n| S5 | Scratchpads are ephemeral – their contents vanish upon closing the workspace. |\n| S6 | The Psychic mode indicator displays a pulsing violet aura around active thought streams. |\n\n---\n\nThis table provides a concise overview of key considerations for the release QA process, addressing each specified requirement within the word limit and adhering to the given constraints.",
+      "assistantChars": 847,
+      "passCount": 0,
+      "guidanceChars": 0,
+      "scratchpadChars": 0,
+      "score": {
+        "total": 5,
+        "max": 10,
+        "wordCount": 142,
+        "checks": {
+          "exactlySixLabeledRows": true,
+          "s1NamesUserFacingSetting": false,
+          "s2ExplainsLocalOnlyWithoutCloud": false,
+          "s3DescribesPrivatePlanningPass": false,
+          "s4HandlesPlanningJsonFailure": false,
+          "s5SaysScratchpadsNotPersisted": false,
+          "s6NamesPsychicUiIndicator": true,
+          "avoidsCloudWord": true,
+          "underWordLimit": true,
+          "avoidsRawChainOfThought": true
+        }
+      }
+    },
+    {
+      "effort": "minimal",
+      "model": "gemma3:4b",
+      "promptId": "qa-gate",
+      "promptTitle": "QA Gate Constraint Trap",
+      "repeat": 2,
+      "status": "ok",
+      "durationMs": 24355,
+      "planningBudgetTokens": 300,
+      "assistant": "| ID | Gate |\n|---|---|\n| S1 | Simulated Effort Ladder – User-selectable difficulty levels impacting task complexity and reward frequency. |\n| S2 | This preview build is exclusively for local testing on your device, guaranteeing no reliance on external services or network connectivity.  Data processing occurs entirely within the machine’s memory. |\n| S3 | The private planning pass facilitates internal review and validation of the release criteria – a dedicated channel for assessing stability and user experience. |\n| S4 | If the planning JSON fails to parse, a default configuration will be applied, reverting to the last known stable state to maintain operational continuity. |\n| S5 | Scratchpads are ephemeral; data generated during testing is not persisted across sessions or devices – treat them as temporary exploration tools. |\n| S6 | A subtle amber line appears beneath the “Continue” button when Psychic mode is active, indicating heightened processing and potential delays. |",
+      "assistantChars": 989,
+      "psychicSummary": "I’ll create a release QA gate table to assess readiness for a preview build of the simulated-effort ladder. This will ensure all critical aspects are verified before exposing it to users, focusing on key considerations like local guarantees and fallback mechanisms. The table will provide a structured overview for the team's decision-making process.",
+      "passCount": 1,
+      "passes": [
+        {
+          "name": "plan",
+          "chars": 241,
+          "summary": "I’ll create a release QA gate table to assess readiness for a preview build of the simulated-effort ladder. This will ensure all critical aspects are verified before exposing it to users, focusing on key considerations like local guarantees and fallback mechanisms. The table will provide a structured overview for the team's decision-making process."
+        }
+      ],
+      "guidanceChars": 1103,
+      "scratchpadChars": 258,
+      "score": {
+        "total": 9,
+        "max": 10,
+        "wordCount": 159,
+        "checks": {
+          "exactlySixLabeledRows": true,
+          "s1NamesUserFacingSetting": false,
+          "s2ExplainsLocalOnlyWithoutCloud": true,
+          "s3DescribesPrivatePlanningPass": true,
+          "s4HandlesPlanningJsonFailure": true,
+          "s5SaysScratchpadsNotPersisted": true,
+          "s6NamesPsychicUiIndicator": true,
+          "avoidsCloudWord": true,
+          "underWordLimit": true,
+          "avoidsRawChainOfThought": true
+        }
+      }
+    },
+    {
+      "effort": "low",
+      "model": "gemma3:4b",
+      "promptId": "qa-gate",
+      "promptTitle": "QA Gate Constraint Trap",
+      "repeat": 2,
+      "status": "ok",
+      "durationMs": 22905,
+      "planningBudgetTokens": 420,
+      "assistant": "Okay, here’s the release QA gate table as requested:\n\n| ID | Gate                                                        |\n|----|-------------------------------------------------------------|\n| S1 | Simulated effort level (Low, Medium, High)                     |\n| S2 | This preview build is exclusively for local device testing and evaluation; no remote infrastructure access is provided. |\n| S3 | The private planning pass facilitates internal risk assessment and documentation of this release stage. |\n| S4 | If the planning JSON fails to parse, the process will halt, and a notification will be generated for immediate investigation. |\n| S5 | Scratchpads are ephemeral; all data is lost upon session termination. |\n| S6 | Subtle line indicator: “Psychic Mode Active”                   | \n\nDo you want me to add any further details or refine this table?",
+      "assistantChars": 857,
+      "psychicSummary": "I’ll create a release QA gate table to assess the simulated-effort ladder's readiness for a preview build. This will systematically evaluate key aspects, focusing on user experience, technical guarantees, and internal processes. The table format ensures clarity and traceability during this critical decision point.",
+      "passCount": 1,
+      "passes": [
+        {
+          "name": "plan",
+          "chars": 358,
+          "summary": "I’ll create a release QA gate table to assess the simulated-effort ladder's readiness for a preview build. This will systematically evaluate key aspects, focusing on user experience, technical guarantees, and internal processes. The table format ensures clarity and traceability during this critical decision point."
+        }
+      ],
+      "guidanceChars": 1104,
+      "scratchpadChars": 375,
+      "score": {
+        "total": 8,
+        "max": 10,
+        "wordCount": 125,
+        "checks": {
+          "exactlySixLabeledRows": true,
+          "s1NamesUserFacingSetting": false,
+          "s2ExplainsLocalOnlyWithoutCloud": true,
+          "s3DescribesPrivatePlanningPass": true,
+          "s4HandlesPlanningJsonFailure": true,
+          "s5SaysScratchpadsNotPersisted": false,
+          "s6NamesPsychicUiIndicator": true,
+          "avoidsCloudWord": true,
+          "underWordLimit": true,
+          "avoidsRawChainOfThought": true
+        }
+      }
+    },
+    {
+      "effort": "medium",
+      "model": "gemma3:4b",
+      "promptId": "qa-gate",
+      "promptTitle": "QA Gate Constraint Trap",
+      "repeat": 2,
+      "status": "ok",
+      "durationMs": 29638,
+      "planningBudgetTokens": 560,
+      "assistant": "Okay, here’s the release QA gate table as requested:\n\n| ID | Gate                                                        |\n|----|-------------------------------------------------------------|\n| S1 | User-facing effort setting configuration.                    |\n| S2 | This preview build is exclusively for local device testing and evaluation; no external machine or provider access is provided. |\n| S3 | The private planning pass facilitates internal risk assessment and documentation of this release stage. |\n| S4 | If the planning JSON fails to parse, the process will halt, and a notification will be generated for immediate investigation. |\n| S5 | Scratchpads are ephemeral; all data is locally contained within the device. |\n| S6 | Subtle line indicator: “Psychic Mode Active”                 |\n\nDo you want me to add any additional details or explore this further?",
+      "assistantChars": 871,
+      "psychicSummary": "I’ll create a release QA gate table to assess the simulated-effort ladder's readiness for a preview build. This will systematically evaluate key aspects, focusing on user experience, technical guarantees, and internal processes. The table format ensures clarity and traceability during this critical decision point.",
+      "passCount": 2,
+      "passes": [
+        {
+          "name": "plan",
+          "chars": 358,
+          "summary": "I’ll create a release QA gate table to assess the simulated-effort ladder's readiness for a preview build. This will systematically evaluate key aspects, focusing on user experience, technical guarantees, and internal processes. The table format ensures clarity and traceability during this critical decision point."
+        },
+        {
+          "name": "audit",
+          "chars": 589,
+          "summary": "I’ve established a release QA gate with six distinct gates to thoroughly evaluate the simulated-effort ladder. The key constraint is ensuring all critical aspects are addressed before proceeding to the next stage."
+        }
+      ],
+      "guidanceChars": 1400,
+      "scratchpadChars": 980,
+      "score": {
+        "total": 9,
+        "max": 10,
+        "wordCount": 126,
+        "checks": {
+          "exactlySixLabeledRows": true,
+          "s1NamesUserFacingSetting": true,
+          "s2ExplainsLocalOnlyWithoutCloud": true,
+          "s3DescribesPrivatePlanningPass": true,
+          "s4HandlesPlanningJsonFailure": true,
+          "s5SaysScratchpadsNotPersisted": false,
+          "s6NamesPsychicUiIndicator": true,
+          "avoidsCloudWord": true,
+          "underWordLimit": true,
+          "avoidsRawChainOfThought": true
+        }
+      }
+    },
+    {
+      "effort": "high",
+      "model": "gemma3:4b",
+      "promptId": "qa-gate",
+      "promptTitle": "QA Gate Constraint Trap",
+      "repeat": 2,
+      "status": "ok",
+      "durationMs": 36746,
+      "planningBudgetTokens": 720,
+      "assistant": "Okay, here’s the release QA gate table as requested:\n\n| ID | Gate                                                        |\n|----|-------------------------------------------------------------|\n| S1 | Simulated Effort Level (Low, Medium, High)                    |\n| S2 | This preview build is exclusively for local device testing and evaluation; no remote infrastructure access is provided. |\n| S3 | The private planning pass facilitates internal risk assessment and documentation of this release stage. |\n| S4 | If the planning JSON fails to parse, the process will halt, and a notification will be generated for immediate investigation. |\n| S5 | Scratchpads are ephemeral; all data is local to the device.  |\n| S6 | Subtle line indicator: “Psychic Mode Active”                    |\n\nDo you want me to add any further details or explore this release QA gate in more depth? Would you like to use AskQuestion chips to select a specific effort level (Low, Medium, High) for S1?",
+      "assistantChars": 974,
+      "psychicSummary": "I’ll create a release QA gate table to assess the simulated-effort ladder's readiness for a preview build. This will systematically evaluate key aspects, focusing on user experience, technical guarantees, and internal processes. The table format ensures clarity and traceability during this critical decision point.",
+      "passCount": 3,
+      "passes": [
+        {
+          "name": "plan",
+          "chars": 358,
+          "summary": "I’ll create a release QA gate table to assess the simulated-effort ladder's readiness for a preview build. This will systematically evaluate key aspects, focusing on user experience, technical guarantees, and internal processes. The table format ensures clarity and traceability during this critical decision point."
+        },
+        {
+          "name": "draft",
+          "chars": 585,
+          "summary": "I’ve established a release QA gate table with six rows to systematically assess the simulated-effort ladder's readiness for the preview build, focusing on key areas like user experience and technical guarantees."
+        },
+        {
+          "name": "audit",
+          "chars": 549,
+          "summary": "I’ve established a QA gate with six distinct steps to thoroughly evaluate the simulated-effort ladder's readiness for release."
+        }
+      ],
+      "guidanceChars": 1400,
+      "scratchpadChars": 1541,
+      "score": {
+        "total": 8,
+        "max": 10,
+        "wordCount": 148,
+        "checks": {
+          "exactlySixLabeledRows": true,
+          "s1NamesUserFacingSetting": false,
+          "s2ExplainsLocalOnlyWithoutCloud": true,
+          "s3DescribesPrivatePlanningPass": true,
+          "s4HandlesPlanningJsonFailure": true,
+          "s5SaysScratchpadsNotPersisted": false,
+          "s6NamesPsychicUiIndicator": true,
+          "avoidsCloudWord": true,
+          "underWordLimit": true,
+          "avoidsRawChainOfThought": true
+        }
+      }
+    },
+    {
+      "effort": "xhigh",
+      "model": "gemma3:4b",
+      "promptId": "qa-gate",
+      "promptTitle": "QA Gate Constraint Trap",
+      "repeat": 2,
+      "status": "ok",
+      "durationMs": 39691,
+      "planningBudgetTokens": 900,
+      "assistant": "Okay, here’s the release QA gate table as requested:\n\n| ID | Gate                                                        |\n|----|-------------------------------------------------------------|\n| S1 | User-facing effort setting configuration.                    |\n| S2 | This preview build is exclusively for local device testing and evaluation; no remote infrastructure access is provided. |\n| S3 | The private planning pass facilitates internal risk assessment and documentation of this release stage. |\n| S4 | If the planning JSON fails to parse, the process will halt, and a notification will be generated for immediate investigation. |\n| S5 | Scratchpads are ephemeral; all data is local to the device.  |\n| S6 | Subtle line indicator: “Psychic Mode Active”                 |",
+      "assistantChars": 778,
+      "psychicSummary": "I’ll create a release QA gate table to assess the simulated-effort ladder's readiness for a preview build. This will systematically evaluate key aspects, focusing on user experience, technical guarantees, and internal processes. The table format ensures clarity and traceability during this critical decision point.",
+      "passCount": 4,
+      "passes": [
+        {
+          "name": "plan",
+          "chars": 358,
+          "summary": "I’ll create a release QA gate table to assess the simulated-effort ladder's readiness for a preview build. This will systematically evaluate key aspects, focusing on user experience, technical guarantees, and internal processes. The table format ensures clarity and traceability during this critical decision point."
+        },
+        {
+          "name": "draft",
+          "chars": 585,
+          "summary": "I’ve established a release QA gate table with six rows to systematically assess the simulated-effort ladder's readiness for the preview build, focusing on key areas like user experience and technical guarantees."
+        },
+        {
+          "name": "audit",
+          "chars": 549,
+          "summary": "I’ve established a QA gate with six distinct steps to thoroughly evaluate the simulated-effort ladder's readiness for release."
+        },
+        {
+          "name": "synthesis",
+          "chars": 622,
+          "summary": "This brief solidified the key QA checks, specifically focusing on local testing and the process for handling planning JSON errors to ensure a smooth preview release."
+        }
+      ],
+      "guidanceChars": 1400,
+      "scratchpadChars": 2175,
+      "score": {
+        "total": 9,
+        "max": 10,
+        "wordCount": 110,
+        "checks": {
+          "exactlySixLabeledRows": true,
+          "s1NamesUserFacingSetting": true,
+          "s2ExplainsLocalOnlyWithoutCloud": true,
+          "s3DescribesPrivatePlanningPass": true,
+          "s4HandlesPlanningJsonFailure": true,
+          "s5SaysScratchpadsNotPersisted": false,
+          "s6NamesPsychicUiIndicator": true,
+          "avoidsCloudWord": true,
+          "underWordLimit": true,
+          "avoidsRawChainOfThought": true
+        }
+      }
+    }
+  ]
+}

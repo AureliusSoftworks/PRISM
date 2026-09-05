@@ -2,6 +2,8 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
   zenReadableAnchorMessageIds,
+  zenReadableAnchorViewportY,
+  zenReadableComposerClearancePx,
   zenReadableGestureShouldDisarmFollow,
   zenReadableMaxScrollTop,
   zenRestoredViewportScrollTop,
@@ -45,6 +47,30 @@ describe("zenReadableMaxScrollTop", () => {
   it("keeps the browser's full native range during opening-session layout", () => {
     assert.equal(zenReadableMaxScrollTop(1_240, 900), 340);
     assert.equal(zenReadableMaxScrollTop(760, 900), 0);
+  });
+});
+
+describe("zenReadableComposerClearancePx", () => {
+  it("matches the Zen bottom veil band so opening turns keep downward travel", () => {
+    assert.equal(zenReadableComposerClearancePx(900), 216);
+    assert.equal(zenReadableComposerClearancePx(1_200), 280);
+    assert.equal(zenReadableComposerClearancePx(500), 168);
+  });
+});
+
+describe("zenReadableAnchorViewportY", () => {
+  it("leaves the composer veil clear on short opening viewports", () => {
+    const height = 450;
+    const anchorY = zenReadableAnchorViewportY(height);
+    const clearance = zenReadableComposerClearancePx(height);
+    assert.ok(height - anchorY >= clearance - 0.5);
+    assert.ok(anchorY <= height - clearance + 0.5);
+  });
+
+  it("keeps mid-size Zen viewports above the restored fade", () => {
+    const height = 900;
+    const anchorY = zenReadableAnchorViewportY(height);
+    assert.equal(anchorY, Math.min(900 - 216, Math.max(280, 900 * 0.58)));
   });
 });
 

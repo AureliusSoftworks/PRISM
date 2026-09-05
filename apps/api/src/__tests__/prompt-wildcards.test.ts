@@ -6,11 +6,31 @@ import {
   generateScriptedPromptWildcardValue,
   promptWildcardNames,
   resolvePromptBotWildcards,
+  resolvePromptWildcardsScripted,
   resolvePromptWildcardsWithModel,
 } from "../prompt-wildcards.ts";
 import { SCRIPTED_PROMPT_NOUN_PAIRS } from "../prompt-wildcard-seeds.ts";
 
 describe("prompt wildcard resolution", () => {
+  it("resolves every scripted slot locally and leaves custom model slots pending", () => {
+    const result = resolvePromptWildcardsScripted({
+      prompt: "A {NAME} found {MYSTERY_TRAIT} beside {NUM} {OBJECT}.",
+    });
+
+    assert.doesNotMatch(result.prompt, /\{NAME\}|\{NUM\}|\{OBJECT\}/u);
+    assert.match(result.prompt, /\{MYSTERY_TRAIT\}/u);
+    assert.deepEqual(
+      result.replacements.map((replacement) => replacement.key).sort(),
+      ["NAME", "NUM", "OBJECT"],
+    );
+  });
+
+  it("treats generated scripted text as terminal even when it resembles syntax", () => {
+    const result = resolvePromptWildcardsScripted({ prompt: "{BOT}" });
+    assert.equal(result.prompt, "your mom");
+    assert.equal(result.replacements.length, 1);
+  });
+
   it("resolves BOT from the library after send and preserves stable bot ids", () => {
     const result = resolvePromptBotWildcards({
       prompt: "Ask {BOT}, then {BOT}, then {BOT}.",
@@ -42,7 +62,45 @@ describe("prompt wildcard resolution", () => {
     assert.equal(result.replacements[0]?.botId, "receiver");
   });
 
+  it("uses the easter egg when the user's library has no eligible bots", () => {
+    const result = resolvePromptBotWildcards({
+      prompt: "Ask {BOT}, then {BOT}.",
+      candidates: [],
+    });
+    assert.equal(result.prompt, "Ask your mom, then your mom.");
+    assert.deepEqual(
+      result.replacements.map(({ key, value, botId }) => ({ key, value, botId })),
+      [
+        { key: "BOT", value: "your mom", botId: undefined },
+        { key: "BOT", value: "your mom", botId: undefined },
+      ],
+    );
+  });
+
+  it("resolves BOT inside the shared model wildcard pipeline", async () => {
+    let providerCalls = 0;
+    const provider: LlmProvider = {
+      async generateResponse() {
+        providerCalls += 1;
+        throw new Error("provider should not be called for BOT");
+      },
+      async embedText() {
+        return [];
+      },
+    };
+    const result = await resolvePromptWildcardsWithModel({
+      prompt: "Ask {BOT}.",
+      provider,
+      botCandidates: [{ id: "mira", name: "Mira" }],
+      generationOverrides: {},
+    });
+    assert.equal(providerCalls, 0);
+    assert.equal(result.prompt, "Ask [Mira](prism-bot://mira).");
+    assert.equal(result.replacements[0]?.botId, "mira");
+  });
+
   it("scripted built-in wildcard generation avoids used values when possible", () => {
+    assert.equal(generateScriptedPromptWildcardValue("BOT"), "your mom");
     const usedValues = new Set<string>();
     const first = generateScriptedPromptWildcardValue("PERSON", usedValues);
     const second = generateScriptedPromptWildcardValue("PERSON", usedValues);
@@ -51,6 +109,60 @@ describe("prompt wildcard resolution", () => {
     assert.notEqual(first, second);
     const num = Number(generateScriptedPromptWildcardValue("NUM"));
     assert.equal(Number.isInteger(num) && num >= 1 && num <= 10, true);
+  });
+
+  it("resolves TODAY from the local calendar without calling the provider", async () => {
+    let providerCalls = 0;
+    const provider: LlmProvider = {
+      name: "local",
+      async generateResponse() {
+        providerCalls += 1;
+        throw new Error("provider should not be called for TODAY");
+      },
+      async embedText() {
+        return [];
+      },
+    };
+
+    const result = await resolvePromptWildcardsWithModel({
+      prompt: "Write about {TODAY}.",
+      provider,
+      generationOverrides: {},
+    });
+
+    assert.equal(providerCalls, 0);
+    assert.doesNotMatch(result.prompt, /\{TODAY\}/u);
+    assert.match(result.prompt, /\d{4}/u);
+    assert.equal(result.replacements[0]?.key, "TODAY");
+    assert.equal(
+      generateScriptedPromptWildcardValue("TODAY"),
+      result.replacements[0]?.value
+    );
+  });
+
+  it("clears leftover {VAR} without calling the provider", async () => {
+    let providerCalls = 0;
+    const provider: LlmProvider = {
+      name: "local",
+      async generateResponse() {
+        providerCalls += 1;
+        throw new Error("provider should not be called for VAR");
+      },
+      async embedText() {
+        return [];
+      },
+    };
+
+    const result = await resolvePromptWildcardsWithModel({
+      prompt: 'Echo leftover "{VAR}" here.',
+      provider,
+      generationOverrides: {},
+    });
+
+    assert.equal(providerCalls, 0);
+    assert.equal(result.prompt, 'Echo leftover "" here.');
+    assert.equal(result.replacements[0]?.key, "VAR");
+    assert.equal(result.replacements[0]?.value, "");
   });
 
   it("resolves built-in wildcard slots without calling the provider", async () => {
@@ -274,7 +386,7 @@ describe("prompt wildcard resolution", () => {
     );
   });
 
-  it("generates nouns with script values instead of sticky model examples", async () => {
+  it("generates nouns from the scripted pool without consulting a model", async () => {
     let providerCalls = 0;
     const provider: LlmProvider = {
       name: "local",
@@ -296,9 +408,11 @@ describe("prompt wildcard resolution", () => {
     assert.equal(providerCalls, 0);
     assert.match(result.prompt, /^Hide the .+\.$/u);
     assert.equal(result.replacements[0]?.key, "NOUN");
-    for (const sticky of ["lantern", "subway", "rumor", "chessboard", "stinky"]) {
-      assert.doesNotMatch(result.prompt, new RegExp(sticky, "iu"));
-    }
+    assert.ok(
+      SCRIPTED_PROMPT_NOUN_PAIRS.some(
+        (pair) => pair.singular === result.replacements[0]?.value,
+      ),
+    );
   });
 
   it("avoids repeated built-in values within one prompt run when the pool allows it", async () => {

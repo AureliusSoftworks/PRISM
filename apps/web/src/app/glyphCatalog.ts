@@ -66,7 +66,7 @@ export const LUCIDE_BOT_GLYPH_GROUPS: readonly LucideGlyphGroup[] = [
       Accessibility Activity BadgeCheck BadgeHelp BadgeInfo CircleAlert CircleCheck CircleDashed
       CircleDot CircleEllipsis CircleEqual CircleGauge CircleHelp CircleOff CircleSlash CircleUser
       CircleX Clover Crosshair Drama Fingerprint Focus Goal HandHeart HeartHandshake IdCard
-      Landmark LifeBuoy Medal Orbit Paintbrush2 Palette Scan Search Sparkles UserRound UsersRound
+      Landmark LifeBuoy Medal Orbit Paintbrush2 Palette Scan ScanFace Search Sparkles UserRound UsersRound
       Workflow Zap
     `),
   },

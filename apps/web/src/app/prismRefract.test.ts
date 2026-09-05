@@ -1,0 +1,209 @@
+import assert from "node:assert/strict";
+import { describe, it } from "node:test";
+import {
+  createBotDirectedSetupRefractTarget,
+  initialPrismRefractProseDirection,
+  PRISM_REFRACT_DEFAULT_PROSE_DIRECTION,
+  PrismRefractGenerationTimeoutError,
+  nextPrismRefractChoice,
+  prismRefractModifierClickDecision,
+  prismRefractProvenanceDetail,
+  runPrismRefractGenerationWithTimeout,
+} from "./prismRefract.ts";
+
+describe("Prism Refract helpers", () => {
+  it("names the model and effort in a Refract receipt", () => {
+    assert.equal(
+      prismRefractProvenanceDetail({
+        model: "gpt-5.6-sol",
+        reasoningEffort: "xhigh",
+        turbo: true,
+      }),
+      "Model: gpt-5.6-sol · Effort: Extra High · Turbo.",
+    );
+    assert.equal(
+      prismRefractProvenanceDetail({ model: "llama3.2" }),
+      "Model: llama3.2 · Effort: Default.",
+    );
+    assert.equal(
+      prismRefractProvenanceDetail({
+        model: null,
+        reasoningEffort: "none",
+      }),
+      "Model: None · Effort: None.",
+    );
+  });
+
+  it("offers replaceable creative steering only when prose already exists", () => {
+    assert.equal(
+      initialPrismRefractProseDirection("A draft paragraph."),
+      PRISM_REFRACT_DEFAULT_PROSE_DIRECTION,
+    );
+    assert.equal(initialPrismRefractProseDirection("   "), "");
+  });
+
+  it("carries a captured bot identity through the shared setup target", async () => {
+    const calls: Array<{ botId: string; botName: string; direction: string }> = [];
+    const target = createBotDirectedSetupRefractTarget({
+      id: "signal-anchor-lizzy",
+      label: "Build around Elizabeth Bennet",
+      botId: "lizzy",
+      botName: "Elizabeth Bennet",
+      run: (input) => {
+        calls.push(input);
+      },
+    });
+
+    const signal = new AbortController().signal;
+    await target.run("Center the episode on first impressions.", signal);
+
+    assert.equal(target.kind, "magic");
+    assert.equal(target.purpose, "bot-directed-setup");
+    assert.deepEqual(target.anchor, {
+      botId: "lizzy",
+      botName: "Elizabeth Bennet",
+    });
+    assert.deepEqual(calls, [
+      {
+        botId: "lizzy",
+        botName: "Elizabeth Bennet",
+        direction: "Center the episode on first impressions.",
+        signal,
+      },
+    ]);
+  });
+
+  it("uses every unrejected valid choice before resetting the shuffle bag", () => {
+    const choices = [
+      { value: "", label: "Choose…" },
+      { value: "a", label: "A" },
+      { value: "b", label: "B" },
+      { value: "c", label: "C", disabled: true },
+    ];
+    assert.deepEqual(nextPrismRefractChoice(choices, "a", ["b"], () => 0), {
+      value: "b",
+      label: "B",
+    });
+    assert.deepEqual(nextPrismRefractChoice(choices, "a", [], () => 0), {
+      value: "b",
+      label: "B",
+    });
+  });
+
+  it("never returns placeholders or disabled options", () => {
+    assert.equal(
+      nextPrismRefractChoice(
+        [
+          { value: "", label: "Choose…" },
+          { value: "b", label: "B", disabled: true },
+        ],
+        "a",
+        [],
+      ),
+      null,
+    );
+  });
+
+  it("can keep the sole valid constrained value instead of failing", () => {
+    assert.deepEqual(
+      nextPrismRefractChoice(
+        [
+          { value: "", label: "Choose…" },
+          { value: "only", label: "Only" },
+        ],
+        "only",
+        [],
+        () => 0,
+      ),
+      { value: "only", label: "Only" },
+    );
+  });
+
+  it("uses a repeated same-target click as the explicit cancel control", () => {
+    const active = {
+      activeTargetId: "topic",
+      activeTargetKind: "field" as const,
+      canAccept: true,
+    };
+    assert.equal(
+      prismRefractModifierClickDecision({
+        ...active,
+        clickedTargetId: "topic",
+      }),
+      "cancel",
+    );
+    assert.equal(
+      prismRefractModifierClickDecision({
+        ...active,
+        clickedTargetId: "private-comments",
+      }),
+      "accept-and-begin",
+    );
+  });
+
+  it("never rerolls from modifier-click — the active sheen cancels instead", () => {
+    assert.equal(
+      prismRefractModifierClickDecision({
+        activeTargetId: "topic",
+        activeTargetKind: "field",
+        clickedTargetId: "topic",
+        canAccept: false,
+      }),
+      "cancel",
+    );
+  });
+
+  it("queues a distinct target while the active draft is unsettled", () => {
+    assert.equal(
+      prismRefractModifierClickDecision({
+        activeTargetId: "topic",
+        activeTargetKind: "field",
+        clickedTargetId: "private-comments",
+        canAccept: false,
+      }),
+      "queue",
+    );
+    assert.equal(
+      prismRefractModifierClickDecision({
+        activeTargetId: null,
+        activeTargetKind: null,
+        clickedTargetId: "topic",
+        canAccept: false,
+      }),
+      "begin",
+    );
+  });
+
+  it("settles stalled generation with a timeout and aborts its work signal", async () => {
+    const observed: { signal: AbortSignal | null } = { signal: null };
+    await assert.rejects(
+      runPrismRefractGenerationWithTimeout({
+        signal: new AbortController().signal,
+        timeoutMs: 5,
+        run: (signal) => {
+          observed.signal = signal;
+          return new Promise<string>(() => undefined);
+        },
+      }),
+      PrismRefractGenerationTimeoutError,
+    );
+    assert.equal(observed.signal?.aborted, true);
+  });
+
+  it("forwards explicit page-lifecycle cancellation to generation", async () => {
+    const parent = new AbortController();
+    const generation = runPrismRefractGenerationWithTimeout({
+      signal: parent.signal,
+      run: (signal) =>
+        new Promise<string>((_resolve, reject) => {
+          signal.addEventListener(
+            "abort",
+            () => reject(signal.reason),
+            { once: true },
+          );
+        }),
+    });
+    parent.abort(new DOMException("Page left.", "AbortError"));
+    await assert.rejects(generation, { name: "AbortError" });
+  });
+});

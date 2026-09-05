@@ -1,4 +1,7 @@
-import { parseBuiltInPromptWildcardReference } from "@localai/shared";
+import {
+  isPassthroughBuiltInPromptWildcardKey,
+  parseBuiltInPromptWildcardReference,
+} from "@localai/shared";
 
 export function wildcardReferenceBadge(reference: string | null | undefined): string | null {
   if (!reference) return null;
@@ -26,6 +29,8 @@ export function rewriteWildcardSlotTokenReference(
   if (!trimmed.startsWith("{") || !trimmed.endsWith("}")) return null;
   const reference = parseBuiltInPromptWildcardReference(trimmed.slice(1, -1));
   if (!reference) return null;
+  // `{VAR}` is one shared capture — no A/B/C letter-link cycling.
+  if (isPassthroughBuiltInPromptWildcardKey(reference.key)) return null;
   const next = nextWildcardReferenceNumber(reference.reference, direction);
   return `{${reference.slot.label}${next ?? ""}}`;
 }

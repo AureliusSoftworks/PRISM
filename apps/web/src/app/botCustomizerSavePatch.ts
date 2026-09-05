@@ -6,6 +6,7 @@ import {
   type BotAudioVoiceProfileV1,
   type BotAvatarDetailsV1,
   type BotPowerV1,
+  type BotFaceCustomSpeechPoses,
 } from "@localai/shared";
 
 export interface BotCustomizerSavePristine {
@@ -27,6 +28,7 @@ export interface BotCustomizerSavePristine {
   topK: number;
   repetitionPenalty: number;
   color: string;
+  accentColor: string | null;
   glyph: string;
   faceEyesFont: string;
   faceEyeCharacter: string | null;
@@ -34,6 +36,7 @@ export interface BotCustomizerSavePristine {
   faceMouthFont: string;
   faceMouthCharacter: string | null;
   faceMouthAnimation: string;
+  faceMouthSpeechPoses: BotFaceCustomSpeechPoses | null;
   faceMouthCoffeePucker: boolean;
   faceFontWeight: number;
   faceEyeScale: number;
@@ -41,15 +44,21 @@ export interface BotCustomizerSavePristine {
   faceEyeOffsetY: number;
   faceEyeRotationDeg: number;
   faceEyeCount: 1 | 2;
+  faceEyeSpacing: number;
   faceMouthScale: number;
   faceMouthOffsetX: number;
   faceMouthOffsetY: number;
   faceMouthRotationDeg: number;
   faceBlinkBar: string;
+  faceBlinkCount: 1 | 2;
   faceBlinkScale: number;
   faceBlinkOffsetX: number;
   faceBlinkOffsetY: number;
+  faceBlinkRotationDeg: number;
   faceThinkingFrames: readonly string[];
+  faceThinkingScale: number;
+  faceThinkingOffsetX: number;
+  faceThinkingOffsetY: number;
   avatarDetails: BotAvatarDetailsV1 | null;
   profilePictureImageId: string | null;
   audioVoiceProfile: BotAudioVoiceProfileV1;
@@ -79,6 +88,7 @@ export interface BotCustomizerSaveCurrent {
   topK: number;
   repetitionPenalty: number;
   color: string;
+  accentColor: string | null;
   glyph: string;
   faceEyesFont: string;
   faceEyeCharacter: string | null;
@@ -86,6 +96,7 @@ export interface BotCustomizerSaveCurrent {
   faceMouthFont: string;
   faceMouthCharacter: string | null;
   faceMouthAnimation: string;
+  faceMouthSpeechPoses: BotFaceCustomSpeechPoses | null;
   faceMouthCoffeePucker: boolean;
   faceFontWeight: number;
   faceEyeScale: number;
@@ -93,15 +104,21 @@ export interface BotCustomizerSaveCurrent {
   faceEyeOffsetY: number;
   faceEyeRotationDeg: number;
   faceEyeCount: 1 | 2;
+  faceEyeSpacing: number;
   faceMouthScale: number;
   faceMouthOffsetX: number;
   faceMouthOffsetY: number;
   faceMouthRotationDeg: number;
   faceBlinkBar: string;
+  faceBlinkCount: 1 | 2;
   faceBlinkScale: number;
   faceBlinkOffsetX: number;
   faceBlinkOffsetY: number;
+  faceBlinkRotationDeg: number;
   faceThinkingFrames: readonly string[];
+  faceThinkingScale: number;
+  faceThinkingOffsetX: number;
+  faceThinkingOffsetY: number;
   avatarDetails: BotAvatarDetailsV1 | null;
   profilePictureImageId: string | null;
   audioVoiceProfile: BotAudioVoiceProfileV1;
@@ -122,6 +139,7 @@ export interface BotCustomizerSavePatch {
   topK?: number;
   repetitionPenalty?: number;
   color?: string;
+  accentColor?: string | null;
   glyph?: string;
   faceEyesFont?: string;
   faceEyeCharacter?: string | null;
@@ -129,6 +147,7 @@ export interface BotCustomizerSavePatch {
   faceMouthFont?: string;
   faceMouthCharacter?: string | null;
   faceMouthAnimation?: string;
+  faceMouthSpeechPoses?: BotFaceCustomSpeechPoses | null;
   faceMouthCoffeePucker?: boolean;
   faceFontWeight?: number;
   faceEyeScale?: number;
@@ -136,15 +155,21 @@ export interface BotCustomizerSavePatch {
   faceEyeOffsetY?: number;
   faceEyeRotationDeg?: number;
   faceEyeCount?: 1 | 2;
+  faceEyeSpacing?: number;
   faceMouthScale?: number;
   faceMouthOffsetX?: number;
   faceMouthOffsetY?: number;
   faceMouthRotationDeg?: number;
   faceBlinkBar?: string;
+  faceBlinkCount?: 1 | 2;
   faceBlinkScale?: number;
   faceBlinkOffsetX?: number;
   faceBlinkOffsetY?: number;
+  faceBlinkRotationDeg?: number;
   faceThinkingFrames?: readonly string[];
+  faceThinkingScale?: number;
+  faceThinkingOffsetX?: number;
+  faceThinkingOffsetY?: number;
   avatarDetails?: BotAvatarDetailsV1 | null;
   profilePictureImageId?: string | null;
   audioVoiceProfileOverride?: BotAudioVoiceProfileV1 | null;
@@ -183,6 +208,7 @@ export function buildBotCustomizerSavePatch(
       topK: current.topK,
       repetitionPenalty: current.repetitionPenalty,
       color: current.color,
+      accentColor: current.accentColor,
       glyph: current.glyph,
       faceEyesFont: current.faceEyesFont,
       faceEyeCharacter: current.faceEyeCharacter,
@@ -190,6 +216,7 @@ export function buildBotCustomizerSavePatch(
       faceMouthFont: current.faceMouthFont,
       faceMouthCharacter: current.faceMouthCharacter,
       faceMouthAnimation: current.faceMouthAnimation,
+      faceMouthSpeechPoses: current.faceMouthSpeechPoses,
       faceMouthCoffeePucker: current.faceMouthCoffeePucker,
       faceFontWeight: current.faceFontWeight,
       faceEyeScale: current.faceEyeScale,
@@ -197,6 +224,7 @@ export function buildBotCustomizerSavePatch(
       faceEyeOffsetY: current.faceEyeOffsetY,
       faceEyeRotationDeg: current.faceEyeRotationDeg,
       faceEyeCount: current.faceEyeCount,
+      faceEyeSpacing: current.faceEyeSpacing,
       faceMouthScale: current.faceMouthScale,
       faceMouthOffsetX: current.faceMouthOffsetX,
       faceMouthOffsetY: current.faceMouthOffsetY,
@@ -205,7 +233,11 @@ export function buildBotCustomizerSavePatch(
       faceBlinkScale: current.faceBlinkScale,
       faceBlinkOffsetX: current.faceBlinkOffsetX,
       faceBlinkOffsetY: current.faceBlinkOffsetY,
+      faceBlinkRotationDeg: current.faceBlinkRotationDeg,
       faceThinkingFrames: current.faceThinkingFrames,
+      faceThinkingScale: current.faceThinkingScale,
+      faceThinkingOffsetX: current.faceThinkingOffsetX,
+      faceThinkingOffsetY: current.faceThinkingOffsetY,
       avatarDetails: current.avatarDetails,
       profilePictureImageId: current.profilePictureImageId,
       audioVoiceProfileOverride: current.audioVoiceProfile,
@@ -255,6 +287,12 @@ export function buildBotCustomizerSavePatch(
   if (normalizeColorForCompare(current.color) !== normalizeColorForCompare(pristine.color)) {
     patch.color = current.color;
   }
+  if (
+    normalizeColorForCompare(current.accentColor) !==
+    normalizeColorForCompare(pristine.accentColor)
+  ) {
+    patch.accentColor = current.accentColor;
+  }
   if (current.glyph !== pristine.glyph) patch.glyph = current.glyph;
   if (serializeBotPowersV1(current.powers ?? []) !== serializeBotPowersV1(pristine.powers ?? [])) {
     patch.powers = current.powers ?? [];
@@ -277,6 +315,12 @@ export function buildBotCustomizerSavePatch(
   if (current.faceMouthAnimation !== pristine.faceMouthAnimation) {
     patch.faceMouthAnimation = current.faceMouthAnimation;
   }
+  if (
+    JSON.stringify(current.faceMouthSpeechPoses) !==
+    JSON.stringify(pristine.faceMouthSpeechPoses)
+  ) {
+    patch.faceMouthSpeechPoses = current.faceMouthSpeechPoses;
+  }
   if (current.faceMouthCoffeePucker !== pristine.faceMouthCoffeePucker) {
     patch.faceMouthCoffeePucker = current.faceMouthCoffeePucker;
   }
@@ -298,6 +342,9 @@ export function buildBotCustomizerSavePatch(
   if (current.faceEyeCount !== pristine.faceEyeCount) {
     patch.faceEyeCount = current.faceEyeCount;
   }
+  if (current.faceEyeSpacing !== pristine.faceEyeSpacing) {
+    patch.faceEyeSpacing = current.faceEyeSpacing;
+  }
   if (current.faceMouthScale !== pristine.faceMouthScale) {
     patch.faceMouthScale = current.faceMouthScale;
   }
@@ -313,6 +360,9 @@ export function buildBotCustomizerSavePatch(
   if (current.faceBlinkBar !== pristine.faceBlinkBar) {
     patch.faceBlinkBar = current.faceBlinkBar;
   }
+  if (current.faceBlinkCount !== pristine.faceBlinkCount) {
+    patch.faceBlinkCount = current.faceBlinkCount;
+  }
   if (current.faceBlinkScale !== pristine.faceBlinkScale) {
     patch.faceBlinkScale = current.faceBlinkScale;
   }
@@ -322,8 +372,20 @@ export function buildBotCustomizerSavePatch(
   if (current.faceBlinkOffsetY !== pristine.faceBlinkOffsetY) {
     patch.faceBlinkOffsetY = current.faceBlinkOffsetY;
   }
+  if (current.faceBlinkRotationDeg !== pristine.faceBlinkRotationDeg) {
+    patch.faceBlinkRotationDeg = current.faceBlinkRotationDeg;
+  }
   if (!thinkingFramesEqual(current.faceThinkingFrames, pristine.faceThinkingFrames)) {
     patch.faceThinkingFrames = current.faceThinkingFrames;
+  }
+  if (current.faceThinkingScale !== pristine.faceThinkingScale) {
+    patch.faceThinkingScale = current.faceThinkingScale;
+  }
+  if (current.faceThinkingOffsetX !== pristine.faceThinkingOffsetX) {
+    patch.faceThinkingOffsetX = current.faceThinkingOffsetX;
+  }
+  if (current.faceThinkingOffsetY !== pristine.faceThinkingOffsetY) {
+    patch.faceThinkingOffsetY = current.faceThinkingOffsetY;
   }
   if (avatarDetailsKey(current.avatarDetails) !== avatarDetailsKey(pristine.avatarDetails)) {
     patch.avatarDetails = current.avatarDetails;

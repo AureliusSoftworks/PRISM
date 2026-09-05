@@ -73,6 +73,31 @@ describe("configuration normalization", () => {
     );
   });
 
+  it("never permits a public or credential-bearing Ollama host", () => {
+    for (const unsafeHost of [
+      "https://ollama.public.example:11434",
+      "https://account-canary:secret@192.168.1.20:11434",
+      "ftp://127.0.0.1:11434",
+    ]) {
+      withEnv({ OLLAMA_HOST: unsafeHost }, () => {
+        assert.equal(getAppConfig().ollamaHost, "http://localhost:11434");
+      });
+    }
+  });
+
+  it("allows Ollama only on loopback or a private LAN", () => {
+    for (const privateHost of [
+      "http://127.0.0.1:11434",
+      "http://192.168.1.20:11434",
+      "https://ollama.local:11434",
+      "http://[::1]:11434",
+    ]) {
+      withEnv({ OLLAMA_HOST: privateHost }, () => {
+        assert.equal(getAppConfig().ollamaHost, privateHost);
+      });
+    }
+  });
+
   it("prefers the canonical Brave Search environment key", () => {
     withEnv(
       {
@@ -92,5 +117,11 @@ describe("configuration normalization", () => {
         assert.equal(getAppConfig().braveSearchApiKey, "legacy-value");
       }
     );
+  });
+
+  it("reads the optional server Ollama Cloud bearer credential", () => {
+    withEnv({ OLLAMA_API_KEY: "ollama-server-test-key" }, () => {
+      assert.equal(getAppConfig().ollamaApiKey, "ollama-server-test-key");
+    });
   });
 });

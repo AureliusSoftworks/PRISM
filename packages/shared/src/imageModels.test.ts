@@ -79,6 +79,17 @@ describe("imageModels", () => {
     assert.equal(r.quality, "high");
   });
 
+  it("allows the low-cost 16:9 room canvas only for GPT Image 2", () => {
+    assert.deepEqual(
+      normalizeOpenAiImageGenerationParams("gpt-image-2", "1280x720", "low"),
+      { model: "gpt-image-2", size: "1280x720", quality: "low" },
+    );
+    assert.equal(
+      normalizeOpenAiImageGenerationParams("gpt-image-1.5", "1280x720", "low").size,
+      "1536x1024",
+    );
+  });
+
   it("folds legacy dall-e portrait size onto GPT Image portrait size", () => {
     const r = normalizeOpenAiImageGenerationParams(
       "gpt-image-1.5",

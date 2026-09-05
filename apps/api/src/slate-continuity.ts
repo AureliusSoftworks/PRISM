@@ -3,6 +3,7 @@ import type { DatabaseSync } from "node:sqlite";
 import {
   CONTINUITY_FRAMEWORK,
   currentContinuityProducerVersions,
+  splitSlateImportedManuscript,
   transformSlateLockedRangesForTextEdit,
   type SlateBookSummary,
   type SlateContinuityClaim,
@@ -27,6 +28,15 @@ import {
   type SlateStructureItem,
 } from "@localai/shared";
 import { randomId } from "./security.ts";
+import {
+  createSlateSectionDocumentV1,
+  ensureSlateSectionDocument,
+  normalizeSlateSectionDocument,
+  persistSlateSectionDocumentWithinTransaction,
+  slateSectionDocumentSnapshot,
+  type SlateSectionDocumentSnapshot,
+  type SlateSectionDocumentV1,
+} from "./slate-section-documents.ts";
 
 const SERIES_TITLE_MAX = 180;
 const SERIES_DESCRIPTION_MAX = 8_000;
@@ -41,6 +51,8 @@ interface SeriesRow {
   user_id: string;
   title: string;
   description: string;
+  continuity_active_generation: number;
+  continuity_previous_generation: number | null;
   created_at: string;
   updated_at: string;
   book_count?: number;
@@ -263,7 +275,69 @@ function storedLockedRanges(row: SectionRow): SlateLockedRange[] {
   }
 }
 
-function sectionFromRow(row: SectionRow): SlateSectionDetail {
+function importedManuscriptSectionSeeds(project: ProjectRow): Array<{
+  title: string;
+  prose: string;
+  lockedRangesJson: string;
+}> {
+  const unsplit = [
+    {
+      title: "Imported manuscript",
+      prose: project.manuscript,
+      lockedRangesJson: project.locked_ranges_json,
+    },
+  ];
+  const segments = splitSlateImportedManuscript(project.manuscript);
+  if (segments.length < 2) return unsplit;
+
+  let lockedRanges: SlateLockedRange[];
+  try {
+    lockedRanges = normalizeLockedRanges(
+      parseJson(project.locked_ranges_json, []),
+      project.manuscript.length,
+    );
+  } catch {
+    return unsplit;
+  }
+  const owners = lockedRanges.map((range) =>
+    segments.findIndex(
+      (segment) =>
+        range.start >= segment.start && range.end <= segment.end,
+    ),
+  );
+  if (owners.some((owner) => owner < 0)) return unsplit;
+
+  return segments.map((segment, segmentIndex) => ({
+    title: segment.title,
+    prose: segment.prose,
+    lockedRangesJson: JSON.stringify(
+      lockedRanges
+        .filter((_, rangeIndex) => owners[rangeIndex] === segmentIndex)
+        .map((range) => ({
+          ...range,
+          start: range.start - segment.start,
+          end: range.end - segment.start,
+        })),
+    ),
+  }));
+}
+
+type SlateSectionDetailWithDocument = SlateSectionDetail & {
+  document: SlateSectionDocumentV1;
+  documentHash: string;
+  proseHash: string;
+};
+
+function sectionFromRow(
+  row: SectionRow,
+  documentSnapshot?: SlateSectionDocumentSnapshot,
+): SlateSectionDetailWithDocument {
+  const snapshot =
+    documentSnapshot ??
+    slateSectionDocumentSnapshot(
+      createSlateSectionDocumentV1(row.id, row.prose),
+      row.revision,
+    );
   return {
     id: row.id,
     projectId: row.project_id,
@@ -282,13 +356,21 @@ function sectionFromRow(row: SectionRow): SlateSectionDetail {
     proseLength: row.prose.length,
     contentHash: row.content_hash,
     prose: row.prose,
+    document: snapshot.document,
+    documentHash: snapshot.documentHash,
+    proseHash: snapshot.proseHash,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
 }
 
 function summaryFromSection(row: SectionRow): SlateSectionSummary {
-  const { prose: _prose, lockedRanges: _lockedRanges, ...summary } =
+  const {
+    prose: _prose,
+    lockedRanges: _lockedRanges,
+    document: _document,
+    ...summary
+  } =
     sectionFromRow(row);
   return summary;
 }
@@ -511,21 +593,34 @@ function insertSourceWithinTransaction(
     sourceRevision: number;
     content: string;
     authority: "human" | "ai" | "procedural";
-    provider?: "local" | "openai" | "anthropic" | null;
+    provider?: "local" | "ollama_cloud" | "openai" | "anthropic" | null;
     model?: string | null;
   },
 ): SourceRow {
-  seriesRow(db, input.userId, input.seriesId);
-  if (input.projectId) projectRow(db, input.userId, input.projectId);
+  const series = seriesRow(db, input.userId, input.seriesId);
+  const project = input.projectId
+    ? projectRow(db, input.userId, input.projectId)
+    : null;
+  const seriesGeneration = Number(series.continuity_active_generation ?? 0);
+  const projectGeneration = Number(project?.continuity_active_generation ?? 0);
+  const generation =
+    Number.isInteger(seriesGeneration) && seriesGeneration > 0
+      ? seriesGeneration
+      : Number.isInteger(projectGeneration) && projectGeneration > 0
+        ? projectGeneration
+        : 0;
   const previous = input.sectionId
     ? (db
         .prepare(
           `SELECT id FROM slate_continuity_sources
             WHERE user_id = ? AND section_id = ?
+              AND generation = ?
             ORDER BY source_revision DESC, created_at DESC
             LIMIT 1`,
         )
-        .get(input.userId, input.sectionId) as { id: string } | undefined)
+        .get(input.userId, input.sectionId, generation) as
+        | { id: string }
+        | undefined)
     : undefined;
   const id = randomId();
   const createdAt = new Date().toISOString();
@@ -534,8 +629,8 @@ function insertSourceWithinTransaction(
     `INSERT INTO slate_continuity_sources
       (id, user_id, series_id, project_id, section_id, scope_kind, kind,
        source_revision, content, content_hash, authority, provider, model,
-       producer_versions_json, supersedes_source_id, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       producer_versions_json, generation, supersedes_source_id, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     id,
     input.userId,
@@ -551,12 +646,13 @@ function insertSourceWithinTransaction(
     input.provider ?? null,
     input.model ?? null,
     JSON.stringify(producerVersions),
+    generation,
     previous?.id ?? null,
     createdAt,
   );
   return db
-    .prepare("SELECT * FROM slate_continuity_sources WHERE id = ?")
-    .get(id) as unknown as SourceRow;
+    .prepare("SELECT * FROM slate_continuity_sources WHERE user_id = ? AND id = ?")
+    .get(input.userId, id) as unknown as SourceRow;
 }
 
 function sourceFromRow(row: SourceRow): SlateContinuitySource {
@@ -733,46 +829,53 @@ export function ensureSlateProjectSections(
       );
 
       if (project.manuscript.length > 0) {
-        const sectionId = randomId();
-        db.prepare(
+        const importedSections = importedManuscriptSectionSeeds(project);
+        const insertSection = db.prepare(
           `INSERT INTO slate_sections
             (id, project_id, series_id, user_id, parent_section_id,
              structure_item_id, kind, ordinal, title, summary, direction, prose,
              locked_ranges_json, locked, status, revision, content_hash,
              created_at, updated_at)
-           VALUES (?, ?, ?, ?, NULL, NULL, 'imported', 0,
-                   'Imported manuscript', '', '', ?, ?, 0, 'drafted', 0, ?, ?, ?)`,
-        ).run(
-          sectionId,
-          projectId,
-          project.series_id,
-          userId,
-          project.manuscript,
-          project.locked_ranges_json,
-          originalHash,
-          now,
-          now,
+           VALUES (?, ?, ?, ?, NULL, NULL, 'imported', ?,
+                   ?, '', '', ?, ?, 0, 'drafted', 0, ?, ?, ?)`,
         );
-        const source = insertSourceWithinTransaction(db, {
-          userId,
-          seriesId: project.series_id,
-          projectId,
-          sectionId,
-          scopeKind: "section",
-          kind: "import",
-          sourceRevision: 0,
-          content: project.manuscript,
-          authority: "human",
-        });
-        queueContinuityExtraction(db, {
-          userId,
-          seriesId: project.series_id,
-          projectId,
-          sectionId,
-          sourceId: source.id,
-          sourceRevision: 0,
-          contentHash: originalHash,
-          now,
+        importedSections.forEach((section, ordinal) => {
+          const sectionId = randomId();
+          const contentHash = sha256(section.prose);
+          insertSection.run(
+            sectionId,
+            projectId,
+            project.series_id,
+            userId,
+            ordinal,
+            section.title,
+            section.prose,
+            section.lockedRangesJson,
+            contentHash,
+            now,
+            now,
+          );
+          const source = insertSourceWithinTransaction(db, {
+            userId,
+            seriesId: project.series_id,
+            projectId,
+            sectionId,
+            scopeKind: "section",
+            kind: "import",
+            sourceRevision: 0,
+            content: section.prose,
+            authority: "human",
+          });
+          queueContinuityExtraction(db, {
+            userId,
+            seriesId: project.series_id,
+            projectId,
+            sectionId,
+            sourceId: source.id,
+            sourceRevision: 0,
+            contentHash,
+            now,
+          });
         });
       } else {
         const structure = structureItems(project);
@@ -868,7 +971,7 @@ export function getSlateProjectSection(
   userId: string,
   projectId: string,
   sectionId: string,
-): SlateSectionDetail {
+): SlateSectionDetailWithDocument {
   ensureSlateProjectSections(db, userId, projectId);
   const row = db
     .prepare(
@@ -877,7 +980,10 @@ export function getSlateProjectSection(
     )
     .get(sectionId, projectId, userId) as SectionRow | undefined;
   if (!row) throw new Error("Slate section not found.");
-  return sectionFromRow(row);
+  return sectionFromRow(
+    row,
+    ensureSlateSectionDocument(db, { userId, projectId, sectionId }),
+  );
 }
 
 function legacyProjection(db: DatabaseSync, userId: string, projectId: string): string {
@@ -892,14 +998,22 @@ function legacyProjection(db: DatabaseSync, userId: string, projectId: string): 
       title: string;
       prose: string;
     }>;
-  return rows
-    .filter((row) => row.prose.trim().length > 0)
-    .map((row) =>
+  const projected = rows.filter((row) => row.prose.trim().length > 0);
+  let manuscript = "";
+  projected.forEach((row, index) => {
+    const previous = projected[index - 1];
+    if (
+      previous &&
+      !(previous.kind === "imported" && row.kind === "imported")
+    ) {
+      manuscript += "\n\n\n";
+    }
+    manuscript +=
       row.kind === "imported"
         ? row.prose
-        : `${row.title}\n\n${row.prose}`,
-    )
-    .join("\n\n\n");
+        : `${row.title}\n\n${row.prose}`;
+  });
+  return manuscript;
 }
 
 export interface SlateSectionProjectionSpan {
@@ -928,9 +1042,16 @@ export function slateSectionProjectionSpans(
     .all(projectId, userId) as unknown as SectionRow[];
   const spans: SlateSectionProjectionSpan[] = [];
   let cursor = 0;
+  let previousKind: SlateSectionKind | null = null;
   for (const row of rows) {
     if (!row.prose.trim()) continue;
-    if (spans.length > 0) cursor += 3;
+    const currentKind = sectionKind(row.kind);
+    if (
+      spans.length > 0 &&
+      !(previousKind === "imported" && currentKind === "imported")
+    ) {
+      cursor += 3;
+    }
     const representationStart = cursor;
     const titlePrefixLength = row.kind === "imported" ? 0 : row.title.length + 2;
     const bodyStart = representationStart + titlePrefixLength;
@@ -939,7 +1060,7 @@ export function slateSectionProjectionSpans(
     spans.push({
       sectionId: row.id,
       structureItemId: row.structure_item_id,
-      kind: sectionKind(row.kind),
+      kind: currentKind,
       title: row.title,
       representationStart,
       bodyStart,
@@ -947,6 +1068,7 @@ export function slateSectionProjectionSpans(
       representationEnd,
     });
     cursor = representationEnd;
+    previousKind = currentKind;
   }
   return spans;
 }
@@ -1062,11 +1184,17 @@ function insertSectionVersion(
   reason: string,
   now: string,
 ): void {
+  const document = ensureSlateSectionDocument(db, {
+    userId: row.user_id,
+    projectId: row.project_id,
+    sectionId: row.id,
+  });
   db.prepare(
     `INSERT OR IGNORE INTO slate_section_versions
       (id, project_id, section_id, user_id, revision, reason, title, summary,
-       direction, prose, locked, status, content_hash, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       direction, prose, locked, status, content_hash, document_json,
+       document_hash, prose_hash, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     randomId(),
     row.project_id,
@@ -1081,6 +1209,9 @@ function insertSectionVersion(
     row.locked,
     row.status,
     row.content_hash,
+    JSON.stringify(document.document),
+    document.documentHash,
+    document.proseHash,
     now,
   );
 }
@@ -1330,16 +1461,19 @@ export function replaceSlateSectionWithAiProse(
     prose: string;
     status: SlateSectionStatus;
     sourceKind: "ai_draft" | "accepted_revision";
-    provider: "local" | "openai" | "anthropic";
+    provider: "local" | "ollama_cloud" | "openai" | "anthropic";
     model: string;
     expectedSectionId: string;
     expectedRevision: number;
     expectedContentHash: string;
     expectedStructureJson: string;
+    /** The caller already owns an IMMEDIATE transaction. */
+    transactionOwner?: boolean;
   },
 ): SlateSectionDetail {
   const prose = exactText(input.prose, "Section prose", SECTION_PROSE_MAX);
-  db.exec("BEGIN IMMEDIATE TRANSACTION");
+  const ownsTransaction = input.transactionOwner !== false;
+  if (ownsTransaction) db.exec("BEGIN IMMEDIATE TRANSACTION");
   try {
     const current = db
       .prepare(
@@ -1437,6 +1571,14 @@ export function replaceSlateSectionWithAiProse(
         "changed",
       );
     }
+    const savedDocument = persistSlateSectionDocumentWithinTransaction(db, {
+      userId,
+      projectId,
+      sectionId: current.id,
+      sectionRevision: revision,
+      document: createSlateSectionDocumentV1(current.id, prose),
+      now,
+    });
     const source = insertSourceWithinTransaction(db, {
       userId,
       seriesId: current.series_id,
@@ -1507,10 +1649,10 @@ export function replaceSlateSectionWithAiProse(
     const saved = db
       .prepare("SELECT * FROM slate_sections WHERE id = ? AND user_id = ?")
       .get(current.id, userId) as unknown as SectionRow;
-    db.exec("COMMIT");
-    return sectionFromRow(saved);
+    if (ownsTransaction) db.exec("COMMIT");
+    return sectionFromRow(saved, savedDocument);
   } catch (error) {
-    db.exec("ROLLBACK");
+    if (ownsTransaction) db.exec("ROLLBACK");
     throw error;
   }
 }
@@ -1530,7 +1672,7 @@ export function applyAcceptedSlateRevisionWithinTransaction(
     selectionEnd: number | null;
     originalText: string;
     proposedText: string;
-    provider: "local" | "openai" | "anthropic";
+    provider: "local" | "ollama_cloud" | "openai" | "anthropic";
     model: string;
     reason: string;
     now: string;
@@ -1614,6 +1756,11 @@ export function applyAcceptedSlateRevisionWithinTransaction(
         : input.proposedText;
   }
   exactText(prose, "Section prose", SECTION_PROSE_MAX);
+  const previousDocument = ensureSlateSectionDocument(db, {
+    userId: input.userId,
+    projectId: input.projectId,
+    sectionId: current.id,
+  });
   insertSectionVersion(db, current, input.reason, input.now);
   const revision = current.revision + 1;
   const contentHash = sha256(prose);
@@ -1632,6 +1779,18 @@ export function applyAcceptedSlateRevisionWithinTransaction(
     input.projectId,
     input.userId,
   );
+  persistSlateSectionDocumentWithinTransaction(db, {
+    userId: input.userId,
+    projectId: input.projectId,
+    sectionId: current.id,
+    sectionRevision: revision,
+    document: createSlateSectionDocumentV1(
+      current.id,
+      prose,
+      previousDocument.document,
+    ),
+    now: input.now,
+  });
   const source = insertSourceWithinTransaction(db, {
     userId: input.userId,
     seriesId: current.series_id,
@@ -1673,9 +1832,32 @@ export function saveSlateProjectSection(
     throw new Error("Section expected revision is invalid.");
   }
   const mutationId = text(rawInput.mutationId, "Section mutation id", 160, true);
-  const prose = exactText(rawInput.prose, "Section prose", SECTION_PROSE_MAX);
-
   ensureSlateProjectSections(db, userId, projectId);
+  const currentDocument = ensureSlateSectionDocument(db, {
+    userId,
+    projectId,
+    sectionId,
+  });
+  const rawRecord = rawInput as unknown as Record<string, unknown>;
+  const requestedDocument = Object.hasOwn(rawRecord, "document")
+    ? normalizeSlateSectionDocument(rawRecord.document)
+    : null;
+  const prose = requestedDocument
+    ? slateSectionDocumentSnapshot(requestedDocument, expectedRevision + 1).prose
+    : exactText(rawInput.prose, "Section prose", SECTION_PROSE_MAX);
+  if (
+    requestedDocument &&
+    Object.hasOwn(rawRecord, "prose") &&
+    rawRecord.prose !== prose
+  ) {
+    throw new Error(
+      "Section prose must match the deterministic rich-document projection.",
+    );
+  }
+  const nextDocument =
+    requestedDocument ??
+    createSlateSectionDocumentV1(sectionId, prose, currentDocument.document);
+
   db.exec("BEGIN IMMEDIATE TRANSACTION");
   try {
     const current = db
@@ -1687,7 +1869,7 @@ export function saveSlateProjectSection(
     if (!current) throw new Error("Slate section not found.");
     if (current.last_mutation_id === mutationId) {
       db.exec("COMMIT");
-      return sectionFromRow(current);
+      return sectionFromRow(current, currentDocument);
     }
     if (current.revision !== expectedRevision) {
       throw new SlateSectionRevisionConflictError(
@@ -1779,6 +1961,14 @@ export function saveSlateProjectSection(
         latest.content_hash,
       );
     }
+    const savedDocument = persistSlateSectionDocumentWithinTransaction(db, {
+      userId,
+      projectId,
+      sectionId,
+      sectionRevision: nextRevision,
+      document: nextDocument,
+      now,
+    });
 
     if (nextHash !== current.content_hash) {
       const source = insertSourceWithinTransaction(db, {
@@ -1815,7 +2005,7 @@ export function saveSlateProjectSection(
       .prepare("SELECT * FROM slate_sections WHERE id = ? AND user_id = ?")
       .get(sectionId, userId) as unknown as SectionRow;
     db.exec("COMMIT");
-    return sectionFromRow(saved);
+    return sectionFromRow(saved, savedDocument);
   } catch (error) {
     db.exec("ROLLBACK");
     throw error;
@@ -1856,7 +2046,7 @@ export function getSlateManuscriptPage(
     .get(projectId, userId) as { total: number };
   return {
     ok: true,
-    sections: pageRows.map(sectionFromRow),
+    sections: pageRows.map((row) => sectionFromRow(row)),
     nextCursor: hasMore ? String(pageRows.at(-1)!.ordinal) : null,
     totalProseLength: Number(total.total ?? 0),
   };
@@ -1877,9 +2067,14 @@ export function getSlateContinuityStatus(
   const concerns = db
     .prepare(
       `SELECT COUNT(*) AS count FROM slate_continuity_concerns
-        WHERE project_id = ? AND user_id = ? AND status = 'open'`,
+        WHERE project_id = ? AND user_id = ? AND status = 'open'
+          AND generation = ?`,
     )
-    .get(projectId, userId) as { count: number };
+    .get(
+      projectId,
+      userId,
+      Number(project.continuity_active_generation ?? 0),
+    ) as { count: number };
   const upgradeStatus =
     project.continuity_upgrade_status === "building" ||
     project.continuity_upgrade_status === "review" ||
@@ -2030,8 +2225,8 @@ export function createSlateContinuityEntity(
       );
     }
     const row = db
-      .prepare("SELECT * FROM slate_continuity_entities WHERE id = ?")
-      .get(id) as unknown as EntityRow;
+      .prepare("SELECT * FROM slate_continuity_entities WHERE user_id = ? AND id = ?")
+      .get(userId, id) as unknown as EntityRow;
     db.exec("COMMIT");
     return entityFromRow(db, row);
   } catch (error) {
@@ -2158,8 +2353,8 @@ export function createSlateContinuityClaim(
   return claimFromRow(
     db,
     db
-      .prepare("SELECT * FROM slate_continuity_claims WHERE id = ?")
-      .get(id) as unknown as ClaimRow,
+      .prepare("SELECT * FROM slate_continuity_claims WHERE user_id = ? AND id = ?")
+      .get(userId, id) as unknown as ClaimRow,
   );
 }
 

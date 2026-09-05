@@ -1,130 +1,138 @@
-# Prism
+# PRISM
 
 <p align="center">
-  <img alt="PRISM refraction emblem" width="112" height="112" src="apps/web/public/refraction-emblem.svg" />
+  <img alt="PRISM refraction emblem" width="104" height="104" src="apps/web/public/refraction-emblem.svg" />
+</p>
+
+<p align="center">
+  <img alt="PRISM" width="420" src="apps/web/public/wordmark.svg" />
 </p>
 
 <p align="center">
   <strong>One light. Many colors.</strong><br />
-  A private, local-first desktop world for conversations, characters, stories, and creative work with AI.
+  A private, local-first desktop world where AI personas become companions,
+  collaborators, performers, and characters.
 </p>
 
 <p align="center">
-  <a href="#enter-prism">Enter Prism</a> ·
-  <a href="#the-spectrum">Experiences</a> ·
-  <a href="#privacy-you-can-see">Privacy</a> ·
-  <a href="#quick-start">Quick Start</a> ·
-  <a href="docs/brand-ethos.md">Ethos</a>
+  <a href="#what-makes-prism-different">Why PRISM</a> ·
+  <a href="#give-a-persona-a-power">Powers</a> ·
+  <a href="#memory-that-belongs-to-you">Memories</a> ·
+  <a href="#experiences-not-tabs">Experiences</a> ·
+  <a href="#enter-prism">Quick Start</a>
 </p>
 
-![Four AI personas in a live PRISM Coffee replay](docs/images/readme/prism-coffee-conversation.png)
+![A faithful PRISM Coffee replay with four original AI personas and six-message Table Talk](docs/images/readme/prism-coffee-live.jpg)
 
-PRISM is not one more chat box. It is a place where AI personas can become
-companions, guests, collaborators, performers, and characters—while the person
-remains the creative source.
+*A faithful Coffee replay: four original personas, a shared topic, table
+reactions, readable follow-up, and Nonsense Nora's Mumbling Power changing what
+the room hears.*
 
-Bring local models through Ollama. Invite online models only when they earn
-their place. Shape distinctive bots in Avatar Studio, meet them one-to-one,
-seat them around a Coffee table, produce their Signal show, or carry their
-voices into Story and Slate.
+PRISM is what happens when AI characters stop living in dropdowns. Give someone
+a face, a voice, a point of view, a Power, and a memory. Then meet them in
+experiences built for companionship, conversation, performance, argument, and
+creative work—not just question and answer.
 
-## Enter Prism
+You remain the creative source. PRISM is the instrument that reveals the
+spectrum.
 
-PRISM treats utility and wonder as the same product problem.
+## What makes PRISM different
 
-- **Personas with presence.** Bots have authored identities, expressive CRT
-  faces, voices, Powers, memories, and portable profiles.
-- **Experiences, not tabs.** Chat, Coffee, Signal, Story, and Slate each have
-  their own interaction model, rhythm, and creative purpose.
-- **Local is a promise.** A LOCAL turn stays inside the user's network. Online
-  providers are explicit, visible choices.
-- **The person stays the author.** PRISM can challenge, combine, perform, and
-  illuminate; it does not claim the original light.
+- **Characters with presence.** Personas carry an authored identity, expressive
+  CRT face, voice, motion, details, memories, and portable profile.
+- **Powers with consequences.** A gift, curse, social rule, or impossible
+  condition can visibly change how a persona speaks, appears, reacts, and moves
+  through a room.
+- **Memory with handles.** Short-term moments, long-term anchors, relationships,
+  and inferred opinions stay visible and under your control.
+- **Experiences with a point of view.** Chat, Zen, Coffee, Signal, Debate, and
+  Slate each have their own rhythm and reason to exist.
+- **Privacy with a visible boundary.** LOCAL and ONLINE are explicit choices;
+  Incognito is a real no-memory lane.
 
-## The Spectrum
+## Give a persona a Power
 
-| Experience | Status | What it is |
+Avatar Studio is where a bot becomes someone. Start from a blank shell or a
+curated original, then shape identity, face, glyph, voice, motion, authored
+details, and up to three Powers in one live preview.
+
+![Nonsense Nora's prompt-built Gibberish Guarantee Power expanded in PRISM Avatar Studio](docs/images/readme/prism-avatar-studio-powers.jpg)
+
+Describe a gift, curse, supernatural ability, social rule, or persistent
+condition in ordinary language. PRISM turns supported effects into portable
+rules with visible consequences across Chat, Zen, Coffee, Signal, and Debate.
+A new last name each session is one of those built-in rules: the given name
+stays, and the surname changes with the session.
+Wilder ideas remain explicit character behavior instead of pretending to be
+hard-coded.
+
+Here, Nora's **Gibberish Guarantee** turns one ordinary-language premise into a
+named, enabled character rule. In the Coffee replay above, her built-in
+**Mumbling** Power enforces a deterministic version of the same idea: everyone
+hears normal-volume gibberish while the intended meaning stays private.
+
+## Memory that belongs to you
+
+PRISM does not hide continuity behind a vague “personalized” label. Short-term
+moments float. Long-term anchors remain explicit. Relationship state and
+inferred opinions show their confidence. You can inspect or remove what PRISM
+has learned, move long-term anchors back to short-term, and choose the confidence
+threshold that promotes direct memories.
+
+![PRISM's shared Memories view with prior context, inferred opinions, and long-term anchors](docs/images/readme/prism-memories.jpg)
+
+Memories can belong to the shared PRISM relationship or to an individual
+persona. Incognito conversations read and write none of them.
+
+## Experiences, not tabs
+
+The same persona can move between intimate conversation, a reactive group, a
+studio, a debate floor, and a manuscript without being flattened into a generic
+assistant.
+
+| Experience | Stage | What it feels like |
 | --- | --- | --- |
-| **Chat v1.12** | Active | The main companion workspace for persona conversations, memory, files, images, tools, and private threads. |
-| **Zen v1.11** | Active | The calmer one-to-one relationship layer now folding into PRISM's default Chat experience. |
-| **Coffee v2.5** | Active | A living group conversation for 2–5 reactive bots, with pacing, cups, voice, replay, and social memory. |
-| **Signal v1.11** | Active | A production studio for bot-hosted interview shows, live direction, cameras, atmosphere, archives, and audience response. |
-| **Story v0.9** | Preview | Generated visual-novel episodes with bot casts, choices, maps, inventory, and transcripts. |
-| **Slate v0.7** | Preview | A quiet prose-fiction desk where the AI writes and the writer directs. |
+| **Chat** | Active | A persistent companion workspace for conversation, tools, files, images, and private threads. |
+| **Zen** | Active | A calmer one-to-one space for continuity, atmosphere, and presence. Prompt Center prompts, commands, and wildcards run only in this immersive composer. |
+| **Coffee** | Active | Seat 2–5 reactive personas at a recurring table. Join them or serve from the sidelines while they speak, sip, interrupt, remember, and react. |
+| **Signal** | Active | Produce a bot-hosted show with a host, guest, visual identity, live direction (including exact on-air quotes), archives, and faithful saved replay. |
+| **Debate** | Preview | Stage structured arguments with frozen sources, explicit advocacy consent, room reactions, judging, and durable verdicts. Spectator shows a live For/Against favor bar from the heard record. Returning title cards can start from a prepared turn. Wield Prism onto a Studio rail link to refresh that section. |
+| **Slate** | Preview | Write in a manuscript-first desk with focused editing, durable AI proposals, Continuity, and a curated Story Bible. |
 
-Applet versions track the experience people touch, independently from the
-desktop release version. See the full registry and roadmap in
-[`docs/applets.md`](docs/applets.md).
+Applet versions evolve independently from the desktop release. The current
+registry and roadmap live in [`docs/applets.md`](docs/applets.md).
 
-## Zen
-
-Zen lets a conversation breathe. Atmosphere can turn the current exchange into
-a generated visual room while the dialogue, persona presence, and controls stay
-quietly in reach.
-
-![A PRISM Zen conversation over a rainy city Atmosphere wallpaper](docs/images/readme/prism-zen-atmosphere-dark.png)
-
-## Coffee
-
-Create a recurring group, tune the pace, invite the cast, and let the table
-develop its own chemistry.
-
-![The Midnight Table Coffee Group setup](docs/images/readme/prism-coffee-group.jpg)
-
-Once the session begins, bots arrive, react, speak, sip, interrupt, remember,
-and leave. The player can join the table, refill a cup, shush the room, or let
-the conversation find its own shape.
-
-## Signal
-
-Give a bot a show—not merely a prompt. The host owns the identity, the producer
-books the guest and angle, and PRISM runs the studio.
-
-![The AFTERLIGHT Signal show dashboard](docs/images/readme/prism-signal-show.jpg)
-
-`Complete this show` fills only the missing identity pieces. Text, logo, linked
-Dark-to-Light studio pair, and audio hand off through one visible, resumable
-production flow while finished assets land on the show.
-
-![Signal generating the logo and Dark-to-Light studio assets for The Echo of Ideas](docs/images/readme/prism-signal-asset-generation.png)
-
-Take it live with cameras, synchronized presence, private host direction,
-episode archives, replay, and audience-facing truth.
-
-![Mara Venn and Vesper Quinn live in the AFTERLIGHT Signal studio](docs/images/readme/prism-signal-studio.png)
-
-## Personas
-
-Avatar Studio is where a bot becomes someone: identity, face, glyph, voice,
-tone, motion, authored details, and supernatural or social Powers all meet in
-one live preview.
-
-| Light | Dark |
-| --- | --- |
-| ![PRISM Avatar Studio in Light mode](docs/images/readme/prism-avatar-studio-light.png) | ![PRISM Avatar Studio in Dark mode](docs/images/readme/prism-avatar-studio-dark.png) |
-
-The same persona can move through Chat, Coffee, Signal, and Story while each
-experience enforces its own boundaries.
-
-## Privacy You Can See
+## Your machine. Your models. Your memories.
 
 The LOCAL / ONLINE choice is a boundary, not a suggestion.
 
-- **LOCAL** routes generation, auxiliary work, and embeddings to configured
-  local-network services. Public image generation is refused in LOCAL mode.
-- **ONLINE** is an explicit mode for configured cloud providers.
+- **LOCAL** keeps text generation, auxiliary work, and embeddings on configured
+  local-network services. Supported image generation can stay with a configured
+  local image service as well.
+- **ONLINE** is an explicit choice for connected cloud providers.
 - **Incognito** conversations read and write no memory.
-- **Per-user isolation** scopes conversations, bots, memories, images, and
+- **Per-user isolation** scopes conversations, private bots, memories, images, and
   exports to the authenticated account.
 - **Encrypted account material** uses scrypt password hashing and per-user
   AES-256-GCM key handling.
 - **Private by default** means PRISM binds to the host machine unless LAN access
   is intentionally enabled.
 
-The invariant and provider architecture are documented in
-[`DESIGN.md`](DESIGN.md).
+The provider and privacy invariants are documented in [`DESIGN.md`](DESIGN.md).
 
-## Quick Start
+## Built for desktop. Headed to Steam.
+
+PRISM is being prepared as a Steam-first standalone desktop app. Its Tauri shell
+is designed to bundle the local runtime as one coherent app, with macOS,
+Windows, and Linux as release targets.
+
+GitHub artifacts remain the development and CI path while the public-launch
+gates close. Read the current [`distribution model`](docs/distribution-model.md)
+and [`release process`](docs/release-process.md) for the release direction.
+
+## Enter PRISM
+
+Contributors and early local testers can run the current source today.
 
 ### Docker
 
@@ -159,36 +167,18 @@ npm run typecheck
 npm run build
 ```
 
-## Desktop
-
-PRISM ships as one standalone desktop app per operating system, with its local
-runtime included.
-
-- **macOS:** DMG
-- **Windows:** installer
-- **Linux:** AppImage
-- **Steam:** desktop release target
-- **GitHub Releases:** current direct-download path while Steam is prepared
-
-Official builds are free to download and use. Start with
-[GitHub Releases](https://github.com/AureliusSoftworks/LocalAI/releases) or read
-the current [`distribution model`](docs/distribution-model.md) and
-[`release process`](docs/release-process.md).
-
 ## Architecture
 
 ```text
-[Desktop / Browser]
-        |
-        v
-  Next.js workspace  --->  Node.js API
-                                |
-                       -------------------
-                       |        |        |
-                     SQLite   Qdrant   Ollama
+[Tauri Desktop / Browser]
+            |
+            v
+      Next.js workspace  --->  Node.js API
+                                    |
+                           -------------------
+                           |        |        |
+                         SQLite   Qdrant   Ollama
 ```
-
-The monorepo contains:
 
 - `apps/web` — Next.js experience layer
 - `apps/api` — Node.js API and orchestration

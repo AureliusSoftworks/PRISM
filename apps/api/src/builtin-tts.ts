@@ -1,16 +1,28 @@
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, resolve, sep } from "node:path";
+import { join } from "node:path";
 import {
   BOT_AUDIO_VOICE_IDS,
   PRISM_BUILTIN_ENGLISH_VOICES,
+  expandSpeechText,
   normalizeBotAudioVoiceProfileV1,
+  normalizeBotAudioVoiceProfileForSynthesisV1,
   prismBuiltinEnglishVoice,
   type BotAudioVoiceId,
   type BotAudioVoiceProfileV1,
 } from "@localai/shared";
+import {
+  PRISM_BUILTIN_TTS_MODEL_ID,
+  prismBuiltinTtsModelRoot,
+} from "./builtin-tts-assets.ts";
+import { BuiltinTtsWorkerClient } from "./builtin-tts-worker-client.ts";
+
+export {
+  PRISM_BUILTIN_TTS_MODEL_ID,
+  prismBuiltinTtsModelRoot,
+} from "./builtin-tts-assets.ts";
 
 type SupportedSystemTtsPlatform = "darwin" | "win32";
 
@@ -18,16 +30,6 @@ export interface SystemVoiceOption {
   name: string;
   locale: string;
 }
-
-export const PRISM_BUILTIN_TTS_MODEL_ID =
-  "onnx-community/Kokoro-82M-v1.0-ONNX";
-
-const PRISM_BUILTIN_TTS_REQUIRED_FILES = [
-  "config.json",
-  "tokenizer.json",
-  "tokenizer_config.json",
-  "onnx/model_quantized.onnx",
-] as const;
 
 const WINDOWS_LIST_VOICES_SCRIPT = `
 Add-Type -AssemblyName System.Speech
@@ -43,6 +45,7 @@ try {
 
 const WINDOWS_SYNTHESIZE_SCRIPT = `
 Add-Type -AssemblyName System.Speech
+[Console]::InputEncoding = New-Object System.Text.UTF8Encoding($false)
 $synth = New-Object System.Speech.Synthesis.SpeechSynthesizer
 try {
   $voices = @($synth.GetInstalledVoices() | Where-Object { $_.Enabled })
@@ -56,7 +59,7 @@ try {
   }
   $synth.Rate = [Math]::Max(-10, [Math]::Min(10, [int]$env:PRISM_TTS_RATE))
   $synth.SetOutputToWaveFile($env:PRISM_TTS_OUTPUT)
-  $synth.Speak([IO.File]::ReadAllText($env:PRISM_TTS_INPUT))
+  $synth.Speak([Console]::In.ReadToEnd())
 } finally {
   $synth.Dispose()
 }
@@ -81,9 +84,11 @@ function encodedPowerShell(script: string): string {
   return Buffer.from(script, "utf16le").toString("base64");
 }
 
-async function runCommand(args: {
+/** Private speech input travels only through this invocation's process pipe. */
+export async function runSystemSpeechCommand(args: {
   command: string;
   parameters: readonly string[];
+  input?: string;
   signal?: AbortSignal;
   env?: NodeJS.ProcessEnv;
 }): Promise<string> {
@@ -92,36 +97,51 @@ async function runCommand(args: {
     const child = spawn(args.command, [...args.parameters], {
       env: args.env,
       windowsHide: true,
-      stdio: ["ignore", "pipe", "pipe"],
+      stdio: [args.input === undefined ? "ignore" : "pipe", "pipe", "pipe"],
     });
     let stdout = "";
-    let stderr = "";
     let settled = false;
+    let terminalError: Error | undefined;
+    let forceKillTimer: ReturnType<typeof setTimeout> | undefined;
     const finish = (error?: Error) => {
       if (settled) return;
       settled = true;
+      if (forceKillTimer !== undefined) clearTimeout(forceKillTimer);
       args.signal?.removeEventListener("abort", onAbort);
       if (error) reject(error);
       else resolve(stdout);
     };
-    const onAbort = () => {
+    const stop = (error: Error) => {
+      if (settled || terminalError) return;
+      terminalError = error;
       child.kill();
-      finish(new DOMException("Aborted", "AbortError"));
+      forceKillTimer = setTimeout(() => child.kill("SIGKILL"), 1_000);
+      forceKillTimer.unref();
+      // Wait for close before the caller removes scratch audio; a live child
+      // must not recreate files after its owner's cancelled request is gone.
     };
+    const onAbort = () => stop(new DOMException("Aborted", "AbortError"));
     args.signal?.addEventListener("abort", onAbort, { once: true });
-    child.stdout?.on("data", (chunk: Buffer) => {
-      if (stdout.length < 64_000) stdout += chunk.toString("utf8");
+    child.stdout?.setEncoding("utf8");
+    child.stdout?.on("data", (chunk: string) => {
+      if (stdout.length < 64_000) stdout += chunk.slice(0, 64_000 - stdout.length);
     });
-    child.stderr?.on("data", (chunk: Buffer) => {
-      if (stderr.length < 8_000) stderr += chunk.toString("utf8");
+    // A host speech engine can echo its input in diagnostics. Drain stderr but
+    // never retain or forward private speech into errors, logs, or fallbacks.
+    child.stderr?.resume();
+    child.stdin?.once("error", () => {
+      stop(new Error("System speech input could not be delivered."));
     });
-    child.once("error", (error) => finish(error));
-    child.once("exit", (code) => {
-      if (code === 0) finish();
-      else finish(new Error(
-        stderr.trim() || `System speech command stopped (${code ?? "unknown"}).`
-      ));
+    child.once("error", () =>
+      finish(terminalError ?? new Error("System speech command could not start.")),
+    );
+    child.once("close", (code) => {
+      if (terminalError) finish(terminalError);
+      else if (code === 0) finish();
+      else finish(new Error(`System speech command stopped (${code ?? "unknown"}).`));
     });
+    if (args.signal?.aborted) onAbort();
+    else if (args.input !== undefined) child.stdin?.end(args.input, "utf8");
   });
 }
 
@@ -186,72 +206,14 @@ export function systemEnglishGenerationSettings(args: {
 
 let macVoiceListPromise: Promise<SystemVoiceOption[]> | null = null;
 let windowsVoiceListPromise: Promise<SystemVoiceOption[]> | null = null;
-let kokoroTtsPromise: Promise<import("kokoro-js").KokoroTTS> | null = null;
-let kokoroModelRoot: string | null = null;
-
-function normalizedModelRoot(path: string): string {
-  const normalized = resolve(path);
-  return normalized.endsWith(sep) ? normalized : `${normalized}${sep}`;
-}
-
-export function prismBuiltinTtsModelRoot(
-  cwd = process.cwd(),
-  configuredRoot = process.env.PRISM_BUILTIN_TTS_MODEL_DIR,
-): string | null {
-  const candidates = [
-    configuredRoot,
-    join(cwd, "models"),
-    join(cwd, "runtime", "models"),
-    join(cwd, ".cache", "prism-models"),
-    // Workspace commands run from either the repo root or apps/api.
-    join(cwd, "..", "..", ".cache", "prism-models"),
-  ].filter((value): value is string => Boolean(value?.trim()));
-  return candidates.find((root) =>
-    PRISM_BUILTIN_TTS_REQUIRED_FILES.every((file) =>
-      existsSync(join(root, PRISM_BUILTIN_TTS_MODEL_ID, file)),
-    ),
-  ) ?? null;
-}
-
-async function getKokoroTts(): Promise<import("kokoro-js").KokoroTTS> {
-  const modelRoot = prismBuiltinTtsModelRoot();
-  if (!modelRoot) {
-    throw new Error(
-      "PRISM's built-in voice pack is not installed. Re-run the runtime staging step.",
-    );
-  }
-  if (kokoroTtsPromise && kokoroModelRoot === modelRoot) return kokoroTtsPromise;
-
-  kokoroModelRoot = modelRoot;
-  kokoroTtsPromise = (async () => {
-    const [{ env }, { KokoroTTS }] = await Promise.all([
-      import("@huggingface/transformers"),
-      import("kokoro-js"),
-    ]);
-    // A LOCAL speech request must never turn a missing model into a download.
-    // Installed desktop and Docker builds stage the pinned model ahead of time.
-    env.allowRemoteModels = false;
-    env.allowLocalModels = true;
-    env.localModelPath = normalizedModelRoot(modelRoot);
-    env.useFSCache = false;
-    return KokoroTTS.from_pretrained(PRISM_BUILTIN_TTS_MODEL_ID, {
-      dtype: "q8",
-      device: "cpu",
-    });
-  })().catch((error) => {
-    kokoroTtsPromise = null;
-    kokoroModelRoot = null;
-    throw error;
-  });
-  return kokoroTtsPromise;
-}
+const prismVoicePackWorker = new BuiltinTtsWorkerClient();
 
 async function listInstalledSystemVoiceOptions(
   platform: SupportedSystemTtsPlatform,
   signal?: AbortSignal
 ): Promise<SystemVoiceOption[]> {
   if (platform === "darwin") {
-    macVoiceListPromise ??= runCommand({
+    macVoiceListPromise ??= runSystemSpeechCommand({
       command: "/usr/bin/say",
       parameters: ["-v", "?"],
       signal,
@@ -263,7 +225,7 @@ async function listInstalledSystemVoiceOptions(
   }
   const powershell = windowsPowerShellPath();
   if (!powershell) return [];
-  windowsVoiceListPromise ??= runCommand({
+  windowsVoiceListPromise ??= runSystemSpeechCommand({
     command: powershell,
     parameters: [
       "-NoLogo",
@@ -286,7 +248,7 @@ async function listInstalledSystemVoices(
 ): Promise<string[]> {
   const options = await listInstalledSystemVoiceOptions(platform, signal);
   const english = options.filter((voice) => voice.locale.toLowerCase().startsWith("en"));
-  return (english.length > 0 ? english : options).map((voice) => voice.name);
+  return english.map((voice) => voice.name);
 }
 
 export function builtinEnglishAvailable(_platform = process.platform): boolean {
@@ -308,7 +270,7 @@ export async function getSystemVoiceCapabilities(signal?: AbortSignal): Promise<
     ? await listInstalledSystemVoiceOptions(platform, signal).catch(() => [])
     : [];
   const englishVoices = allVoices.filter((voice) => voice.locale.toLowerCase().startsWith("en"));
-  const voices = englishVoices.length > 0 ? englishVoices : allVoices;
+  const voices = englishVoices;
   const installedVoices = voices.map((voice) => voice.name);
   const slots = BOT_AUDIO_VOICE_IDS.map((voiceId) => ({
     voiceId,
@@ -330,10 +292,130 @@ export async function getSystemVoiceCapabilities(signal?: AbortSignal): Promise<
   };
 }
 
-function isPcmWave(buffer: Buffer): boolean {
-  return buffer.length >= 44 &&
-    buffer.subarray(0, 4).toString("ascii") === "RIFF" &&
-    buffer.subarray(8, 12).toString("ascii") === "WAVE";
+/**
+ * Validate that a RIFF/WAVE payload contains at least one non-silent frame of
+ * uncompressed PCM audio. Speech tools can exit successfully with header-only
+ * or effectively silent WAVE data, both of which browsers accept but cannot
+ * be heard.
+ */
+export function isPlayablePcmWave(buffer: Buffer): boolean {
+  if (
+    buffer.length < 12 ||
+    buffer.subarray(0, 4).toString("ascii") !== "RIFF" ||
+    buffer.subarray(8, 12).toString("ascii") !== "WAVE"
+  ) {
+    return false;
+  }
+
+  const riffEnd = buffer.readUInt32LE(4) + 8;
+  if (riffEnd < 12 || riffEnd > buffer.length) return false;
+
+  let audioFormat: number | null = null;
+  let bitsPerSample: number | null = null;
+  let blockAlign: number | null = null;
+  let dataBytes = 0;
+  const dataRanges: Array<{ start: number; end: number }> = [];
+  for (let offset = 12; offset + 8 <= riffEnd; ) {
+    const chunkId = buffer.subarray(offset, offset + 4).toString("ascii");
+    const chunkBytes = buffer.readUInt32LE(offset + 4);
+    const valueOffset = offset + 8;
+    const valueEnd = valueOffset + chunkBytes;
+    const nextOffset = valueEnd + (chunkBytes % 2);
+    if (valueEnd > riffEnd || nextOffset > riffEnd) return false;
+
+    if (chunkId === "fmt ") {
+      if (chunkBytes < 16) return false;
+      const candidateAudioFormat = buffer.readUInt16LE(valueOffset);
+      const channels = buffer.readUInt16LE(valueOffset + 2);
+      const sampleRate = buffer.readUInt32LE(valueOffset + 4);
+      const byteRate = buffer.readUInt32LE(valueOffset + 8);
+      const candidateBlockAlign = buffer.readUInt16LE(valueOffset + 12);
+      const candidateBitsPerSample = buffer.readUInt16LE(valueOffset + 14);
+      const bytesPerSample = candidateBitsPerSample / 8;
+      const supportedSampleFormat =
+        candidateAudioFormat === 1 ||
+        (candidateAudioFormat === 3 && candidateBitsPerSample === 32);
+      if (
+        !supportedSampleFormat ||
+        channels === 0 ||
+        sampleRate === 0 ||
+        !Number.isInteger(bytesPerSample) ||
+        bytesPerSample < 1 ||
+        bytesPerSample > 4 ||
+        candidateBlockAlign !== channels * bytesPerSample ||
+        byteRate !== sampleRate * candidateBlockAlign
+      ) {
+        return false;
+      }
+      audioFormat = candidateAudioFormat;
+      bitsPerSample = candidateBitsPerSample;
+      blockAlign = candidateBlockAlign;
+    } else if (chunkId === "data") {
+      dataBytes += chunkBytes;
+      dataRanges.push({ start: valueOffset, end: valueEnd });
+    }
+
+    offset = nextOffset;
+  }
+
+  if (
+    audioFormat === null ||
+    bitsPerSample === null ||
+    blockAlign === null ||
+    dataBytes < blockAlign
+  ) {
+    return false;
+  }
+
+  // A structurally valid, full-length WAVE can still be digital silence (or
+  // contain only inaudible quantization dust). Browser decode/play lifecycle
+  // succeeds for that payload, which used to reveal text and animate timing
+  // without producing speech. Scan the complete payload so leading silence
+  // remains valid while requiring meaningful peak and RMS energy overall.
+  const minimumPeak = 1e-3;
+  const minimumRms = 1e-4;
+  let peak = 0;
+  let squaredSignal = 0;
+  let sampleCount = 0;
+  let invalidSample = false;
+  const observeSample = (sample: number): void => {
+    sampleCount += 1;
+    if (!Number.isFinite(sample)) {
+      invalidSample = true;
+      return;
+    }
+    const magnitude = Math.min(1, Math.abs(sample));
+    peak = Math.max(peak, magnitude);
+    squaredSignal += magnitude * magnitude;
+  };
+
+  for (const { start, end } of dataRanges) {
+    if (audioFormat === 3) {
+      for (let offset = start; offset + 4 <= end; offset += 4) {
+        observeSample(buffer.readFloatLE(offset));
+      }
+      continue;
+    }
+    const bytesPerSample = bitsPerSample / 8;
+    for (
+      let offset = start;
+      offset + bytesPerSample <= end;
+      offset += bytesPerSample
+    ) {
+      if (bitsPerSample === 8) {
+        observeSample((buffer[offset]! - 0x80) / 0x80);
+      } else if (bitsPerSample === 16) {
+        observeSample(buffer.readInt16LE(offset) / 0x8000);
+      } else if (bitsPerSample === 24) {
+        observeSample(buffer.readIntLE(offset, 3) / 0x800000);
+      } else {
+        observeSample(buffer.readInt32LE(offset) / 0x80000000);
+      }
+    }
+  }
+
+  if (invalidSample || sampleCount === 0 || peak < minimumPeak) return false;
+  return Math.sqrt(squaredSignal / sampleCount) >= minimumRms;
 }
 
 async function generateSystemEnglishWave(args: {
@@ -373,14 +455,12 @@ async function generateSystemEnglishWave(args: {
   }
 
   const directory = await mkdtemp(join(tmpdir(), "prism-system-tts-"));
-  const inputPath = join(directory, "speech.txt");
   const outputPath = join(directory, "speech.wav");
   try {
-    await writeFile(inputPath, args.text, "utf8");
     if (platform === "darwin") {
       const intermediatePath = join(directory, "speech.caf");
       const voiceParameters = settings.voiceName ? ["-v", settings.voiceName] : [];
-      await runCommand({
+      await runSystemSpeechCommand({
         command: "/usr/bin/say",
         parameters: [
           ...voiceParameters,
@@ -390,11 +470,12 @@ async function generateSystemEnglishWave(args: {
           "-o",
           intermediatePath,
           "-f",
-          inputPath,
+          "-",
         ],
+        input: args.text,
         signal: args.signal,
       });
-      await runCommand({
+      await runSystemSpeechCommand({
         command: "/usr/bin/afconvert",
         parameters: [intermediatePath, outputPath, "-f", "WAVE", "-d", "LEI16"],
         signal: args.signal,
@@ -402,7 +483,7 @@ async function generateSystemEnglishWave(args: {
     } else {
       const powershell = windowsPowerShellPath();
       if (!powershell) throw new Error("Windows speech synthesis is unavailable.");
-      await runCommand({
+      await runSystemSpeechCommand({
         command: powershell,
         parameters: [
           "-NoLogo",
@@ -411,10 +492,10 @@ async function generateSystemEnglishWave(args: {
           "-EncodedCommand",
           encodedPowerShell(WINDOWS_SYNTHESIZE_SCRIPT),
         ],
+        input: args.text,
         signal: args.signal,
         env: {
           ...process.env,
-          PRISM_TTS_INPUT: inputPath,
           PRISM_TTS_OUTPUT: outputPath,
           PRISM_TTS_VOICE: settings.voiceName ?? "",
           PRISM_TTS_RATE: String(settings.rate),
@@ -423,7 +504,9 @@ async function generateSystemEnglishWave(args: {
       });
     }
     const wave = await readFile(outputPath);
-    if (!isPcmWave(wave)) throw new Error("System speech returned an unsupported audio format.");
+    if (!isPlayablePcmWave(wave)) {
+      throw new Error("System speech returned no playable PCM audio.");
+    }
     return wave;
   } finally {
     await rm(directory, { recursive: true, force: true });
@@ -433,20 +516,21 @@ async function generateSystemEnglishWave(args: {
 async function generatePrismVoicePackWave(args: {
   text: string;
   profile: BotAudioVoiceProfileV1;
+  protectedPhrases?: readonly string[];
+  deliveryMood?: string;
   signal?: AbortSignal;
 }): Promise<Buffer> {
   if (args.signal?.aborted) throw new DOMException("Aborted", "AbortError");
-  const profile = normalizeBotAudioVoiceProfileV1(args.profile);
-  const voice = prismBuiltinEnglishVoice(profile.baseVoiceId);
-  const tts = await getKokoroTts();
+  const wave = await prismVoicePackWorker.generate(args);
   if (args.signal?.aborted) throw new DOMException("Aborted", "AbortError");
-  const audio = await tts.generate(args.text, {
-    voice: voice.engineVoiceId,
-    // Pace is applied once by PRISM's formant-preserving playback worklet.
-    speed: 1,
-  });
-  if (args.signal?.aborted) throw new DOMException("Aborted", "AbortError");
-  return Buffer.from(audio.toWav());
+  return requirePlayablePrismVoicePackWave(wave);
+}
+
+export function requirePlayablePrismVoicePackWave(wave: Buffer): Buffer {
+  if (!isPlayablePcmWave(wave)) {
+    throw new Error("PRISM Voice Pack returned no playable PCM audio.");
+  }
+  return wave;
 }
 
 function isAbortError(error: unknown): boolean {
@@ -457,27 +541,44 @@ export async function generateBuiltinEnglishWave(args: {
   text: string;
   profile: BotAudioVoiceProfileV1;
   allowOperatingSystemVoices?: boolean;
+  protectedPhrases?: readonly string[];
+  /** Delivery mood realized as a style-space direction by the voice pack.
+   * Operating-system voices ignore it: they have no style surface. */
+  deliveryMood?: string;
   signal?: AbortSignal;
 }): Promise<Buffer> {
-  const profile = normalizeBotAudioVoiceProfileV1(args.profile);
-  if (args.allowOperatingSystemVoices && profile.systemVoiceName) {
+  // Keep operating-system and packaged-local engines on the same private
+  // speech projection, including direct callers outside the HTTP route.
+  const speechArgs = {
+    ...args,
+    text: expandSpeechText(args.text),
+  };
+  const profile =
+    normalizeBotAudioVoiceProfileForSynthesisV1(speechArgs.profile);
+  if (speechArgs.allowOperatingSystemVoices && profile.systemVoiceName) {
     try {
-      return await generateSystemEnglishWave({ ...args, profile });
+      return await generateSystemEnglishWave({ ...speechArgs, profile });
     } catch (error) {
       if (isAbortError(error)) throw error;
       // A removed or broken host voice must not silence the bot. The portable
-      // built-in identity remains the deterministic local fallback.
+      // built-in identity remains the deterministic local fallback. Preserve
+      // the explicit system-voice contract by keeping phoneme controls
+      // suspended rather than changing pronunciation invisibly.
+      profile.pronunciationBase = "follow-voice";
+      profile.accentDefinitionId = null;
+      profile.speechprintInfluence = "none";
+      profile.speechprintVariationSeed = "natural-v1";
     }
   }
 
   try {
-    return await generatePrismVoicePackWave({ ...args, profile });
+    return await generatePrismVoicePackWave({ ...speechArgs, profile });
   } catch (error) {
-    if (isAbortError(error) || !args.allowOperatingSystemVoices) throw error;
+    if (isAbortError(error) || !speechArgs.allowOperatingSystemVoices) throw error;
     // If a packaged model is damaged, people who explicitly enabled OS voices
     // still retain a clean device-local recovery path.
     return generateSystemEnglishWave({
-      ...args,
+      ...speechArgs,
       profile: { ...profile, systemVoiceName: null },
     });
   }

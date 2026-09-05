@@ -100,14 +100,22 @@ describe("shouldShowZenFallbackWallpaper", () => {
     );
   });
 
-  it("shows for bot conversations when Atmosphere is turned off", () => {
+  it("does not show stock fallbacks for bot rooms — blank gradients are the fallback", () => {
+    assert.equal(
+      shouldShowZenFallbackWallpaper({
+        ...baseline,
+        atmosphereEnabled: true,
+        hasConversationBot: true,
+      }),
+      false
+    );
     assert.equal(
       shouldShowZenFallbackWallpaper({
         ...baseline,
         atmosphereEnabled: false,
         hasConversationBot: true,
       }),
-      true
+      false
     );
   });
 

@@ -11,19 +11,22 @@ describe("view routing helpers", () => {
     assert.equal(prismSurfaceViewForRouteParam("chat"), "chat");
     assert.equal(prismSurfaceViewForRouteParam("zen"), "chat");
     assert.equal(prismSurfaceViewForRouteParam("coffee"), "coffee");
+    assert.equal(prismSurfaceViewForRouteParam("debate"), "debate");
     assert.equal(prismSurfaceViewForRouteParam("botcast"), "botcast");
     assert.equal(prismSurfaceViewForRouteParam("slate"), "slate");
-    assert.equal(prismSurfaceViewForRouteParam("story"), "story");
+    assert.equal(prismSurfaceViewForRouteParam("story"), "chat");
     assert.equal(prismSurfaceViewForRouteParam(null), "chat");
     assert.equal(prismSurfaceViewForRouteParam("unknown"), "chat");
   });
 
-  it("keeps deprecated hub, zen, and sandbox aliases without emitting old URLs", () => {
+  it("keeps deprecated aliases while routing through the living-shell registry", () => {
     assert.equal(prismSurfaceViewForRouteParam("sandbox"), "chat");
     assert.equal(prismHrefForSurfaceView("sandbox"), "/?view=chat");
     assert.equal(prismHrefForSurfaceView("chat"), "/?view=chat");
     assert.equal(prismHrefForSurfaceView("hub"), "/?view=chat");
+    assert.equal(prismHrefForSurfaceView("debate"), "/?view=debate");
     assert.equal(prismHrefForSurfaceView("botcast"), "/?view=botcast");
     assert.equal(prismHrefForSurfaceView("slate"), "/?view=slate");
+    assert.equal(prismHrefForSurfaceView("story"), "/?view=chat");
   });
 });

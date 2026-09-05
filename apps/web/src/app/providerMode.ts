@@ -1,7 +1,10 @@
 import { DISABLED_MODEL_CHOICE, isDisabledModelChoice } from "@localai/shared";
 
-export type Provider = "local" | "openai" | "anthropic";
+export type Provider = "local" | "ollama_cloud" | "openai" | "anthropic";
+/** Every remote provider that can appear in a manual ONLINE picker. */
 export type OnlineProvider = Exclude<Provider, "local">;
+/** Contextual Auto and recovery remain deliberately OpenAI/Anthropic-only. */
+type AutoOnlineProvider = Exclude<OnlineProvider, "ollama_cloud">;
 export type ResponseMode = "local" | "online";
 export type AutoResponseMode = ResponseMode | "auto";
 
@@ -13,6 +16,9 @@ export interface ProviderModeModelOption {
   id: string;
   provider: Provider;
   disabledReason?: string;
+  supportsStructuredOutput?: boolean;
+  /** False only when Settings hides this enabled model from manual pickers. */
+  showInGlobalPicker?: boolean;
 }
 
 export type ModelChoiceByProvider = Partial<Record<Provider, string>>;
@@ -21,7 +27,7 @@ export function normalizeProviderModeModelChoice(
   value: string | null | undefined
 ): string {
   const trimmed = value?.trim() ?? "";
-  if (isDisabledModelChoice(trimmed)) return DISABLED_MODEL_CHOICE;
+  if (isDisabledModelChoice(trimmed)) return AUTO_MODEL_CHOICE;
   return trimmed.length > 0 ? trimmed : AUTO_MODEL_CHOICE;
 }
 
@@ -35,17 +41,25 @@ export function nextResponseMode(mode: ResponseMode): ResponseMode {
 
 export function autoResponseModeForProvider(
   provider: Provider,
-  autoEnabled: boolean,
-  autoAllowed = true
+  _autoEnabled: boolean,
+  _autoAllowed = true
 ): AutoResponseMode {
-  return autoEnabled && autoAllowed ? "auto" : responseModeForProvider(provider);
+  return responseModeForProvider(provider);
+}
+
+/**
+ * Hard LOCAL privacy blocks online capabilities (Premium voice, ElevenLabs
+ * credit checks, etc.). Auto model selection stays inside the active lane.
+ */
+export function blocksOnlineCapabilities(mode: AutoResponseMode): boolean {
+  return mode === "local";
 }
 
 export function isOnlineProvider(provider: Provider): provider is OnlineProvider {
   return provider !== "local";
 }
 
-export function onlineProviderFallback(provider: Provider): OnlineProvider {
+export function onlineProviderFallback(provider: Provider): AutoOnlineProvider {
   return provider === "anthropic" ? "anthropic" : "openai";
 }
 
@@ -53,6 +67,7 @@ export function fallbackOnlineModelIdsForProvider(
   provider: OnlineProvider,
   preferredOnlineModel?: string | null
 ): string[] {
+  if (provider === "ollama_cloud") return [];
   const ids: string[] = [];
   const preferred = normalizeProviderModeModelChoice(preferredOnlineModel);
   if (preferred !== AUTO_MODEL_CHOICE && preferred !== DISABLED_MODEL_CHOICE) {
@@ -69,10 +84,12 @@ export function fallbackOnlineModelIdsForProvider(
   ids.push(
     provider === "anthropic"
       ? ANTHROPIC_FALLBACK_CHAT_MODEL_ID
-      : OPENAI_FALLBACK_CHAT_MODEL_ID
+      : provider === "openai"
+        ? OPENAI_FALLBACK_CHAT_MODEL_ID
+        : ""
   );
 
-  return Array.from(new Set(ids));
+  return Array.from(new Set(ids.filter(Boolean)));
 }
 
 export function combinedOnlineModelOptions<T extends ProviderModeModelOption>(
@@ -95,14 +112,38 @@ export function filterVisibleModelOptions<T extends ProviderModeModelOption>(
   hiddenModelIds: readonly string[]
 ): T[] {
   const hidden = new Set(hiddenModelIds.map((id) => id.trim()).filter(Boolean));
-  return options.filter((model) => !hidden.has(model.id));
+  return options.filter(
+    (model) => !hidden.has(model.id) && model.showInGlobalPicker !== false,
+  );
 }
 
 export function filterVisibleOnlineModelOptions<T extends ProviderModeModelOption>(
   options: readonly T[],
   hiddenModelIds: readonly string[]
 ): T[] {
-  return filterVisibleModelOptions(options, hiddenModelIds);
+  return filterVisibleModelOptions(options, hiddenModelIds).filter(
+    (model) => isOnlineProvider(model.provider),
+  );
+}
+
+/**
+ * Global picker visibility is player-owned. Capability-limited applets keep a
+ * checked model visible and explain why it cannot run there instead of
+ * silently removing it from the shared picker.
+ */
+export function markStructuredOutputModelsUnavailable<
+  T extends ProviderModeModelOption,
+>(options: readonly T[], surfaceLabel: string): T[] {
+  return options.map((model) =>
+    model.supportsStructuredOutput === false
+      ? {
+          ...model,
+          disabledReason:
+            model.disabledReason ??
+            `${surfaceLabel} requires structured output, which this model's provider does not support yet.`,
+        }
+      : model,
+  );
 }
 
 export function inferOnlineProviderForModelChoice(
@@ -122,11 +163,15 @@ export function inferOnlineProviderForModelChoice(
         !model.disabledReason
     );
     if (exact && isOnlineProvider(exact.provider)) return exact.provider;
-    return normalized.toLowerCase().startsWith("claude-") ? "anthropic" : "openai";
+    const id = normalized.toLowerCase();
+    return id.startsWith("claude-") ? "anthropic" : "openai";
   }
 
   const firstAvailable = onlineOptions.find(
-    (model) => isOnlineProvider(model.provider) && !model.disabledReason
+    (model) =>
+      model.provider !== "ollama_cloud" &&
+      isOnlineProvider(model.provider) &&
+      !model.disabledReason
   );
   if (firstAvailable && isOnlineProvider(firstAvailable.provider)) {
     return firstAvailable.provider;
@@ -147,9 +192,10 @@ export function resolveModelChoiceForResponseMode(args: {
     };
   }
 
-  const preferredProvider = onlineProviderFallback(args.providerPreference);
-  const otherProvider: OnlineProvider =
-    preferredProvider === "openai" ? "anthropic" : "openai";
+  const preferredProvider: OnlineProvider =
+    args.providerPreference === "local"
+      ? onlineProviderFallback(args.providerPreference)
+      : args.providerPreference;
   const preferredChoice = normalizeProviderModeModelChoice(
     args.choices[preferredProvider]
   );
@@ -170,19 +216,19 @@ export function resolveModelChoiceForResponseMode(args: {
     };
   }
 
-  const otherChoice = normalizeProviderModeModelChoice(args.choices[otherProvider]);
-  if (
-    otherChoice !== AUTO_MODEL_CHOICE &&
-    otherChoice !== DISABLED_MODEL_CHOICE
-  ) {
-    return {
-      provider: inferOnlineProviderForModelChoice(
-        otherChoice,
-        args.onlineOptions,
-        otherProvider
-      ),
-      modelChoice: otherChoice,
-    };
+  for (const provider of ["ollama_cloud", "openai", "anthropic"] as const) {
+    if (provider === preferredProvider) continue;
+    const choice = normalizeProviderModeModelChoice(args.choices[provider]);
+    if (choice !== AUTO_MODEL_CHOICE && choice !== DISABLED_MODEL_CHOICE) {
+      return {
+        provider: inferOnlineProviderForModelChoice(
+          choice,
+          args.onlineOptions,
+          provider,
+        ),
+        modelChoice: choice,
+      };
+    }
   }
 
   return {
@@ -211,8 +257,76 @@ export function applyOnlineModelChoice(args: {
     provider,
     choices: {
       local: normalizeProviderModeModelChoice(args.currentChoices.local),
+      ollama_cloud: provider === "ollama_cloud" ? normalized : AUTO_MODEL_CHOICE,
       openai: provider === "openai" ? normalized : AUTO_MODEL_CHOICE,
       anthropic: provider === "anthropic" ? normalized : AUTO_MODEL_CHOICE,
     },
   };
+}
+
+export function applyModelChoiceForResponseMode(args: {
+  responseMode: AutoResponseMode;
+  currentChoices: ModelChoiceByProvider;
+  nextChoice: string;
+  options: readonly ProviderModeModelOption[];
+  providerPreference: Provider;
+}): { provider: Provider; choices: Record<Provider, string> } {
+  const normalized = normalizeProviderModeModelChoice(args.nextChoice);
+  const selectedOption =
+    normalized === AUTO_MODEL_CHOICE
+      ? null
+      : (args.options.find(
+          (option) => option.id === normalized && !option.disabledReason,
+        ) ?? null);
+  const selectedProvider = selectedOption?.provider ?? args.providerPreference;
+
+  if (args.responseMode === "auto" && normalized === AUTO_MODEL_CHOICE) {
+    if (args.providerPreference === "local") {
+      return {
+        provider: "local",
+        choices: {
+          local: AUTO_MODEL_CHOICE,
+          ollama_cloud: normalizeProviderModeModelChoice(
+            args.currentChoices.ollama_cloud,
+          ),
+          openai: normalizeProviderModeModelChoice(args.currentChoices.openai),
+          anthropic: normalizeProviderModeModelChoice(args.currentChoices.anthropic),
+        },
+      };
+    }
+    const provider = onlineProviderFallback(args.providerPreference);
+    return {
+      provider,
+      choices: {
+        local: normalizeProviderModeModelChoice(args.currentChoices.local),
+        ollama_cloud: AUTO_MODEL_CHOICE,
+        openai: AUTO_MODEL_CHOICE,
+        anthropic: AUTO_MODEL_CHOICE,
+      },
+    };
+  }
+
+  if (
+    args.responseMode === "local" ||
+    (args.responseMode === "auto" && selectedProvider === "local")
+  ) {
+    return {
+      provider: "local",
+      choices: {
+        local: normalized,
+        ollama_cloud: normalizeProviderModeModelChoice(
+          args.currentChoices.ollama_cloud,
+        ),
+        openai: normalizeProviderModeModelChoice(args.currentChoices.openai),
+        anthropic: normalizeProviderModeModelChoice(args.currentChoices.anthropic),
+      },
+    };
+  }
+
+  return applyOnlineModelChoice({
+    currentChoices: args.currentChoices,
+    nextChoice: normalized,
+    onlineOptions: args.options,
+    providerPreference: selectedProvider,
+  });
 }

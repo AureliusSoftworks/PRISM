@@ -2,23 +2,62 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 import {
+  DEFAULT_BOT_AUDIO_VOICE_PROFILE_V2,
+  VOICE_ACCENT_MAP_ANCHORS,
+  voiceAccentMapPointForCoordinates,
+} from "@localai/shared";
+import {
   ElevenLabsVoiceError,
   VOICE_CAPABILITIES,
   applyPlayerNamePronunciation,
   cleanSpeakableAssistantProse,
+  elevenLabsVoiceIsolationSeed,
   elevenLabsVoiceSettings,
   requestElevenLabsSpeech,
   requestElevenLabsSpeechWithTimestamps,
   requestElevenLabsVoiceCatalog,
   requestElevenLabsVoiceCollections,
   requestElevenLabsVoiceIdentity,
+  requestElevenLabsSharedVoiceCandidates,
+  selectElevenLabsSharedVoiceCandidate,
+  importElevenLabsSharedVoice,
   resolveElevenLabsVoiceId,
+  resolveFrozenReplayVoiceEngine,
   resolveVoiceSynthesisExplicitOnlineContext,
   resolveVoiceSynthesisBoundary,
   validateVoiceSynthesisRequest,
 } from "../voices.ts";
+import { resetElevenLabsPronunciationDictionaryCacheForTests } from
+  "../elevenlabs-pronunciation-dictionaries.ts";
 
 describe("voice Phase 1 boundary", () => {
+  it("regenerates replay speech only with the frozen resolved engine", () => {
+    assert.equal(
+      resolveFrozenReplayVoiceEngine({
+        privacyMode: "local",
+        requestedEngine: "elevenlabs",
+        resolvedEngine: "builtin-local-fallback",
+      }),
+      "builtin",
+    );
+    assert.equal(
+      resolveFrozenReplayVoiceEngine({
+        privacyMode: "local",
+        requestedEngine: "elevenlabs",
+        resolvedEngine: null,
+      }),
+      null,
+    );
+    assert.equal(
+      resolveFrozenReplayVoiceEngine({
+        privacyMode: "online",
+        requestedEngine: "builtin",
+        resolvedEngine: "elevenlabs",
+      }),
+      "elevenlabs",
+    );
+  });
+
   it("advertises the packaged local neural voice model", () => {
     assert.equal(VOICE_CAPABILITIES.builtinEnglish.model, "kokoro-82m-q8");
     assert.deepEqual(VOICE_CAPABILITIES.modes, ["mute", "english", "babble", "bottish"]);
@@ -57,6 +96,7 @@ describe("voice Phase 1 boundary", () => {
       kind: "builtin-babble",
       engineUsed: "builtin-babble",
       text: "hello",
+      censorRanges: [],
       profile: request.profile,
     });
   });
@@ -73,6 +113,48 @@ describe("voice Phase 1 boundary", () => {
       "The important part is trust.",
     );
   });
+  it("sends only a harmless carrier plus exact censor ranges to synthesizers", () => {
+    const request = validateVoiceSynthesisRequest({
+      text: "That is f***ing ridiculous, you absolute b••••••.",
+      elevenLabsText:
+        "[sighs] That is f***ing ridiculous, you absolute b••••••.",
+      mode: "english",
+      engine: "elevenlabs",
+      explicitOnlineContext: true,
+    });
+    assert.equal(
+      request.text,
+      "That is bleep ridiculous, you absolute bleep.",
+    );
+    assert.equal(
+      request.elevenLabsText,
+      "[sighs] That is bleep ridiculous, you absolute bleep.",
+    );
+    assert.deepEqual(request.textCensorRanges, [
+      { start: 8, end: 13 },
+      { start: 39, end: 44 },
+    ]);
+    assert.deepEqual(request.elevenLabsCensorRanges, [
+      { start: 16, end: 21 },
+      { start: 47, end: 52 },
+    ]);
+    const local = resolveVoiceSynthesisBoundary({
+      ...request,
+      persistedMessageProvider: "local",
+    });
+    const online = resolveVoiceSynthesisBoundary(request);
+    const synthesisInputs = [
+      local.ok ? local.text : "",
+      online.ok && online.kind === "elevenlabs-stream"
+        ? online.elevenLabsText
+        : "",
+    ];
+    assert.ok(synthesisInputs.every((text) => text.includes("bleep")));
+    assert.ok(synthesisInputs.every((text) => !text.includes("•")));
+    assert.ok(synthesisInputs.every((text) =>
+      !/\b(?:fuck\w*|goddamn|shit\w*|damn|hell|asshole|bastard)\b/iu.test(text)
+    ));
+  });
   it("uses a phonetic player name only in synthesized text", () => {
     assert.equal(
       applyPlayerNamePronunciation("Jared, what do you think?", "Jared", "Jair-id"),
@@ -86,35 +168,17 @@ describe("voice Phase 1 boundary", () => {
   it("forces ElevenLabs history from LOCAL through builtin fallback without egress", () => {
     const request = validateVoiceSynthesisRequest({ text: "hello", mode: "english", engine: "elevenlabs", explicitOnlineContext: true });
     const result = resolveVoiceSynthesisBoundary({ ...request, persistedMessageProvider: "local" });
-    assert.deepEqual(result, {
-      ok: true,
-      kind: "builtin-english",
-      engineUsed: "builtin-local-fallback",
-      text: "hello",
-      profile: {
-        v: 2,
-        enabled: true,
-        baseVoiceId: "voice-1",
-        elevenLabsEffect: "chorus",
-        pitch: 0,
-        warmth: 0,
-        pace: 0.333,
-        lilt: 0,
-        bottishTone: 0.45,
-        eqTilt: 0,
-        gainDb: 0,
-        volume: 1,
-        texture: {
-          preset: "clean",
-          amount: 0,
-          bandwidth: 1,
-          noise: 0,
-          instability: 0,
-          distortion: 0,
-          damage: 0,
-        },
-      },
-    });
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    assert.equal(result.kind, "builtin-english");
+    assert.equal(result.engineUsed, "builtin-local-fallback");
+    assert.equal(result.text, "hello");
+    assert.equal(result.profile.v, 2);
+    assert.equal(result.profile.enabled, true);
+    assert.equal(result.profile.baseVoiceId, "voice-1");
+    assert.equal(result.profile.elevenLabsEffect, "chorus");
+    assert.equal(result.profile.pace, 0.333);
+    assert.equal(result.profile.texture.preset, "clean");
   });
   it("requires explicit online context for an ElevenLabs preview", () => {
     const request = validateVoiceSynthesisRequest({ text: "hello", mode: "english", engine: "elevenlabs" });
@@ -199,6 +263,14 @@ describe("voice Phase 1 boundary", () => {
         elevenLabsText: "[explosion] Welcome back.",
       }).elevenLabsText,
       null,
+    );
+    assert.equal(
+      validateVoiceSynthesisRequest({
+        ...request,
+        text: "That surprised me. Excuse me.",
+        elevenLabsText: "That surprised me. [burps] Excuse me.",
+      }).elevenLabsText,
+      "That surprised me. [burps] Excuse me.",
     );
     const withLeakedStageDirection = validateVoiceSynthesisRequest({
       ...request,
@@ -339,6 +411,7 @@ describe("voice Phase 1 boundary", () => {
       voiceId: "voice/provider id",
       model: "eleven_flash_v2_5",
       text: "hello",
+      seed: elevenLabsVoiceIsolationSeed("bot-morty"),
       profile: { v: 1, baseVoiceId: "voice-1", pitch: 0, warmth: 0, pace: 0, lilt: 0 },
       fetchImpl: (async (url, init) => {
         request = { url: String(url), init };
@@ -354,6 +427,21 @@ describe("voice Phase 1 boundary", () => {
     const body = JSON.parse(String(request?.init?.body));
     assert.equal(body.model_id, "eleven_flash_v2_5");
     assert.equal(body.text, "hello");
+    assert.equal(body.seed, elevenLabsVoiceIsolationSeed("bot-morty"));
+    assert.equal(body.previous_text, undefined);
+    assert.equal(body.next_text, undefined);
+    assert.equal(body.previous_request_ids, undefined);
+    assert.equal(body.next_request_ids, undefined);
+  });
+
+  it("gives bots sharing one ElevenLabs actor stable isolated sampling lanes", () => {
+    const morty = elevenLabsVoiceIsolationSeed("bot-morty");
+    const rick = elevenLabsVoiceIsolationSeed("bot-rick");
+    assert.equal(morty, elevenLabsVoiceIsolationSeed("bot-morty"));
+    assert.notEqual(morty, rick);
+    assert.equal(elevenLabsVoiceIsolationSeed("  bot-morty  "), morty);
+    assert.equal(elevenLabsVoiceIsolationSeed(null), undefined);
+    assert.ok(morty !== undefined && morty >= 0 && morty <= 4_294_967_295);
   });
 
   it("turns a saved voice direction deck into Eleven v3 audio tags", async () => {
@@ -396,6 +484,798 @@ describe("voice Phase 1 boundary", () => {
       requestBody?.text,
       "[warm] [hushed] [with measured pauses] The door is already open.",
     );
+  });
+
+  it("combines the private Accent Map cue with authored directions in Eleven v3", async () => {
+    let requestBody: Record<string, unknown> | null = null;
+    const text = "The door is already open.";
+    const request = {
+      apiKey: "secret-key", voiceId: "voice-id", model: "eleven_flash_v2_5",
+      text, deliveryMood: "warm" as const,
+      profile: {
+        v: 2 as const, enabled: true, baseVoiceId: "voice-1" as const, elevenLabsEffect: "clean" as const,
+        elevenLabsDirection: "hushed, measured", elevenLabsNativeAccentHint: "American",
+        accentDefinitionId: "german-influenced-english",
+        pronunciationBase: "en-US", speechprintInfluence: "italian-influenced-english",
+        speechprintStrength: "balanced", pitch: 0, warmth: 0, pace: 0, lilt: 0,
+        bottishTone: 0.45, volume: 1, texture: { preset: "clean", amount: 0, bandwidth: 1, noise: 0, instability: 0, distortion: 0, damage: 0 },
+      },
+      fetchImpl: (async (_url, init) => {
+        requestBody = JSON.parse(String(init?.body));
+        return new Response(new Uint8Array([1]), { status: 200 });
+      }) as typeof fetch,
+    };
+    await requestElevenLabsSpeech(request);
+    assert.equal(requestBody?.model_id, "eleven_v3");
+    assert.equal(
+      requestBody?.text,
+      "[German accent] [hushed] [measured] The door is already open.",
+    );
+    assert.equal(request.text, text);
+    assert.doesNotMatch(requestBody?.text as string, /warmly/u);
+  });
+
+  it("bypasses Accent Map direction and phonology when the bot switch is off", async () => {
+    let requestBody: Record<string, unknown> | null = null;
+    let ipaResolverCalled = false;
+    const calls: string[] = [];
+    const text = "Peter Piper picked a peck of pickled peppers.";
+    await requestElevenLabsSpeech({
+      apiKey: "secret-key",
+      tenantId: "tenant-disabled",
+      privacyMode: "online",
+      voiceId: "british-premium-voice",
+      model: "eleven_flash_v2_5",
+      text,
+      profile: {
+        ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V2,
+        accentPronunciationEnabled: false,
+        premiumPronunciationEnabled: false,
+        accentDefinitionId: "american-english",
+        pronunciationMapPoint: { x: 0.28, y: 0.31 },
+        speechprintInfluence: "american-english",
+      },
+      accentIpaResolver: async () => {
+        ipaResolverCalled = true;
+        throw new Error("disabled Accent Map must not resolve IPA");
+      },
+      fetchImpl: (async (url, init) => {
+        calls.push(String(url));
+        requestBody = JSON.parse(String(init?.body));
+        return new Response(new Uint8Array([1]), { status: 200 });
+      }) as typeof fetch,
+    });
+
+    assert.equal(ipaResolverCalled, false);
+    assert.equal(requestBody?.model_id, "eleven_flash_v2_5");
+    assert.equal(requestBody?.text, text);
+    assert.equal(requestBody?.pronunciation_dictionary_locators, undefined);
+    assert.deepEqual(calls.filter((url) => url.includes("pronunciation-dictionaries")), []);
+  });
+
+  it("forces Accent Map pronunciation on a Premium voice that would otherwise be native-eligible", async () => {
+    let requestBody: Record<string, unknown> | null = null;
+    await requestElevenLabsSpeech({
+      apiKey: "secret-key",
+      voiceId: "german-premium-voice",
+      model: "eleven_flash_v2_5",
+      text: "Walter waits.",
+      profile: {
+        ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V2,
+        premiumPronunciationEnabled: true,
+        elevenLabsNativeAccentHint: "German",
+        accentDefinitionId: "german-influenced-english",
+      },
+      fetchImpl: (async (_url, init) => {
+        requestBody = JSON.parse(String(init?.body));
+        return new Response(new Uint8Array([1]), { status: 200 });
+      }) as typeof fetch,
+    });
+    assert.equal(requestBody?.model_id, "eleven_v3");
+    assert.equal(requestBody?.text, "[German accent] Walter waits.");
+  });
+
+  it("attaches Accent Map IPA to the streaming request without changing its voice", async () => {
+    resetElevenLabsPronunciationDictionaryCacheForTests();
+    const calls: Array<{ url: string; body: Record<string, unknown> | null }> = [];
+    await requestElevenLabsSpeech({
+      apiKey: "secret-key",
+      tenantId: "tenant-stream",
+      privacyMode: "online",
+      voiceId: "stream-selected-voice",
+      model: "eleven_flash_v2_5",
+      text: "When.",
+      profile: {
+        ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V2,
+        premiumPronunciationEnabled: true,
+        accentDefinitionId: "northern-german-influenced-english",
+      },
+      accentIpaResolver: async () => ({
+        sourceText: "When.", targetLocale: "en-US", targetIpa: "vˈɛn",
+        identity: {
+          accentDefinitionId: "northern-german-influenced-english",
+          field: [{
+            accentDefinitionId: "northern-german-influenced-english",
+            pronunciationBase: "en-US",
+            influence: "northern-german-influenced-english",
+            weight: 1,
+          }],
+          strength: "balanced",
+        },
+        rulesetVersion: "test-v1",
+        rulesetSha256: "e".repeat(64),
+        planSha256: "f".repeat(64),
+        spans: [{
+          sourceStart: 0, sourceEnd: 4, sourceText: "When",
+          canonicalGrapheme: "when", baselineIpa: "wˈɛn", targetIpa: "vˈɛn",
+          changed: true, protected: false, appliedRuleIds: ["w-labiodental"],
+        }],
+      }),
+      fetchImpl: (async (url, init) => {
+        const requestUrl = String(url);
+        const body = typeof init?.body === "string"
+          ? JSON.parse(init.body) as Record<string, unknown>
+          : null;
+        calls.push({ url: requestUrl, body });
+        if (requestUrl.includes("page_size=100")) {
+          return Response.json({ pronunciation_dictionaries: [] });
+        }
+        if (requestUrl.endsWith("/add-from-rules")) {
+          return Response.json({ id: "stream-map", version_id: "stream-v1" });
+        }
+        return new Response(new Uint8Array([1]), { status: 200 });
+      }) as typeof fetch,
+    });
+    const providerCall = calls.find((call) => call.url.includes("text-to-speech"));
+    assert.match(providerCall?.url ?? "", /stream-selected-voice\/stream/u);
+    assert.equal(providerCall?.body?.model_id, "eleven_v3");
+    assert.equal(providerCall?.body?.text, "[Northern German accent] When.");
+    assert.deepEqual(providerCall?.body?.pronunciation_dictionary_locators, [{
+      pronunciation_dictionary_id: "stream-map",
+      version_id: "stream-v1",
+    }]);
+  });
+
+  it("sends the reported Northern German prose with its national phonology and regional R", async () => {
+    resetElevenLabsPronunciationDictionaryCacheForTests();
+    const sourceText =
+      "The weary watchmaker thought for a moment, turned toward the old harbor, and watched bright birds circle above the stone tower as the whole valley grew wonderfully still.";
+    const calls: Array<{ url: string; body: Record<string, unknown> | null }> = [];
+    await requestElevenLabsSpeech({
+      apiKey: "secret-key",
+      tenantId: "tenant-northern-german-prose",
+      privacyMode: "online",
+      voiceId: "selected-american-voice",
+      model: "eleven_flash_v2_5",
+      text: sourceText,
+      profile: {
+        ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V2,
+        premiumPronunciationEnabled: true,
+        accentDefinitionId: "northern-german-influenced-english",
+        pronunciationMapPoint: voiceAccentMapPointForCoordinates(10, 53.55),
+        speechprintStrength: "balanced",
+      },
+      fetchImpl: (async (url, init) => {
+        const requestUrl = String(url);
+        const body = typeof init?.body === "string"
+          ? JSON.parse(init.body) as Record<string, unknown>
+          : null;
+        calls.push({ url: requestUrl, body });
+        if (requestUrl.includes("page_size=100")) {
+          return Response.json({ pronunciation_dictionaries: [] });
+        }
+        if (requestUrl.endsWith("/add-from-rules")) {
+          return Response.json({ id: "regional-map", version_id: "regional-v1" });
+        }
+        return new Response(new Uint8Array([1]), { status: 200 });
+      }) as typeof fetch,
+    });
+
+    const dictionaryCall = calls.find((call) =>
+      call.url.endsWith("/add-from-rules"),
+    );
+    const rules = Array.isArray(dictionaryCall?.body?.rules)
+      ? dictionaryCall.body.rules as Array<Record<string, unknown>>
+      : [];
+    const phonemeByWord = new Map(rules.map((rule) => [
+      String(rule.string_to_replace),
+      String(rule.phoneme),
+    ]));
+    assert.equal(phonemeByWord.get("the"), "zˈə");
+    assert.equal(phonemeByWord.get("thought"), "sˈɔːt");
+    assert.equal(phonemeByWord.get("weary"), "vˈɪɹi");
+    assert.equal(phonemeByWord.get("harbor"), "hˈɑʁbəʁ");
+    assert.equal(phonemeByWord.get("birds"), "bˈɜʁdz");
+    const providerCall = calls.find((call) =>
+      call.url.includes("text-to-speech"),
+    );
+    assert.match(providerCall?.url ?? "", /selected-american-voice\/stream/u);
+    assert.equal(providerCall?.body?.model_id, "eleven_v3");
+    assert.equal(providerCall?.body?.text, `[Northern German accent] ${sourceText}`);
+    assert.deepEqual(providerCall?.body?.pronunciation_dictionary_locators, [{
+      pronunciation_dictionary_id: "regional-map",
+      version_id: "regional-v1",
+    }]);
+  });
+
+  it("attaches inherited regional-family IPA across Premium Accent Map voices", async () => {
+    const sourceText =
+      "This thoughtful river runs under another hidden arch.";
+    const cases = [
+      {
+        accentDefinitionId: "southern-french-influenced-english",
+        expected: {
+          this: "zˈis",
+          runs: "ʁˈanz",
+          hidden: "ˈiden",
+        },
+      },
+      {
+        accentDefinitionId: "northern-italian-influenced-english",
+        expected: {
+          this: "dˈis",
+          runs: "ɾˈanzə",
+          another: "ɐnˈadəɾə",
+        },
+      },
+      {
+        accentDefinitionId: "southern-italian-influenced-english",
+        expected: {
+          this: "dˈɪsə",
+          runs: "ɾˈanzə",
+          another: "ɐnˈadəɾə",
+        },
+      },
+      {
+        accentDefinitionId: "andalusian-spanish-influenced-english",
+        expected: {
+          thoughtful: "sˈɔːtfəl",
+          runs: "ɾˈanz",
+          hidden: "hˈidən",
+        },
+      },
+    ] as const;
+
+    for (const testCase of cases) {
+      resetElevenLabsPronunciationDictionaryCacheForTests();
+      const point = VOICE_ACCENT_MAP_ANCHORS.find(
+        (anchor) =>
+          anchor.accentDefinitionId === testCase.accentDefinitionId,
+      )?.point;
+      assert.ok(point, testCase.accentDefinitionId);
+      const calls: Array<{
+        url: string;
+        body: Record<string, unknown> | null;
+      }> = [];
+      await requestElevenLabsSpeech({
+        apiKey: "secret-key",
+        tenantId: `tenant-${testCase.accentDefinitionId}`,
+        privacyMode: "online",
+        voiceId: "selected-premium-voice",
+        model: "eleven_flash_v2_5",
+        text: sourceText,
+        profile: {
+          ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V2,
+          premiumPronunciationEnabled: true,
+          accentDefinitionId: testCase.accentDefinitionId,
+          pronunciationMapPoint: point,
+          speechprintStrength: "strong",
+        },
+        fetchImpl: (async (url, init) => {
+          const requestUrl = String(url);
+          const body = typeof init?.body === "string"
+            ? JSON.parse(init.body) as Record<string, unknown>
+            : null;
+          calls.push({ url: requestUrl, body });
+          if (requestUrl.includes("page_size=100")) {
+            return Response.json({ pronunciation_dictionaries: [] });
+          }
+          if (requestUrl.endsWith("/add-from-rules")) {
+            return Response.json({
+              id: `map-${testCase.accentDefinitionId}`,
+              version_id: "regional-v1",
+            });
+          }
+          return new Response(new Uint8Array([1]), { status: 200 });
+        }) as typeof fetch,
+      });
+
+      const dictionaryCall = calls.find((call) =>
+        call.url.endsWith("/add-from-rules"),
+      );
+      const rules = Array.isArray(dictionaryCall?.body?.rules)
+        ? dictionaryCall.body.rules as Array<Record<string, unknown>>
+        : [];
+      const phonemeByWord = new Map(rules.map((rule) => [
+        String(rule.string_to_replace),
+        String(rule.phoneme),
+      ]));
+      for (const [word, phoneme] of Object.entries(testCase.expected)) {
+        assert.equal(
+          phonemeByWord.get(word),
+          phoneme,
+          `${testCase.accentDefinitionId}:${word}`,
+        );
+      }
+      const providerCall = calls.find((call) =>
+        call.url.includes("text-to-speech"),
+      );
+      assert.match(providerCall?.url ?? "", /selected-premium-voice\/stream/u);
+      assert.equal(providerCall?.body?.model_id, "eleven_v3");
+      assert.equal(String(providerCall?.body?.text).endsWith(sourceText), true);
+      assert.deepEqual(providerCall?.body?.pronunciation_dictionary_locators, [{
+        pronunciation_dictionary_id: `map-${testCase.accentDefinitionId}`,
+        version_id: "regional-v1",
+      }]);
+    }
+  });
+
+  it("keeps three protected locators in caller order and falls Accent Map back inline", async () => {
+    let dictionaryCalls = 0;
+    let providerBody: Record<string, unknown> | null = null;
+    const protectedLocators = [
+      { pronunciation_dictionary_id: "first", version_id: "v1" },
+      { pronunciation_dictionary_id: "second", version_id: "v2" },
+      { pronunciation_dictionary_id: "third", version_id: "v3" },
+      { pronunciation_dictionary_id: "ignored", version_id: "v4" },
+    ];
+    await requestElevenLabsSpeech({
+      apiKey: "secret-key",
+      tenantId: "tenant-cap",
+      privacyMode: "online",
+      voiceId: "voice-cap",
+      model: "eleven_flash_v2_5",
+      text: "When.",
+      protectedPronunciationDictionaryLocators: protectedLocators,
+      profile: {
+        ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V2,
+        premiumPronunciationEnabled: true,
+        accentDefinitionId: "german-influenced-english",
+      },
+      accentIpaResolver: async () => ({
+        sourceText: "When.", targetLocale: "en-US", targetIpa: "vˈɛn",
+        identity: {
+          accentDefinitionId: "german-influenced-english",
+          field: [{
+            accentDefinitionId: "german-influenced-english",
+            pronunciationBase: "en-US",
+            influence: "german-influenced-english",
+            weight: 1,
+          }],
+          strength: "balanced",
+        },
+        rulesetVersion: "test-v1",
+        rulesetSha256: "1".repeat(64),
+        planSha256: "2".repeat(64),
+        spans: [{
+          sourceStart: 0, sourceEnd: 4, sourceText: "When",
+          canonicalGrapheme: "when", baselineIpa: "wˈɛn", targetIpa: "vˈɛn",
+          changed: true, protected: false, appliedRuleIds: ["w-labiodental"],
+        }],
+      }),
+      fetchImpl: (async (url, init) => {
+        if (String(url).includes("pronunciation-dictionaries")) dictionaryCalls += 1;
+        providerBody = JSON.parse(String(init?.body));
+        return new Response(new Uint8Array([1]), { status: 200 });
+      }) as typeof fetch,
+    });
+    assert.equal(dictionaryCalls, 0);
+    assert.equal(providerBody?.text, "[German accent] /vˈɛn/.");
+    assert.deepEqual(
+      providerBody?.pronunciation_dictionary_locators,
+      protectedLocators.slice(0, 3),
+    );
+  });
+
+  it("keeps canonical Premium text and voice identity while attaching the tenant Accent Map locator last", async () => {
+    resetElevenLabsPronunciationDictionaryCacheForTests();
+    const sourceText = "When Walter waits.";
+    const calls: Array<{ url: string; body: Record<string, unknown> | null }> = [];
+    const speech = await requestElevenLabsSpeechWithTimestamps({
+      apiKey: "secret-key",
+      tenantId: "tenant-a",
+      privacyMode: "online",
+      voiceId: "selected-premium-voice",
+      model: "eleven_flash_v2_5",
+      text: sourceText,
+      protectedPhrases: ["Walter"],
+      protectedPronunciationDictionaryLocators: [
+        { pronunciation_dictionary_id: "player-name", version_id: "player-v1" },
+        { pronunciation_dictionary_id: "bot-name", version_id: "bot-v2" },
+      ],
+      profile: {
+        ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V2,
+        premiumPronunciationEnabled: true,
+        accentDefinitionId: "northern-german-influenced-english",
+      },
+      accentIpaResolver: async () => ({
+        sourceText,
+        targetLocale: "en-US",
+        targetIpa: "vˈɛn vˈɔltəɹ vˈeɪts",
+        identity: {
+          accentDefinitionId: "northern-german-influenced-english",
+          field: [{
+            accentDefinitionId: "northern-german-influenced-english",
+            pronunciationBase: "en-US",
+            influence: "northern-german-influenced-english",
+            weight: 1,
+          }],
+          strength: "balanced",
+        },
+        rulesetVersion: "test-v1",
+        rulesetSha256: "a".repeat(64),
+        planSha256: "b".repeat(64),
+        spans: [
+          {
+            sourceStart: 0, sourceEnd: 4, sourceText: "When",
+            canonicalGrapheme: "when", baselineIpa: "wˈɛn", targetIpa: "vˈɛn",
+            changed: true, protected: false, appliedRuleIds: ["w-labiodental"],
+          },
+          {
+            sourceStart: 5, sourceEnd: 11, sourceText: "Walter",
+            canonicalGrapheme: "walter", baselineIpa: "wˈɔltəɹ", targetIpa: "wˈɔltəɹ",
+            changed: false, protected: true, appliedRuleIds: [],
+          },
+          {
+            sourceStart: 12, sourceEnd: 17, sourceText: "waits",
+            canonicalGrapheme: "waits", baselineIpa: "wˈeɪts", targetIpa: "vˈeɪts",
+            changed: true, protected: false, appliedRuleIds: ["w-labiodental"],
+          },
+        ],
+      }),
+      fetchImpl: (async (url, init) => {
+        const requestUrl = String(url);
+        const body = typeof init?.body === "string"
+          ? JSON.parse(init.body) as Record<string, unknown>
+          : null;
+        calls.push({ url: requestUrl, body });
+        if (requestUrl.includes("page_size=100")) {
+          return Response.json({ pronunciation_dictionaries: [] });
+        }
+        if (requestUrl.endsWith("/add-from-rules")) {
+          return Response.json({ id: "accent-map", version_id: "accent-v1" });
+        }
+        assert.match(requestUrl, /selected-premium-voice\/with-timestamps/u);
+        assert.equal(body?.model_id, "eleven_v3");
+        assert.equal(body?.text, "[Northern German accent] When Walter waits.");
+        assert.deepEqual(body?.pronunciation_dictionary_locators, [
+          { pronunciation_dictionary_id: "player-name", version_id: "player-v1" },
+          { pronunciation_dictionary_id: "bot-name", version_id: "bot-v2" },
+          { pronunciation_dictionary_id: "accent-map", version_id: "accent-v1" },
+        ]);
+        const characters = Array.from(String(body?.text));
+        return Response.json({
+          audio_base64: "AQID",
+          alignment: {
+            characters,
+            character_start_times_seconds: characters.map((_, index) => index * 0.01),
+            character_end_times_seconds: characters.map((_, index) => (index + 1) * 0.01),
+          },
+        });
+      }) as typeof fetch,
+    });
+    assert.equal(speech.alignment?.characters.join(""), sourceText);
+    assert.deepEqual(speech.premiumPhonology, {
+      planSha256: "b".repeat(64),
+      rulesetVersion: "test-v1",
+      rulesetSha256: "a".repeat(64),
+      model: "eleven_v3",
+      direction: "Northern German accent",
+      gateEnabled: true,
+      locatorVersionId: "accent-v1",
+      fallback: "dictionary",
+    });
+    assert.equal(calls.filter((call) => call.url.includes("text-to-speech")).length, 1);
+  });
+
+  it("bounds dictionary failure and restores timestamp alignment after selective inline v3 IPA", async () => {
+    resetElevenLabsPronunciationDictionaryCacheForTests();
+    const sourceText = "When now.";
+    let providerBody: Record<string, unknown> | null = null;
+    const speech = await requestElevenLabsSpeechWithTimestamps({
+      apiKey: "secret-key",
+      tenantId: "tenant-timeout",
+      privacyMode: "online",
+      voiceId: "voice-id",
+      model: "eleven_flash_v2_5",
+      text: sourceText,
+      pronunciationDictionaryTimeoutMs: 50,
+      profile: {
+        ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V2,
+        premiumPronunciationEnabled: true,
+        accentDefinitionId: "german-influenced-english",
+      },
+      accentIpaResolver: async () => ({
+        sourceText,
+        targetLocale: "en-US",
+        targetIpa: "vˈɛn nˈaʊ",
+        identity: {
+          accentDefinitionId: "german-influenced-english",
+          field: [{ accentDefinitionId: "german-influenced-english", pronunciationBase: "en-US", influence: "german-influenced-english", weight: 1 }],
+          strength: "balanced",
+        },
+        rulesetVersion: "test-v1",
+        rulesetSha256: "c".repeat(64),
+        planSha256: "d".repeat(64),
+        spans: [{
+          sourceStart: 0, sourceEnd: 4, sourceText: "When", canonicalGrapheme: "when",
+          baselineIpa: "wˈɛn", targetIpa: "vˈɛn", changed: true, protected: false,
+          appliedRuleIds: ["w-labiodental"],
+        }],
+      }),
+      fetchImpl: (async (url, init) => {
+        if (String(url).includes("pronunciation-dictionaries")) {
+          return new Promise<Response>(() => {});
+        }
+        providerBody = JSON.parse(String(init?.body));
+        const characters = Array.from(String(providerBody.text));
+        return Response.json({
+          audio_base64: "AQID",
+          alignment: {
+            characters,
+            character_start_times_seconds: characters.map((_, index) => index * 0.01),
+            character_end_times_seconds: characters.map((_, index) => (index + 1) * 0.01),
+          },
+        });
+      }) as typeof fetch,
+    });
+    assert.equal(providerBody?.text, "[German accent] /vˈɛn/ now.");
+    assert.equal(speech.alignment?.characters.join(""), sourceText);
+    assert.equal(speech.premiumPhonology?.fallback, "inline-ipa");
+  });
+
+  it("rejects direct ElevenLabs synthesis in LOCAL mode before any provider or dictionary egress", async () => {
+    let calls = 0;
+    await assert.rejects(
+      requestElevenLabsSpeech({
+        apiKey: "secret-key",
+        tenantId: "tenant",
+        privacyMode: "local",
+        voiceId: "voice-id",
+        model: "eleven_v3",
+        text: "When.",
+        profile: {
+          ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V2,
+          premiumPronunciationEnabled: true,
+          accentDefinitionId: "german-influenced-english",
+        },
+        fetchImpl: (async () => {
+          calls += 1;
+          return new Response("audio");
+        }) as typeof fetch,
+      }),
+      /LOCAL mode/u,
+    );
+    assert.equal(calls, 0);
+  });
+
+  it("normalizes umbrella profiles to concrete directions and reserves target IPA for Scottish", async () => {
+    const sourceText = "Peter Piper picked a peck of pickled peppers.";
+    const cases = [
+      {
+        voiceId: "british-premium-voice",
+        nativeAccent: "British",
+        accentDefinitionId: "american-english",
+        targetIpa: "ˈpiːtɚ ˈpaɪpɚ pɪkt ə pɛk əv ˈpɪkəld ˈpɛpɚz",
+        expectedText:
+          `[General American accent] ${sourceText}`,
+      },
+      {
+        voiceId: "american-premium-voice",
+        nativeAccent: "American",
+        accentDefinitionId: "british-english",
+        targetIpa: "ˈpiːtə ˈpaɪpə pɪkt ə pɛk əv ˈpɪkəld ˈpɛpəz",
+        expectedText:
+          `[Received Pronunciation accent] ${sourceText}`,
+      },
+      {
+        voiceId: "american-premium-voice",
+        nativeAccent: "American",
+        accentDefinitionId: "scottish-english",
+        targetIpa: "ˈpitər ˈpaɪpər pɪkt ə pɛk əv ˈpɪkəld ˈpɛpərz",
+        expectedText:
+          "[Scottish accent] /ˈpitər ˈpaɪpər pɪkt ə pɛk əv ˈpɪkəld ˈpɛpərz/",
+      },
+    ] as const;
+    const providerTexts: string[] = [];
+
+    for (const testCase of cases) {
+      let requestedUrl = "";
+      let requestBody: Record<string, unknown> | null = null;
+      const request = {
+        apiKey: "secret-key",
+        voiceId: testCase.voiceId,
+        model: "eleven_flash_v2_5",
+        text: sourceText,
+        profile: {
+          ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V2,
+          premiumPronunciationEnabled: true,
+          elevenLabsNativeAccentHint: testCase.nativeAccent,
+          accentDefinitionId: testCase.accentDefinitionId,
+        },
+        accentIpaResolver: async (args: { text: string }) => ({
+          sourceText: args.text,
+          targetLocale: "en-US",
+          targetIpa: testCase.targetIpa,
+        }),
+        fetchImpl: (async (url, init) => {
+          requestedUrl = String(url);
+          requestBody = JSON.parse(String(init?.body));
+          return new Response(new Uint8Array([1]), { status: 200 });
+        }) as typeof fetch,
+      };
+
+      await requestElevenLabsSpeech(request);
+
+      assert.match(
+        requestedUrl,
+        new RegExp(`${testCase.voiceId}/stream`, "u"),
+      );
+      assert.equal(requestBody?.model_id, "eleven_v3");
+      assert.equal(requestBody?.text, testCase.expectedText);
+      assert.equal(requestBody?.pronunciation_dictionary_locators, undefined);
+      assert.equal(request.text, sourceText);
+      providerTexts.push(String(requestBody?.text));
+    }
+
+    assert.equal(new Set(providerTexts).size, 3);
+  });
+
+  it("carries an unnamed point as the same weighted two-anchor Premium blend", async () => {
+    const newYork = VOICE_ACCENT_MAP_ANCHORS.find(
+      (anchor) => anchor.accentDefinitionId === "new-york-english",
+    );
+    const newJersey = VOICE_ACCENT_MAP_ANCHORS.find(
+      (anchor) => anchor.accentDefinitionId === "new-jersey-english",
+    );
+    assert.ok(newYork && newJersey);
+    const pronunciationMapPoint = {
+      x: (newYork.point.x + newJersey.point.x) / 2,
+      y: (newYork.point.y + newJersey.point.y) / 2,
+    };
+    let requestBody: Record<string, unknown> | null = null;
+    const text = "The river bends past the harbor.";
+    await requestElevenLabsSpeech({
+      apiKey: "secret-key",
+      voiceId: "premium-voice",
+      model: "eleven_flash_v2_5",
+      text,
+      profile: {
+        ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V2,
+        premiumPronunciationEnabled: true,
+        accentDefinitionId: null,
+        pronunciationMapPoint,
+        pronunciationBase: "en-US",
+        speechprintInfluence: "none",
+      },
+      fetchImpl: (async (_url, init) => {
+        requestBody = JSON.parse(String(init?.body));
+        return new Response(new Uint8Array([1]), { status: 200 });
+      }) as typeof fetch,
+    });
+
+    assert.equal(
+      requestBody?.text,
+      `[50% New York accent] [50% New Jersey accent] ${text}`,
+    );
+    assert.equal(requestBody?.model_id, "eleven_v3");
+  });
+
+  it("keeps an unnamed Bavarian-core drop as one exact Premium source", async () => {
+    const bavaria = VOICE_ACCENT_MAP_ANCHORS.find(
+      (anchor) =>
+        anchor.accentDefinitionId ===
+        "bavarian-german-influenced-english",
+    );
+    assert.ok(bavaria);
+    const text = "The river bends past the old road.";
+    let requestBody: Record<string, unknown> | null = null;
+    await requestElevenLabsSpeech({
+      apiKey: "secret-key",
+      voiceId: "premium-voice",
+      model: "eleven_flash_v2_5",
+      text,
+      profile: {
+        ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V2,
+        premiumPronunciationEnabled: true,
+        accentDefinitionId: null,
+        pronunciationMapPoint: bavaria.point,
+        pronunciationBase: "en-US",
+        speechprintInfluence: "none",
+      },
+      fetchImpl: (async (_url, init) => {
+        requestBody = JSON.parse(String(init?.body));
+        return new Response(new Uint8Array([1]), { status: 200 });
+      }) as typeof fetch,
+    });
+
+    assert.equal(requestBody?.text, `[Bavarian German accent] ${text}`);
+    assert.doesNotMatch(String(requestBody?.text), /%/u);
+    assert.equal(requestBody?.model_id, "eleven_v3");
+  });
+
+  it("keeps the exact objection sentence authored in British-family Premium routing", async () => {
+    const text =
+      "Objection. Your theory collapses under the weight of a single, undeniable contradiction.";
+    let requestBody: Record<string, unknown> | null = null;
+    await requestElevenLabsSpeech({
+      apiKey: "secret-key",
+      voiceId: "american-premium-voice",
+      model: "eleven_flash_v2_5",
+      text,
+      profile: {
+        ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V2,
+        premiumPronunciationEnabled: true,
+        elevenLabsNativeAccentHint: "American",
+        accentDefinitionId: "british-english",
+      },
+      accentIpaResolver: async () => {
+        throw new Error("removed umbrella must not take the full-utterance IPA path");
+      },
+      fetchImpl: (async (_url, init) => {
+        requestBody = JSON.parse(String(init?.body));
+        return new Response(new Uint8Array([1]), { status: 200 });
+      }) as typeof fetch,
+    });
+
+    assert.equal(
+      requestBody?.text,
+      `[Received Pronunciation accent] ${text}`,
+    );
+  });
+
+  it("carries Accent Map strength in the Premium direction, never in the line", async () => {
+    let requestBody: Record<string, unknown> | null = null;
+    const text = "They think this hard river is home late.";
+    await requestElevenLabsSpeech({
+      apiKey: "secret-key",
+      voiceId: "american-premium-voice",
+      model: "eleven_flash_v2_5",
+      text,
+      profile: {
+        ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V2,
+        premiumPronunciationEnabled: true,
+        elevenLabsNativeAccentHint: "American",
+        accentDefinitionId: "parisian-french-influenced-english",
+        speechprintStrength: "strong",
+        speechprintVariationSeed: "paris-preview-runtime",
+      },
+      fetchImpl: (async (_url, init) => {
+        requestBody = JSON.parse(String(init?.body));
+        return new Response(new Uint8Array([1]), { status: 200 });
+      }) as typeof fetch,
+    });
+
+    assert.equal(requestBody?.model_id, "eleven_v3");
+    assert.equal(
+      requestBody?.text,
+      `[strong Parisian French accent] ${text}`,
+    );
+  });
+
+  it("never respells names or words on the Premium Accent Map path", async () => {
+    let requestBody: Record<string, unknown> | null = null;
+    await requestElevenLabsSpeech({
+      apiKey: "secret-key",
+      voiceId: "voice-id",
+      model: "eleven_flash_v2_5",
+      text: "Walter waits.",
+      profile: {
+        ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V2,
+        premiumPronunciationEnabled: true,
+        accentDefinitionId: "german-influenced-english",
+        speechprintStrength: "balanced",
+      },
+      fetchImpl: (async (_url, init) => {
+        requestBody = JSON.parse(String(init?.body));
+        return new Response(new Uint8Array([1]), { status: 200 });
+      }) as typeof fetch,
+    });
+
+    // Phoneme notation in the request text is read aloud as notation. The
+    // accent is a direction; the line stays exactly as the bot wrote it.
+    assert.equal(requestBody?.text, "[German accent] Walter waits.");
+    assert.equal(requestBody?.pronunciation_dictionary_locators, undefined);
   });
 
   it("turns non-neutral delivery moods into sparse Eleven v3 directions", async () => {
@@ -445,7 +1325,7 @@ describe("voice Phase 1 boundary", () => {
     assert.equal(requestBody?.text, "The door is already open.");
   });
 
-  it("reserves one direction slot for mood and deduplicates authored direction", async () => {
+  it("keeps all authored identity directions ahead of an ephemeral mood", async () => {
     let requestBody: Record<string, unknown> | null = null;
     await requestElevenLabsSpeech({
       apiKey: "secret-key",
@@ -483,6 +1363,62 @@ describe("voice Phase 1 boundary", () => {
     assert.equal(
       requestBody?.text,
       "[strained] [hushed] [with measured pauses] The door is already open.",
+    );
+  });
+
+  it("does not let a turn mood evict a bot's third authored direction", async () => {
+    let requestBody: Record<string, unknown> | null = null;
+    await requestElevenLabsSpeech({
+      apiKey: "secret-key",
+      voiceId: "shared-actor",
+      model: "eleven_flash_v2_5",
+      text: "The door is already open.",
+      deliveryMood: "joyful",
+      profile: {
+        v: 1,
+        baseVoiceId: "voice-1",
+        elevenLabsDirection: "anxious stammer, youthful pitch, quick cadence",
+        pitch: 0,
+        warmth: 0,
+        pace: 0,
+        lilt: 0,
+      },
+      fetchImpl: (async (_url, init) => {
+        requestBody = JSON.parse(String(init?.body));
+        return new Response(new Uint8Array([1]), { status: 200 });
+      }) as typeof fetch,
+    });
+    assert.equal(
+      requestBody?.text,
+      "[anxious stammer] [youthful pitch] [quick cadence] The door is already open.",
+    );
+  });
+
+  it("appends a turn mood only when the bot has a free direction slot", async () => {
+    let requestBody: Record<string, unknown> | null = null;
+    await requestElevenLabsSpeech({
+      apiKey: "secret-key",
+      voiceId: "shared-actor",
+      model: "eleven_flash_v2_5",
+      text: "The door is already open.",
+      deliveryMood: "joyful",
+      profile: {
+        v: 1,
+        baseVoiceId: "voice-1",
+        elevenLabsDirection: "anxious stammer, quick cadence",
+        pitch: 0,
+        warmth: 0,
+        pace: 0,
+        lilt: 0,
+      },
+      fetchImpl: (async (_url, init) => {
+        requestBody = JSON.parse(String(init?.body));
+        return new Response(new Uint8Array([1]), { status: 200 });
+      }) as typeof fetch,
+    });
+    assert.equal(
+      requestBody?.text,
+      "[anxious stammer] [quick cadence] [delighted] The door is already open.",
     );
   });
 
@@ -613,6 +1549,290 @@ describe("voice Phase 1 boundary", () => {
     assert.equal(speech.alignment?.characters.join(""), "Hi there.");
   });
 
+  it("projects titles and exact clock times only into every Premium speech request", async () => {
+    const sourceText = "Ms. Rivera called Capt. Chen at 10:09 AM";
+    let providerText = "";
+    await requestElevenLabsSpeech({
+      apiKey: "secret-key",
+      voiceId: "voice-id",
+      model: "eleven_flash_v2_5",
+      text: sourceText,
+      profile: { v: 1, baseVoiceId: "voice-1", pitch: 0, warmth: 0, pace: 0, lilt: 0 },
+      fetchImpl: (async (_url, init) => {
+        providerText = JSON.parse(String(init?.body)).text;
+        return new Response("audio", { status: 200 });
+      }) as typeof fetch,
+    });
+    assert.equal(
+      providerText,
+      "Miss Rivera called Captain Chen at ten oh nine in the morning",
+    );
+    assert.equal(sourceText, "Ms. Rivera called Capt. Chen at 10:09 AM");
+  });
+
+  it("maps expanded Premium titles back onto the authored transcript", async () => {
+    const sourceText = "Ms. Rivera called Capt. Chen.";
+    const providerText = "Miss Rivera called Captain Chen.";
+    const characters = Array.from(providerText);
+    const speech = await requestElevenLabsSpeechWithTimestamps({
+      apiKey: "secret-key",
+      voiceId: "voice-id",
+      model: "eleven_flash_v2_5",
+      text: sourceText,
+      profile: { v: 1, baseVoiceId: "voice-1", pitch: 0, warmth: 0, pace: 0, lilt: 0 },
+      fetchImpl: (async (_url, init) => {
+        assert.equal(JSON.parse(String(init?.body)).text, providerText);
+        return new Response(JSON.stringify({
+          audio_base64: "AQID",
+          alignment: {
+            characters,
+            character_start_times_seconds: characters.map(
+              (_, index) => index * 0.05,
+            ),
+            character_end_times_seconds: characters.map(
+              (_, index) => (index + 1) * 0.05,
+            ),
+          },
+        }), { status: 200 });
+      }) as typeof fetch,
+    });
+    assert.equal(speech.alignment?.characters.join(""), sourceText);
+  });
+
+  it("composes title and Accent Map projections without changing alignment text", async () => {
+    const sourceText = "Capt. Rivera.";
+    const providerText = "[General American accent] Captain Rivera.";
+    const characters = Array.from(providerText);
+    const speech = await requestElevenLabsSpeechWithTimestamps({
+      apiKey: "secret-key",
+      voiceId: "british-premium-voice",
+      model: "eleven_flash_v2_5",
+      text: sourceText,
+      profile: {
+        ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V2,
+        premiumPronunciationEnabled: true,
+        elevenLabsNativeAccentHint: "British",
+        accentDefinitionId: "american-english",
+      },
+      accentIpaResolver: async ({ text }) => {
+        assert.equal(text, "Captain Rivera.");
+        return {
+          sourceText: text,
+          targetLocale: "en-US",
+          targetIpa: "ˈkæptən ɹɪˈvɛɹə",
+        };
+      },
+      fetchImpl: (async (_url, init) => {
+        assert.equal(JSON.parse(String(init?.body)).text, providerText);
+        return new Response(JSON.stringify({
+          audio_base64: "AQID",
+          alignment: {
+            characters,
+            character_start_times_seconds: characters.map(
+              (_, index) => index * 0.05,
+            ),
+            character_end_times_seconds: characters.map(
+              (_, index) => (index + 1) * 0.05,
+            ),
+          },
+        }), { status: 200 });
+      }) as typeof fetch,
+    });
+    assert.equal(speech.alignment?.characters.join(""), sourceText);
+  });
+
+  it("maps timestamped alignment back onto the original tagged transcript", async () => {
+    const spokenText = "Peter Piper picked a peck of pickled peppers.";
+    const sourceText = `[sighs] ${spokenText} [laughs]`;
+    let providerText = "";
+    let requestedUrl = "";
+    const request = {
+      apiKey: "secret-key",
+      voiceId: "british-premium-voice",
+      model: "eleven_flash_v2_5",
+      text: sourceText,
+      profile: {
+        ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V2,
+        premiumPronunciationEnabled: true,
+        elevenLabsNativeAccentHint: "British",
+        elevenLabsDirection: "hushed",
+        accentDefinitionId: "american-english",
+      },
+      accentIpaResolver: async () => ({
+        sourceText: spokenText,
+        targetLocale: "en-US",
+        targetIpa: "ˈpiːtɚ ˈpaɪpɚ pɪkt ə pɛk əv ˈpɪkəld ˈpɛpɚz",
+      }),
+      fetchImpl: (async (url, init) => {
+        requestedUrl = String(url);
+        const body = JSON.parse(String(init?.body)) as {
+          text: string;
+          model_id: string;
+        };
+        assert.equal(body.model_id, "eleven_v3");
+        providerText = body.text;
+        const characters = Array.from(body.text);
+        return new Response(JSON.stringify({
+          audio_base64: "AQID",
+          alignment: {
+            characters,
+            character_start_times_seconds: characters.map(
+              (_, index) => index * 0.01,
+            ),
+            character_end_times_seconds: characters.map(
+              (_, index) => (index + 1) * 0.01,
+            ),
+          },
+        }), { status: 200 });
+      }) as typeof fetch,
+    };
+
+    const speech = await requestElevenLabsSpeechWithTimestamps(request);
+
+    assert.match(requestedUrl, /british-premium-voice\/with-timestamps/u);
+    assert.equal(
+      providerText,
+      `[General American accent] [hushed] [sighs] ${spokenText} [laughs]`,
+    );
+    assert.equal(speech.alignment?.characters.join(""), spokenText);
+    assert.doesNotMatch(speech.alignment?.characters.join("") ?? "", /[\/\[\]ˈɾɚɹ]/u);
+    assert.equal(request.text, sourceText);
+  });
+
+  it("hands respelled provider timing back to the words as written", async () => {
+    const spokenText = "I think this brother said thanks.";
+    const sourceText = `[sighs] ${spokenText} [laughs]`;
+    let providerText = "";
+    const request = {
+      apiKey: "secret-key",
+      voiceId: "american-premium-voice",
+      model: "eleven_flash_v2_5",
+      text: sourceText,
+      profile: {
+        ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V2,
+        premiumPronunciationEnabled: true,
+        elevenLabsNativeAccentHint: "American",
+        accentDefinitionId: "cockney-english",
+        speechprintStrength: "strong" as const,
+      },
+      fetchImpl: (async (_url, init) => {
+        const body = JSON.parse(String(init?.body)) as { text: string };
+        providerText = body.text;
+        const characters = Array.from(body.text);
+        return new Response(JSON.stringify({
+          audio_base64: "AQID",
+          alignment: {
+            characters,
+            character_start_times_seconds: characters.map((_, i) => i * 0.01),
+            character_end_times_seconds: characters.map((_, i) => (i + 1) * 0.01),
+          },
+        }), { status: 200 });
+      }) as typeof fetch,
+    };
+
+    const speech = await requestElevenLabsSpeechWithTimestamps(request);
+
+    // Consonants move in the request; audio tags and spacing do not.
+    assert.equal(
+      providerText,
+      "[strong Cockney accent] [sighs] I fink this bruvver said fanks. [laughs]",
+    );
+    // Timing comes back attached to the line the bot actually wrote.
+    assert.equal(speech.alignment?.characters.join(""), spokenText);
+    const starts = speech.alignment?.characterStartTimesSeconds ?? [];
+    for (let index = 1; index < starts.length; index += 1) {
+      assert.ok(
+        starts[index]! >= starts[index - 1]!,
+        "projected timings must not run backwards",
+      );
+    }
+    assert.equal(request.text, sourceText);
+  });
+
+  it("leaves the written line untouched when the voice already has the accent", async () => {
+    let requestBody: Record<string, unknown> | null = null;
+    const text = "I think this brother said thanks.";
+    await requestElevenLabsSpeech({
+      apiKey: "secret-key",
+      voiceId: "cockney-premium-voice",
+      model: "eleven_flash_v2_5",
+      text,
+      profile: {
+        ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V2,
+        elevenLabsNativeAccentHint: "Cockney",
+        accentDefinitionId: "cockney-english",
+      },
+      fetchImpl: (async (_url, init) => {
+        requestBody = JSON.parse(String(init?.body));
+        return new Response(new Uint8Array([1]), { status: 200 });
+      }) as typeof fetch,
+    });
+
+    // No direction means the voice already speaks it; respelling on top
+    // would double the accent.
+    assert.equal(requestBody?.text, text);
+  });
+
+  it("never respells an authored name pronunciation", async () => {
+    let requestBody: Record<string, unknown> | null = null;
+    await requestElevenLabsSpeech({
+      apiKey: "secret-key",
+      voiceId: "american-premium-voice",
+      model: "eleven_flash_v2_5",
+      text: "Thanks, Thistle. I think DATA is three things.",
+      protectedPhrases: ["Thistle"],
+      profile: {
+        ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V2,
+        premiumPronunciationEnabled: true,
+        elevenLabsNativeAccentHint: "American",
+        accentDefinitionId: "irish-english",
+        speechprintStrength: "strong" as const,
+      },
+      fetchImpl: (async (_url, init) => {
+        requestBody = JSON.parse(String(init?.body));
+        return new Response(new Uint8Array([1]), { status: 200 });
+      }) as typeof fetch,
+    });
+
+    assert.equal(
+      requestBody?.text,
+      "[strong Irish accent] Tanks, Thistle. I tink DATA is tree tings.",
+    );
+  });
+
+  it("rejects incomplete timestamped speech before returning partial audio", async () => {
+    await assert.rejects(
+      requestElevenLabsSpeechWithTimestamps({
+        apiKey: "secret-key",
+        voiceId: "british-premium-voice",
+        model: "eleven_flash_v2_5",
+        text: "Peter Piper picked a peck of pickled peppers.",
+        profile: {
+          ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V2,
+          elevenLabsNativeAccentHint: "British",
+          accentDefinitionId: "american-english",
+        },
+        fetchImpl: (async (_url, init) => {
+          const body = JSON.parse(String(init?.body)) as { text: string };
+          const characters = Array.from(body.text).slice(0, -12);
+          return new Response(JSON.stringify({
+            audio_base64: "AQID",
+            alignment: {
+              characters,
+              character_start_times_seconds: characters.map(
+                (_, index) => index * 0.01,
+              ),
+              character_end_times_seconds: characters.map(
+                (_, index) => (index + 1) * 0.01,
+              ),
+            },
+          }), { status: 200 });
+        }) as typeof fetch,
+      }),
+      /ended before the requested line/u,
+    );
+  });
+
   it("normalizes timestamped ElevenLabs audio and character alignment", async () => {
     let requestUrl = "";
     const speech = await requestElevenLabsSpeechWithTimestamps({
@@ -620,9 +1840,12 @@ describe("voice Phase 1 boundary", () => {
       voiceId: "voice/provider id",
       model: "eleven_flash_v2_5",
       text: "Hi",
+      seed: elevenLabsVoiceIsolationSeed("bot-rick"),
       profile: { v: 1, baseVoiceId: "voice-1", pitch: 0, warmth: 0, pace: 0, lilt: 0 },
-      fetchImpl: (async (url) => {
+      fetchImpl: (async (url, init) => {
         requestUrl = String(url);
+        const body = JSON.parse(String(init?.body));
+        assert.equal(body.seed, elevenLabsVoiceIsolationSeed("bot-rick"));
         return new Response(JSON.stringify({
           audio_base64: "AQID",
           alignment: {
@@ -657,6 +1880,48 @@ describe("voice Phase 1 boundary", () => {
       },
       providerRequestId: "provider-request",
     });
+  });
+
+  it("rejects timestamped speech whose alignment ends at a strict text prefix", async () => {
+    const requestedText =
+      "Gentlemen, vanity is not evidence, however handsomely dressed.";
+    const truncatedText = "Gentlemen, vanity";
+
+    await assert.rejects(
+      requestElevenLabsSpeechWithTimestamps({
+        apiKey: "secret-key",
+        voiceId: "voice-id",
+        model: "eleven_flash_v2_5",
+        text: requestedText,
+        profile: {
+          v: 1,
+          baseVoiceId: "voice-1",
+          pitch: 0,
+          warmth: 0,
+          pace: 0,
+          lilt: 0,
+        },
+        fetchImpl: (async () => {
+          const characters = Array.from(truncatedText);
+          return new Response(
+            JSON.stringify({
+              audio_base64: "AQID",
+              alignment: {
+                characters,
+                character_start_times_seconds: characters.map(
+                  (_, index) => index * 0.05,
+                ),
+                character_end_times_seconds: characters.map(
+                  (_, index) => (index + 1) * 0.05,
+                ),
+              },
+            }),
+            { status: 200 },
+          );
+        }) as typeof fetch,
+      }),
+      /ended before the requested line/u,
+    );
   });
 
   it("preserves ElevenLabs provider codes while surfacing their readable message", async () => {
@@ -736,6 +2001,225 @@ describe("voice Phase 1 boundary", () => {
     }]);
   });
 
+  it("paginates saved voices and preserves their original shared identity", async () => {
+    const requestedUrls: string[] = [];
+    const voices = await requestElevenLabsVoiceCatalog({
+      apiKey: "secret-key",
+      fetchImpl: (async (input) => {
+        const url = new URL(String(input));
+        requestedUrls.push(url.toString());
+        if (!url.searchParams.has("next_page_token")) {
+          return new Response(JSON.stringify({
+            voices: [{
+              voice_id: "provider-copy-a",
+              name: "Avery",
+              category: "professional",
+              sharing: {
+                original_voice_id: "source-a",
+                public_owner_id: "owner-a",
+              },
+            }],
+            has_more: true,
+            next_page_token: "page-two",
+          }), { status: 200 });
+        }
+        return new Response(JSON.stringify({
+          voices: [{ voice_id: "voice-b", name: "Blair" }],
+          has_more: false,
+        }), { status: 200 });
+      }) as typeof fetch,
+    });
+    assert.equal(requestedUrls.length, 2);
+    assert.equal(
+      new URL(requestedUrls[1]!).searchParams.get("next_page_token"),
+      "page-two",
+    );
+    assert.deepEqual(voices[0], {
+      voiceId: "provider-copy-a",
+      name: "Avery",
+      category: "professional",
+      description: null,
+      previewUrl: null,
+      labels: {},
+      originalVoiceId: "source-a",
+      publicOwnerId: "owner-a",
+    });
+    assert.equal(voices[1]?.voiceId, "voice-b");
+  });
+
+  it("filters importable English professional Voice Library entries and uses the official query", async () => {
+    let requestedUrl = "";
+    const voices = await requestElevenLabsSharedVoiceCandidates({
+      apiKey: "secret-key",
+      page: 3,
+      fetchImpl: (async (input) => {
+        requestedUrl = String(input);
+        return new Response(JSON.stringify({
+          voices: [
+            {
+              public_owner_id: "owner-a",
+              voice_id: "voice-a",
+              name: "Avery",
+              language: "en",
+              accent: "American",
+              category: "professional",
+              description: "Warm character voice",
+              rate: 1,
+            },
+            { public_owner_id: "owner-b", voice_id: "voice-b", name: "French", language: "fr", category: "professional" },
+            { public_owner_id: "owner-c", voice_id: "voice-c", name: "Moderated", language: "en", category: "professional", live_moderation_enabled: true },
+            { public_owner_id: "owner-d", voice_id: "voice-d", name: "Custom", language: "en", category: "professional", rate: 2 },
+          ],
+        }), { status: 200 });
+      }) as typeof fetch,
+    });
+    const url = new URL(requestedUrl);
+    assert.equal(url.pathname, "/v1/shared-voices");
+    assert.equal(url.searchParams.get("page_size"), "100");
+    assert.equal(url.searchParams.get("page"), "3");
+    assert.equal(url.searchParams.get("category"), "professional");
+    assert.equal(url.searchParams.get("language"), "en");
+    assert.equal(url.searchParams.get("include_custom_rates"), "false");
+    assert.equal(url.searchParams.get("include_live_moderated"), "false");
+    assert.deepEqual(voices, [{
+      publicOwnerId: "owner-a",
+      voiceId: "voice-a",
+      name: "Avery",
+      category: "professional",
+      description: "Warm character voice",
+      previewUrl: null,
+      labels: { language: "en", accent: "American" },
+    }]);
+  });
+
+  it("imports a shared voice under its owner and preserves the bookmarked name", async () => {
+    let requestedUrl = "";
+    let init: RequestInit | undefined;
+    const voiceId = await importElevenLabsSharedVoice({
+      apiKey: "secret-key",
+      publicOwnerId: "public/user",
+      voiceId: "voice/a",
+      name: "Avery",
+      fetchImpl: (async (input, requestInit) => {
+        requestedUrl = String(input);
+        init = requestInit;
+        return new Response(JSON.stringify({ voice_id: "imported-a" }), { status: 200 });
+      }) as typeof fetch,
+    });
+    assert.equal(requestedUrl, "https://api.elevenlabs.io/v1/voices/add/public%2Fuser/voice%2Fa");
+    assert.equal(init?.method, "POST");
+    assert.equal(new Headers(init?.headers).get("xi-api-key"), "secret-key");
+    assert.deepEqual(JSON.parse(String(init?.body)), { new_name: "Avery", bookmarked: true });
+    assert.equal(voiceId, "imported-a");
+  });
+
+  it("selects a playable shared audition while honoring recent exclusions", () => {
+    const candidates = [
+      {
+        publicOwnerId: "owner-a",
+        voiceId: "voice-a",
+        name: "Avery",
+        category: "professional" as const,
+        description: null,
+        previewUrl: "https://example.test/a.mp3",
+        labels: {},
+      },
+      {
+        publicOwnerId: "owner-b",
+        voiceId: "voice-b",
+        name: "Blair",
+        category: "high_quality" as const,
+        description: null,
+        previewUrl: "https://example.test/b.mp3",
+        labels: {},
+      },
+      {
+        publicOwnerId: "owner-c",
+        voiceId: "voice-c",
+        name: "Casey",
+        category: "professional" as const,
+        description: null,
+        previewUrl: null,
+        labels: {},
+      },
+    ];
+    assert.equal(
+      selectElevenLabsSharedVoiceCandidate(candidates, new Set(["voice-a"]), () => 0)
+        ?.voiceId,
+      "voice-b",
+    );
+    assert.equal(
+      selectElevenLabsSharedVoiceCandidate(
+        candidates,
+        new Set(["voice-a", "voice-b"]),
+      ),
+      null,
+    );
+    assert.equal(
+      selectElevenLabsSharedVoiceCandidate(
+        candidates.map((candidate) =>
+          candidate.voiceId === "voice-b"
+            ? { ...candidate, description: "Warm British narrator" }
+            : { ...candidate, description: "Bright American character" },
+        ),
+        new Set(),
+        () => 0,
+        "British narrator",
+      )?.voiceId,
+      "voice-b",
+    );
+  });
+
+  it("treats explicit Refract accent and gender words as provider-metadata constraints", () => {
+    const candidates = [
+      {
+        publicOwnerId: "owner-a",
+        voiceId: "australian-male",
+        name: "Lachlan",
+        category: "professional" as const,
+        description: "Warm narrator",
+        previewUrl: "https://example.test/lachlan.mp3",
+        labels: { accent: "Australian", gender: "male" },
+      },
+      {
+        publicOwnerId: "owner-b",
+        voiceId: "indian-female",
+        name: "Priya",
+        category: "professional" as const,
+        description: "Warm narrator",
+        previewUrl: "https://example.test/priya.mp3",
+        labels: { accent: "Indian", gender: "female" },
+      },
+    ];
+    assert.equal(
+      selectElevenLabsSharedVoiceCandidate(
+        candidates,
+        new Set(),
+        () => 0.99,
+        "australian man",
+      )?.voiceId,
+      "australian-male",
+    );
+    assert.equal(
+      selectElevenLabsSharedVoiceCandidate(
+        candidates.filter((candidate) => candidate.voiceId !== "australian-male"),
+        new Set(),
+        () => 0,
+        "australian man",
+      ),
+      null,
+    );
+    assert.equal(
+      selectElevenLabsSharedVoiceCandidate(
+        candidates,
+        new Set(),
+        () => 0.99,
+        "man",
+      )?.voiceId,
+      "australian-male",
+    );
+  });
+
   it("resolves an authenticated ElevenLabs voice ID to its display name", async () => {
     let requestedUrl = "";
     let requestedKey = "";
@@ -759,6 +2243,7 @@ describe("voice Phase 1 boundary", () => {
     assert.deepEqual(voice, {
       voiceId: "portable/voice",
       name: "Portable Muse",
+      labels: {},
     });
   });
 
@@ -857,5 +2342,38 @@ describe("voice Phase 1 boundary", () => {
     );
     assert.doesNotMatch(catalogRoute, /preferred_provider|Switch to Online/u);
     assert.match(serverSource, /resolveVoiceSynthesisExplicitOnlineContext\(\{/u);
+  });
+
+  it("keeps discovery non-importing with bounded exclusions and saves idempotently", () => {
+    const serverSource = readFileSync(new URL("../server.ts", import.meta.url), "utf8");
+    const discoverRoute = serverSource.slice(
+      serverSource.indexOf('route("POST", "/api/voices/elevenlabs/shared/discover"'),
+      serverSource.indexOf('route("POST", "/api/voices/elevenlabs/shared/use"'),
+    );
+    const saveRoute = serverSource.slice(
+      serverSource.indexOf('route("POST", "/api/voices/elevenlabs/library"'),
+      serverSource.indexOf('route("GET", "/api/voices/elevenlabs"'),
+    );
+    const useRoute = serverSource.slice(
+      serverSource.indexOf('route("POST", "/api/voices/elevenlabs/shared/use"'),
+      serverSource.indexOf('route("POST", "/api/voices/elevenlabs/library"'),
+    );
+    assert.match(discoverRoute, /getElevenLabsApiKeyForUser\(userId, userKey\) \?\? config\.elevenLabsApiKey/u);
+    assert.match(discoverRoute, /sharedVoiceExclusions\(body\.excludeVoiceIds\)/u);
+    assert.match(discoverRoute, /boundedSharedVoiceText\(body\.direction\)/u);
+    assert.match(discoverRoute, /listPremiumVoiceLibrary\(db, userId\)/u);
+    assert.match(discoverRoute, /selectElevenLabsSharedVoiceCandidate\(/u);
+    assert.doesNotMatch(discoverRoute, /importElevenLabsSharedVoice|\/v1\/voices\/add|DELETE/u);
+    assert.match(useRoute, /requestElevenLabsVoiceCatalog\(/u);
+    assert.match(useRoute, /importElevenLabsSharedVoice\(/u);
+    assert.doesNotMatch(useRoute, /savePremiumVoiceLibraryEntry|premium_voice_library/u);
+    assert.match(saveRoute, /findPremiumVoiceLibraryEntry\(db, userId, input\.sourceVoiceId\)/u);
+    assert.match(saveRoute, /getElevenLabsApiKeyForUser\(userId, userKey\) \?\? config\.elevenLabsApiKey/u);
+    assert.match(saveRoute, /requestElevenLabsVoiceCatalog\(/u);
+    assert.match(saveRoute, /voice\.originalVoiceId === input\.sourceVoiceId/u);
+    assert.match(saveRoute, /importElevenLabsSharedVoice\(/u);
+    assert.match(saveRoute, /savePremiumVoiceLibraryEntry\(db, userId/u);
+    assert.match(saveRoute, /elevenLabsSharedVoiceSaveFlights/u);
+    assert.doesNotMatch(saveRoute, /DELETE/u);
   });
 });

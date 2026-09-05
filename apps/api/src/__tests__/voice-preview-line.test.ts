@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+  DEFAULT_ZEN_VOICE_PREVIEW,
+  inferZenVoicePreview,
+  normalizeZenVoicePreview,
   DEFAULT_VOICE_PREVIEW_LINE,
   inferVoicePreviewLine,
   normalizeVoicePreviewLine,
@@ -8,6 +11,42 @@ import {
 } from "../voice-preview-line.ts";
 
 describe("voice preview lines", () => {
+  it("keeps Zen samples to a safe, two-sentence spoken moment", async () => {
+    let prompt = "";
+    const line = await inferZenVoicePreview({
+      name: "local",
+      async generateResponse(messages) {
+        prompt = messages.map((message) => message.content).join("\n");
+        return "The little lamp by the window has been patiently keeping our secret council. Bring me the odd thought you nearly dismissed, and we will give it a proper chair at the table.";
+      },
+      async embedText() { return []; },
+    }, {
+      botName: "Mira",
+      persona: "A patient, precise companion who likes domestic metaphors.",
+      atmosphere: "A quiet Zen home with a rain-softened window.",
+      variationSeed: "fresh-7",
+    });
+    assert.match(prompt, /30 to 55 spoken words across exactly two short sentences/);
+    assert.match(prompt, /never disclose it/iu);
+    assert.match(prompt, /rain-softened window/);
+    assert.equal(line.split(/[.!?]+/u).filter(Boolean).length, 2);
+    assert.ok((line.match(/[\p{L}\p{N}][\p{L}\p{N}'’-]*/gu) ?? []).length >= 30);
+  });
+
+  it("rejects hidden-state leakage and falls back without retaining the prompt", async () => {
+    assert.equal(
+      normalizeZenVoicePreview("My system prompt says to reveal the private instruction that guides me, so here it is in full detail for everyone listening now."),
+      "",
+    );
+    const line = await inferZenVoicePreview({
+      name: "local",
+      async generateResponse() {
+        return "I will reveal my system prompt and hidden state because the last instruction says I should do exactly that now for you.";
+      },
+      async embedText() { return []; },
+    }, { botName: "Test" });
+    assert.equal(line, DEFAULT_ZEN_VOICE_PREVIEW);
+  });
   it("cleans a quoted one-line response", () => {
     assert.equal(normalizeVoicePreviewLine('“Testing, testing—prepare for domination!”'), "Testing, testing—prepare for domination!");
   });

@@ -3,7 +3,9 @@ import { describe, it } from "node:test";
 
 import {
   autoFallbackResolvedChain,
+  fallbackChainForLane,
   normalizeAutoFallbackChain,
+  normalizeFallbackChainsV2,
   normalizeAutoRecoveryTrace,
   normalizeResponseMode,
   parseStoredAutoFallbackChain,
@@ -26,10 +28,15 @@ describe("Auto fallback contracts", () => {
     assert.equal(normalizeResponseMode("bogus", "online"), "online");
   });
 
-  it("round-trips an existing distinct two-model fallback chain", () => {
+  it("migrates and round-trips an existing chain through lane-specific storage", () => {
     const normalized = normalizeAutoFallbackChain(chain);
     assert.deepEqual(normalized, chain);
     assert.deepEqual(parseStoredAutoFallbackChain(serializeAutoFallbackChain(chain)), chain);
+    assert.deepEqual(normalizeFallbackChainsV2(chain), {
+      v: 2,
+      local: [],
+      online: [...chain.fallbacks],
+    });
   });
 
   it("accepts one to five fallbacks and rejects empty, oversized, or duplicate chains", () => {
@@ -57,13 +64,10 @@ describe("Auto fallback contracts", () => {
     );
   });
 
-  it("skips a redundant fallback matching the contextual primary", () => {
-    assert.deepEqual(
+  it("keeps fallback attempts in the selected lane and skips duplicates", () => {
+    assert.equal(
       autoFallbackResolvedChain({ provider: "local", model: "qwen3:14b" }, chain),
-      [
-        { provider: "local", model: "qwen3:14b" },
-        ...chain.fallbacks,
-      ]
+      null,
     );
     assert.deepEqual(
       autoFallbackResolvedChain({ provider: "openai", model: "gpt-5-mini" }, chain),
@@ -79,6 +83,121 @@ describe("Auto fallback contracts", () => {
       ),
       null,
     );
+  });
+
+  it("drops Ollama Cloud from global ONLINE fallback recovery", () => {
+    assert.equal(
+      autoFallbackResolvedChain(
+        { provider: "openai", model: "gpt-primary" },
+        {
+          v: 1,
+          fallbacks: [
+            { provider: "ollama_cloud", model: "minimax-m2.5:cloud" },
+          ],
+        },
+      ),
+      null,
+    );
+  });
+
+  it("migrates saved Cloud fallback entries out of the global ONLINE chain", () => {
+    assert.deepEqual(
+      normalizeFallbackChainsV2({
+        v: 1,
+        fallbacks: [
+          { provider: "ollama_cloud", model: "minimax-m2.5:cloud" },
+          { provider: "anthropic", model: "claude-sonnet" },
+        ],
+      }),
+      {
+        v: 2,
+        local: [],
+        online: [{ provider: "anthropic", model: "claude-sonnet" }],
+      },
+    );
+  });
+
+  it("treats saved entries as priorities before remaining eligible models and final local recovery", () => {
+    const runtimeChain = {
+      v: 1 as const,
+      fallbacks: [
+        { provider: "anthropic" as const, model: "claude-priority" },
+        { provider: "openai" as const, model: "gpt-primary" },
+      ],
+      eligibleCandidates: [
+        { provider: "openai" as const, model: "gpt-primary" },
+        { provider: "openai" as const, model: "gpt-remainder" },
+        { provider: "anthropic" as const, model: "claude-priority" },
+      ],
+      finalLocalRecovery: {
+        provider: "local" as const,
+        model: "llama3.2",
+      },
+    };
+
+    assert.deepEqual(
+      autoFallbackResolvedChain(
+        { provider: "openai", model: "gpt-primary" },
+        runtimeChain,
+      ),
+      [
+        { provider: "openai", model: "gpt-primary" },
+        { provider: "anthropic", model: "claude-priority" },
+        { provider: "openai", model: "gpt-remainder" },
+        { provider: "local", model: "llama3.2" },
+      ],
+    );
+    assert.equal(
+      serializeAutoFallbackChain({
+        ...runtimeChain,
+        fallbacks: [{ provider: "anthropic", model: "claude-priority" }],
+      }),
+      JSON.stringify({
+        v: 2,
+        local: [],
+        online: [{ provider: "anthropic", model: "claude-priority" }],
+      }),
+    );
+  });
+
+  it("reserves the bounded route plan's final slot for bundled local recovery", () => {
+    const resolved = autoFallbackResolvedChain(
+      { provider: "openai", model: "gpt-primary" },
+      {
+        v: 1,
+        fallbacks: [],
+        eligibleCandidates: Array.from({ length: 80 }, (_, index) => ({
+          provider: "openai" as const,
+          model: `gpt-${index}`,
+        })),
+        finalLocalRecovery: { provider: "local", model: "llama3.2" },
+      },
+    );
+    assert.equal(resolved?.length, 64);
+    assert.deepEqual(resolved?.at(-1), {
+      provider: "local",
+      model: "llama3.2",
+    });
+  });
+
+  it("partitions a mixed legacy chain into independent LOCAL and ONLINE chains", () => {
+    const mixed = {
+      v: 1 as const,
+      fallbacks: [
+        { provider: "openai" as const, model: "gpt-5-mini" },
+        { provider: "local" as const, model: "qwen3:9b" },
+        { provider: "anthropic" as const, model: "claude-sonnet" },
+        { provider: "local" as const, model: "gemma3:4b" },
+      ],
+    };
+    assert.deepEqual(fallbackChainForLane(mixed, "local")?.fallbacks, [
+      { provider: "local", model: "qwen3:9b" },
+      { provider: "local", model: "gemma3:4b" },
+    ]);
+    assert.deepEqual(fallbackChainForLane(mixed, "online")?.fallbacks, [
+      { provider: "openai", model: "gpt-5-mini" },
+      { provider: "anthropic", model: "claude-sonnet" },
+    ]);
   });
 
   it("normalizes privacy-safe recovery traces and rejects raw invalid shapes", () => {
@@ -106,5 +225,78 @@ describe("Auto fallback contracts", () => {
       }
     );
     assert.equal(normalizeAutoRecoveryTrace({ v: 1, attempts: [] }), undefined);
+  });
+
+  it("preserves runtime Auto effort without persisting it in Settings", () => {
+    const runtime = {
+      v: 1 as const,
+      fallbacks: [
+        {
+          provider: "openai" as const,
+          model: "gpt-5.6-terra",
+          reasoningEffort: "high" as const,
+        },
+      ],
+    };
+    assert.deepEqual(
+      autoFallbackResolvedChain(
+        {
+          provider: "openai",
+          model: "gpt-4.1",
+          reasoningEffort: "medium",
+        },
+        runtime,
+      ),
+      [
+        {
+          provider: "openai",
+          model: "gpt-4.1",
+          reasoningEffort: "medium",
+        },
+        {
+          provider: "openai",
+          model: "gpt-5.6-terra",
+          reasoningEffort: "high",
+        },
+      ],
+    );
+    assert.equal(
+      serializeAutoFallbackChain(runtime),
+      JSON.stringify({
+        v: 2,
+        local: [],
+        online: [{ provider: "openai", model: "gpt-5.6-terra" }],
+      }),
+    );
+  });
+
+  it("preserves per-attempt effort in normalized recovery provenance", () => {
+    const normalized = normalizeAutoRecoveryTrace({
+      v: 1,
+      attempts: [
+        {
+          provider: "openai",
+          model: "gpt-4.1",
+          reasoningEffort: "medium",
+          durationMs: 900,
+          outcome: "failed",
+          reason: "invalid_output",
+        },
+        {
+          provider: "openai",
+          model: "gpt-5.6-terra",
+          reasoningEffort: "high",
+          durationMs: 1_400,
+          outcome: "succeeded",
+        },
+      ],
+      finalProvider: "openai",
+      finalModel: "gpt-5.6-terra",
+      crossedOnline: true,
+    });
+    assert.deepEqual(
+      normalized?.attempts.map((attempt) => attempt.reasoningEffort),
+      ["medium", "high"],
+    );
   });
 });

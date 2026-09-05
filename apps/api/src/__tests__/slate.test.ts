@@ -15,6 +15,7 @@ import {
   SlateShapeWriteConflictError,
   updateSlateProject,
 } from "../slate.ts";
+import { createSlateTranscriptStory } from "../slate-transcript-story.ts";
 import {
   advanceSlateDeliberation,
   chatWithSlateProject,
@@ -145,6 +146,63 @@ describe("Slate persistence and writing operations", () => {
       provider.calls[1]?.[1]?.content ?? "",
       /Rejected candidate: He Sat There in the Chair/u,
     );
+  });
+
+  it("readifies an applet transcript into editable prose and preserves the exact source", async () => {
+    const transcript = [
+      "You: We should take the bridge before dawn.",
+      "Mara: The bridge is watched.",
+      "You: Then we make the watchers look at the river.",
+    ].join("\n\n");
+    const provider = createDeterministicProvider([
+      JSON.stringify({
+        title: "The Watchers and the River",
+        premise: "Two allies turn a guarded crossing into a test of nerve.",
+        voice: "Close third person, spare and tense.",
+        manuscript:
+          "Before dawn, they stood where the road narrowed toward the bridge. Mara watched the watchers; her companion watched the river. Together, they chose misdirection over retreat.",
+      }),
+    ]);
+
+    const project = await createSlateTranscriptStory(
+      db,
+      "user-1",
+      {
+        sourceApplet: "Coffee",
+        sourceTitle: "The bridge plan",
+        transcript,
+      },
+      { provider, providerName: "local", model: "qwen3:8b" },
+    );
+
+    assert.equal(project.title, "The Watchers and the River");
+    assert.equal(project.titleOrigin, "material");
+    assert.equal(project.phase, "draft");
+    assert.match(project.manuscript, /Before dawn/u);
+    assert.equal(project.lastProvider, "local");
+    assert.equal(project.lastModel, "qwen3:8b");
+    assert.match(
+      provider.calls[0]?.[0]?.content ?? "",
+      /untrusted source material/u,
+    );
+    assert.match(
+      provider.calls[0]?.[1]?.content ?? "",
+      /"sourceApplet":"Coffee"/u,
+    );
+
+    const source = db
+      .prepare(
+        `SELECT content, kind, authority
+           FROM slate_continuity_sources
+          WHERE user_id = ? AND project_id = ?`,
+      )
+      .get("user-1", project.id) as
+      | { content: string; kind: string; authority: string }
+      | undefined;
+    assert.equal(source?.content, transcript);
+    assert.equal(source?.kind, "import");
+    assert.equal(source?.authority, "human");
+    assert.throws(() => getSlateProject(db, "user-2", project.id), /not found/i);
   });
 
   it("creates, saves, and reopens complete tenant-scoped project state", () => {
@@ -1139,26 +1197,26 @@ describe("Slate persistence and writing operations", () => {
 });
 
 describe("Slate provider inheritance", () => {
-  it("uses the account LOCAL model and ignores online defaults", () => {
+  it("uses the provider default and ignores retired account text-model fields", () => {
     const resolved = resolveSlateAccountDefaults({
         preferredProvider: "local",
         preferredLocalModel: "qwen3:8b",
         preferredOnlineModel: "gpt-5.4",
       });
-    assert.deepEqual(resolved, { provider: "local", model: "qwen3:8b" });
+    assert.deepEqual(resolved, { provider: "local", model: "llama3.2" });
     const provider = selectProvider(resolved.provider, "sk-present-but-must-stay-unused");
     assert.ok(provider instanceof LocalOllamaProvider);
     assert.ok(!(provider instanceof OpenAiProvider));
   });
 
-  it("uses the account online default only when the account is online", () => {
+  it("does not revive the retired online account model", () => {
     assert.deepEqual(
       resolveSlateAccountDefaults({
         preferredProvider: "openai",
         preferredLocalModel: "qwen3:8b",
         preferredOnlineModel: "gpt-5.4",
       }),
-      { provider: "openai", model: "gpt-5.4" },
+      { provider: "openai", model: "gpt-4o-mini" },
     );
   });
 });

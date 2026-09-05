@@ -3,9 +3,15 @@
 import type { ReactNode } from "react";
 import {
   BookOpen,
+  Brain,
+  CircleHelp,
   Coffee,
   FlaskConical,
+  Gavel,
   Info,
+  House,
+  HardDrive,
+  Keyboard,
   KeyRound,
   MessageCircle,
   Monitor,
@@ -19,9 +25,11 @@ import {
 import styles from "./page.module.css";
 
 export type SettingsScope =
+  | "startup"
   | "chat"
   | "zen"
   | "coffee"
+  | "debate"
   | "botcast"
   | "slate"
   | "connections"
@@ -29,7 +37,12 @@ export type SettingsScope =
   | "network"
   | "experimental"
   | "models"
+  | "memories"
+  | "shortcuts"
   | "voice"
+  | "storage"
+  | "assets"
+  | "help"
   | "about"
   | "account";
 
@@ -54,14 +67,29 @@ const SETTINGS_NAV_GROUPS: readonly {
   }[];
 }[] = [
   {
-    label: "General",
+    label: "Prism",
+    items: [
+      { scope: "startup", title: "Startup", icon: <House size={16} strokeWidth={2} /> },
+      { scope: "shortcuts", title: "Shortcuts", icon: <Keyboard size={16} strokeWidth={2} /> },
+      { scope: "appearance", title: "Appearance", icon: <Monitor size={16} strokeWidth={2} /> },
+    ],
+  },
+  {
+    label: "AI & Voice",
     items: [
       { scope: "connections", title: "Connections", icon: <KeyRound size={16} strokeWidth={2} /> },
       { scope: "models", title: "Models", icon: <SlidersHorizontal size={16} strokeWidth={2} /> },
-      { scope: "appearance", title: "Appearance", icon: <Monitor size={16} strokeWidth={2} /> },
-      { scope: "network", title: "Network", icon: <Network size={16} strokeWidth={2} /> },
-      { scope: "experimental", title: "Experimental", icon: <FlaskConical size={16} strokeWidth={2} /> },
       { scope: "voice", title: "Voice", icon: <Volume2 size={16} strokeWidth={2} /> },
+      { scope: "experimental", title: "Experimental", icon: <FlaskConical size={16} strokeWidth={2} /> },
+    ],
+  },
+  {
+    label: "Data & Network",
+    items: [
+      { scope: "memories", title: "Memories", icon: <Brain size={16} strokeWidth={2} /> },
+      { scope: "storage", title: "Storage", icon: <HardDrive size={16} strokeWidth={2} /> },
+      { scope: "assets", title: "Assets", icon: <Sparkles size={16} strokeWidth={2} /> },
+      { scope: "network", title: "Network", icon: <Network size={16} strokeWidth={2} /> },
     ],
   },
   {
@@ -70,6 +98,7 @@ const SETTINGS_NAV_GROUPS: readonly {
       { scope: "chat", title: "Chat", icon: <MessageCircle size={16} strokeWidth={2} /> },
       { scope: "zen", title: "Zen", icon: <Sparkles size={16} strokeWidth={2} /> },
       { scope: "coffee", title: "Coffee", icon: <Coffee size={16} strokeWidth={2} /> },
+      { scope: "debate", title: "Debate", icon: <Gavel size={16} strokeWidth={2} /> },
       { scope: "botcast", title: "Signal", icon: <Radio size={16} strokeWidth={2} /> },
       { scope: "slate", title: "Slate", icon: <BookOpen size={16} strokeWidth={2} /> },
     ],
@@ -77,6 +106,11 @@ const SETTINGS_NAV_GROUPS: readonly {
   {
     label: "Info",
     items: [
+      {
+        scope: "help",
+        title: "Help",
+        icon: <CircleHelp size={16} strokeWidth={2} />,
+      },
       { scope: "about", title: "About", icon: <Info size={16} strokeWidth={2} /> },
       { scope: "account", title: "Account", icon: <UserRound size={16} strokeWidth={2} /> },
     ],
@@ -97,11 +131,11 @@ export function SettingsPanel({
       className={`${styles.panel} ${styles.panelSettings}`}
       data-prism-panel="settings"
       data-prism-panel-layer="true"
-      data-dev-panel-safe-area="right"
+      data-viewport-safe-area="right"
       data-settings-scope={scope}
       data-closing={panelClosing ? "true" : undefined}
       role="dialog"
-      aria-modal="true"
+      aria-modal="false"
       aria-labelledby="settings-panel-title"
       tabIndex={-1}
     >

@@ -249,7 +249,7 @@ function coalesceQueuedExtractionJobs(
             error = ?,
             completed_at = ?,
             updated_at = ?
-      WHERE id = ? AND status = 'queued'`,
+      WHERE user_id = ? AND id = ? AND status = 'queued'`,
   );
   let count = 0;
   for (const row of rows) {
@@ -260,6 +260,7 @@ function coalesceQueuedExtractionJobs(
       `Superseded by newer source revision ${newest.source_revision}.`,
       now,
       now,
+      row.user_id,
       row.id,
     );
     count += Number(result.changes);
@@ -346,9 +347,9 @@ export function claimNextSlateContinuityJob(
                 started_at = ?,
                 completed_at = NULL,
                 updated_at = ?
-          WHERE id = ? AND status = 'queued'`,
+          WHERE user_id = ? AND id = ? AND status = 'queued'`,
       )
-      .run(now, now, row.id);
+      .run(now, now, row.user_id, row.id);
     if (Number(claimed.changes) !== 1) {
       throw new Error("Slate Continuity job claim lost its transaction lock.");
     }
@@ -373,11 +374,12 @@ function completeJob(
               error = NULL,
               completed_at = ?,
               updated_at = ?
-        WHERE id = ?
+        WHERE user_id = ?
+          AND id = ?
           AND status = 'running'
           AND started_at = ?`,
     )
-    .run(now, now, job.id, job.startedAt);
+    .run(now, now, job.userId, job.id, job.startedAt);
   return Number(result.changes) === 1;
 }
 
@@ -424,7 +426,8 @@ function failJob(
               started_at = NULL,
               completed_at = ?,
               updated_at = ?
-        WHERE id = ?
+        WHERE user_id = ?
+          AND id = ?
           AND status = 'running'
           AND started_at = ?`,
     )
@@ -434,6 +437,7 @@ function failJob(
       availableAt,
       retryScheduled ? null : now,
       now,
+      job.userId,
       job.id,
       job.startedAt,
     );

@@ -1,5 +1,8 @@
+import { createHash } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 import { randomId } from "./security.ts";
+import type { LlmProvider } from "./providers.ts";
+import { getLatestThreadSummary } from "./memory-summarizer.ts";
 import { upsertPrismMoodState } from "./db.ts";
 import {
   getConversationHubMetadataMap,
@@ -10,6 +13,7 @@ import {
   buildConversationHistoryEntry,
   loadConversationParticipantBotIdsMap,
 } from "./conversation-history.ts";
+import { deleteMemoriesAcquiredDuringAppletSessions } from "./memory.ts";
 import {
   applyPrismMoodIgnoredQuestion,
   applyPrismMoodIgnoreCooldown,
@@ -95,6 +99,30 @@ export interface ConversationSweepState {
   latestSweepAt: string | null;
 }
 
+export type ChatDistillationPersonaKind = "bot" | "prism";
+
+export interface ChatDistillationSummary {
+  personaKind: ChatDistillationPersonaKind;
+  personaKey: string;
+  botId: string | null;
+  botName: string;
+  summary: string;
+  createdAt: string;
+}
+
+export interface ChatDistillationFailure {
+  personaKind: ChatDistillationPersonaKind | "orphan";
+  personaKey: string;
+  botId: string | null;
+  botName: string;
+  error: string;
+}
+
+export interface ChatDistillationResult extends ConversationSweepResult {
+  summaries: ChatDistillationSummary[];
+  failures: ChatDistillationFailure[];
+}
+
 export interface UndoLatestConversationMessagesResult {
   conversationId: string;
   conversationMode: string | null;
@@ -115,6 +143,15 @@ const DEV_SEED_CHAT_USER_MESSAGE = "Dev tools seeded this sidebar chat.";
 const DEV_SEED_CHAT_ASSISTANT_MESSAGE =
   "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.";
 const SWEEP_UNDO_WINDOW_MS = 15000;
+const DISTILL_UNDO_WINDOW_MS = 30 * 24 * 60 * 60 * 1_000;
+const CHAT_DISTILLATION_TITLE_PREFIX = "Distillation · ";
+const CHAT_DISTILLATION_BATCH_PREFIX = "distill:";
+const CHAT_DISTILLATION_TRANSCRIPT_MAX_CHARS = 48_000;
+const CHAT_DISTILLATION_PRISM_KEY = "prism";
+const CHAT_DISTILLATION_ORPHAN_KEY = "orphan";
+
+const CHAT_DISTILLATION_PROMPT = `You are distilling a private history between one person and one specific persona before those chat threads are archived. Preserve concrete shared context: the person's current goals and preferences, meaningful decisions, unresolved threads, commitments, relationship texture, and details that would make the next meeting feel continuous. Write one compact paragraph in the persona's first-person voice, as a private thought they would naturally carry forward. Be specific rather than generic. Do not mention chats, transcripts, summaries, storage, archiving, memory systems, prompts, or databases. Do not invent facts. The person's next message will be newer and must take precedence over this continuity. Return only the paragraph.`;
+const CHAT_ORPHAN_DISTILLATION_PROMPT = `You are preserving a private direct Chat history whose former persona is no longer installed. Produce one compact archival paragraph that retains concrete user goals, preferences, decisions, unresolved threads, commitments, and other facts needed to understand the history. Write neutrally in the third person. Preserve rather than imitate the unknown former persona: do not adopt its voice, invent its identity, or imply that it can return. Do not mention prompts, databases, or storage implementation. Do not invent facts. Return only the paragraph.`;
 
 function inClausePlaceholders(count: number): string {
   return Array.from({ length: count }, () => "?").join(", ");
@@ -835,6 +872,7 @@ function deleteConversationsByIds(
   const scopedInClause = `user_id = ? AND id IN (${placeholders})`;
   const messageScopedInClause = `user_id = ? AND conversation_id IN (${placeholders})`;
 
+  deleteMemoriesForAppletConversations(db, userId, conversationIds);
   deleteCoffeePollsForConversations(db, userId, conversationIds);
 
   db.prepare(
@@ -859,6 +897,41 @@ function deleteConversationsByIds(
     `DELETE FROM conversations WHERE ${scopedInClause}`
   ).run(userId, ...conversationIds);
   return Number(deleted.changes ?? 0);
+}
+
+function deleteMemoriesForAppletConversations(
+  db: DatabaseSync,
+  userId: string,
+  conversationIds: readonly string[],
+): void {
+  if (conversationIds.length === 0) return;
+  const placeholders = inClausePlaceholders(conversationIds.length);
+  const coffeeIds = (
+    db
+      .prepare(
+        `SELECT id FROM conversations
+          WHERE user_id = ?
+            AND conversation_mode = 'coffee'
+            AND id IN (${placeholders})`,
+      )
+      .all(userId, ...conversationIds) as Array<{ id: string }>
+  ).map((row) => row.id);
+  if (coffeeIds.length === 0) return;
+  const coffeePlaceholders = inClausePlaceholders(coffeeIds.length);
+  const messageIds = (
+    db
+      .prepare(
+        `SELECT id FROM messages
+          WHERE user_id = ? AND conversation_id IN (${coffeePlaceholders})`,
+      )
+      .all(userId, ...coffeeIds) as Array<{ id: string }>
+  ).map((row) => row.id);
+  deleteMemoriesAcquiredDuringAppletSessions(
+    db,
+    userId,
+    coffeeIds,
+    messageIds,
+  );
 }
 
 function composeSweepSummaryText(
@@ -905,89 +978,6 @@ function composeSweepSummaryText(
   return lines.join("\n");
 }
 
-/**
- * Create saved, bot-attributed placeholder chats for Developer Tools.
- *
- * These rows deliberately bypass the normal LLM pipeline: they are only seeded
- * UI fixtures for sidebar density checks, so a static lorem assistant reply is
- * enough and avoids provider/network side effects.
- */
-export function createDevSeedConversations(
-  db: DatabaseSync,
-  userId: string,
-  count: number
-): number {
-  if (!Number.isInteger(count) || count < 1) {
-    throw new Error("Chat seed count must be a positive integer.");
-  }
-
-  const botRows = db
-    .prepare(
-      "SELECT id FROM bots WHERE user_id = ? ORDER BY updated_at DESC, created_at DESC, name ASC"
-    )
-    .all(userId) as Array<{ id: string }>;
-
-  const insertConversation = db.prepare(
-    "INSERT INTO conversations (id, user_id, title, conversation_mode, bot_id, incognito, created_at, updated_at) VALUES (?, ?, ?, 'sandbox', ?, 0, ?, ?)"
-  );
-  const insertMessage = db.prepare(
-    "INSERT INTO messages (id, conversation_id, user_id, role, content, bot_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)"
-  );
-
-  const baseTime = Date.now();
-  db.exec("BEGIN IMMEDIATE TRANSACTION");
-  try {
-    for (let index = 0; index < count; index += 1) {
-      const conversationId = randomId(12);
-      const botId = botRows.length > 0
-        ? botRows[index % botRows.length]?.id ?? null
-        : null;
-      const createdAt = new Date(baseTime + index * 2).toISOString();
-      const updatedAt = new Date(baseTime + index * 2 + 1).toISOString();
-      const ordinal = index + 1;
-
-      insertConversation.run(
-        conversationId,
-        userId,
-        `Dev chat ${ordinal}`,
-        botId,
-        createdAt,
-        updatedAt
-      );
-      insertMessage.run(
-        randomId(12),
-        conversationId,
-        userId,
-        "user",
-        DEV_SEED_CHAT_USER_MESSAGE,
-        null,
-        createdAt
-      );
-      insertMessage.run(
-        randomId(12),
-        conversationId,
-        userId,
-        "assistant",
-        DEV_SEED_CHAT_ASSISTANT_MESSAGE,
-        botId,
-        updatedAt
-      );
-    }
-    db.exec("COMMIT");
-    return count;
-  } catch (error) {
-    db.exec("ROLLBACK");
-    throw error;
-  }
-}
-
-/**
- * Return saved conversations for the sidebar/history list.
- *
- * Private/incognito rows are deliberately excluded here. Current private chats
- * are ephemeral and never persist; this filter hides older rows that may have
- * been saved before that contract existed.
- */
 export function listConversationSummaries(
   db: DatabaseSync,
   userId: string
@@ -1017,15 +1007,18 @@ export function listConversationSummaries(
               ${zenWallpaperSelect}
               (SELECT m.bot_id FROM messages m
                  WHERE m.conversation_id = c.id
+                   AND m.user_id = c.user_id
                    AND m.role = 'assistant'
                  ORDER BY m.created_at DESC LIMIT 1) AS last_bot_id,
               (SELECT b.color FROM messages m
-                 LEFT JOIN bots b ON b.id = m.bot_id
+                 LEFT JOIN bots b ON b.id = m.bot_id AND b.user_id = m.user_id
                  WHERE m.conversation_id = c.id
+                   AND m.user_id = c.user_id
                    AND m.role = 'assistant'
                  ORDER BY m.created_at DESC LIMIT 1) AS last_bot_color,
               EXISTS (SELECT 1 FROM messages m
                         WHERE m.conversation_id = c.id
+                          AND m.user_id = c.user_id
                           AND m.role = 'assistant') AS has_assistant_reply
          FROM conversations c
         WHERE c.user_id = ?
@@ -1163,6 +1156,511 @@ export function getConversationSweepState(
     canUndo: Boolean(latest?.id),
     latestBatchId: latest?.id ?? null,
     latestSweepAt: latest?.created_at ?? null,
+  };
+}
+
+type ChatDistillationConversationRow = {
+  id: string;
+  title: string;
+  conversation_mode: "chat" | "zen";
+  bot_id: string | null;
+  last_assistant_bot_id: string | null;
+  updated_at: string;
+};
+
+type ChatDistillationGroup = {
+  personaKind: ChatDistillationPersonaKind | "orphan";
+  personaKey: string;
+  botId: string | null;
+  botName: string;
+  systemPrompt: string;
+  onlineEnabled: boolean;
+  conversations: ChatDistillationConversationRow[];
+};
+
+interface ChatDistillationOptions {
+  localProvider?: LlmProvider;
+  prismPersona?: {
+    name: string;
+    systemPrompt: string;
+    onlineEnabled?: boolean;
+  };
+}
+
+function chatDistillationGroups(
+  db: DatabaseSync,
+  userId: string,
+  options: ChatDistillationOptions,
+): ChatDistillationGroup[] {
+  const rows = db
+    .prepare(
+      `SELECT c.id, c.title, c.conversation_mode, c.bot_id, c.updated_at,
+              b.id AS installed_bot_id, b.name AS bot_name,
+              b.system_prompt, b.online_enabled,
+              (SELECT m.bot_id
+                 FROM messages m
+                WHERE m.user_id = c.user_id
+                  AND m.conversation_id = c.id
+                  AND m.role = 'assistant'
+                ORDER BY m.created_at DESC, m.rowid DESC
+                LIMIT 1) AS last_assistant_bot_id
+         FROM conversations c
+         LEFT JOIN bots b ON b.id = c.bot_id AND b.user_id = c.user_id
+        WHERE c.user_id = ?
+          AND c.conversation_mode IN ('chat', 'zen')
+          AND COALESCE(c.incognito, 0) = 0
+          AND c.archived_at IS NULL
+          AND EXISTS (
+            SELECT 1 FROM messages m
+             WHERE m.user_id = c.user_id
+               AND m.conversation_id = c.id
+               AND m.role IN ('user', 'assistant')
+          )
+        ORDER BY c.updated_at, c.id`,
+    )
+    .all(userId) as Array<
+    ChatDistillationConversationRow & {
+      installed_bot_id: string | null;
+      bot_name: string | null;
+      system_prompt: string | null;
+      online_enabled: number | null;
+    }
+  >;
+  const prismName = options.prismPersona?.name.trim() || "Prism";
+  const prismSystemPrompt =
+    options.prismPersona?.systemPrompt.trim() ||
+    `You are ${prismName}, the user's default companion in PRISM.`;
+  const byPersona = new Map<string, ChatDistillationGroup>();
+  for (const row of rows) {
+    let next: Omit<ChatDistillationGroup, "conversations">;
+    if (row.bot_id && row.installed_bot_id) {
+      next = {
+        personaKind: "bot",
+        personaKey: row.installed_bot_id,
+        botId: row.installed_bot_id,
+        botName: row.bot_name?.trim() || "Saved persona",
+        systemPrompt: row.system_prompt?.trim() ?? "",
+        onlineEnabled: row.online_enabled !== 0,
+      };
+    } else if (!row.bot_id && !row.last_assistant_bot_id) {
+      next = {
+        personaKind: "prism",
+        personaKey: CHAT_DISTILLATION_PRISM_KEY,
+        botId: null,
+        botName: prismName,
+        systemPrompt: prismSystemPrompt,
+        // Ordinary Prism Home is LOCAL-only. Keep that privacy ceiling even
+        // when the player happened to open the ritual from an ONLINE picker.
+        onlineEnabled: options.prismPersona?.onlineEnabled === true,
+      };
+    } else {
+      const orphanKey =
+        row.last_assistant_bot_id?.trim() ||
+        CHAT_DISTILLATION_ORPHAN_KEY;
+      next = {
+        personaKind: "orphan",
+        personaKey: orphanKey,
+        botId: null,
+        botName:
+          orphanKey === CHAT_DISTILLATION_ORPHAN_KEY
+            ? "Unknown former persona"
+            : "Deleted bot",
+        systemPrompt: CHAT_ORPHAN_DISTILLATION_PROMPT,
+        // A deleted persona's former privacy ceiling is unknowable. Preserve
+        // the stronger boundary and never send its history to an online model.
+        onlineEnabled: false,
+      };
+    }
+    const mapKey = `${next.personaKind}:${next.personaKey}`;
+    const group = byPersona.get(mapKey);
+    if (group) {
+      group.conversations.push(row);
+      continue;
+    }
+    byPersona.set(mapKey, {
+      ...next,
+      conversations: [row],
+    });
+  }
+  return Array.from(byPersona.values());
+}
+
+function chatDistillationSource(
+  db: DatabaseSync,
+  userId: string,
+  group: ChatDistillationGroup,
+): { prompt: string; fingerprint: string } {
+  const sections: string[] = [];
+  const previous =
+    group.personaKind === "bot" && group.botId
+      ? getLatestChatBotDistillation(db, userId, group.botId)
+      : group.personaKind === "prism"
+        ? getLatestPrismChatDistillation(db, userId)
+        : null;
+  if (previous) {
+    sections.push(`[Prior distilled continuity]\n${previous.summary}`);
+  }
+  for (const conversation of group.conversations) {
+    const compact = getLatestThreadSummary(
+      db,
+      userId,
+      conversation.id,
+      conversation.conversation_mode,
+    );
+    const messages = db
+      .prepare(
+        `SELECT role, content, created_at
+           FROM messages
+          WHERE user_id = ? AND conversation_id = ?
+            AND role IN ('user', 'assistant')
+          ORDER BY created_at, rowid`,
+      )
+      .all(userId, conversation.id) as Array<{
+      role: string;
+      content: string;
+      created_at: string;
+    }>;
+    const transcript = messages
+      .map((message) => `${message.role}: ${message.content}`)
+      .join("\n");
+    sections.push(
+      [
+        `[Conversation: ${conversation.title}]`,
+        compact ? `[Existing compact]\n${compact}` : "",
+        transcript,
+      ]
+        .filter(Boolean)
+        .join("\n"),
+    );
+  }
+  const full = sections.join("\n\n");
+  const prompt =
+    full.length <= CHAT_DISTILLATION_TRANSCRIPT_MAX_CHARS
+      ? full
+      : full.slice(full.length - CHAT_DISTILLATION_TRANSCRIPT_MAX_CHARS);
+  const fingerprint = createHash("sha256")
+    .update(
+      JSON.stringify({
+        personaKind: group.personaKind,
+        personaKey: group.personaKey,
+        conversations: group.conversations,
+        prompt,
+      }),
+    )
+    .digest("hex");
+  return { prompt, fingerprint };
+}
+
+function chatDistillationGroupIsCurrent(
+  db: DatabaseSync,
+  userId: string,
+  group: ChatDistillationGroup,
+  fingerprint: string,
+  options: ChatDistillationOptions,
+): boolean {
+  const current = chatDistillationGroups(db, userId, options).find(
+    (candidate) =>
+      candidate.personaKind === group.personaKind &&
+      candidate.personaKey === group.personaKey,
+  );
+  return Boolean(
+    current &&
+      chatDistillationSource(db, userId, current).fingerprint === fingerprint,
+  );
+}
+
+export function listChatBotDistillations(
+  db: DatabaseSync,
+  userId: string,
+): ChatDistillationSummary[] {
+  const rows = db
+    .prepare(
+      `SELECT c.chat_distillation_kind, c.chat_distillation_key,
+              c.chat_distillation_persona_name, c.bot_id,
+              b.name AS installed_bot_name,
+              m.content AS summary, m.created_at, m.id AS message_id
+         FROM conversations c
+         LEFT JOIN bots b ON b.id = c.bot_id AND b.user_id = c.user_id
+         JOIN messages m ON m.conversation_id = c.id AND m.user_id = c.user_id
+        WHERE c.user_id = ?
+          AND c.chat_distillation_kind IN ('bot', 'prism')
+          AND c.chat_distillation_key IS NOT NULL
+          AND c.archive_batch_id LIKE ?
+          AND m.role = 'assistant'
+          AND (
+            c.chat_distillation_kind = 'prism'
+            OR (
+              c.chat_distillation_kind = 'bot'
+              AND c.bot_id = c.chat_distillation_key
+              AND b.id IS NOT NULL
+            )
+          )
+        ORDER BY m.created_at DESC, m.id DESC`,
+    )
+    .all(
+      userId,
+      `${CHAT_DISTILLATION_BATCH_PREFIX}%`,
+    ) as Array<{
+    chat_distillation_kind: ChatDistillationPersonaKind;
+    chat_distillation_key: string;
+    chat_distillation_persona_name: string | null;
+    bot_id: string | null;
+    installed_bot_name: string | null;
+    summary: string;
+    created_at: string;
+    message_id: string;
+  }>;
+  const seen = new Set<string>();
+  return rows.flatMap((row) => {
+    const scopeKey = `${row.chat_distillation_kind}:${row.chat_distillation_key}`;
+    if (seen.has(scopeKey)) return [];
+    seen.add(scopeKey);
+    return [
+      {
+        personaKind: row.chat_distillation_kind,
+        personaKey: row.chat_distillation_key,
+        botId: row.chat_distillation_kind === "bot" ? row.bot_id : null,
+        botName:
+          row.chat_distillation_kind === "bot"
+            ? row.installed_bot_name?.trim() || "Saved persona"
+            : row.chat_distillation_persona_name?.trim() || "Prism",
+        summary: row.summary,
+        createdAt: row.created_at,
+      },
+    ];
+  });
+}
+
+export function getLatestChatBotDistillation(
+  db: DatabaseSync,
+  userId: string,
+  botId: string,
+): ChatDistillationSummary | null {
+  return (
+    listChatBotDistillations(db, userId).find(
+      (summary) =>
+        summary.personaKind === "bot" && summary.botId === botId,
+    ) ?? null
+  );
+}
+
+export function getLatestPrismChatDistillation(
+  db: DatabaseSync,
+  userId: string,
+): ChatDistillationSummary | null {
+  return (
+    listChatBotDistillations(db, userId).find(
+      (summary) => summary.personaKind === "prism",
+    ) ?? null
+  );
+}
+
+export async function distillChatConversations(
+  db: DatabaseSync,
+  provider: LlmProvider,
+  userId: string,
+  options: ChatDistillationOptions = {},
+): Promise<ChatDistillationResult> {
+  const groups = chatDistillationGroups(db, userId, options);
+  const failures: ChatDistillationFailure[] = [];
+  const generated: Array<{
+    group: ChatDistillationGroup;
+    summary: string;
+    fingerprint: string;
+  }> = [];
+
+  for (const group of groups) {
+    const source = chatDistillationSource(db, userId, group);
+    try {
+      const groupProvider =
+        provider.name !== "local" && !group.onlineEnabled
+          ? options.localProvider
+          : provider;
+      if (!groupProvider) {
+        throw new Error(
+          `${group.botName} is LOCAL-only, and a local distillation provider is unavailable.`,
+        );
+      }
+      const summary = (
+        await groupProvider.generateResponse(
+          [
+            {
+              role: "system",
+              content:
+                group.personaKind === "orphan"
+                  ? CHAT_ORPHAN_DISTILLATION_PROMPT
+                  : [group.systemPrompt, CHAT_DISTILLATION_PROMPT]
+                      .filter(Boolean)
+                      .join("\n\n"),
+            },
+            {
+              role: "user",
+              content:
+                group.personaKind === "orphan"
+                  ? `Private archival history:\n\n${source.prompt}`
+                  : `Persona: ${group.botName}\n\n${source.prompt}`,
+            },
+          ],
+          {
+            usagePurpose: "memory_summary",
+            maxTokens: 700,
+            temperature: 0.45,
+          },
+        )
+      )
+        .replace(/\s+/gu, " ")
+        .trim();
+      if (!summary) throw new Error("The persona returned an empty distillation.");
+      generated.push({ group, summary: summary.slice(0, 4_000), fingerprint: source.fingerprint });
+    } catch (error) {
+      failures.push({
+        personaKind: group.personaKind,
+        personaKey: group.personaKey,
+        botId: group.botId,
+        botName: group.botName,
+        error: error instanceof Error ? error.message : "Distillation failed.",
+      });
+    }
+  }
+
+  const stable = generated.filter((item) => {
+    if (
+      chatDistillationGroupIsCurrent(
+        db,
+        userId,
+        item.group,
+        item.fingerprint,
+        options,
+      )
+    ) {
+      return true;
+    }
+    failures.push({
+      personaKind: item.group.personaKind,
+      personaKey: item.group.personaKey,
+      botId: item.group.botId,
+      botName: item.group.botName,
+      error: "Chats changed while the distillation was being prepared. Try again.",
+    });
+    return false;
+  });
+  if (stable.length === 0) {
+    return {
+      batchId: null,
+      sweptGroups: 0,
+      archivedConversationCount: 0,
+      summaryConversationCount: 0,
+      undoExpiresAt: null,
+      summaries: [],
+      failures,
+    };
+  }
+
+  const nowMs = Date.now();
+  const batchId = `${CHAT_DISTILLATION_BATCH_PREFIX}${randomId(12)}`;
+  const archivedAt = new Date(nowMs).toISOString();
+  const undoExpiresAt = new Date(nowMs + DISTILL_UNDO_WINDOW_MS).toISOString();
+  const archivedConversationIds = stable.flatMap((item) =>
+    item.group.conversations.map((conversation) => conversation.id),
+  );
+  const summaryConversationIds: string[] = [];
+  const summaries: ChatDistillationSummary[] = [];
+
+  db.exec("BEGIN IMMEDIATE TRANSACTION");
+  try {
+    db.prepare(
+      "UPDATE conversation_sweep_batches SET undone_at = ? WHERE user_id = ? AND undone_at IS NULL",
+    ).run(new Date(nowMs - 1).toISOString(), userId);
+    let index = 0;
+    for (const item of stable) {
+      const summaryConversationId = randomId(12);
+      const createdAt = new Date(nowMs + index + 1).toISOString();
+      const persistedBotId =
+        item.group.personaKind === "bot" ? item.group.botId : null;
+      summaryConversationIds.push(summaryConversationId);
+      db.prepare(
+        `INSERT INTO conversations (
+          id, user_id, title, conversation_mode, bot_id, incognito,
+          archived_at, archive_batch_id, chat_distillation_kind,
+          chat_distillation_key, chat_distillation_persona_name,
+          created_at, updated_at
+        ) VALUES (?, ?, ?, 'chat', ?, 0, ?, ?, ?, ?, ?, ?, ?)`,
+      ).run(
+        summaryConversationId,
+        userId,
+        `${CHAT_DISTILLATION_TITLE_PREFIX}${item.group.botName}`,
+        persistedBotId,
+        archivedAt,
+        batchId,
+        item.group.personaKind,
+        item.group.personaKey,
+        item.group.botName,
+        createdAt,
+        createdAt,
+      );
+      db.prepare(
+        `INSERT INTO messages (
+          id, conversation_id, user_id, role, content, bot_id, created_at
+        ) VALUES (?, ?, ?, 'assistant', ?, ?, ?)`,
+      ).run(
+        randomId(12),
+        summaryConversationId,
+        userId,
+        item.summary,
+        persistedBotId,
+        createdAt,
+      );
+      if (item.group.personaKind !== "orphan") {
+        summaries.push({
+          personaKind: item.group.personaKind,
+          personaKey: item.group.personaKey,
+          botId: persistedBotId,
+          botName: item.group.botName,
+          summary: item.summary,
+          createdAt,
+        });
+      }
+      index += 1;
+    }
+
+    const archivePlaceholders = inClausePlaceholders(archivedConversationIds.length);
+    const archived = db.prepare(
+      `UPDATE conversations
+          SET archived_at = ?, archive_batch_id = ?
+        WHERE user_id = ?
+          AND archived_at IS NULL
+          AND id IN (${archivePlaceholders})`,
+    ).run(archivedAt, batchId, userId, ...archivedConversationIds);
+    if (Number(archived.changes) !== archivedConversationIds.length) {
+      throw new Error("Chats changed before their distillation could be committed.");
+    }
+    db.prepare(
+      `INSERT INTO conversation_sweep_batches (
+        id, user_id, archived_conversation_ids, summary_conversation_ids,
+        created_at, undo_expires_at, undone_at
+      ) VALUES (?, ?, ?, ?, ?, ?, NULL)`,
+    ).run(
+      batchId,
+      userId,
+      JSON.stringify(archivedConversationIds),
+      JSON.stringify(summaryConversationIds),
+      new Date(nowMs + index + 2).toISOString(),
+      undoExpiresAt,
+    );
+    db.exec("COMMIT");
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
+
+  return {
+    batchId,
+    sweptGroups: stable.length,
+    archivedConversationCount: archivedConversationIds.length,
+    summaryConversationCount: summaryConversationIds.length,
+    undoExpiresAt,
+    summaries,
+    failures,
   };
 }
 
@@ -1405,6 +1903,7 @@ export function undoLatestConversationSweep(
  *     summaries) by untying them (`conversation_id = NULL`) instead of
  *     destroying them. Images and summaries outlive the chat they came from
  *     because the gallery / memories UI still show them meaningfully.
+ *   - Revokes learned memory rows when the target is a Coffee applet session.
  */
 export function deleteConversation(
   db: DatabaseSync,
@@ -1452,7 +1951,7 @@ export function deleteConversation(
 /**
  * Empty a single saved chat without deleting the conversation row.
  *
- * This is the durable half of the `/clear` command: the transcript, exports,
+ * This is the durable half of the `$clear` command: the transcript, exports,
  * and thread-scoped summaries are removed so future model prompts cannot see
  * previous turns. User artifacts that may still matter outside this thread
  * (images and long-term memories) are preserved but detached from the chat.
@@ -1576,8 +2075,8 @@ export function setZenStarterConversationSuppression(
  * `botId === null` targets Default Prism chats (`conversations.bot_id IS NULL`).
  * Private/incognito rows are excluded to match the sidebar's visible saved-chat
  * surface. Linked user artifacts follow the same preservation contract as
- * {@link deleteConversation}: images and memories survive with their
- * conversation pointer nulled, while messages and exports are deleted.
+ * {@link deleteConversation}; memories acquired in Coffee are revoked with
+ * their applet session.
  */
 export function deleteConversationsByBot(
   db: DatabaseSync,
@@ -1596,6 +2095,14 @@ export function deleteConversationsByBot(
       )
       .get(...groupParams) as { n: number };
     const conversationCount = Number(countRow.n ?? 0);
+    const conversationIds = (
+      db
+        .prepare(
+          `SELECT id FROM conversations WHERE user_id = ? AND COALESCE(incognito, 0) = 0 AND archived_at IS NULL AND conversation_mode != 'zen' AND ${botPredicate}`,
+        )
+        .all(...groupParams) as Array<{ id: string }>
+    ).map((row) => row.id);
+    deleteMemoriesForAppletConversations(db, userId, conversationIds);
 
     db.prepare(
       `UPDATE images SET conversation_id = NULL WHERE user_id = ? AND conversation_id IN (${groupSubquery})`
@@ -1942,7 +2449,8 @@ export function deleteConversationMessage(
  *     gone or the database is untouched.
  *   - Follows the same preservation contract as {@link deleteConversation}:
  *     images and memory summaries survive with `conversation_id = NULL`;
- *     messages and markdown exports are hard-deleted alongside their chats.
+ *     messages and markdown exports are hard-deleted alongside their chats,
+ *     and learned Coffee memories are revoked with their sessions.
  *   - Strictly scoped to `userId` via `WHERE user_id = ?` on every statement
  *     so other users' data is never touched.
  */
@@ -1963,6 +2471,19 @@ export function deleteAllConversations(
             )`
       )
       .get(userId) as { n: number };
+    const conversationIds = (
+      db
+        .prepare(
+          `SELECT id FROM conversations
+            WHERE user_id = ?
+              AND NOT (
+                conversation_mode = 'zen'
+                OR (conversation_mode = 'chat' AND bot_id IS NULL)
+              )`,
+        )
+        .all(userId) as Array<{ id: string }>
+    ).map((row) => row.id);
+    deleteMemoriesForAppletConversations(db, userId, conversationIds);
 
     db.prepare(
       "UPDATE images SET conversation_id = NULL WHERE user_id = ? AND conversation_id IN (SELECT id FROM conversations WHERE user_id = ? AND NOT (conversation_mode = 'zen' OR (conversation_mode = 'chat' AND bot_id IS NULL)))"

@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- PRISM runs live multi-bot sessions with real-time audio and a recorded
+	     timeline. App Nap suspends WKWebView timers and render throttles the
+	     compositor when macOS deems the app idle, and the throttle has been
+	     observed to stick after the player returns (Coffee session 9c2a7b79:
+	     1 FPS with an idle main thread until audio played). Opt the app out. -->
+	<key>NSAppSleepDisabled</key>
+	<true/>
+</dict>
+</plist>

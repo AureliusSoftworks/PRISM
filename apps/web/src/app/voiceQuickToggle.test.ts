@@ -2,6 +2,10 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   VOICE_PLAYBACK_CHOICES,
+  PREMIUM_LOCAL_FALLBACK_NOTICE,
+  conversationEnglishVoiceEngine,
+  effectiveVoicePlaybackChoice,
+  premiumLocalFallbackNotice,
   voicePlaybackChoice,
   voiceModeDrivesCanvasReveal,
   voiceModeDisplayName,
@@ -11,7 +15,6 @@ import {
 describe("global voice selector", () => {
   it("offers explicit modes in the intended continuum order", () => {
     assert.deepEqual(VOICE_PLAYBACK_CHOICES, [
-      "mute",
       "english",
       "premium",
       "babble",
@@ -19,7 +22,7 @@ describe("global voice selector", () => {
     ]);
   });
 
-  it("derives all five visible choices from persisted synthesis settings", () => {
+  it("keeps legacy Mute readable without offering it in the picker", () => {
     assert.equal(voicePlaybackChoice("mute", "builtin"), "mute");
     assert.equal(voicePlaybackChoice("english", "builtin"), "english");
     assert.equal(voicePlaybackChoice("english", "elevenlabs"), "premium");
@@ -48,12 +51,64 @@ describe("global voice selector", () => {
     assert.equal(voiceModeDisplayName("bottish"), "Bottish");
     assert.equal(voiceModeDisplayName("english"), "English");
     assert.equal(voiceModeDisplayName("premium"), "Premium");
+    assert.equal(
+      voiceModeDisplayName("premium", { localPremiumFallback: true }),
+      "English · LOCAL",
+    );
   });
 
-  it("keeps robot voice playback from blocking the canvas reveal clock", () => {
-    assert.equal(voiceModeDrivesCanvasReveal("bottish"), false);
+  it("uses the persisted reply provider as Premium's privacy authority", () => {
+    assert.equal(
+      conversationEnglishVoiceEngine("elevenlabs", "local"),
+      "builtin",
+    );
+    assert.equal(
+      conversationEnglishVoiceEngine("elevenlabs", "openai"),
+      "elevenlabs",
+    );
+    assert.equal(
+      conversationEnglishVoiceEngine("elevenlabs", null),
+      "elevenlabs",
+    );
+  });
+
+  it("explains when Premium stays on-device for a LOCAL reply", () => {
+    assert.equal(
+      premiumLocalFallbackNotice({
+        requestedEngine: "elevenlabs",
+        effectiveEngine: "builtin",
+        messageProvider: "local",
+      }),
+      PREMIUM_LOCAL_FALLBACK_NOTICE,
+    );
+    assert.equal(
+      premiumLocalFallbackNotice({
+        requestedEngine: "elevenlabs",
+        effectiveEngine: "elevenlabs",
+        engineUsedHeader: "builtin-local-fallback",
+      }),
+      PREMIUM_LOCAL_FALLBACK_NOTICE,
+    );
+    assert.equal(
+      premiumLocalFallbackNotice({
+        requestedEngine: "elevenlabs",
+        effectiveEngine: "elevenlabs",
+        messageProvider: "openai",
+      }),
+      null,
+    );
+  });
+
+  it("shows the actual local voice when Premium cannot leave the device", () => {
+    assert.equal(effectiveVoicePlaybackChoice("premium", true), "english");
+    assert.equal(effectiveVoicePlaybackChoice("premium", false), "premium");
+    assert.equal(effectiveVoicePlaybackChoice("babble", true), "babble");
+  });
+
+  it("lets every audible Speech Type own reveal timing", () => {
+    assert.equal(voiceModeDrivesCanvasReveal("bottish"), true);
     assert.equal(voiceModeDrivesCanvasReveal("mute"), false);
-    assert.equal(voiceModeDrivesCanvasReveal("babble"), false);
+    assert.equal(voiceModeDrivesCanvasReveal("babble"), true);
     assert.equal(voiceModeDrivesCanvasReveal("english"), true);
   });
 });

@@ -25,6 +25,16 @@ describe("bot marketplace previews", () => {
     assert.match(pageSource, /avatarDetails: body\.avatarDetails/);
     assert.match(
       pageSource,
+      /face_eye_spacing: body\.faceEyeSpacing as number \| null/,
+      "Marketplace previews must preserve authored eye spacing",
+    );
+    assert.match(
+      pageSource,
+      /interface Bot \{[\s\S]*?face_eye_spacing\?: number \| null;/,
+      "The preview row shape must declare every mapped face field",
+    );
+    assert.match(
+      pageSource,
       /authored_audio_voice_profile:[\s\S]*?body\.authoredAudioVoiceProfile/,
     );
     assert.match(
@@ -114,15 +124,19 @@ describe("bot marketplace previews", () => {
     );
     assert.match(
       showcaseSource,
-      /isMarketplacePreview[\s\S]*?playBotHubVoicePreview\(bot, "english"\)[\s\S]*?regenerateBotHubAudioSample\(bot\)/,
+      /const voiceTestBot = showcaseBackdropDismissible \? bot : null;/,
     );
-    assert.match(showcaseSource, /playBotHubVoicePreview\(bot, "premium"\)/);
-    assert.match(showcaseSource, /playBotHubVoicePreview\(bot, "babble"\)/);
-    assert.match(showcaseSource, /playBotHubVoicePreview\(bot, "bottish"\)/);
     assert.match(
       showcaseSource,
-      /if \(isMarketplacePreview \|\| !bot\) return;/,
+      /voiceTestBot \? \{ exactText: botHubVoiceEchoDraft \} : undefined/,
     );
+    for (const mode of ["english", "premium", "babble", "bottish"]) {
+      assert.match(
+        showcaseSource,
+        new RegExp(`playShowcaseVoiceMode\\("${mode}"\\)`),
+      );
+    }
+    assert.doesNotMatch(showcaseSource, /regenerateBotHubAudioSample/);
   });
 
   it("reserves desktop space for the full mannequin preview", () => {

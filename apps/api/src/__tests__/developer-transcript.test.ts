@@ -103,6 +103,9 @@ describe("buildDeveloperTranscript", () => {
     assert.match(transcript, /### Call 1/u);
     assert.match(transcript, /Purpose \/ routing decision: coffee_turn/u);
     assert.match(transcript, /Selected topic: A useful disagreement/u);
+    assert.match(transcript, /## Coffee Event Accounting/u);
+    assert.match(transcript, /1 visible messages · 1 stored events/u);
+    assert.match(transcript, /Actions: 1/u);
     assert.match(transcript, /#### System prompts/u);
     assert.match(transcript, /#### Raw model \/ service output/u);
     assert.match(transcript, /#### Parsed output/u);
@@ -156,5 +159,110 @@ describe("buildDeveloperTranscript", () => {
 
     assert.match(transcript, /Retry \/ fallback: yes/u);
     assert.match(transcript, /Generated output was transformed, rejected, retried, or not displayed verbatim/u);
+  });
+
+  it("annotates each generated Auto turn with its final route and execution state", () => {
+    const transcript = buildDeveloperTranscript({
+      exportedAt: "2026-08-26T20:00:00.000Z",
+      conversation: {
+        id: "conversation-auto-route",
+        title: "Changing routes",
+        mode: "chat",
+        createdAt: "2026-08-26T19:00:00.000Z",
+        updatedAt: "2026-08-26T19:05:00.000Z",
+      },
+      events: [],
+      messages: [
+        {
+          id: "assistant-auto",
+          role: "assistant",
+          content: "Recovered answer",
+          provider: "openai",
+          model: "gpt-primary",
+          botId: null,
+          audienceBotIds: null,
+          createdAt: "2026-08-26T19:04:01.000Z",
+          toolPayload: JSON.stringify({
+            reasoningEffort: "high",
+            turbo: true,
+            autoRoute: {
+              provider: "openai",
+              model: "gpt-primary",
+              reasoningEffort: "high",
+            },
+            autoRecovery: {
+              attempts: [{ provider: "openai", model: "gpt-primary" }],
+              finalProvider: "anthropic",
+              finalModel: "claude-recovered",
+            },
+          }),
+        },
+        {
+          id: "assistant-deterministic",
+          role: "assistant",
+          content: "A fixed Power response",
+          provider: null,
+          model: null,
+          botId: null,
+          audienceBotIds: null,
+          createdAt: "2026-08-26T19:04:02.000Z",
+          toolPayload: JSON.stringify({ botPowerExactResponse: "silence" }),
+        },
+      ],
+    });
+
+    assert.match(
+      transcript,
+      /Generation: Auto → anthropic\/claude-recovered · Effort None · Recovered after 1 attempt/u,
+    );
+    assert.doesNotMatch(transcript, /Generation: [^\n]*Turbo[^\n]*Recovered/u);
+    assert.match(
+      transcript,
+      /Generation: Not model-generated \(deterministic response\)\./u,
+    );
+  });
+
+  it("keeps retained Gibberish intent out of developer exports", () => {
+    const intended = "I will explain the archive plan clearly.\nThen verify it.";
+    const transcript = buildDeveloperTranscript({
+      conversation: {
+        id: "conversation-private-speech",
+        title: "Mumbling",
+        mode: "chat",
+        createdAt: "2026-08-26T00:00:00.000Z",
+        updatedAt: "2026-08-26T00:00:01.000Z",
+      },
+      messages: [{
+        id: "assistant-1",
+        role: "assistant",
+        content: "Nuhff, wuhff yuhb, guhff.",
+        provider: "local",
+        model: "test",
+        botId: "bot-1",
+        audienceBotIds: null,
+        toolPayload: JSON.stringify({
+          botPowerExactResponse: "speech_obfuscation",
+          botPowerIntendedSpeech: intended,
+        }),
+        createdAt: "2026-08-26T00:00:01.000Z",
+      }],
+      events: [{
+        id: "event-1",
+        requestId: "request-1",
+        requestSequence: 1,
+        messageId: "assistant-1",
+        kind: "llm",
+        purpose: "chat_reply",
+        provider: "local",
+        model: "test",
+        payloadJson: JSON.stringify({ rawOutput: intended, parsedOutput: intended }),
+        createdAt: "2026-08-26T00:00:00.500Z",
+      }],
+    });
+
+    assert.match(transcript, /Nuhff, wuhff yuhb, guhff\./u);
+    assert.doesNotMatch(transcript, /archive plan|verify it/iu);
+    assert.doesNotMatch(transcript, /botPowerIntendedSpeech/u);
+    assert.match(transcript, /PRIVATE_SPEECH_INTENT_REDACTED/u);
   });
 });

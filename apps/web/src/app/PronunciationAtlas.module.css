@@ -1,0 +1,616 @@
+.atlas {
+  --pronunciation-atlas-color: var(--foundry-module-color, #ff7972);
+  min-width: 0;
+  display: grid;
+  gap: 9px;
+}
+
+.pad {
+  width: 100%;
+  aspect-ratio: 2 / 1;
+}
+
+/* The origin guide is not a second accent pin. Keep it subordinate. */
+.pad::before {
+  opacity: 0.2;
+}
+
+.heading {
+  min-width: 0;
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.headingActions {
+  display: grid;
+  justify-items: end;
+  gap: 5px;
+}
+
+.headingActions button {
+  min-height: 26px;
+  border: 1px solid color-mix(in srgb, var(--pronunciation-atlas-color, var(--accent)) 48%, var(--border));
+  border-radius: 999px;
+  padding: 4px 9px;
+  background: color-mix(in srgb, var(--bg) 88%, var(--panel));
+  color: var(--muted);
+  font: inherit;
+  font-size: 9px;
+  font-weight: 780;
+  cursor: pointer;
+}
+
+.headingActions button[data-active="true"] {
+  background: color-mix(in srgb, var(--pronunciation-atlas-color, var(--accent)) 18%, var(--panel));
+  color: var(--fg);
+}
+
+.headingActions button:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--pronunciation-atlas-color, var(--accent)) 70%, transparent);
+  outline-offset: 2px;
+}
+
+.heading > span {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.heading strong {
+  color: var(--fg, #f5f7fb);
+  font-size: 11px;
+  font-weight: 820;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.heading small,
+.naturalHint {
+  color: var(--fg-muted, #8e9bab);
+  font-size: 10px;
+  line-height: 1.35;
+}
+
+.heading output {
+  max-width: 62%;
+  color: var(--fg, #f5f7fb);
+  font-size: 10px;
+  font-weight: 730;
+  line-height: 1.3;
+  text-align: right;
+}
+
+.map {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  border-radius: inherit;
+  pointer-events: none;
+  opacity: 0;
+  animation: atlasMaterialize 520ms steps(8, end) forwards;
+  /* The scanline sweeps forever; bound its damage to this box and keep the
+   * artwork layers below compositing instead of repainting. */
+  contain: layout paint;
+  isolation: isolate;
+  /* Lens view: 1 / lens.size, with the window origin as percent offsets.
+   * Defaults reproduce the untransformed world exactly. */
+  --atlas-lens-zoom: 1;
+  --atlas-lens-pos-x: 50%;
+  --atlas-lens-pos-y: 50%;
+}
+
+.world {
+  position: absolute;
+  inset: 0;
+  display: block;
+  background: color-mix(
+    in srgb,
+    var(--fg-muted, #8e9bab) 58%,
+    transparent
+  );
+  -webkit-mask-image: url("/voice/pronunciation-atlas-earth-equirectangular-v2.svg");
+  mask-image: url("/voice/pronunciation-atlas-earth-equirectangular-v2.svg");
+  -webkit-mask-position: var(--atlas-lens-pos-x) var(--atlas-lens-pos-y);
+  mask-position: var(--atlas-lens-pos-x) var(--atlas-lens-pos-y);
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-size: calc(var(--atlas-lens-zoom) * 100%)
+    calc(var(--atlas-lens-zoom) * 100%);
+  mask-size: calc(var(--atlas-lens-zoom) * 100%)
+    calc(var(--atlas-lens-zoom) * 100%);
+  transition:
+    mask-size 420ms ease,
+    mask-position 420ms ease,
+    -webkit-mask-size 420ms ease,
+    -webkit-mask-position 420ms ease;
+  opacity: 0.82;
+  filter: drop-shadow(
+    0 0 5px
+      color-mix(in srgb, var(--pronunciation-atlas-color) 28%, transparent)
+  );
+  /* The 829KB vector mask plus drop-shadow must rasterize once into its own
+   * compositor layer; without this the infinite scanline repaints it every
+   * frame and the whole Studio drops to slideshow frame rates. */
+  will-change: transform;
+}
+
+.borders {
+  position: absolute;
+  inset: 0;
+  display: block;
+  background: color-mix(
+    in srgb,
+    var(--pronunciation-atlas-color) 72%,
+    var(--fg, #ffffff) 10%
+  );
+  -webkit-mask-image: url("/voice/pronunciation-atlas-borders-equirectangular-v1.svg");
+  mask-image: url("/voice/pronunciation-atlas-borders-equirectangular-v1.svg");
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-position: var(--atlas-lens-pos-x) var(--atlas-lens-pos-y);
+  mask-position: var(--atlas-lens-pos-x) var(--atlas-lens-pos-y);
+  -webkit-mask-size: calc(var(--atlas-lens-zoom) * 100%)
+    calc(var(--atlas-lens-zoom) * 100%);
+  mask-size: calc(var(--atlas-lens-zoom) * 100%)
+    calc(var(--atlas-lens-zoom) * 100%);
+  /* Countries and states surface only once a lens is active: hidden at the
+   * world's clean silhouette, easing toward 0.42 as the zoom deepens. */
+  opacity: clamp(0, (var(--atlas-lens-zoom) - 1.4) * 0.18, 0.42);
+  transition:
+    opacity 420ms ease,
+    mask-size 420ms ease,
+    mask-position 420ms ease,
+    -webkit-mask-size 420ms ease,
+    -webkit-mask-position 420ms ease;
+  /* Same isolation as the earth silhouette: the borders mask is its own
+   * cached layer, not a per-frame vector rasterization. */
+  will-change: transform;
+}
+
+.lensFootprint {
+  position: absolute;
+  border: 1px dashed
+    color-mix(in srgb, var(--pronunciation-atlas-color) 52%, transparent);
+  border-radius: 3px;
+  background: color-mix(
+    in srgb,
+    var(--pronunciation-atlas-color) 7%,
+    transparent
+  );
+  /* Regions stay invisible until the cursor is actually over one; the map
+   * reads as clean artwork rather than a grid of click targets. */
+  opacity: 0;
+  pointer-events: auto;
+  transition:
+    left 420ms ease,
+    top 420ms ease,
+    width 420ms ease,
+    height 420ms ease,
+    border-color 200ms ease,
+    background 200ms ease,
+    opacity 160ms ease;
+}
+
+.lensFootprint:hover {
+  opacity: 0.92;
+  border-style: solid;
+}
+
+.lensFootprint > small {
+  position: absolute;
+  left: 3px;
+  bottom: calc(100% + 2px);
+  color: color-mix(
+    in srgb,
+    var(--pronunciation-atlas-color) 72%,
+    var(--fg, #ffffff) 18%
+  );
+  font-size: 7px;
+  font-weight: 790;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  opacity: 0.75;
+}
+
+.lensFootprint[data-emphasized="true"] {
+  border-style: solid;
+  border-color: color-mix(
+    in srgb,
+    var(--pronunciation-atlas-color) 78%,
+    var(--fg, #ffffff) 12%
+  );
+  background: color-mix(
+    in srgb,
+    var(--pronunciation-atlas-color) 16%,
+    transparent
+  );
+}
+
+.longitudeLines {
+  position: absolute;
+  inset: 0;
+  opacity: 0.2;
+  background:
+    repeating-linear-gradient(
+      90deg,
+      transparent 0 calc(12.5% - 0.5px),
+      color-mix(in srgb, var(--pronunciation-atlas-color) 38%, transparent)
+        calc(12.5% - 0.5px) 12.5%
+    ),
+    repeating-linear-gradient(
+      0deg,
+      transparent 0 calc(25% - 0.5px),
+      color-mix(in srgb, var(--pronunciation-atlas-color) 34%, transparent)
+        calc(25% - 0.5px) 25%
+    );
+  /* The graticule zooms with the lens so lines keep their longitudes. */
+  background-size: calc(var(--atlas-lens-zoom) * 100%)
+    calc(var(--atlas-lens-zoom) * 100%);
+  background-position: var(--atlas-lens-pos-x) var(--atlas-lens-pos-y);
+  transition:
+    background-size 420ms ease,
+    background-position 420ms ease;
+  mask-image: radial-gradient(ellipse, #000 44%, transparent 92%);
+}
+
+.scan {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: -18%;
+  height: 18%;
+  opacity: 0.48;
+  background: linear-gradient(
+    180deg,
+    transparent,
+    color-mix(in srgb, var(--pronunciation-atlas-color) 34%, transparent),
+    transparent
+  );
+  filter: blur(2px);
+  animation: atlasScan 3.8s linear infinite;
+  /* Promoted up front so the sweep is pure compositor work. */
+  will-change: transform;
+}
+
+.controls {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 9px;
+}
+
+.nearby,
+.lenses {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+}
+
+.nearby > span,
+.lenses > span {
+  color: var(--fg-muted, #8e9bab);
+  font-size: 8px;
+  font-weight: 790;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.nearby > div,
+.lenses > div {
+  min-width: 0;
+  display: flex;
+  gap: 5px;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+.lenses button {
+  min-height: 26px;
+  flex: 0 0 auto;
+  padding: 3px 8px;
+  border: 1px solid
+    color-mix(
+      in srgb,
+      var(--pronunciation-atlas-color) 16%,
+      var(--line, #303846)
+    );
+  border-radius: 999px;
+  color: var(--fg-muted, #8e9bab);
+  background: transparent;
+  font: inherit;
+  font-size: 9px;
+  font-weight: 740;
+  cursor: pointer;
+}
+
+.lenses button:is(:hover, :focus-visible),
+.lenses button[data-active="true"] {
+  outline: none;
+  color: var(--fg, #f5f7fb);
+  border-color: color-mix(
+    in srgb,
+    var(--pronunciation-atlas-color) 58%,
+    var(--fg, #ffffff) 12%
+  );
+  background: color-mix(
+    in srgb,
+    var(--pronunciation-atlas-color) 16%,
+    color-mix(in srgb, var(--fg, #ffffff) 3.5%, transparent)
+  );
+}
+
+.lenses button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.nearby button {
+  min-height: 29px;
+  flex: 0 0 auto;
+  padding: 4px 9px;
+  border: 1px solid
+    color-mix(
+      in srgb,
+      var(--pronunciation-atlas-color) 22%,
+      var(--line, #303846)
+    );
+  border-radius: 999px;
+  color: var(--fg-muted, #8e9bab);
+  background: color-mix(in srgb, var(--fg, #ffffff) 2.2%, transparent);
+  font: inherit;
+  font-size: 9px;
+  font-weight: 740;
+  cursor: pointer;
+}
+
+.nearby button:is(:hover, :focus-visible),
+.nearby button[data-active="true"] {
+  outline: none;
+  color: var(--fg, #f5f7fb);
+  border-color: color-mix(
+    in srgb,
+    var(--pronunciation-atlas-color) 58%,
+    var(--fg, #ffffff) 12%
+  );
+  background: color-mix(
+    in srgb,
+    var(--pronunciation-atlas-color) 16%,
+    color-mix(in srgb, var(--fg, #ffffff) 3.5%, transparent)
+  );
+}
+
+.nearby button:disabled {
+  cursor: not-allowed;
+  opacity: 0.44;
+}
+
+.strength,
+.previewBar {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.strength button,
+.previewBar button,
+.listFallback summary {
+  appearance: none;
+  min-height: 34px;
+  border: 1px solid
+    color-mix(
+      in srgb,
+      var(--pronunciation-atlas-color) 24%,
+      var(--line, #303846)
+    );
+  border-radius: 7px;
+  color: var(--fg-muted, #8e9bab);
+  background: color-mix(in srgb, var(--fg, #ffffff) 2.5%, transparent);
+  font-size: 10px;
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.strength button,
+.previewBar button {
+  padding: 5px 11px;
+}
+
+.strength button[data-active="true"],
+.previewBar button[data-primary="true"] {
+  color: var(--fg, #ffffff);
+  border-color: color-mix(
+    in srgb,
+    var(--pronunciation-atlas-color) 58%,
+    var(--fg, #ffffff)
+  );
+  background: color-mix(
+    in srgb,
+    var(--pronunciation-atlas-color) 22%,
+    color-mix(in srgb, var(--fg, #ffffff) 4%, transparent)
+  );
+}
+
+.strength button:focus-visible,
+.previewBar button:focus-visible,
+.listFallback summary:focus-visible {
+  outline: 2px solid
+    color-mix(
+      in srgb,
+      var(--pronunciation-atlas-color) 64%,
+      var(--fg, #ffffff)
+    );
+  outline-offset: 2px;
+}
+
+.strength button:hover:not(:disabled),
+.previewBar button:hover:not(:disabled),
+.listFallback summary:hover {
+  color: var(--fg);
+  border-color: var(--fg-muted);
+}
+
+.previewBar button:disabled {
+  color: var(--fg-muted);
+  background: transparent;
+  border-color: var(--line);
+  cursor: not-allowed;
+}
+
+.listFallback {
+  position: relative;
+  margin-left: auto;
+}
+
+.listFallback summary {
+  padding: 6px 9px;
+  list-style: none;
+}
+
+.listFallback summary::-webkit-details-marker {
+  display: none;
+}
+
+.listFallback > div {
+  position: relative;
+  z-index: 8;
+  min-width: 0;
+  margin-top: 5px;
+  padding: 10px;
+  display: grid;
+  gap: 9px;
+  border: 1px solid
+    color-mix(
+      in srgb,
+      var(--pronunciation-atlas-color) 32%,
+      var(--line, #303846)
+    );
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--surface, #11161e) 94%, transparent);
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.38);
+  backdrop-filter: blur(16px);
+}
+
+.controls:has(.listFallback[open]) {
+  flex-wrap: wrap;
+}
+
+.listFallback[open] {
+  flex-basis: 100%;
+}
+
+.listFallback[open] summary {
+  width: fit-content;
+  margin-left: auto;
+}
+
+.listFallback label {
+  display: grid;
+  gap: 4px;
+  color: var(--fg-muted, #8e9bab);
+  font-size: 9.5px;
+  font-weight: 740;
+}
+
+.listFallback select {
+  min-width: 0;
+  height: 34px;
+  border: 1px solid var(--line, #303846);
+  border-radius: 7px;
+  color: var(--fg, #f5f7fb);
+  background: var(--surface, #11161e);
+  font: inherit;
+}
+
+.previewBar {
+  justify-content: flex-end;
+  border-top: 1px solid
+    color-mix(in srgb, var(--pronunciation-atlas-color) 14%, transparent);
+  padding-top: 8px;
+}
+
+@keyframes atlasMaterialize {
+  0% {
+    opacity: 0;
+    clip-path: inset(48% 0 48% 0);
+    transform: translateY(2px) scaleY(0.94);
+  }
+  30% {
+    opacity: 0.76;
+  }
+  44% {
+    opacity: 0.28;
+  }
+  62% {
+    opacity: 0.9;
+  }
+  100% {
+    opacity: 0.94;
+    clip-path: inset(0 0 0 0);
+    transform: none;
+  }
+}
+
+@keyframes atlasScan {
+  from {
+    transform: translateY(0);
+  }
+  to {
+    transform: translateY(650%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .map {
+    opacity: 0.94;
+    animation: none;
+  }
+
+  .scan {
+    display: none;
+  }
+}
+
+@media (max-width: 520px) {
+  .heading {
+    align-items: start;
+    flex-direction: column;
+    gap: 5px;
+  }
+
+  .heading output {
+    max-width: 100%;
+    text-align: left;
+  }
+
+  .controls {
+    align-items: stretch;
+  }
+
+  .strength {
+    flex: 1 1 auto;
+  }
+
+  .strength button {
+    flex: 1 1 0;
+  }
+}
+
+/* Drill-down navigation: the world view is a navigator, not a placement
+ * surface — the cursor says so, and region footprints read as targets. */
+.atlas[data-atlas-view="world"] .pad {
+  cursor: zoom-in;
+}
+
+.lenses output {
+  color: var(--muted, #93a0b4);
+  font-size: 10px;
+  align-self: center;
+}

@@ -1,4 +1,9 @@
 import {
+  botPowerResponseIsSilentV1,
+  socialSilenceMessageIsMarkedV1,
+  type SocialSilenceMarkerV1,
+} from "@localai/shared";
+import {
   PRISM_BOT_MARKDOWN_LINK_RE,
   tokenizeBotMentionSource,
 } from "./botMention.ts";
@@ -12,14 +17,16 @@ export type CoffeeUserRevealFlowState =
   | "tableTyping";
 
 export function coffeeComposerUsesRichInput(args: {
-  variant: "chat" | "coffee-global" | "coffee-table" | "signal";
+  variant: "chat" | "coffee-global" | "coffee-table" | "signal" | "debate";
   markdownEditorEnabled: boolean;
 }): boolean {
-  return (
-    args.markdownEditorEnabled ||
-    args.variant === "coffee-table" ||
-    args.variant === "signal"
-  );
+  // Live stages always use the browser's native editing path. Mention chips
+  // and Markdown are useful in setup/global composers, but TipTap reconciliation
+  // must never compete with Coffee/Signal animation or audio for a keystroke.
+  if (args.variant === "coffee-table" || args.variant === "signal") {
+    return false;
+  }
+  return args.markdownEditorEnabled;
 }
 
 export function coffeeShouldQueueAssistantRevealAfterUserTyping(
@@ -39,6 +46,67 @@ export function coffeeRevealPreparationMayCommit(args: {
   currentEpoch: number;
 }): boolean {
   return args.preparedEpoch === args.currentEpoch;
+}
+
+/** True when this table line was cut off and must not finish typing or seal. */
+export function coffeeRevealLineIsCutOffV1(
+  messageId: string | null | undefined,
+  cutOffMessageId: string | null | undefined,
+): boolean {
+  const id = messageId?.trim();
+  if (!id) return false;
+  return cutOffMessageId?.trim() === id;
+}
+
+/**
+ * A cut-off line must not seal as if the speaker finished. Voice `onEnd` after
+ * an abort would otherwise dump the rest of the table text.
+ */
+export function coffeeRevealVoiceEndSealsTableLineV1(args: {
+  messageId: string;
+  activeMessageId: string | null | undefined;
+  cutOffMessageId: string | null | undefined;
+}): boolean {
+  const messageId = args.messageId.trim();
+  if (!messageId) return false;
+  if (coffeeRevealLineIsCutOffV1(messageId, args.cutOffMessageId)) return false;
+  return args.activeMessageId?.trim() === messageId;
+}
+
+export interface CoffeeHeardCutoff<T extends { id: string; content: string }> {
+  sourceMessage: T;
+  heardContent: string;
+}
+
+/**
+ * Apply the audience-heard cutoff to every live Coffee text surface. A pending
+ * line may not exist in the committed conversation yet, so missing source rows
+ * are appended from the captured message until the server returns its saved
+ * projection.
+ */
+export function coffeeMessagesWithHeardCutoffs<
+  T extends { id: string; content: string },
+>(args: {
+  messages: readonly T[];
+  cutoffs: readonly CoffeeHeardCutoff<T>[];
+}): T[] {
+  if (args.cutoffs.length === 0) return [...args.messages];
+  const cutoffByMessageId = new Map(
+    args.cutoffs.map((cutoff) => [cutoff.sourceMessage.id, cutoff] as const),
+  );
+  const presentMessageIds = new Set(args.messages.map((message) => message.id));
+  return [
+    ...args.messages.map((message) => {
+      const cutoff = cutoffByMessageId.get(message.id);
+      return cutoff ? { ...message, content: cutoff.heardContent } : message;
+    }),
+    ...args.cutoffs
+      .filter((cutoff) => !presentMessageIds.has(cutoff.sourceMessage.id))
+      .map((cutoff) => ({
+        ...cutoff.sourceMessage,
+        content: cutoff.heardContent,
+      })),
+  ];
 }
 
 export function coffeeArrivalAutoplayCanScheduleNow(
@@ -79,6 +147,22 @@ export function coffeePendingSubmittedUserLineVisible(args: {
   );
 }
 
+/**
+ * `queueCoffeeReveal` updates pending-conversation deps while the player line may
+ * still be in `userTableTyping`. Restarting that typewriter from zero makes the
+ * finished line vanish until the bot starts speaking — skip the restart once the
+ * reveal has settled (or the full display length is already on screen).
+ */
+export function coffeeUserTableTypingShouldRestart(args: {
+  settled: boolean;
+  visibleLength: number;
+  fullDisplayLength: number;
+}): boolean {
+  if (args.settled) return false;
+  if (args.fullDisplayLength <= 0) return false;
+  return args.visibleLength < args.fullDisplayLength;
+}
+
 /** The stored player message from a completed Coffee turn, without display rewriting. */
 export function coffeeSubmittedUserMessageFromTurn<
   T extends { role: string; content: string },
@@ -97,18 +181,38 @@ export function coffeePersistedUserLineOwnsPendingReveal<
 >(args: { messages: readonly T[]; userRevealText: string }): boolean {
   const normalizedPending = args.userRevealText.replace(/\s+/g, " ").trim();
   if (!normalizedPending) return false;
-  const latestStoredUserMessage = coffeeSubmittedUserMessageFromTurn(
-    args.messages,
-  );
-  return (
-    latestStoredUserMessage?.content.replace(/\s+/g, " ").trim() ===
-    normalizedPending
+  // Any persisted copy owns the pending line — not just the latest user
+  // message. A follow-up action message (e.g. `*twiddles thumbs*`) becomes the
+  // newest user row, and matching only against it re-surfaced the previous
+  // send as a phantom pending line beside its persisted twin.
+  return args.messages.some(
+    (message) =>
+      message.role === "user" &&
+      message.content.replace(/\s+/g, " ").trim() === normalizedPending,
   );
 }
 
-export function coffeeTableMessageContentIsVisible(content: string): boolean {
+export function coffeeTableMessageContentIsVisible(
+  content: string,
+  socialSilence?: SocialSilenceMarkerV1,
+  options?: { keepPowerMuteEllipsis?: boolean },
+): boolean {
   const normalized = content.trim();
-  return /[\p{L}\p{N}]/u.test(normalized);
+  // Hard Mute / social-silence "..." is intentional table presence — keep it.
+  if (
+    options?.keepPowerMuteEllipsis === true &&
+    botPowerResponseIsSilentV1(normalized)
+  ) {
+    return true;
+  }
+  return (
+    /[\p{L}\p{N}]/u.test(normalized) ||
+    socialSilenceMessageIsMarkedV1({
+      content: normalized,
+      marker: socialSilence,
+      mode: "coffee",
+    })
+  );
 }
 
 /** Sentence-case player prose for display without rewriting persisted message source. */
@@ -176,6 +280,55 @@ export function coffeeLoopTimerOwnsAutoplayTurn(args: {
   return args.scheduledForMs === null || args.scheduledForMs > args.nowMs;
 }
 
+/** Remaining delay on Coffee's monotonic autoplay deadline. */
+export function coffeeMonotonicDeadlineRemainingMs(
+  deadlineMs: number,
+  nowMs: number,
+): number {
+  if (!Number.isFinite(deadlineMs) || !Number.isFinite(nowMs)) return 0;
+  return Math.max(0, deadlineMs - nowMs);
+}
+
+export interface CoffeeAwkwardSilencePressure {
+  pressure: number;
+  focus: string | null;
+}
+
+/**
+ * Wall-clock dead-air pressure. Any new player or bot message resets it by
+ * becoming the latest activity timestamp; it never mutates the saved topic.
+ */
+export function coffeeAwkwardSilencePressure(args: {
+  lastActivityAtMs: number | null;
+  sessionStartedAtMs: number | null;
+  nowMs: number;
+  savedTopic?: string | null;
+}): CoffeeAwkwardSilencePressure {
+  const anchorMs = args.lastActivityAtMs ?? args.sessionStartedAtMs;
+  if (anchorMs === null || !Number.isFinite(anchorMs) || !Number.isFinite(args.nowMs)) {
+    return { pressure: 0, focus: null };
+  }
+  const inactiveMs = Math.max(0, args.nowMs - anchorMs);
+  if (inactiveMs < 35_000) return { pressure: 0, focus: null };
+  const pressure = Math.min(1, (inactiveMs - 35_000) / 40_000);
+  const topic = args.savedTopic?.trim();
+  if (inactiveMs < 65_000) {
+    return {
+      pressure,
+      focus:
+        "An awkward silence has settled. Break it naturally by questioning, contrasting, or making concrete one specific claim from the visible exchange. Do not offer a generic aphorism.",
+    };
+  }
+  return {
+    pressure,
+    focus: [
+      "The prior exchange has stalled. Make one natural pivot to a concrete new angle",
+      topic ? `that grows from the saved topic ${JSON.stringify(topic)}` : "that grows from the saved topic",
+      "without renaming or rewriting that topic. Ask something answerable or introduce a specific object, choice, consequence, or action.",
+    ].join(" "),
+  };
+}
+
 export function coffeeVoicePlaybackOwnsAutoplayGate(args: {
   busy: boolean;
   activeMessageId: string | null | undefined;
@@ -183,13 +336,15 @@ export function coffeeVoicePlaybackOwnsAutoplayGate(args: {
   return args.busy && Boolean(args.activeMessageId?.trim());
 }
 
+/**
+ * A composing player never blocks the table: bots keep thinking, revealing,
+ * and scheduling turns while text sits in the composer (Signal-style flow).
+ */
 export function coffeeAutoplayForceTurnShouldRun(args: {
   hasConversation: boolean;
   hasPresentBot: boolean;
   sessionPhase: string;
   autoplayPaused: boolean;
-  devModeEnabled: boolean;
-  draft: string;
   requestInFlight: boolean;
   pendingReveal: boolean;
   timerPresent: boolean;
@@ -205,12 +360,7 @@ export function coffeeAutoplayForceTurnShouldRun(args: {
   if (!args.hasConversation || !args.hasPresentBot) return false;
   if (args.sessionPhase !== "arriving" && args.sessionPhase !== "live")
     return false;
-  if (
-    args.autoplayPaused ||
-    args.devModeEnabled ||
-    args.draft.trim().length > 0
-  )
-    return false;
+  if (args.autoplayPaused) return false;
   if (args.requestInFlight || args.pendingReveal) return false;
   if (args.sessionEndsAtMs !== null && args.nowMs >= args.sessionEndsAtMs)
     return false;
@@ -236,8 +386,6 @@ export function coffeeAutoplayWatchdogShouldWake(args: {
   hasConversation: boolean;
   sessionPhase: string;
   autoplayPaused: boolean;
-  devModeEnabled: boolean;
-  draft: string;
   rhythmState: CoffeeUserRevealFlowState;
   loopScheduled: boolean;
   requestInFlight: boolean;
@@ -247,47 +395,10 @@ export function coffeeAutoplayWatchdogShouldWake(args: {
   if (!args.hasConversation) return false;
   if (args.sessionPhase !== "arriving" && args.sessionPhase !== "live")
     return false;
-  if (args.autoplayPaused || args.devModeEnabled) return false;
-  if (args.draft.trim().length > 0) return false;
+  if (args.autoplayPaused) return false;
   if (!coffeeArrivalAutoplayCanScheduleNow(args.rhythmState)) return false;
   if (args.loopScheduled || args.requestInFlight) return false;
   return args.sessionEndsAtMs === null || args.nowMs < args.sessionEndsAtMs;
-}
-
-export function coffeeTableTalkAutoplayDeferralMs(args: {
-  conversationId: string;
-  draft: string;
-  lastTypedAtMs: number;
-  lastTypedConversationId: string | null;
-  nowMs: number;
-  graceMs: number;
-}): number {
-  if (args.lastTypedConversationId !== args.conversationId) return 0;
-  if (args.draft.trim().length > 0) return Math.max(0, args.graceMs);
-  if (args.lastTypedAtMs <= 0) return 0;
-  return Math.max(0, args.graceMs - (args.nowMs - args.lastTypedAtMs));
-}
-
-export function coffeeGeneratedReplyRevealDeferralMs(args: {
-  conversationId: string;
-  draft: string;
-  includeCooldown: boolean;
-  lastTypedAtMs: number;
-  lastTypedConversationId: string | null;
-  nowMs: number;
-  graceMs: number;
-}): number {
-  if (args.includeCooldown) return 0;
-  if (args.draft.trim().length === 0) return 0;
-  return coffeeTableTalkAutoplayDeferralMs(args);
-}
-
-export function coffeeDraftChangeCountsAsTyping(
-  previousDraft: string,
-  nextDraft: string,
-): boolean {
-  if (previousDraft === nextDraft) return false;
-  return previousDraft.trim().length > 0 || nextDraft.trim().length > 0;
 }
 
 export function coffeeDirectedMentionBotIds(
@@ -347,4 +458,67 @@ export function coffeeVisibleDirectedMentionBotIds(
     displayCursor += segment.text.length;
   }
   return out;
+}
+
+/*
+ * `coffeeTypewriterCommitBudgetMs` and `coffeeComposerDraftSyncDelayMs` used to
+ * live here. Both widened their interval as frames collapsed and narrowed it as
+ * frames recovered, which is a feedback loop rather than a fix — the same flaw
+ * that retired the avatar load sheds. Reveal progress now bypasses top-level
+ * state entirely (`coffeeRevealProgressChannel`), and the composer draft
+ * settles on a fixed debounce.
+ */
+
+/**
+ * Rhythm states the Coffee table can sit in. Mirrors `CoffeeTurnRhythmState`
+ * in page.tsx; kept structural so the stall predicate below is testable
+ * without pulling the component in.
+ */
+export type CoffeeTableRhythmStateV1 =
+  | "idle"
+  | "botThinking"
+  | "playerComposing"
+  | "userTableTyping"
+  | "tableTyping"
+  | "cooldown";
+
+/**
+ * Is the table in a shape where nothing can make it move again?
+ *
+ * All of these share one signature: no request in flight, no timer armed, and
+ * nothing progressing — the room is silent with an idle main thread and the
+ * composer disabled. Session 8e012a9d lost ~138s to a thinking seat that had
+ * lost its request; session 6d6f1239 sat silent for seven minutes on a pending
+ * reveal that never started; session 2253b3903a sat for 100 minutes with the
+ * rhythm parked at `cooldown` after its hand-off timer was cancelled without
+ * anyone resetting the state.
+ *
+ * `cooldownTimerArmed` is the important negative case: a healthy cooldown looks
+ * identical to a stranded one except that its hand-off timer is still pending.
+ * Without that input the predicate would start counting against every ordinary
+ * cooldown, and any tightening of the threshold would start cutting real turns
+ * short.
+ */
+export function coffeeTableStallShapeV1(args: {
+  phase: string;
+  requestInFlight: boolean;
+  loopTimerArmed: boolean;
+  cooldownTimerArmed: boolean;
+  rhythmState: CoffeeTableRhythmStateV1;
+  pendingRevealPresent: boolean;
+  pendingSpeakerPresent: boolean;
+}): boolean {
+  if (args.phase !== "live" && args.phase !== "arriving") return false;
+  if (args.requestInFlight || args.loopTimerArmed) return false;
+  // A pending hand-off is progress, not a stall.
+  if (args.cooldownTimerArmed) return false;
+  if (args.rhythmState === "tableTyping" || args.rhythmState === "userTableTyping") {
+    return false;
+  }
+  if (args.rhythmState === "cooldown") return true;
+  if (args.pendingRevealPresent) return true;
+  if (args.pendingSpeakerPresent) {
+    return args.rhythmState === "botThinking" || args.rhythmState === "idle";
+  }
+  return false;
 }

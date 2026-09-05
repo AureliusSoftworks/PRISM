@@ -139,8 +139,8 @@ function readArchive(entry) {
     .trim()
     .split("\n")
     .filter(Boolean);
-  if (!entries.includes("bot.json") || !entries.includes("memories.json")) {
-    throw new Error(`${entry.name} archive is missing a required entry.`);
+  if (!entries.includes("bot.json")) {
+    throw new Error(`${entry.name} archive is missing bot.json.`);
   }
   const document = JSON.parse(
     execFileSync("unzip", ["-p", bundlePath, "bot.json"], {

@@ -3,11 +3,111 @@ import type {
   WebSearchPayload,
 } from "./prismTool.js";
 import type { PrismMoodIgnoredQuestionPenaltyLevel } from "./mood.js";
-import type { AutoRecoveryTraceV1 } from "./autoFallback.js";
+import type {
+  AutoFallbackAttemptTraceV1,
+  AutoRecoveryTraceV1,
+} from "./autoFallback.js";
+import type { AutoRouteDecisionV1 } from "./modelRouting.js";
 import type {
   BotCrosstalkInterruptedSpeakerCue,
+  CrosstalkFloorOutcome,
+  CrosstalkReclaimPlanV1,
   ListenerReactionSpokenCue,
+  SocialSilenceMarkerV1,
 } from "./listenerReaction.js";
+import type {
+  BotPowerMutePerformanceV1,
+  BotPowerObserverProjectionV1,
+} from "./botPower.js";
+import type { BotPowerTrollPresentationV1 } from "./trollPower.js";
+import type { BotIdentityShapeshiftStateV1 } from "./botIdentityShapeshift.js";
+import type { BotFalseNameStateV1 } from "./botFalseName.js";
+import type {
+  MaxReasoningEffort,
+  ProviderReasoningEffort,
+} from "./reasoningEffort.js";
+
+export {
+  PRISM_ACTION_UNDO_RETENTION_MS,
+  PRISM_CONTEXT_TOKEN_TTL_MS,
+  PRISM_ORCHESTRATION_VERSION,
+  normalizePrismExecuteProposalRequestV1,
+  normalizePrismIntentPlanV1,
+  normalizePrismJsonObject,
+  normalizePrismUndoRequestV1,
+  type PrismActionPreviewV1,
+  type PrismActionProposalV1,
+  type PrismActionRunStatusV1,
+  type PrismActionRunV1,
+  type PrismCapabilityDescriptorV1,
+  type PrismCapabilityExecutionV1,
+  type PrismCapabilityProviderV1,
+  type PrismCapabilityRiskV1,
+  type PrismCapabilityUndoV1,
+  type PrismCompanionCardV1,
+  type PrismConfirmationPolicyV1,
+  type PrismContextTokenV1,
+  type PrismEntityReferenceV1,
+  type PrismExecuteProposalRequestV1,
+  type PrismIntentKindV1,
+  type PrismIntentPlanStepV1,
+  type PrismIntentPlanV1,
+  type PrismJsonObject,
+  type PrismJsonPrimitive,
+  type PrismJsonValue,
+  type PrismMonitorV1,
+  type PrismUndoRequestV1,
+} from "./prismOrchestration.js";
+
+export {
+  PRISM_REFRACT_DEBATE_EXHIBIT_REJECTED_CANDIDATE_LIMIT,
+  PRISM_REFRACT_DIRECTION_MAX_LENGTH,
+  PRISM_REFRACT_DEBATE_TEXT_TARGET_KINDS,
+  PRISM_REFRACT_INPUT_CONTEXT_MAX_LENGTH,
+  PRISM_REFRACT_INPUT_LABEL_MAX_LENGTH,
+  PRISM_REFRACT_INPUT_TEXT_TARGET_KIND,
+  PRISM_REFRACT_INPUT_VALUE_MAX_LENGTH,
+  PRISM_REFRACT_REFERENCE_ID_MAX_LENGTH,
+  PRISM_REFRACT_REJECTED_CANDIDATE_LIMIT,
+  PRISM_REFRACT_SIGNAL_TEXT_TARGET_KINDS,
+  isPrismRefractDebateTextTarget,
+  isPrismRefractInputTextTarget,
+  normalizePrismRefractDirection,
+  normalizePrismRefractRequest,
+  type PrismRefractDebateTextTarget,
+  type PrismRefractDebateTextTargetKind,
+  type PrismRefractInputTextTarget,
+  type PrismRefractRequest,
+  type PrismRefractResponse,
+  type PrismRefractSignalTextTarget,
+  type PrismRefractSignalTextTargetKind,
+  type PrismRefractTextTarget,
+} from "./prismRefract.js";
+
+export {
+  PRISM_COMPANION_HANDOFF_DIRECTIONS,
+  PRISM_COMPANION_MESSAGE_MAX_LENGTH,
+  PRISM_COMPANION_RECOVERY_LIMIT,
+  PRISM_COMPANION_REFERENCE_ID_MAX_LENGTH,
+  PRISM_COMPANION_SURFACE_IDS,
+  PRISM_COMPANION_TOOL_IDS,
+  isPrismCompanionSurfaceId,
+  normalizePrismCompanionActionIntent,
+  normalizePrismCompanionActionIntents,
+  normalizePrismCompanionDebateDraft,
+  normalizePrismCompanionMessages,
+  normalizePrismCompanionRequest,
+  normalizePrismCompanionSurfaceReference,
+  type PrismCompanionActionIntent,
+  type PrismCompanionDebateDraft,
+  type PrismCompanionHandoffDirection,
+  type PrismCompanionMessage,
+  type PrismCompanionRequest,
+  type PrismCompanionResponse,
+  type PrismCompanionSurfaceId,
+  type PrismCompanionSurfaceReference,
+  type PrismCompanionToolId,
+} from "./prismCompanion.js";
 
 export {
   PRISM_EULA_ACCEPTANCE_ACTION,
@@ -42,12 +142,15 @@ export {
   isProjectOwnedAssetBlobArchivePath,
   projectOwnedAssetBlobArchivePathForChecksum,
   type ProjectOwnedAssetBackupReferenceV1,
+  type CoffeeProjectImageRestoreMetadataV1,
+  type CoffeeProjectOwnedAssetSlotV1,
   type ProjectOwnedAssetExportPayloadV1,
   type ProjectOwnedAssetManifestEntryV1,
   type ProjectOwnedAssetManifestV1,
   type ProjectOwnedAssetMediaTypeV1,
   type ProjectOwnedAssetOwnerTypeV1,
   type ProjectOwnedAssetRestoreMetadataV1,
+  type ProjectOwnedAssetSlotV1,
   type SignalProjectAudioRestoreMetadataV1,
   type SignalProjectImageRestoreMetadataV1,
   type SignalProjectOwnedAssetSlotV1,
@@ -56,14 +159,18 @@ export {
 export {
   AUTO_FALLBACK_CHAIN_FALLBACK_COUNT,
   AUTO_FALLBACK_CHAIN_MAX_ATTEMPT_COUNT,
+  AUTO_FALLBACK_CHAIN_MAX_TOTAL_FALLBACK_COUNT,
   AUTO_FALLBACK_CHAIN_MAX_FALLBACK_COUNT,
   AUTO_FALLBACK_CHAIN_MIN_FALLBACK_COUNT,
   AUTO_FALLBACK_CHAIN_VERSION,
+  FALLBACK_CHAINS_VERSION,
   AUTO_FALLBACK_MODEL_ID_MAX_LENGTH,
   autoFallbackModelKey,
   autoFallbackResolvedChain,
+  fallbackChainForLane,
   isAutoFallbackProvider,
   normalizeAutoFallbackChain,
+  normalizeFallbackChainsV2,
   normalizeAutoFallbackModelRef,
   normalizeAutoRecoveryTrace,
   normalizeResponseMode,
@@ -74,6 +181,7 @@ export {
   type AutoFallbackFailureReason,
   type AutoFallbackModelRef,
   type AutoFallbackProvider,
+  type FallbackChainsV2,
   type AutoRecoveryTraceV1,
   type ResponseMode,
 } from "./autoFallback.js";
@@ -81,38 +189,113 @@ export {
 export {
   BOT_POWER_INTENT_MAX_LENGTH,
   BOT_POWER_CANONICAL_SILENCE_V1,
-  BOT_POWER_FORGETFUL_CONTEXT_MAX_MESSAGES_V1,
-  BOT_POWER_FORGETFUL_CONTEXT_MIN_MESSAGES_V1,
+  BOT_POWER_MUTE_PERFORMANCE_VERSION,
+  BOT_POWER_MUTE_MIN_DURATION_MS,
+  BOT_POWER_MUTE_MAX_DURATION_MS,
+  BOT_POWER_MUTE_REACTION_MAX,
+  BOT_POWER_MUTE_REACTION_MIN_SPACING_MS,
+  BOT_POWER_AVATAR_SCALE_MODES_V1,
+  BOT_POWER_AVATAR_SCALE_MULTIPLIER_V1,
+  BOT_POWER_DESIGNATION_MAX_LENGTH,
   BOT_POWER_MAX_COUNT,
   BOT_POWER_NAME_MAX_LENGTH,
   BOT_POWER_LOUD_TEXT_SCALE_V1,
   BOT_POWER_LOUD_VOICE_GAIN_MULTIPLIER_V1,
   BOT_POWER_QUIET_TEXT_SCALE_V1,
   BOT_POWER_QUIET_VOICE_GAIN_MULTIPLIER_V1,
+  BOT_POWER_MUTE_PUBLIC_MARK_V1,
+  BOT_POWER_SIGIL_IDS_V1,
   BOT_POWER_VERSION,
+  botPowerFallbackTitleV1,
+  normalizeBotPowerGeneratedTitleV1,
+  rerollBotPowerPresentationV1,
   COFFEE_POWER_PROMPT_MAX_CHARS,
   COFFEE_POWER_PROMPT_MAX_TOKENS,
   activeBotPowerEffectsV1,
   activeBotPowersV1,
+  applyBotPowerAddressedInsultV1,
   applyBotPowerAddressedCopyResponseV1,
   applyBotPowerEternalIntroductionResponseV1,
   applyBotPowerEchoResponseV1,
+  applyBotPowerCursedTongueResponseV1,
+  BOT_POWER_CURSED_TONGUE_MAX_PER_SENTENCE_V2,
+  BOT_POWER_CURSED_TONGUE_MIN_PER_UTTERANCE_V2,
+  botPowerCursedTongueMinimumCensorsV2,
+  botPowerCursedTongueCensorCountV2,
+  botPowerCursedTongueSentenceRangesV1,
   applyBotPowerMumbledResponseV1,
+  applyBotPowerMumbledReactionPlanV1,
   applyBotPowerMuteResponseV1,
+  botPowerMuteEstimatedDurationMsV1,
+  botPowerMuteElapsedCueV1,
+  botPowerMuteInterruptionChanceV1,
+  botPowerMutePeriodsV1,
+  botPowerMutePrivateHistoryV1,
+  botPowerMutePublicResponseAtElapsedV1,
+  botPowerMuteObserverHistoryV1,
+  botPowerMuteReactionCountV1,
+  botPowerMuteReactionTemperamentFromPersonaV1,
+  createBotPowerMutePerformanceV1,
+  normalizeBotPowerMutePerformanceV1,
+  planBotPowerMuteReactionBeatsV1,
   applyBotPowerResponseBudgetV1,
+  BOT_POWER_RESPONSE_BUDGET_MINIMAL_MAX_WORDS_V1,
+  botAddressFormsV1,
+  botNameBoundaryPatternV1,
+  botTextNamesBotV1,
   botPowerAddressedFandomCueFromEffectsV1,
   botPowerAddressedFandomCueV1,
+  botPowerChromaticBiasCueFromEffectsV1,
+  botPowerChromaticBiasCueV1,
+  botPowerChromaticBiasColorMatchesV1,
+  botPowerChromaticBiasEffectsFromEffectsV1,
+  botPowerChromaticBiasEffectsFromIntentV1,
+  botPowerChromaticBiasResolvedHueV1,
+  botPowerChromaticBiasSubjectMatchV1,
+  botPowerHueLabelV1,
+  BOT_POWER_CHROMATIC_BIAS_MATCH_BAND_DEG_V1,
+  botPowerAddressedInsultPrimaryCueV1,
+  botPowerRequiresAddressedInsultV1,
+  botPowerRequiresAddressedInsultFromEffectsV1,
+  botPowerResponseHasAddressedInsultV1,
   botPowerDeterministicHalfChanceV1,
+  botPowerAvatarScaleModeFromDescriptionV1,
   botPowerAvatarScaleModeFromEffectsV1,
   botPowerAvatarScaleModeV1,
+  botPowerHasAvatarColorCycleFromEffectsV1,
+  botPowerHasAvatarColorCycleV1,
+  botPowerPairwiseSizeCueFromEffectsV1,
+  botPowerPairwiseSizeCueV1,
   botPowerAvatarVisibilityModeFromEffectsV1,
   botPowerAvatarVisibilityModeV1,
   botPowerCupRateMultiplierForBotV1,
   botPowerCandorResponseRuleV1,
   botPowerCandorTriggerV1,
+  strongestBotPowerCredulityEffectV1,
+  strongestBotPowerAntiTruthEffectV1,
+  botPowerLooksLikeSafetyRefusalV1,
+  botPowerIsAddressedQuestionV1,
+  botPowerCredulitySelfRuleV1,
+  botPowerAntiTruthSelfRuleV1,
+  botPowerAntiTruthSpokenNameV1,
+  applyBotPowerAntiTruthTrueNameLeakV1,
+  botPowerAntiTruthInvertPromptV1,
   botPowerDefinitionIsExplicitInterruptionV1,
   botPowerDefinitionIsUnconditionalInterruptionV1,
+  botPowerDefinitionIsEndlessTangentV1,
+  botPowerDefinitionIsTrollV1,
+  botPowerTrollAuthoringCueV1,
+  botPowerTrollsV1,
+  applyBotPowerBotNamesV1,
+  botPowerBotNamingCueFromEffectsV1,
+  botPowerBotNamingCueV1,
+  botPowerDesignationEffectFromIntentV1,
+  botPowerDesignationObserverCueFromEffectsV1,
+  botPowerDesignationObserverCueV1,
+  botPowerTargetNameFromEffectsV1,
+  botPowerTargetNameV1,
   botPowerDefinitionIsExplicitMuteV1,
+  botPowerDefinitionIsSimulationEvangelistV1,
   botPowerCopiesAddressedSpeechV1,
   botPowerEchoesAddressedSpeechV1,
   botPowerEternallyIntroducesFromEffectsV1,
@@ -125,18 +308,94 @@ export {
   botPowerIntermittentMuteEffectV1,
   botPowerIntermittentMuteTurnIsIgnoredFromEffectsV1,
   botPowerIntermittentMuteTurnIsIgnoredV1,
+  botPowerIntermittentAudibilityEffectFromEffectsV1,
+  botPowerIntermittentAudibilityEffectV1,
+  botPowerIgnoresOtherPowersFromEffectsV1,
+  botPowerIgnoresOtherPowersV1,
+  botPowerPiercesDeliveryFiltersFromEffectsV1,
+  botPowerPiercesDeliveryFiltersV1,
+  botPowerHasStageAwarenessFromEffectsV1,
+  botPowerHasStageAwarenessV1,
+  demoteMultiEnlightenedScenePowersV1,
+  botPowerSignalPolicyFromEffectsV1,
+  botPowerAvatarOpacityFromEffectsV1,
+  botPowerAvatarOpacityV1,
+  botPowerMouthMotionFromEffectsV1,
+  botPowerMouthMotionV1,
+  botPowerMetaSigilFromEffectsV1,
+  botPowerMetaSigilV1,
+  botPowerInaudibleMissCueV1,
+  botPowerIntermittentAudibilityHolderRuleFromEffectsV1,
+  botPowerIntermittentAudibilityHolderRuleV1,
+  botPowerMuteExemptsPlayerFromEffectsV1,
+  botPowerMuteExemptsPlayerV1,
+  botPowerSpeechAudienceAllowsPlayerFromEffectsV1,
+  botPowerAuthoringParadoxHintV1,
+  botPowerEffectIsDeliveryFilterV1,
+  BOT_POWER_DELIVERY_EFFECT_TYPES_V1,
+  botPowerIneptImagePromptV1,
+  botPowerIneptitudeFinalTurnCueV1,
+  botPowerIneptitudeFinalRoleCueFromEffectsV1,
+  botPowerIneptitudeFinalRoleCueV1,
+  botPowerIneptitudeRoleCueFromEffectsV1,
+  botPowerIneptitudeRoleCueV1,
+  botPowerIneptUserPromptV1,
+  botPowerIneptRoleMisdirectionFromEffectsV1,
+  botPowerIneptRoleMisdirectionV1,
+  botPowerIsIneptFromEffectsV1,
+  botPowerIsIneptV1,
+  botPowerListenerHearsTurnFromEffectsV1,
+  botPowerListenerHearsTurnV1,
+  botPowerAnnoyanceEffectFromEffectsV1,
+  botPowerAnnoyanceEffectV1,
+  botPowerAnnoyanceTargetFromEffectsV1,
+  botPowerAnnoyanceTargetV1,
   botPowerIsMutedV1,
+  botPowerIsBreathlessFromEffectsV1,
+  botPowerIsBreathlessV1,
+  botPowerIsBreathAmbientVocalizationKindV1,
+  botPowerIsBreathListenerVocalFoleyV1,
+  botPowerIsBreathActionSfxKindV1,
+  botPowerIsBreathPerformanceTagV1,
+  botPowerStripBreathPerformanceTextV1,
+  botPowerOmitBreathListenerVocalFoleyV1,
+  botPowerDefinitionIsExplicitBreathlessV1,
+  BOT_POWER_BREATH_AMBIENT_VOCALIZATION_KINDS_V1,
+  BOT_POWER_BREATH_LISTENER_VOCAL_FOLEYS_V1,
+  BOT_POWER_BREATH_ACTION_SFX_KINDS_V1,
+  BOT_POWER_BREATH_PERFORMANCE_TAGS_V1,
   botPowerMumblesSpeechFromEffectsV1,
   botPowerMumblesSpeechV1,
+  botPowerSpeechRegistersV1,
+  botPowerCursesSpeechFromEffectsV1,
+  botPowerCursesSpeechV1,
+  botPowerCursedTongueAuthoringCueV1,
+  botPowerResponseIsSemanticSilenceV1,
+  botPowerSpeechObfuscationAuthoringCueV1,
+  botPowerIntendedSpeechLooksGibberishV1,
   botPowerMirrorsIdentityV1,
+  botPowerShapeshiftsIdentityV1,
+  botPowerBelievesFalseNameV1,
+  botPowerFalseNamePoolV1,
+  botPowerFalseNamePoolFromEffectsV1,
+  normalizeBotPowerFalseNamePoolV1,
   botPowerMuteActionTextsV1,
+  botPowerObserverProjectionFromEffectsV1,
+  botPowerObserverProjectionV1,
   botPowerObserverCueLinesV1,
+  botPowerPairwisePerceptionFromEffectsV1,
+  botPowerPairwisePerceptionV1,
+  botPowerPerceptionOverlapStartRatioV1,
   botPowerResponseIsSilentV1,
   botPowerResponseIsFirstIntroductionV1,
   botPowerSelfCueLinesV1,
+  botPowerSubjectEffectsForObserverFromEffectsV1,
+  botPowerSubjectEffectsForObserverV1,
   botPowerThemeMoodCueFromEffectsV1,
   botPowerThemeMoodCueV1,
   botPowerSourceHashV1,
+  botPowerSourceHashForPowerV1,
+  botPowerSigilForPowerV1,
   botPowerTextScaleFromEffectsV1,
   botPowerTextScaleV1,
   botPowerVoiceGainMultiplierFromEffectsV1,
@@ -146,7 +405,10 @@ export {
   buildBotPowersPromptBlock,
   buildBotPowersSelfPromptV1,
   buildCoffeePowersPromptBlock,
+  composeBotIdentityMirrorPowersV1,
   coffeePowerCupRateMultiplierV1,
+  coffeePowerStayRateMultiplierV1,
+  coffeePowerVesselModeV1,
   estimateCoffeePowerTokensV1,
   estimateBotPowerTokensV1,
   normalizeBotPowerEffectV1,
@@ -166,27 +428,49 @@ export {
   strongestBotPowerResponseBudgetEffectV1,
   strongestHardBotPowerResponseBudgetEffectV1,
   type BotPowerBondDirection,
+  type BotPowerChromaticBiasColorV1,
+  type BotPowerChromaticBiasEffectV1,
+  type BotPowerChromaticBiasPeerV1,
+  type BotPowerChromaticBiasPolarityV1,
   type BotPowerAvatarScaleMode,
   type BotPowerAvatarVisibilityModeV1,
+  type BotPowerAuthoringModeV1,
   type BotPowerCompileStatus,
+  type BotPowerDesignationPlacement,
   type BotPowerEffectV1,
+  type BotPowerFalseNamePoolV1,
+  type BotPowerMutePerformanceV1,
+  type BotPowerMuteReactionBeatV1,
+  type BotPowerMuteReactionCandidateV1,
+  type BotPowerMuteReactionKindV1,
+  type BotPowerMuteReactionModeV1,
+  type BotPowerMuteReactionTemperamentV1,
   type BotPowerFrequency,
   type BotPowerGravityDirection,
+  type BotPowerIneptitudeRoleV1,
   type BotPowerInterruptionMatchV1,
   type BotPowerMemoryMode,
+  type BotPowerObserverPerspectiveV1,
+  type BotPowerObserverProjectionV1,
+  type BotPowerObserverVisibilityV1,
+  type BotPowerPairwisePerceptionV1,
   type BotPowerEnforcement,
   type BotPowerResponseBudgetEffectV1,
   type BotPowerResponseBudgetMode,
   type BotPowerResolvedThemeV1,
   type BotPowerVoicePresenceMode,
   type BotPowerStrength,
+  type BotPowerSigilIdV1,
   type BotPowerTargetV1,
   type BotPowerTopicDirection,
   type BotPowerV1,
   type CoffeePowerPlanV1,
+  type CoffeePowerVesselModeV1,
   type CompiledBotPowerV1,
   type ResolvedCoffeePowerBotV1,
 } from "./botPower.js";
+
+export * from "./trollPower.js";
 
 export {
   applyPrismMoodExpiredIgnoreCooldown,
@@ -202,11 +486,11 @@ export {
   COFFEE_NEAR_DESATURATED_SATURATION,
   coffeeDepartureChanceFromSocial,
   coffeeMoodSaturationFromSocial,
+  coffeeOrdinaryAutomaticCutInMoodSupportsInterruption,
   coffeeSocialSnapshotToPrismMoodState,
   coffeeSocialSnapshotIsNearDesaturated,
   createDefaultPrismMoodState,
   DEFAULT_PRISM_MOOD_SENSITIVITY,
-  debugPatchPrismMood,
   decayPrismMood,
   derivePrismMoodConfidence,
   derivePrismMoodKey,
@@ -227,7 +511,6 @@ export {
   shouldPrismMoodDeclineResponse,
   shouldPrismMoodStartIgnoreCooldown,
   type CoffeeSocialLikeSnapshot,
-  type PrismMoodDebugPatch,
   type PrismMoodDelta,
   type PrismMoodDeltaKind,
   type PrismMoodIgnoredQuestionPenaltyLevel,
@@ -246,6 +529,7 @@ export {
   BOT_PROFILE_CATEGORY_ORDER,
   BOT_PROFILE_META_END,
   BOT_PROFILE_META_START,
+  BOT_PROFILE_PURPOSE_STATEMENT_MAX_LENGTH,
   BOT_VOICE_PRESET_LABELS,
   DEFAULT_BOT_PROFILE_FIELDS,
   MAX_CUSTOM_FACTS,
@@ -284,35 +568,146 @@ export {
 } from "./botProfile.js";
 
 export {
+  BOT_IDENTITY_PRESENTATION_TRANSITION_MS,
+  botIdentityPresentationColorV1,
+  botIdentityPresentationFrameMaterialSeedV1,
+  botIdentityPresentationGlyphV1,
+  botIdentityPresentationScreenMaterialSeedV1,
+  botIdentityPresentationTransitionActiveV1,
+  resolveBotIdentityPublicPresentationV1,
+  botIdentityPresentationVoicePresetV1,
+  normalizeBotIdentityPresentationSnapshotV1,
+  type BotIdentityPresentationSnapshotV1,
+  type BotIdentityPublicPresentationV1,
+} from "./botIdentityPresentation.js";
+
+export {
   BOT_IDENTITY_MIRROR_TRANSITION_MS,
   BOT_IDENTITY_MIRROR_VERSION,
+  applyBotIdentityMirrorFaceV1,
+  applyBotIdentityMirrorHolderVoiceEffectV1,
+  applyBotIdentityMirrorOriginalCorrectionV1,
   applyBotIdentityMirrorResponseV1,
   botDirectAddressIndexV1,
   botDirectlyAddressesBotV1,
   botNaturalAddressAliasesV1,
+  botIdentityMirrorAvatarDetailsV1,
   botIdentityMirrorFaceV1,
   botIdentityMirrorVoiceV1,
   botIdentityMirrorHolderPromptV1,
+  botIdentityMirrorPublicNameV1,
+  botIdentityMirrorQuotedTargetNameV1,
   botIdentityMirrorObserverPromptV1,
+  botIdentityMirrorOriginalCorrectionRequiredV1,
   botIdentityMirrorTransitionActiveV1,
   botIdentityMirrorTargetChangesV1,
   createBotIdentityMirrorStateV1,
   normalizeBotIdentityMirrorStateV1,
+  resolveBotIdentityMirrorAvatarDetailsV1,
+  resolveBotIdentityMirrorFaceV1,
   resolveBotIdentityMirrorVoiceV1,
   type BotIdentityMirrorStateV1,
   type BotIdentityMirrorSurfaceV1,
 } from "./botIdentityMirror.js";
+export {
+  BOT_IDENTITY_SHAPESHIFT_TRANSITION_MS,
+  BOT_IDENTITY_SHAPESHIFT_VERSION,
+  applyBotIdentityShapeshiftResponseV1,
+  botIdentityShapeshiftHolderPromptV1,
+  botIdentityShapeshiftObserverPromptV1,
+  botIdentityShapeshiftQuotedTargetNameV1,
+  botIdentityShapeshiftSeedHashV1,
+  botIdentityShapeshiftTargetChangesV1,
+  botIdentityShapeshiftTransitionActiveV1,
+  createBotIdentityShapeshiftStateV1,
+  applyBotIdentityShapeshiftAccentMapV1,
+  normalizeBotIdentityShapeshiftStateV1,
+  pickBotIdentityShapeshiftCandidateIndexV1,
+  resolveBotIdentityShapeshiftAvatarDetailsV1,
+  resolveBotIdentityShapeshiftFaceV1,
+  resolveBotIdentityShapeshiftVoiceV1,
+  type BotIdentityShapeshiftStateV1,
+  type BotIdentityShapeshiftSurfaceV1,
+  type BotIdentityShapeshiftTargetSourceV1,
+} from "./botIdentityShapeshift.js";
+
+export {
+  BOT_FALSE_NAME_POOL_V1,
+  BOT_SESSION_SURNAME_POOL_V1,
+  BOT_FALSE_NAME_VERSION,
+  botFalseNameChangesV1,
+  botFalseNameObserverCueV1,
+  botFalseNameResponseConflictsV1,
+  botFalseNameSeedHashV1,
+  botFalseNameSelfCueV1,
+  buildBotFalseNameSeedV1,
+  createBotFalseNameStateFromSeedV1,
+  createBotFalseNameStateV1,
+  normalizeBotFalseNameStateV1,
+  pickBotFalseNameFromPoolV1,
+  pickBotSessionSurnameNameV1,
+  botGivenNameFromLibraryNameV1,
+  rewriteBotFalseNameResponseV1,
+  type BotFalseNameStateV1,
+  type BotFalseNameSurfaceV1,
+} from "./botFalseName.js";
+
+export {
+  VOICE_INTONATION_CONTOUR_DEFINITIONS,
+  VOICE_INTONATION_CONTOUR_IDS,
+  VOICE_INTONATION_FULL_DEPTH_SECONDS,
+  voiceIntonationContourCentsAt,
+  voiceIntonationContourDefinitionForId,
+  voiceIntonationContourForAccentDefinition,
+  voiceIntonationDetuneCents,
+  voiceIntonationPlanForProfile,
+  type VoiceIntonationContourDefinitionV1,
+  type VoiceIntonationContourId,
+  type VoiceIntonationKeyframeV1,
+  type VoiceIntonationPlanV1,
+} from "./voiceIntonation.js";
+
+export {
+  BOT_SPEECH_REGISTER_DEFINITIONS,
+  BOT_SPEECH_REGISTER_IDS,
+  BOT_SPEECH_REGISTER_SHARED_RULES_V1,
+  botSpeechRegisterAuthoringCueV1,
+  botSpeechRegisterDefinitionForId,
+  normalizeBotSpeechRegisterId,
+  type BotSpeechRegisterDefinitionV1,
+  type BotSpeechRegisterId,
+} from "./botSpeechRegister.js";
+
+export {
+  BOT_VERNACULAR_DEFINITIONS,
+  BOT_VERNACULAR_IDS,
+  BOT_VERNACULAR_SHARED_RULES_V1,
+  botVernacularAuthoringCueV1,
+  botVernacularDefinitionForId,
+  botVernacularIdForAccentDefinition,
+  botVernacularIdFromStoredVoiceProfile,
+  normalizeBotVernacularId,
+  type BotVernacularDefinitionV1,
+  type BotVernacularId,
+} from "./botVernacular.js";
 
 export {
   BOT_AUDIO_VOICE_IDS,
+  BUILTIN_ACCENT_REALIZATION_BLEND_WEIGHT,
   PRISM_BUILTIN_ENGLISH_VOICES,
+  builtinAccentRealizationBlend,
+  builtinMelodicityRealizationBlend,
+  builtinMoodRealizationBlend,
   prismBuiltinEnglishVoice,
+  type BuiltinAccentRealizationBlendV1,
   BOT_VOICE_TEXTURE_PRESETS,
   BOT_VOICE_TEXTURE_PRESET_LABELS,
   BOT_VOICE_TEXTURE_RECIPES,
   DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
   DEFAULT_BOT_AUDIO_VOICE_PROFILE_V2,
+  DEFAULT_BOT_AUDIO_VOICE_PROFILE_V3,
   DEFAULT_ENGLISH_VOICE_ENGINE,
+  DEFAULT_SPEECH_TYPE_VOICE_MODE,
   DEFAULT_VOICE_EFFECT,
   DEFAULT_VOICE_MODE,
   VOICE_EFFECTS,
@@ -322,11 +717,20 @@ export {
   ELEVENLABS_VOICE_EFFECT_DESCRIPTIONS,
   ELEVENLABS_VOICE_EFFECT_LABELS,
   ELEVENLABS_VOICE_STABILITY_DEFAULT,
+  BOT_AVATAR_SFX_DEFAULT_VOLUME,
+  BOT_AVATAR_SFX_MAX_VOLUME,
   BOT_VOICE_EQ_TILT_DB_MAX,
   BOT_VOICE_LOW_SHELF_HZ,
   BOT_VOICE_HIGH_SHELF_HZ,
   BOT_VOICE_GAIN_DB_MIN,
   BOT_VOICE_GAIN_DB_MAX,
+  LOCAL_VOICE_ENGINE_PREFERENCES,
+  LOCAL_VOICE_SOURCES,
+  LOCAL_VOICE_ACCENT_MODES,
+  LOCAL_VOICE_PRONUNCIATION_BASES,
+  LOCAL_VOICE_PRESENTATIONS,
+  LOCAL_VOICE_SPEECHPRINT_INFLUENCES,
+  LOCAL_VOICE_SPEECHPRINT_STRENGTHS,
   botVoiceTextureForPreset,
   botVoiceTextureIsModified,
   isBotAudioVoiceId,
@@ -334,7 +738,13 @@ export {
   normalizeBotAudioVoiceControl,
   normalizeBotVoiceGainDb,
   applyVoiceDeliveryMoodToProfile,
+  botAudioVoiceProfileForFeelLane,
+  botAudioVoiceProfileHasExplicitAccentPronunciationSetting,
+  botVoiceFeelLaneForEngine,
   normalizeBotAudioVoiceProfileV1,
+  normalizeBotAudioVoiceProfileForSynthesisV1,
+  migrateLegacyAccentPronunciationEnginesV1,
+  normalizeBotAudioVoiceProfileV3,
   normalizeBotVoiceTexture,
   normalizeBotVoiceTextureUnit,
   normalizeBotVoiceVolume,
@@ -346,17 +756,36 @@ export {
   normalizeElevenLabsVoiceStability,
   normalizeVoiceEffect,
   normalizeOptionalBotAudioVoiceProfileV1,
+  normalizeSpeechTypeVoiceMode,
+  normalizeLocalVoiceAccentLocale,
+  normalizeLocalVoiceAccentMode,
+  normalizeLocalVoicePronunciationBase,
+  normalizeVoiceAccentDefinitionId,
+  normalizeLocalVoiceEnginePreference,
+  normalizeLocalVoiceSource,
+  normalizeLocalVoiceSpeechprintInfluence,
+  normalizeLocalVoiceSpeechprintStrength,
+  normalizeLocalVoiceSpeechprintVariationSeed,
+  normalizeLocalVoiceSpeechprintV1,
+  resolveLocalVoicePronunciationLocale,
+  localVoicePronunciationOverrideIsActive,
   resolveBotAudioVoiceProfileV1,
+  resolveBotPronunciationMapPointV1,
   normalizeVoiceMode,
+  normalizeWhodunnitTextVoiceMode,
+  normalizeWhodunnitSpeechType,
+  normalizeWhodunnitInvestigationPerspective,
   normalizeVoiceDeliveryMood,
   elevenLabsVoiceDirectionForMood,
   expectedVoicePlaybackDurationMs,
   resolveVoicePlaybackTransform,
+  resolveVoicePlaybackTransformForLane,
   resolveBotVoiceCharacter,
   voiceDeliveryRateForMood,
   NEUTRAL_COFFEE_VOICE_DELIVERY_ENVELOPE,
   VOICE_DELIVERY_RATE_BY_MOOD,
   ELEVENLABS_VOICE_DIRECTION_BY_MOOD,
+  ELEVENLABS_VOICE_DIRECTION_MAX_CHARACTERS,
   ELEVENLABS_VOICE_SPEED_MIN,
   ELEVENLABS_VOICE_SPEED_MAX,
   BOT_AUDIO_VOICE_PACE_RATE_DEPTH,
@@ -367,16 +796,41 @@ export {
   BOT_AVATAR_SFX_PROMPT_MAX_LENGTH,
   BOT_AVATAR_SFX_FILE_NAME_MAX_LENGTH,
   applyBotNamePronunciations,
+  SPEECH_TITLE_ABBREVIATIONS,
+  expandSpeechAbbreviations,
+  expandSpeechText,
+  projectSpeechAbbreviations,
+  projectSpeechText,
+  type SpeechAbbreviationProjection,
+  type SpeechAbbreviationProjectionSegment,
+  type SpeechTextProjection,
+  type SpeechTextProjectionSegment,
   applyPlayerNamePronunciation,
   normalizeBotNamePronunciation,
   normalizeBotSelfReferral,
   parseStoredBotAudioVoiceProfileV1,
+  parseStoredBotAudioVoiceProfileV3,
   serializeBotAudioVoiceProfileV1,
   type BotAudioVoiceId,
   type PrismBuiltinEnglishVoice,
   type BotAudioVoiceProfile,
   type BotAudioVoiceProfileV1,
   type BotAudioVoiceProfileV2,
+  type BotAudioVoiceProfileV3,
+  type BotLocalVoiceProfileV1,
+  type BotLocalVoiceToneV1,
+  type BotPremiumVoiceProfileV1,
+  type BotVoiceDeliveryProfileV1,
+  type BotVoiceFeelLane,
+  type LocalVoiceAccentMode,
+  type LocalVoicePronunciationBase,
+  type VoiceAccentDefinitionId,
+  type LocalVoiceEnginePreference,
+  type LocalVoiceSource,
+  type LocalVoicePresentation,
+  type LocalVoiceSpeechprintInfluence,
+  type LocalVoiceSpeechprintStrength,
+  type LocalVoiceSpeechprintV1,
   type BotAvatarSfxV1,
   type BotVoiceTexturePreset,
   type BotVoiceTextureV1,
@@ -388,15 +842,35 @@ export {
   type NormalizedBotAudioVoiceProfileV1,
   type BotNamePronunciationEntry,
   type EnglishVoiceEngine,
+  type SpeechTypeVoiceMode,
   type ElevenLabsVoiceEffect,
   type VoiceEffect,
   type VoiceMode,
+  type WhodunnitTextVoiceMode,
+  DEFAULT_WHODUNNIT_TEXT_VOICE_MODE,
+  type WhodunnitSpeechType,
+  type WhodunnitInvestigationPerspective,
+  DEFAULT_WHODUNNIT_SPEECH_TYPE,
+  DEFAULT_WHODUNNIT_INVESTIGATION_PERSPECTIVE,
 } from "./audioVoice.js";
+
+export {
+  BOT_LOCAL_LAUGH_DELIMITER_MAX_LENGTH,
+  BOT_LOCAL_LAUGH_SYLLABLE_MAX_LENGTH,
+  botLocalLaughIntensityForCue,
+  botLocalLaughSynthesisText,
+  normalizeBotLocalLaughDelimiter,
+  normalizeBotLocalLaughSyllable,
+  projectLocalWrittenLaughterForSynthesis,
+  projectPremiumLaughterForSynthesis,
+  type BotLocalLaughIntensity,
+} from "./localLaugh.js";
 
 export {
   BOT_FACE_FONT_IDS,
   BOT_FACE_FONT_LABELS,
   BOT_FACE_GLYPH_ANIMATIONS,
+  BOT_FACE_EYE_MOVEMENTS,
   BOT_FACE_FONT_WEIGHT_MAX,
   BOT_FACE_FONT_WEIGHT_MIN,
   BOT_FACE_FONT_WEIGHT_STEP,
@@ -407,9 +881,14 @@ export {
   BOT_FACE_BLINK_OFFSET_Y_MAX,
   BOT_FACE_BLINK_OFFSET_Y_MIN,
   BOT_FACE_BLINK_OFFSET_Y_STEP,
+  BOT_FACE_BLINK_ROTATION_DEG_MAX,
+  BOT_FACE_BLINK_ROTATION_DEG_MIN,
+  BOT_FACE_BLINK_ROTATION_DEG_STEP,
   BOT_FACE_BLINK_SCALE_MAX,
   BOT_FACE_BLINK_SCALE_MIN,
   BOT_FACE_BLINK_SCALE_STEP,
+  botFaceBlinkGeometryFollowsEyesByDefault,
+  botFaceBlinkScaleForEyeScale,
   BOT_FACE_EYE_OFFSET_X_MAX,
   BOT_FACE_EYE_OFFSET_X_MIN,
   BOT_FACE_EYE_OFFSET_X_STEP,
@@ -436,9 +915,20 @@ export {
   BOT_FACE_MOUTH_SCALE_MIN,
   BOT_FACE_MOUTH_SCALE_STEP,
   BOT_FACE_THINKING_FRAME_COUNT,
+  BOT_FACE_THINKING_OFFSET_X_MAX,
+  BOT_FACE_THINKING_OFFSET_X_MIN,
+  BOT_FACE_THINKING_OFFSET_X_STEP,
+  BOT_FACE_THINKING_OFFSET_Y_MAX,
+  BOT_FACE_THINKING_OFFSET_Y_MIN,
+  BOT_FACE_THINKING_OFFSET_Y_STEP,
+  BOT_FACE_THINKING_SCALE_MAX,
+  BOT_FACE_THINKING_SCALE_MIN,
+  BOT_FACE_THINKING_SCALE_STEP,
   DEFAULT_BOT_FACE_BLINK_BAR,
+  DEFAULT_BOT_FACE_BLINK_COUNT,
   DEFAULT_BOT_FACE_BLINK_OFFSET_X,
   DEFAULT_BOT_FACE_BLINK_OFFSET_Y,
+  DEFAULT_BOT_FACE_BLINK_ROTATION_DEG,
   DEFAULT_BOT_FACE_BLINK_SCALE,
   DEFAULT_BOT_FACE_EYE_CHARACTER,
   DEFAULT_BOT_FACE_EYE_COUNT,
@@ -446,27 +936,41 @@ export {
   DEFAULT_BOT_FACE_EYE_OFFSET_Y,
   DEFAULT_BOT_FACE_EYE_SCALE,
   DEFAULT_BOT_FACE_EYE_ROTATION_DEG,
+  DEFAULT_BOT_FACE_PAIRED_EYE_ROTATION_DEG,
   DEFAULT_BOT_FACE_FONT_ID,
   DEFAULT_BOT_FACE_GLYPH_ANIMATION,
+  DEFAULT_BOT_FACE_EYE_MOVEMENT,
+  botFaceEyeMovementIsActive,
   DEFAULT_BOT_FACE_FONT_WEIGHT,
   DEFAULT_BOT_FACE_MOUTH_CHARACTER,
+  DEFAULT_BOT_FACE_CUSTOM_SPEECH_POSES,
   DEFAULT_BOT_FACE_MOUTH_COFFEE_PUCKER,
   DEFAULT_BOT_FACE_MOUTH_OFFSET_X,
   DEFAULT_BOT_FACE_MOUTH_OFFSET_Y,
   DEFAULT_BOT_FACE_MOUTH_ROTATION_DEG,
   DEFAULT_BOT_FACE_MOUTH_SCALE,
   DEFAULT_BOT_FACE_THINKING_FRAMES,
+  DEFAULT_BOT_FACE_THINKING_OFFSET_X,
+  DEFAULT_BOT_FACE_THINKING_OFFSET_Y,
+  DEFAULT_BOT_FACE_THINKING_SCALE,
+  DEFAULT_BOT_FACE_EYE_SPACING,
+  BOT_FACE_EYE_SPACING_MIN,
+  BOT_FACE_EYE_SPACING_MAX,
+  BOT_FACE_EYE_SPACING_STEP,
   DISABLED_BOT_FACE_THINKING_FRAMES,
   botFaceThinkingSpinnerDisabled,
   botFaceThinkingFramesEqual,
+  botFaceCustomSpeechGlyphForMouthShape,
   botFaceFontFromVoicePreset,
   isBotFaceFontId,
   normalizeBotFaceBlinkBar,
   normalizeBotFaceBlinkOffsetX,
   normalizeBotFaceBlinkOffsetY,
+  normalizeBotFaceBlinkRotationDeg,
   normalizeBotFaceBlinkScale,
   normalizeBotFaceEyeCharacter,
   normalizeBotFaceEyeCount,
+  normalizeBotFaceEyeSpacing,
   normalizeBotFaceEyeOffsetX,
   normalizeBotFaceEyeOffsetY,
   normalizeBotFaceEyeScale,
@@ -474,21 +978,30 @@ export {
   normalizeBotFaceFontId,
   normalizeBotFaceFontWeight,
   normalizeBotFaceGlyphAnimation,
+  normalizeBotFaceEyeMovement,
   normalizeBotFaceMouthCharacter,
+  normalizeBotFaceCustomSpeechPoses,
   normalizeBotFaceMouthCoffeePucker,
   normalizeBotFaceMouthOffsetX,
   normalizeBotFaceMouthOffsetY,
   normalizeBotFaceMouthRotationDeg,
   normalizeBotFaceMouthScale,
   normalizeBotFaceThinkingFrames,
+  normalizeBotFaceThinkingOffsetX,
+  normalizeBotFaceThinkingOffsetY,
+  normalizeBotFaceThinkingScale,
   parseStoredBotFaceThinkingFrames,
+  parseStoredBotFaceCustomSpeechPoses,
   randomBotFaceStyle,
   resolveBotFaceStyle,
   serializeBotFaceThinkingFrames,
+  serializeBotFaceCustomSpeechPosesForStorage,
   type BotFaceBlinkBar,
   type BotFaceEyeCount,
   type BotFaceFontId,
   type BotFaceGlyphAnimation,
+  type BotFaceCustomSpeechPoses,
+  type BotFaceEyeMovement,
   type BotFaceStyle,
   type BotFaceStyleInput,
   type BotFaceThinkingFrames,
@@ -502,6 +1015,7 @@ export {
   BOT_AVATAR_DETAILS_PAINT_COLOR_MAP_BYTE_LENGTH,
   BOT_AVATAR_DETAILS_PAINT_MASK_BASE64_LENGTH,
   BOT_AVATAR_DETAILS_PAINT_MASK_BYTE_LENGTH,
+  BOT_AVATAR_DETAILS_SPEECH_INK_ANIMATIONS,
   BOT_AVATAR_DETAILS_VERSION,
   BOT_AVATAR_DETAILS_WRITABLE_PIXEL_COUNT,
   BOT_AVATAR_DETAIL_OFFSET_MAX,
@@ -529,7 +1043,97 @@ export {
   type BotAvatarDetailStampTransform,
   type BotAvatarDetailStampV1,
   type BotAvatarDetailsV1,
+  type BotAvatarDetailsSpeechInkAnimation,
 } from "./botAvatarDetails.js";
+
+export {
+  BOT_GENERATION_DRAFT_VERSION,
+  CURSED_TONGUE_GENERATED_AUTHORING_PROMPT,
+  BOT_GENERATED_AVATAR_INK_MAX_PAINTED_PIXELS,
+  BOT_GENERATED_AVATAR_INK_MAX_PATHS,
+  BOT_GENERATION_GLYPH_IDS,
+  BOT_GENERATION_PROMPT_MAX_LENGTH,
+  BOT_GENERATION_VOICE_PREVIEW_MAX_LENGTH,
+  botGenerationVoiceIdentityOptions,
+  normalizeGeneratedAvatarDetailsInkV1,
+  normalizeBotGeneratedDraftV1,
+  normalizeLeanBotGeneratedDraftV1,
+  normalizeBotGenerationPrompt,
+  type BotGeneratedAvatarDetailsInputV1,
+  type BotGeneratedDraftV1,
+  type BotGenerationVoiceCatalogV1,
+  type BotGeneratedInkPathV1,
+  type BotGeneratedInkPointV1,
+  type BotGeneratedInkPrimitiveV1,
+  type BotGeneratedInkRole,
+  type BotGeneratedInkShape,
+  type BotGeneratedInkStrokeV1,
+  type BotGeneratedSettingsV1,
+  type BotGenerationGlyphId,
+} from "./botGeneration.js";
+
+export {
+  BOT_PERSON_NAME_MAX_LENGTH,
+  TEXT_ENTRY_IMPORT_MAX_LENGTH,
+  TEXT_ENTRY_DOCUMENT_MAX_LENGTH,
+  TEXT_ENTRY_GLYPH_MAX_LENGTH,
+  TEXT_ENTRY_PROFILE_FIELD_MAX_LENGTH,
+  TEXT_ENTRY_FACT_LABEL_MAX_LENGTH,
+  TEXT_ENTRY_FACT_VALUE_MAX_LENGTH,
+  TEXT_ENTRY_DECK_DESCRIPTION_MAX_LENGTH,
+  TEXT_ENTRY_EMAIL_MAX_LENGTH,
+  TEXT_ENTRY_LONG_FORM_MAX_LENGTH,
+  TEXT_ENTRY_PARAGRAPH_MAX_LENGTH,
+  TEXT_ENTRY_PASSWORD_MAX_LENGTH,
+  TEXT_ENTRY_SEARCH_MAX_LENGTH,
+  TEXT_ENTRY_SECRET_MAX_LENGTH,
+  TEXT_ENTRY_SHORT_MAX_LENGTH,
+  TEXT_ENTRY_SYSTEM_PROMPT_MAX_LENGTH,
+  TEXT_ENTRY_TAG_MAX_LENGTH,
+  TEXT_ENTRY_TITLE_MAX_LENGTH,
+  TEXT_ENTRY_URL_MAX_LENGTH,
+} from "./textEntryLimits.js";
+export {
+  BOT_FOUNDRY_BATCH_MAX_COUNT,
+  BOT_FOUNDRY_BATCH_MIN_COUNT,
+  BOT_FOUNDRY_LEAN_BATCH_MIN_COUNT,
+  BOT_FOUNDRY_INSPIRATION_MAX_SOURCES,
+  BOT_FOUNDRY_INSPIRATION_MIN_SOURCES,
+  DEFAULT_BOT_FOUNDRY_POWER_OPTIONS,
+  botFoundryBatchIsLean,
+  botFoundryGenerationContextInstruction,
+  botFoundryPowerBudgetInstruction,
+  botFoundryPowerStrengthLabel,
+  explicitBotFoundryPowerCountFromBrief,
+  normalizeBotFoundryBatchGroupIdentityV1,
+  normalizeBotFoundryGenerationContextV1,
+  normalizeBotFoundryPowerOptionsV1,
+  resolveBotFoundryGenerationContextForBriefV1,
+  resolveBotFoundryPowerOptionsForBriefV1,
+  uniqueBotFoundryBatchGroupName,
+  type BotFoundryCreationMode,
+  type BotFoundryGenerationContextV1,
+  type BotFoundryBatchGroupIdentityV1,
+  type BotFoundryInspirationSourceV1,
+  type BotFoundryPowerCount,
+  type BotFoundryPowerOptionsV1,
+} from "./botFoundryCreation.js";
+
+export {
+  BOT_LIBRARY_GROUP_MEMBER_MAX,
+  BOT_LIBRARY_GROUP_MEMBER_MIN,
+} from "./libraryGroup.js";
+
+export {
+  BOT_GENERATION_FIELD_REGISTRY_VERSION,
+  BOT_GENERATION_FIELD_REGISTRY_V1,
+  botGenerationFieldDefinitionV1,
+  normalizeBotGenerationFieldKeyV1,
+  type BotGenerationFieldDefinitionV1,
+  type BotGenerationFieldKeyV1,
+  type BotGenerationFieldPolicyV1,
+  type BotGenerationFieldValueKindV1,
+} from "./botGenerationFields.js";
 
 export {
   PRISM_TOOL_END,
@@ -539,6 +1143,7 @@ export {
   normalizeCoffeeReplayEventPayload,
   normalizeZenDisplayMetadata,
   normalizeStoredZenAssistantTurnPayload,
+  normalizeCoffeeAsidePayload,
   parseAssistantPrismTools,
   parseStoredAssistantToolPayload,
   parseStoredToolPayload,
@@ -547,14 +1152,20 @@ export {
   type AskQuestionOption,
   type AskQuestionPayload,
   type CoffeeAmbientActionPayload,
+  type CoffeeAsidePayload,
+  type CoffeeStageActionPayload,
   type CoffeeReplayArrivalEventPayload,
+  type CoffeeReplayBaristaDeliveryEventPayload,
   type CoffeeReplayBotDepartureEventPayload,
+  type CoffeeReplayDirectionalIrritationEventPayload,
   type CoffeeReplayEventPayload,
+  type CoffeeReplayPowerAnnoyanceEventPayload,
   type CoffeeReplayIdentityMirrorEventPayload,
   type CoffeeReplayMoodEventPayload,
   type CoffeeReplayPowerMoodBoostEventPayload,
   type CoffeeReplayPowerMoodDrainEventPayload,
   type CoffeeReplayPlayerDepartureEventPayload,
+  type CoffeeReplayPlayerSipEventPayload,
   type CoffeeReplaySocialSnapshotPayload,
   type CoffeeReplayTopOffEventPayload,
   type CoffeeUserActionPayload,
@@ -565,6 +1176,15 @@ export {
   type WebSearchPayload,
   type WebSearchRequestPayload,
   type WebSearchResult,
+  type UserNotesAction,
+  type UserNotesPayload,
+  type UserNotesReceiptItem,
+  type UserNotesReceiptStatus,
+  type UserNotesRequestPayload,
+  USER_NOTE_BODY_MAX,
+  USER_NOTE_TITLE_MAX,
+  normalizeStoredUserNotesPayload,
+  normalizeUserNotesRequestFromRecord,
   type StoredAssistantMoodPayload,
   type StoredAssistantToolPayload,
   type StoredMoodKey,
@@ -574,11 +1194,14 @@ export {
   type ZenDisplayLinePlacement,
   type ZenDisplayMetadata,
   type ZenDisplayPlacement,
+  type ZenStageActionPayload,
 } from "./prismTool.js";
 
 export {
   normalizePromptShortcutMetadata,
   isDisabledPromptWildcardToken,
+  isContextualBuiltInPromptWildcardKey,
+  isPassthroughBuiltInPromptWildcardKey,
   normalizeBuiltInPromptWildcardSlotKey,
   normalizeManualAskQuestionResultPayload,
   normalizePromptWildcardRunMetadata,
@@ -593,7 +1216,12 @@ export {
   withPromptShortcutResolvedPrompt,
   withPromptWildcardResolvedPrompt,
   BUILT_IN_PROMPT_WILDCARD_SLOTS,
+  applyPromptShortcutVarPassthrough,
+  contextualBuiltInPromptWildcardValue,
+  formatBuiltInPromptWildcardToday,
   getBuiltInPromptWildcardSlot,
+  promptContainsPassthroughBuiltInPromptWildcards,
+  resolveContextualBuiltInPromptWildcards,
   type BuiltInPromptWildcardReference,
   type BuiltInPromptWildcardSlot,
   type BuiltInPromptWildcardSlotKey,
@@ -604,6 +1232,10 @@ export {
   type PromptShortcutRunMetadata,
   type PromptShortcutWildcardReplacement,
   type PromptWildcardRunMetadata,
+  PSYCHIC_THOUGHT_PASS_STAGES,
+  isPsychicThoughtPassStage,
+  type PsychicThoughtPass,
+  type PsychicThoughtPassStage,
   type PsychicThoughtPayload,
 } from "./promptShortcut.js";
 
@@ -624,6 +1256,23 @@ export {
   GROUP_ROOM_WALLPAPER_VARIATION_SEED_MAX_LENGTH,
   type GroupRoomWallpaperImageGenerationRequest,
 } from "./groupRoomWallpaper.js";
+
+export {
+  DEFAULT_HUB_ATMOSPHERE_STYLE,
+  HUB_ATMOSPHERE_IMAGE_PURPOSE,
+  HUB_ATMOSPHERE_STYLES,
+  composeHubAtmospherePrompt,
+  normalizeHubAtmosphereStyle,
+  type HubAtmosphereStyle,
+} from "./hubAtmosphere.js";
+export {
+  CHAT_ATMOSPHERE_IMAGE_PURPOSE,
+  CHAT_ATMOSPHERE_RETENTION_DAYS,
+  chatAtmosphereRetentionCutoffIso,
+  chatAtmosphereUtcDate,
+  composeChatAtmospherePrompt,
+  type ChatAtmospherePromptArgs,
+} from "./chatAtmosphere.js";
 
 export {
   OPENAI_IMAGE_MODEL_IDS,
@@ -652,6 +1301,17 @@ export {
 } from "./imageModels.js";
 
 export {
+  TEXT_MODEL_DISPLAY_NAME_MAX_LENGTH,
+  TEXT_MODEL_DISPLAY_NAME_MAX_ENTRIES,
+  textModelDisplayNameKey,
+  normalizeTextModelDisplayNames,
+  parseStoredTextModelDisplayNames,
+  resolveTextModelDisplayName,
+  type TextModelDisplayNames,
+  type TextModelProvider,
+} from "./modelDisplayNames.js";
+
+export {
   COMFYUI_REMOTE_WORKFLOW_PREFIX,
   COMFYUI_WORKFLOW_MODEL_PREFIX,
   MAX_COMFY_UI_WORKFLOW_REGISTRATIONS,
@@ -674,17 +1334,61 @@ export {
 } from "./comfyUiWorkflow.js";
 
 export {
+  AUTO_MODEL_TURBO_PREFERENCE_ID,
+  MODEL_REASONING_EFFORT_PREFERENCE_VALUES,
   REASONING_EFFORT_VALUES,
   anthropicModelSupportsReasoningEffort,
   anthropicReasoningEffortForRequest,
+  effectiveModelReasoningEffort,
+  isAutoModelTurboPreferenceId,
+  modelReasoningEffortMaxUnlockLevel,
+  modelReasoningEffortPreferenceKey,
+  modelReasoningEffortRungProvenance,
   modelSupportsNativeReasoningEffort,
+  modelSupportsTurboMode,
+  ollamaModelIsKnownToSupportNativeThinking,
+  ollamaModelUsesTieredThinking,
+  normalizeModelReasoningEffortPreference,
+  normalizeProviderReasoningEffort,
   normalizeReasoningEffort,
+  openAiModelSupportsMaxReasoningEffort,
   openAiModelSupportsReasoningEffort,
+  openAiReasoningEffortForRequest,
+  openAiReasoningEffortLevels,
+  reasoningGenerationBudgetMs,
   reasoningEffortForRequest,
+  REASONING_GENERATION_AUTO_TOTAL_BUDGET_MS,
+  resolveModelReasoningEffortCapability,
+  simulatedPsychicAnswerGuidanceMaxChars,
+  simulatedPsychicPlanningMaxTokens,
+  simulatedPsychicPrivateArtifactMaxChars,
+  SIMULATED_EFFORT_PASS_NAMES,
+  normalizeSimulatedEffortLadderProfile,
+  simulatedEffortLadderPasses,
+  simulatedEffortTextPasses,
+  simulatedPsychicPrivatePassMaxTokens,
+  simulatedPsychicScratchpadMaxChars,
+  simulatedSurfacePreparationMaxTokens,
+  simulatedSurfacePreparationNoteMaxChars,
+  getSimulatedEffortBudgetProfile,
+  setSimulatedEffortBudgetProfile,
+  simulatedEffortUsesThriftyPrompting,
+  withSimulatedEffortBudgetProfile,
   type AnthropicRequestReasoningEffort,
+  type ModelReasoningEffortCapabilityV1,
+  type ModelReasoningEffortPreference,
+  type ModelReasoningEffortPreferenceV1,
+  type ModelReasoningEffortRungProvenance,
+  type ModelTurboPreferenceV1,
+  type MaxReasoningEffort,
   type NativeReasoningEffortProvider,
+  type ProviderReasoningEffort,
   type ReasoningEffort,
   type RequestReasoningEffort,
+  type SimulatedEffortBudgetProfile,
+  type SimulatedEffortLadderProfile,
+  type SimulatedEffortPassName,
+  type SimulatedEffortTextPassName,
 } from "./reasoningEffort.js";
 
 export {
@@ -740,6 +1444,7 @@ export {
   type StorySessionListResponse,
   type StorySessionMutationResponse,
   type StorySessionProgress,
+  type StoryRoutingSnapshotV1,
   type StorySessionStatus,
   type StorySessionSummary,
   type StorySessionTravelRequest,
@@ -847,6 +1552,14 @@ export {
   type SlateVersionSummary,
 } from "./slate.js";
 
+export * from "./slateComposition.js";
+export * from "./slateCreativeStudios.js";
+export * from "./slateDocument.js";
+export * from "./slateImportedManuscript.js";
+export * from "./slateMirror.js";
+export * from "./slateReviewExport.js";
+export * from "./slateStoryBible.js";
+
 export {
   ACCENT_LUMINANCE_MAX_LIGHT,
   ACCENT_LUMINANCE_MAX_LIGHT_YELLOW,
@@ -854,26 +1567,40 @@ export {
   ACCENT_LIGHTNESS_MAX_DARK,
   ACCENT_LIGHTNESS_MIN,
   ACCENT_LIGHTNESS_MIN_DARK,
+  BOT_AUTO_ACCENT_HUE_OFFSET_DEGREES,
+  DEFAULT_BOT_IDENTITY_COLOR,
   accentLightnessBand,
+  blendWeightedBotIdentityColors,
   clampAccentLightness,
   clampLuminance,
   contrastRatio,
   ensureContrast,
+  fullySaturateBotColor,
   hexToHsl,
   hslToHex,
+  circularHueDistanceDeg,
+  complementaryHueDeg,
+  botIdentityHueDeg,
   normalizeAccentForTheme,
+  normalizeBotIdentityColor,
   pickReadableText,
   relativeLuminance,
+  resolveBotAccentColor,
   swatchBorderCompensation,
+  type WeightedBotIdentityColor,
 } from "./color.js";
 
 import type {
   AskQuestionPayload,
   CoffeeAmbientActionPayload,
+  CoffeeAsidePayload,
+  CoffeeStageActionPayload,
   CoffeeReplayEventPayload,
   CoffeeUserActionPayload,
   SentGeneratedImagePayload,
+  UserNotesPayload,
   ZenDisplayMetadata,
+  ZenStageActionPayload,
 } from "./prismTool.js";
 import type {
   ManualAskQuestionResultPayload,
@@ -881,21 +1608,37 @@ import type {
   PromptWildcardRunMetadata,
   PsychicThoughtPayload,
 } from "./promptShortcut.js";
-import type { CoffeeSessionSettings } from "./coffeeSettings.js";
+import type {
+  CoffeeExperienceMode,
+  CoffeeSessionSettings,
+} from "./coffeeSettings.js";
 import type {
   PrismMoodInterruptionInput,
   PrismMoodKey,
   PrismMoodSnapshot,
 } from "./mood.js";
-import type { ReasoningEffort } from "./reasoningEffort.js";
 
 export type UserRole = "user";
-export type LlmProviderName = "local" | "openai" | "anthropic";
+export type LlmProviderName =
+  | "local"
+  | "ollama_cloud"
+  | "openai"
+  | "anthropic";
 
 export type UsageProviderName =
   LlmProviderName | "ollama" | "comfyui" | "unknown";
 
 export type UsageRange = "24h" | "7d" | "30d" | "all";
+
+/** Usage panel provider chip. `"local"` includes local + ollama + comfyui rows. */
+export type UsageProviderFilter =
+  | "all"
+  | "local"
+  | "openai"
+  | "anthropic"
+  | "ollama"
+  | "comfyui"
+  | "unknown";
 
 export type UsagePrivacyScope = "normal" | "private";
 
@@ -914,10 +1657,15 @@ export type UsagePurpose =
   | "botcast_show_chat"
   | "botcast_review"
   | "botcast_turn"
+  | "bot_generation"
   | "coffee_turn"
   | "coffee_router"
   | "coffee_summary"
   | "composer_cleanup"
+  | "debate_generation"
+  | "debate_synopsis"
+  | "debate_debrief"
+  | "flight_recorder_summary"
   | "embedding"
   | "image_generation"
   | "bot_profile_picture"
@@ -932,6 +1680,7 @@ export type UsagePurpose =
   | "slate_project_chat"
   | "slate_revision"
   | "slate_shape"
+  | "slate_transcript_story"
   | "slate_title_suggestion"
   | "story_generation"
   | "voice_preview"
@@ -979,6 +1728,30 @@ export interface UsageRecentEvent {
   estimatedCostMicroUsd: number | null;
   costEstimated: boolean;
   unpriced: boolean;
+  workflow?: string | null;
+  workflowStage?: string | null;
+  workRole?: "prepare" | "connective" | "audit" | "author" | "repair" | null;
+  workCacheHit?: boolean | null;
+  fallbackReason?: string | null;
+  contextTokensKeptLocal?: number | null;
+}
+
+export interface UsageLocalFirstBreakdownItem {
+  key: string;
+  workflow: string;
+  stage: string;
+  assistedOperationCount: number;
+  localTokens: number;
+  onlineTokens: number;
+  estimatedContextTokensKeptLocal: number;
+}
+
+export interface UsageLocalFirstBalance {
+  localTokens: number;
+  onlineTokens: number;
+  assistedOperationCount: number;
+  estimatedContextTokensKeptLocal: number;
+  byAppletStage: UsageLocalFirstBreakdownItem[];
 }
 
 export interface UsageResponse {
@@ -990,16 +1763,34 @@ export interface UsageResponse {
   byProvider: UsageBreakdownItem[];
   byModel: UsageBreakdownItem[];
   byPurpose: UsageBreakdownItem[];
+  localFirst: UsageLocalFirstBalance;
   recentEvents: UsageRecentEvent[];
   trackingStartedAt: string | null;
   hasUntrackedHistory: boolean;
   conversationScoped: boolean;
+  /** Active provider chip from the Usage panel (`all` when unfiltered). */
+  providerFilter: UsageProviderFilter;
+  /** Account-wide online-token trip meter (independent of range/scope filters). */
+  trip: UsageTripMeter;
+}
+
+/** Resettable online-token trip odometer for the Usage panel. */
+export interface UsageTripMeter {
+  enabled: boolean;
+  /** When the current/last trip began. Null if a trip has never been started. */
+  startedAt: string | null;
+  onlineTokens: number;
+  estimatedCostMicroUsd: number;
+  /** True when the meter is off and showing the frozen last-trip total. */
+  frozen: boolean;
 }
 
 export interface UserProfile {
   id: string;
   email: string;
   displayName: string;
+  /** Private phonetic form for synthesis; never a visible label. */
+  playerNamePronunciation: string;
   role: UserRole;
   createdAt: string;
   theme: "light" | "dark" | "system";
@@ -1012,6 +1803,27 @@ export interface AuthSession {
   expiresAt: string;
 }
 
+export type CoffeeTurnRouteSourceV1 =
+  | "hearing_repeat"
+  | "directed_speaker"
+  | "player_direct_address"
+  | "peer_direct_address"
+  | "router_model"
+  | "deterministic_fallback"
+  | "speaker_balance"
+  | "autonomous_handoff"
+  | "power_override";
+
+/** Privacy-safe persisted provenance for Coffee floor ownership. */
+export interface CoffeeTurnRouteV1 {
+  v: 1;
+  name: "coffeeTurnRoute";
+  source: CoffeeTurnRouteSourceV1;
+  selectedSpeakerBotId: string;
+  addressedBotId?: string;
+  playerAddressKind?: "mention" | "plain_text" | "followup";
+}
+
 export interface ChatMessage {
   id: string;
   role: "user" | "assistant" | "system";
@@ -1021,8 +1833,19 @@ export interface ChatMessage {
   provider?: LlmProviderName;
   /** Concrete model id used for this assistant reply, when recorded. */
   model?: string;
+  /** Contextual Auto route used for this assistant message. */
+  autoRoute?: AutoRouteDecisionV1;
+  /** Concrete provider effort used by a fixed-model assistant reply. */
+  reasoningEffort?: ProviderReasoningEffort;
+  /** True when the concrete model used Turbo for this assistant reply. */
+  turbo?: boolean;
   /** Bot/persona id attributed to this message. Null/undefined = default PRISM. */
   botId?: string | null;
+  /**
+   * Private Chat transport only: the holder's clean intended speech before a
+   * public speech Power rewrote it. Never render, export, or persist this field.
+   */
+  botPowerPrivateIntendedSpeech?: string;
   /** Bot that generated the message (assistant only). Resolved from bots.name at read time. */
   botName?: string;
   /** Bot's associated accent color (CSS color string). Resolved from bots.color at read time. */
@@ -1033,6 +1856,8 @@ export interface ChatMessage {
   moodKey?: BotMoodKey;
   /** Optional confidence (0-1) for tuning and diagnostics. */
   moodConfidence?: number;
+  /** Internal receipt that makes a private Shh follow-up replay-safe. */
+  assistantInterruptionReaction?: AssistantInterruptionReactionInput;
   /** Display-only Zen layout hint; ignored outside Zen surfaces. */
   zenDisplay?: ZenDisplayMetadata;
   /** When this assistant row used AskQuestion (`tool_payload` on the server). */
@@ -1045,16 +1870,48 @@ export interface ChatMessage {
   sentGeneratedImage?: SentGeneratedImagePayload;
   /** When this assistant turn included web search results shown as a source card. */
   webSearch?: WebSearchPayload;
+  /** When this assistant turn completed a chat-only personal note action (receipt). */
+  userNotes?: UserNotesPayload;
   /** Coffee-only scripted ambient action shown as table UI, not transcript prose. */
   coffeeAmbientAction?: CoffeeAmbientActionPayload;
+  /** Coffee-only canonical stage action (Director / LLM / Power) for exact-once display. */
+  coffeeStageAction?: CoffeeStageActionPayload;
+  /** Zen-only canonical stage action provenance for reload and plate presentation. */
+  zenStageAction?: ZenStageActionPayload;
   /** Coffee-only user action cue shown as ambient context, not transcript prose. */
   coffeeUserAction?: CoffeeUserActionPayload;
+  /** Coffee-only interruption metadata projected into transcript-only spoken lines. */
+  coffeeInterruption?: CoffeeInterruptionEvent;
+  /** Coffee-only quiet side remark to one seated peer (half-volume playback). */
+  coffeeAside?: CoffeeAsidePayload;
   /** Coffee-only hidden replay state beats; not shown in normal transcripts. */
   coffeeReplayEvents?: CoffeeReplayEventPayload[];
+  /** Frozen participant ids allowed to hear this Coffee line, or null for all. */
+  coffeeAudienceBotIds?: string[] | null;
+  /** Human-observer projection applied when this Coffee row was read. */
+  coffeeObserverProjection?: BotPowerObserverProjectionV1;
   /** Privacy-safe provider/model attempt history when Auto recovered this reply. */
   autoRecovery?: AutoRecoveryTraceV1;
+  /** Privacy-safe reason the Coffee floor selected this bot. */
+  coffeeTurnRoute?: CoffeeTurnRouteV1;
+  /** Coffee-only semantic lane. Departures are presented, but never own the floor. */
+  coffeeMessageKind?: CoffeeMessageKind;
   /** Saved deterministic hard-response branch from a Ready Power. */
   botPowerExactResponse?: "speech_copy" | "hearing_repeat" | "intermittent_mute" | "speech_obfuscation";
+  /** Text-free proof that this committed line has an owner-only meaning reveal. */
+  speechIntentRevealAvailable?: true;
+  /** Public replay-stable timed Mute presentation; private intent is never here. */
+  botPowerMutePerformance?: BotPowerMutePerformanceV1;
+  /** Session-sticky Shapeshifter public form for Chat/Zen (and Coffee/Signal envelopes). */
+  identityShapeshift?: BotIdentityShapeshiftStateV1;
+  /** Session-sticky John/Jane Doe alias for Chat/Zen assistant tool payloads. */
+  falseName?: BotFalseNameStateV1;
+  /** Exact `...` chosen as an ordinary social beat, never a Power response. */
+  socialSilence?: SocialSilenceMarkerV1;
+  /** Links a protected floor-reclaim turn to its interrupted heard fragment. */
+  crosstalkReclaim?: CrosstalkReclaimPlanV1;
+  /** Public replay-stable Troll delivery and ordinary-interruption projection. */
+  botPowerTrollPresentation?: BotPowerTrollPresentationV1;
   /** User-entered Prompt Center shortcut that resolved into this message content. */
   promptShortcut?: PromptShortcutMetadata;
   /** User-entered wildcard decks/options that resolved into this message content. */
@@ -1064,6 +1921,9 @@ export interface ChatMessage {
   /** Concise visible summary from Psychic mode for this user turn. */
   psychicThought?: PsychicThoughtPayload;
 }
+
+export type CoffeeMessageKind = "floor" | "departure";
+export type CoffeeSessionLifecycleState = "active" | "closing" | "complete";
 
 /**
  * Coffee-only hidden social metrics tracked per bot for a single session.
@@ -1102,11 +1962,19 @@ export interface CoffeeInterruptionEvent {
   pauseBeat?: boolean;
   reactionOutcome?: "silence" | "react" | "yield" | "resume";
   resumeOutcome?: "none" | "yielded" | "continued" | "invited";
+  /** Canonical bot-to-bot floor result; legacy resume fields remain readable. */
+  floorOutcome?: CrosstalkFloorOutcome;
+  /** Linked one-turn reclaim generated from only the audience-heard fragment. */
+  reclaim?: CrosstalkReclaimPlanV1;
   reactionText?: string;
   /** Immediate canned cut-in spoken by the interrupting bot. */
   interrupterCue?: ListenerReactionSpokenCue;
+  publicInterrupterCue?: string;
+  interrupterCueSpeechEffect?: "speech_obfuscation";
   /** Annoyed canned tail spoken by the interrupted bot over the cut-in. */
   interruptedSpeakerCue?: BotCrosstalkInterruptedSpeakerCue;
+  publicInterruptedSpeakerCue?: string;
+  interruptedSpeakerCueSpeechEffect?: "speech_obfuscation";
   socialConsequences: CoffeeInterruptionSocialDelta[];
 }
 
@@ -1910,7 +2778,8 @@ export interface CoffeeGroupEvent {
     | "settings_updated"
     | "roster_updated"
     | "session_created"
-    | "model_choice_updated";
+    | "model_choice_updated"
+    | "synthesis_updated";
   payload: Record<string, unknown>;
   createdAt: string;
 }
@@ -1926,10 +2795,87 @@ export interface CoffeeGroupModelChoice {
   anthropic?: string;
 }
 
+/** Maximum length of the editable one-sentence Coffee Group ethos. */
+export const COFFEE_GROUP_ETHOS_MAX_LENGTH = 280;
+
+/** Independently retryable identity items synthesized for a Coffee Group. */
+export type CoffeeGroupSynthesisItem = "name" | "ethos" | "atmosphere";
+
+/** Durable lifecycle state for one Coffee Group synthesis item. */
+export type CoffeeGroupSynthesisStatus =
+  | "pending"
+  | "running"
+  | "ready"
+  | "failed";
+
+/** How the currently persisted value for a synthesis item was produced. */
+export type CoffeeGroupSynthesisSource =
+  | "generated"
+  | "manual"
+  | "fallback";
+
+/** Durable state for one independently retryable Coffee Group identity item. */
+export interface CoffeeGroupSynthesisItemState {
+  status: CoffeeGroupSynthesisStatus;
+  revision: number;
+  updatedAt: string;
+  source?: CoffeeGroupSynthesisSource;
+  error?: string;
+}
+
+/** Extensible manifest for Coffee Group identity synthesis. */
+export interface CoffeeGroupSynthesisState {
+  version: 1;
+  items: Record<CoffeeGroupSynthesisItem, CoffeeGroupSynthesisItemState>;
+}
+
+/** Generated, character-free café background attached to a Coffee Group. */
+export interface CoffeeGroupAtmosphere {
+  imageId: string;
+  prompt?: string;
+  revision: number;
+  updatedAt: string;
+}
+
+export type CoffeeGroupSoundtrackStatus =
+  | "preparing"
+  | "generating"
+  | "ready"
+  | "failed"
+  | "unavailable";
+
+/** Public metadata for the cached, group-owned Coffee music bed. Audio is served separately. */
+export interface CoffeeGroupSoundtrack {
+  status: CoffeeGroupSoundtrackStatus;
+  generating: boolean;
+  provider: "elevenlabs" | null;
+  model: string | null;
+  prompt: string | null;
+  contentType: string | null;
+  durationMs: number | null;
+  revision: number;
+  /** True when the immediately previous generated bed can replace the current one. */
+  undoAvailable: boolean;
+  updatedAt: string;
+  error?: string;
+}
+
 export interface CoffeeGroup {
   id: string;
   userId: string;
   name: string;
+  /** Soft table premise: why these bots choose to gather. */
+  ethos: string;
+  /** Character-free café artwork composited behind the Coffee table. */
+  atmosphere: CoffeeGroupAtmosphere | null;
+  /** Original instrumental group bed; bundled Coffee Jazz remains its fallback. */
+  soundtrack: CoffeeGroupSoundtrack | null;
+  /** Independent completion and retry state for generated identity items. */
+  synthesis: CoffeeGroupSynthesisState;
+  /** Library group that owns this table's live invite pool; null for legacy tables. */
+  libraryGroupId: string | null;
+  /** The selected source was later removed from Library; saved legacy seats remain readable. */
+  libraryGroupUnavailable?: boolean;
   botGroupIds: string[];
   coffeeSeatBotIds: Array<string | null>;
   coffeeSettings: CoffeeSessionSettings;
@@ -1950,25 +2896,53 @@ export interface CoffeeGroup {
 
 export {
   COFFEE_HISTORY_WINDOW_HARD_CAP,
+  COFFEE_BAR_ORDER_MAX_LENGTH,
   COFFEE_SPEAKER_REPLY_MAX_OUTPUT_TOKENS_HARD,
+  COFFEE_TABLE_MOOD_PRESETS,
   COFFEE_TABLE_REPLY_MAX_CHARS_HARD,
   DEFAULT_COFFEE_SESSION_SETTINGS,
+  applyCoffeeTableMood,
+  coffeeTableMoodForSettings,
   coffeeEffectiveHistoryLimit,
   coffeeEffectiveMemoryCallbacks,
+  coffeeFarewellReplyDelay,
+  coffeeReusableSessionSettings,
   coffeeReplyLengthCaps,
   coffeeRouterTailMessageCount,
   coffeeRouterTemperature,
+  isCoffeeExperienceMode,
   normalizeCoffeeSessionSettings,
   type CoffeeCrossTalkLevel,
+  type CoffeeBarDeliveryStatus,
+  type CoffeeBarDrink,
+  type CoffeeBarDrinkReactionStatus,
+  type CoffeeBarGeneratedDrink,
+  type CoffeeBarOrderChoice,
+  type CoffeeBarOrderStatus,
+  type CoffeeBarRole,
+  type CoffeeBarRitualState,
+  type CoffeeBarServiceBotSnapshot,
+  type CoffeeBarSpecialImageStatus,
+  type CoffeeFarewellFuseKind,
+  type CoffeeFarewellFuseState,
+  type CoffeeExperienceMode,
   type CoffeeMemoryCallbacks,
   type CoffeeResponseLengthPreset,
   type CoffeeSessionSettings,
+  type CoffeeServeThanks,
+  type CoffeePlayerCupState,
+  type CoffeeWaiterOfferState,
+  type CoffeeBotWaiterVisitState,
   type CoffeeTableEnergy,
 } from "./coffeeSettings.js";
 
 export {
+  coffeeInterruptionFloorOutcome,
   coffeeInterruptionReactionCandidates,
+  coffeeInterruptionTranscriptSegments,
   pickCoffeeInterruptionReaction,
+  type CoffeeInterruptionTranscriptSegment,
+  type CoffeeInterruptionTranscriptSegmentKind,
   type CoffeeReactionOutcome,
   type CoffeeReactionStyle,
   type CoffeeReactionTone,
@@ -2043,13 +3017,16 @@ export interface Conversation {
   /** Stable History ownership/navigation metadata. Older clients may ignore it. */
   history?: ConversationHistoryEntry;
   /**
-   * Coffee-only — ordered list of 2-5 bot ids that participate in this
-   * live session. Captured once when the Coffee thread is created and
+   * Coffee-only — ordered list of bot ids that participate in this live
+   * session. New sessions seat at most 4; legacy snapshots may contain 2-5.
+   * Captured once when the Coffee thread is created and
    * frozen for the conversation. The router LLM picks which one of these
    * speaks next on each turn.
    * Always undefined for `chat` and `sandbox` mode rows.
    */
   botGroupIds?: string[];
+  /** Coffee-only durable lifecycle. Closing and complete sessions reject new work. */
+  coffeeSessionState?: CoffeeSessionLifecycleState;
   /** Coffee-only — durable parent group for recurring table sessions. */
   coffeeGroupId?: string | null;
   /**
@@ -2063,6 +3040,8 @@ export interface Conversation {
    * marked away for this specific session.
    */
   coffeeAbsentBotIds?: string[];
+  /** Live observer projection for each frozen Coffee participant. */
+  coffeeObserverProjectionByBotId?: Record<string, BotPowerObserverProjectionV1>;
   /**
    * Coffee-only hidden social values keyed by bot id for this conversation.
    * This is primarily consumed by dev diagnostics and prompt shaping.
@@ -2154,8 +3133,21 @@ export interface UserMemory {
   userId: string;
   conversationId?: string;
   botId?: string;
+  /** Directed peer scope for bot-to-bot observations and opinions. */
+  targetBotId?: string;
   createdAt: string;
+  /** Effective confidence after short-term decay. */
   confidence: number;
+  /** Confidence at acquisition or the most recent reinforcement. */
+  baseConfidence?: number;
+  /** Explicit lifecycle; inferred opinions always use `derived`. */
+  lifecycle?: MemoryLifecycle;
+  /** Last acquisition/reinforcement point used by daily decay. */
+  lastReinforcedAt?: string;
+  /** Current projected expiry for short-term memories. */
+  expiresAt?: string;
+  /** Direct memory records supporting a derived opinion. */
+  evidenceMemoryIds?: string[];
   /** What this memory is about, used for memory-panel organization. */
   category?: MemoryCategory;
   /** Short-term memories can be rewritten/removed; long-term memories must be demoted first. */
@@ -2173,6 +3165,32 @@ export interface UserMemory {
 
 export type MemoryCategory = "general" | "user" | "bot_relation";
 export type MemoryTier = "short_term" | "long_term";
+export type MemoryLifecycle = MemoryTier | "derived";
+export type MemoryAcquisitionSensitivity = "cautious" | "balanced" | "curious";
+
+export interface MemoryEcologySettings {
+  learnAboutPlayer: boolean;
+  learnAboutBots: boolean;
+  acquisitionSensitivity: MemoryAcquisitionSensitivity;
+  shortTermRetentionDays: number;
+  longTermPromotionThreshold: number;
+  inferredMinEvidenceCount: number;
+  inferredConfidenceThreshold: number;
+}
+
+export type MemoryAcquisitionReceiptKind = "player_memory" | "bot_relation";
+
+export interface MemoryAcquisitionReceipt {
+  id: string;
+  memoryId: string;
+  learnerBotId: string | null;
+  targetBotId: string | null;
+  conversationId: string | null;
+  kind: MemoryAcquisitionReceiptKind;
+  createdAt: string;
+  readAt: string | null;
+  memory?: UserMemory;
+}
 
 export interface ZenSessionMemoryItem {
   id: string;
@@ -2202,19 +3220,46 @@ export interface ZenSessionMemoryOverview {
 export {
   REQUIRED_LOCAL_MODELS,
   REQUIRED_PRIMARY_LOCAL_MODEL_ID,
+  AUTO_MODEL_ROUTING_POLICY_VERSION,
   DISABLED_MODEL_CHOICE,
   MODEL_VISIBILITY_DEFAULTS_VERSION,
+  ONLINE_AUTO_PROVIDER_BIAS_DEFAULT,
+  ONLINE_AUTO_PROVIDER_BIAS_MAX,
+  ONLINE_AUTO_PROVIDER_BIAS_MIN,
+  ONLINE_AUTO_PROVIDER_BIAS_WEIGHT,
+  ONLINE_AUTO_PROVIDER_WEIGHTS_VERSION,
+  BALANCED_ONLINE_AUTO_PROVIDER_WEIGHTS,
+  DEFAULT_ONLINE_AUTO_QUALITY_POSTURE,
+  clampOnlineAutoProviderBias,
+  formatOnlineAutoProviderBiasLabel,
+  formatOnlineAutoQualityPostureLabel,
+  normalizeOnlineAutoProviderWeights,
+  normalizeOnlineAutoQualityPosture,
+  parseStoredOnlineAutoProviderWeights,
+  serializeOnlineAutoProviderWeights,
+  formatOnlineAutoProviderWeightsLabel,
   defaultHiddenModelIdsForCatalog,
   isCommonOnlineChatModel,
   isDisabledModelChoice,
+  normalizeAutoRouteDecisionV1,
   reconcileHiddenModelIdsForCatalog,
   sanitizeHiddenModelIds,
   resolveAutoModel,
+  resolveAutoModelRoutePlan,
   type AutoModelProvider,
+  type OnlineAutoProviderId,
+  type OnlineAutoQualityPosture,
+  type OnlineAutoProviderWeightsV1,
+  type AutoModelPriceV1,
+  type AutoRouteDecisionV1,
+  type AutoRouteReasonCode,
+  type AutoRoutingContextV1,
   type CatalogShapeForAuto,
   type ModelForDefaultVisibility,
   type ResolveAutoModelInput,
   type ResolvedAutoModel,
+  type ModelSelectionV1,
+  type ResponseLane,
 } from "./modelRouting.js";
 
 export {
@@ -2262,7 +3307,8 @@ export interface MemoryValidationEvent {
  * - `"sandbox"`: the full command-center. Cross-session memory is disabled
  *   entirely here — the rolling message window IS the thread's memory. The
  *   `incognito` flag is ignored for Sandbox requests.
- * - `"coffee"`: timed live conversation for 2-5 reactive bots. User turns and
+ * - `"coffee"`: timed live conversation for up to 3 reactive bots drawn from
+ *   a saved group. User turns and
  *   autonomous timed turns trigger a router LLM pick (which bot speaks next
  *   based on personality + context), then that bot replies through the Coffee
  *   pipeline. Memory is thread-scoped only in the first pass.
@@ -2290,7 +3336,6 @@ export interface ChatCompanionPreferences {
 export interface SandboxRuntimeControls {
   preferredProvider?: LlmProviderName;
   modelOverride?: string;
-  reasoningEffort?: ReasoningEffort;
   botId?: string | null;
 }
 
@@ -2312,10 +3357,11 @@ export interface ChatRequestPayload {
   companionPreferences?: ChatCompanionPreferences;
   /** Advanced controls for runtime routing. */
   sandboxControls?: SandboxRuntimeControls;
-  /** Back-compat top-level advanced knobs. Chat honors explicit modelOverride only. */
+  /** Back-compat top-level routing knobs. Chat honors explicit modelOverride only. */
   preferredProvider?: LlmProviderName;
   modelOverride?: string;
-  reasoningEffort?: ReasoningEffort;
+  /** Request-only native Max overdrive for an explicitly selected compatible model. */
+  reasoningEffort?: MaxReasoningEffort;
   /**
    * Chat/Sandbox bot selector. In Zen this is a backwards-compatible fallback
    * for `facetBotId`.
@@ -2333,6 +3379,8 @@ export interface ChatRequestPayload {
   zenAutonomy?: ZenAutonomyInput;
   /** Zen-only assistant follow-up when an AskQuestion patience timer expires. */
   zenAskQuestionPatience?: ZenAskQuestionPatienceInput;
+  /** Chat/Zen assistant-only reaction after the player presses Shh. */
+  assistantInterruptionReaction?: AssistantInterruptionReactionInput;
   /**
    * Client-held prior messages for an incognito chat. The server uses this as
    * prompt context only; private turns are never read from or written to
@@ -2378,7 +3426,22 @@ export interface ZenAskQuestionPatienceInput {
   clientTurnId: string;
 }
 
-export type ZenLiveActionSource = "draft_action" | "idle";
+/**
+ * A canonical assistant-only turn created after Shh truncates the latest
+ * audible assistant message. It never represents user-authored transcript
+ * text; the interrupted fragment is repeated here only as a stale-run guard.
+ */
+export interface AssistantInterruptionReactionInput {
+  source: "shh";
+  activeBotId: string | null;
+  assistantMessageId: string;
+  interruptedContent: string;
+  clientTurnId: string;
+}
+
+export type ZenLiveActionSource =
+  | "submitted_action"
+  | "idle";
 
 export type ZenLiveActionReactionKind =
   "silent" | "show_action" | "interrupt_candidate";
@@ -2540,7 +3603,7 @@ export type CoffeeArrivalScenario =
 
 /** Request body for `POST /api/coffee/sessions`. */
 export interface CoffeeSessionCreateRequest {
-  /** Fixed five-seat table layout; null entries are empty chairs. */
+  /** Fixed five-seat layout with two to four occupied seats for a new table. */
   groupBotIds: Array<string | null>;
   /** Optional session tuning; omitted rows use server defaults. */
   coffeeSettings?: unknown;
@@ -2552,6 +3615,8 @@ export interface CoffeeSessionCreateRequest {
   initialPoll?: CoffeePollCreateRequest;
   /** Optional opening teams mode that seeds left/right social dynamics. */
   initialTeams?: CoffeeTeamSessionConfig;
+  /** Join (chat+sip) or Serve (pour-only). Omitted = legacy full interactive. */
+  experienceMode?: CoffeeExperienceMode;
 }
 
 /** Request body for `POST /api/coffee/groups/:id/sessions`. */
@@ -2572,6 +3637,8 @@ export interface CoffeeGroupSessionCreateRequest {
   initialPoll?: CoffeePollCreateRequest;
   /** Optional opening teams mode that seeds left/right social dynamics. */
   initialTeams?: CoffeeTeamSessionConfig;
+  /** Join (chat+sip) or Serve (pour-only). Omitted = legacy full interactive. */
+  experienceMode?: CoffeeExperienceMode;
 }
 
 /** Response body for `POST /api/coffee/sessions`. */
@@ -2588,6 +3655,40 @@ export interface CoffeeSessionCreateResponse {
   poll?: CoffeePoll;
   /** Present when the session started with Coffee Teams. */
   teams?: CoffeeTeamState;
+}
+
+export type CoffeeContextSparkSourceApplet = "signal" | "debate" | "coffee";
+
+export type CoffeeContextSparkState =
+  | "available"
+  | "armed"
+  | "used"
+  | "dismissed"
+  | "stale";
+
+/** A grounded invitation to revisit something an attending bot experienced. */
+export interface CoffeeContextSpark {
+  id: string;
+  conversationId: string;
+  sourceApplet: CoffeeContextSparkSourceApplet;
+  sourceSessionId: string;
+  sourceTitle: string;
+  sourceDate: string;
+  inspiredBotId: string;
+  inspiredBotName: string;
+  inspiredBotColor: string | null;
+  inspiredBotGlyph: string | null;
+  prompt: string;
+  state: CoffeeContextSparkState;
+  createdAt: string;
+}
+
+export interface CoffeeContextSparksResponse {
+  sparks: CoffeeContextSpark[];
+}
+
+export interface CoffeeContextSparkPatchRequest {
+  state: Extract<CoffeeContextSparkState, "available" | "armed" | "dismissed">;
 }
 
 /** Request body for `POST /api/coffee/sessions/:id/user-action`. */
@@ -2611,7 +3712,6 @@ export interface CoffeeContinueRequest {
    * gating still wins — a bot with `online_enabled=0` falls back to local.
    */
   preferredProvider?: LlmProviderName;
-  reasoningEffort?: ReasoningEffort;
   /**
    * Optional director-mode pick. When present, the server asks this seated bot
    * to speak instead of running the automatic speaker router.
@@ -2643,7 +3743,7 @@ export interface CoffeeTurnRequest {
   /** Existing Coffee conversation id, or omitted for legacy first-turn creation. */
   conversationId?: string;
   /**
-   * Ordered list of 2-5 bot ids, or a fixed five-seat layout with null empty
+   * Ordered list of 2-4 bot ids, or a fixed five-seat layout with null empty
    * seats. Required only for legacy first-turn creation; ignored on subsequent
    * turns (server uses the group stored on the conversation row). New clients
    * should create a Coffee session first via `POST /api/coffee/sessions`.
@@ -2656,13 +3756,14 @@ export interface CoffeeTurnRequest {
    * wins — a bot with `online_enabled=0` always falls back to local.
    */
   preferredProvider?: LlmProviderName;
-  reasoningEffort?: ReasoningEffort;
   /** The user's outgoing message. */
   message: string;
   /** Optional player-interruption metadata from the live table reveal state. */
   playerInterruption?: CoffeePlayerInterruptionInput;
   /** Optional director-mode pick for this user turn. */
   directedSpeakerBotId?: string;
+  /** Armed historical source whose participating bot should answer first. */
+  contextSparkId?: string;
   /**
    * Client-visible bots currently seated at the live table. During Coffee's
    * opening arrivals, the server routes turns only among these bots.
@@ -2705,6 +3806,36 @@ export type CoffeeTurnJobPhase =
   | "stale"
   | "failed";
 
+export type CoffeeTurnModelSelectionKind = "auto" | "fixed";
+
+export type CoffeeTurnJobFailureCode =
+  | "auto_fallback_exhausted"
+  | "provider_unavailable"
+  | "invalid_output"
+  | "stale_retry"
+  | "cancelled"
+  | "unknown";
+
+export interface CoffeeTurnJobRetryMetadataV1 {
+  v: 1;
+  retryOfJobId: string;
+  expectedLatestMessageCursor: string | null;
+  ordinal: number;
+  excludedSpeakerBotId?: string;
+}
+
+/** Privacy-safe, machine-readable failure details for bounded Coffee recovery. */
+export interface CoffeeTurnJobFailureV1 {
+  v: 1;
+  code: CoffeeTurnJobFailureCode;
+  selectionKind: CoffeeTurnModelSelectionKind;
+  attempts: AutoFallbackAttemptTraceV1[];
+  speakerBotId: string | null;
+  latestMessageCursor: string | null;
+  retry: CoffeeTurnJobRetryMetadataV1 | null;
+  retryable: boolean;
+}
+
 export interface CoffeeTurnJobStatus {
   id: string;
   conversationId: string | null;
@@ -2714,6 +3845,9 @@ export interface CoffeeTurnJobStatus {
   updatedAt: string;
   interruptEligibleAt: string | null;
   response?: CoffeeTurnResponse;
+  /** Structured recovery contract. `error` remains during compatibility rollout. */
+  failure?: CoffeeTurnJobFailureV1;
+  retry?: CoffeeTurnJobRetryMetadataV1;
   error?: string;
 }
 
@@ -2751,12 +3885,62 @@ export interface CoffeePollPlayerVoteRequest {
 export interface CoffeePollPlayerVoteResponse {
   poll: CoffeePoll;
 }
+export * from "./autoCameraDirector.js";
 export * from "./botcast.js";
+export * from "./signalVisualRecognition.js";
+export * from "./producerQuoteReception.js";
+export * from "./actionSfxPack.js";
+export * from "./englishPacingProfile.js";
+export * from "./corporalityFoley.js";
+export * from "./signalFancyAction.js";
+export * from "./signalOrganicPerformance.js";
+export * from "./signalPickles.js";
 export * from "./signalMusicProfile.js";
 export * from "./voiceSpokenText.js";
+export * from "./voiceAlignmentTrace.js";
+export * from "./voicePerformance.js";
+export * from "./localVoice.js";
+export * from "./voiceSpeechprint.js";
+export * from "./protectedSpeech.js";
+export * from "./premiumRespelling.js";
 export * from "./listenerReaction.js";
+export * from "./responseCue.js";
+export * from "./turnPreparation.js";
+export * from "./directionalIrritation.js";
+export * from "./stageActionDirector.js";
 export * from "./continuityVersion.js";
 export * from "./modelReadiness.js";
 export * from "./graphicsQuality.js";
+export * from "./crtFocus.js";
+export * from "./typographyScale.js";
 export * from "./review.js";
 export * from "./ephemeralChat.js";
+export * from "./replay.js";
+export * from "./liveBake.js";
+export * from "./livingShell.js";
+export * from "./livingShellProgress.js";
+export * from "./imageAssets.js";
+export * from "./softAssetJobs.js";
+export * from "./slateHandoff.js";
+export * from "./debate.js";
+export * from "./debateMystery.js";
+export * from "./debateMysteryV2.js";
+export * from "./debateMysteryExterior.js";
+export * from "./mysteryIncidentPlan.js";
+export * from "./portableMysteryPackage.js";
+export * from "./portableMysteryCase.js";
+export * from "./whodunnitProps.js";
+export * from "./whodunnitSfx.js";
+export * from "./mansionLayoutV2.js";
+export * from "./roomLightTune.js";
+export * from "./mysteryVenue.js";
+export * from "./mysterySideRooms.js";
+export * from "./mansionAutoDecorationV2.js";
+export * from "./mansionMusic.js";
+export * from "./audioAssets.js";
+export * from "./mansionAcoustics.js";
+export * from "./debateParticipation.js";
+export * from "./debateChairFavorability.js";
+export * from "./coffeeGroupSetup.js";
+export * from "./coffeeTopicTitle.js";
+export * from "./debateAudiencePressure.js";

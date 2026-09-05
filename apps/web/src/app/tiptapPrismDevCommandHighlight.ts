@@ -4,7 +4,7 @@ import { Plugin } from "@tiptap/pm/state";
 import { Decoration, DecorationSet } from "@tiptap/pm/view";
 import { parseBuiltInPromptWildcardReference } from "@localai/shared";
 
-const DEV_COMMAND_RE = /^\/(?:\?|[a-z0-9][a-z0-9-]*)(?=\s|$)/iu;
+const DEV_COMMAND_RE = /^\$(?:\?|[a-z0-9][a-z0-9-]*)(?=\s|$)/iu;
 const TOOL_SHORTCUT_RE = /^(\s*)\?([a-z0-9][a-z0-9-]*)(?=\s|$)/iu;
 const PROMPT_SHORTCUT_RE = /(^|[\s([{])\/([a-z0-9][a-z0-9-]*)(?=\s|$|[.,;:!?)}\]])/giu;
 const WILDCARD_DECK_RE = /(^|[\s([{])!([a-z0-9][a-z0-9_-]*)(?=\s|$|[.,;:!?)}\]])/giu;
@@ -20,7 +20,7 @@ export interface PendingWildcardSlotDecoration {
 interface PrismDevCommandHighlightOptions {
   /**
    * When provided, only exact command-name matches are decorated. This keeps
-   * `/cle` plain while the user is still typing toward `/clear`.
+   * `$cle` plain while the user is still typing toward `$clear`.
    */
   commandNames: readonly string[] | null;
   /**
@@ -80,7 +80,7 @@ interface KnownCommandMatch extends RegExpMatchArray {
 const DEFAULT_DEV_COMMAND_ARGUMENTS = ["wait", "load"];
 
 function normalizeCommandName(value: string): string {
-  return value.trim().replace(/^\/+/, "").toLowerCase();
+  return value.trim().replace(/^\$+/, "").toLowerCase();
 }
 
 function normalizeArgumentName(value: string): string {
@@ -91,7 +91,7 @@ function normalizedKnownNames(names: readonly string[] | null | undefined): Set<
   if (!names) return null;
   return new Set(
     names
-      .map((name) => name.trim().replace(/^[!/?]+/, "").toLowerCase())
+      .map((name) => name.trim().replace(/^[!/?$]+/, "").toLowerCase())
       .filter(Boolean)
   );
 }

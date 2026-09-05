@@ -1,5 +1,6 @@
 import {
   buildSpeechActivityWindows,
+  buildSpeechActivityWindowsFromTextCadence,
   speechActivityAtMs,
   type SpeechActivityWindow,
 } from "./speechActivity.ts";
@@ -23,6 +24,8 @@ export interface CoffeeDeliveryCharacterAlignment {
 
 export const COFFEE_DELIVERY_MIN_DURATION_MS = 280;
 export const COFFEE_DELIVERY_MAX_DURATION_MS = 18_000;
+/** Voice preparation may fail without rejecting or ever reporting playback start. */
+export const COFFEE_VOICE_START_FAILSAFE_MS = 12_000;
 export const COFFEE_VOICE_REVEAL_TAIL_GRACE_MS = 2_000;
 
 export const COFFEE_DELIVERY_MOOD_CHARACTERS_PER_SECOND: Record<CoffeeDeliveryMood, number> = {
@@ -45,6 +48,15 @@ export function coffeeVoiceRevealFallbackDelayMs(
 ): number {
   const safeDurationMs = Math.max(0, Number.isFinite(durationMs) ? durationMs : 0);
   return safeDurationMs + (voiced ? COFFEE_VOICE_REVEAL_TAIL_GRACE_MS : 0);
+}
+
+/**
+ * Stall heartbeat for Coffee reveal: while voice progress keeps arriving,
+ * reschedule applyReveal this far in the future instead of using a fixed
+ * estimate that can cut monologues short after clause pauses.
+ */
+export function coffeeVoiceRevealStallWatchdogDelayMs(): number {
+  return COFFEE_VOICE_REVEAL_TAIL_GRACE_MS;
 }
 
 /** Resolve the delivery duration only after playback's real start callback. */
@@ -213,7 +225,10 @@ export function buildCoffeeDeliveryPlan({
     durationMs: Math.round(targetDuration),
     baseCharacterMs: baseCharacterMs * scale,
     emphasis: resolveEmphasis(text),
-    speechActivityWindows: null,
+    speechActivityWindows: buildSpeechActivityWindowsFromTextCadence(
+      text,
+      targetDuration,
+    ),
   };
 }
 

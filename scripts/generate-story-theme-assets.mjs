@@ -1,7 +1,9 @@
-import { mkdirSync, copyFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { deflateSync } from "node:zlib";
+
+import sharp from "sharp";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
 const THEME_ID = "prism_default";
@@ -593,10 +595,14 @@ for (const [fileName, width, height, draw] of ASSETS) {
   const raster = new Raster(width, height);
   draw(raster);
   const draftPath = join(MOCKUP_DIR, fileName);
-  const publicPath = join(PUBLIC_DIR, fileName);
+  const publicPath = join(PUBLIC_DIR, fileName.replace(/\.png$/u, ".webp"));
   mkdirSync(dirname(draftPath), { recursive: true });
   writeFileSync(draftPath, pngEncode(raster));
-  if (PROMOTE_MOCKUPS) copyFileSync(draftPath, publicPath);
+  if (PROMOTE_MOCKUPS) {
+    await sharp(draftPath, { failOn: "error" })
+      .webp({ lossless: true, effort: 6 })
+      .toFile(publicPath);
+  }
 }
 
 console.log(

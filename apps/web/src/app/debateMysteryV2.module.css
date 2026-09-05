@@ -1,0 +1,4377 @@
+.forge,
+.titleCard,
+.caseOpening,
+.investigation,
+.court,
+.verdict {
+  --v2-bg: #070912;
+  --v2-panel: rgba(15, 18, 32, 0.94);
+  --v2-edge: rgba(178, 155, 255, 0.3);
+  --v2-text: #f7f5ff;
+  --v2-muted: #aca8bd;
+  --v2-accent: #a98cff;
+  --v2-chrome: rgba(9, 11, 21, 0.96);
+  --v2-raised: rgba(15, 18, 32, 0.94);
+  --v2-soft: rgba(255, 255, 255, 0.045);
+  --v2-field: rgba(9, 10, 19, 0.72);
+  --v2-backdrop: rgba(2, 3, 8, 0.58);
+  --v2-shadow: 0 1.4rem 3.4rem rgba(0, 0, 0, 0.34);
+  min-height: 100dvh;
+  color: var(--v2-text);
+  background:
+    radial-gradient(circle at 50% -10%, rgba(116, 73, 227, 0.22), transparent 48%),
+    linear-gradient(160deg, #070912, #0c0d18 54%, #07080e);
+}
+
+.forge[data-theme="light"],
+.titleCard[data-theme="light"],
+.caseOpening[data-theme="light"],
+.investigation[data-theme="light"],
+.court[data-theme="light"],
+.verdict[data-theme="light"] {
+  --v2-bg: #edf5fc;
+  --v2-panel: rgba(248, 251, 255, 0.96);
+  --v2-edge: rgba(69, 91, 113, 0.22);
+  --v2-text: #172638;
+  --v2-muted: #5c7186;
+  --v2-accent: #6a4bc0;
+  --v2-chrome: rgba(248, 251, 255, 0.97);
+  --v2-raised: rgba(235, 243, 249, 0.96);
+  --v2-soft: rgba(220, 234, 244, 0.68);
+  --v2-field: rgba(255, 255, 255, 0.88);
+  --v2-backdrop: rgba(70, 90, 110, 0.2);
+  --v2-shadow: 0 1.4rem 3.4rem rgba(49, 70, 91, 0.2);
+  color-scheme: light;
+  background:
+    radial-gradient(circle at 50% -10%, rgba(106, 75, 192, 0.1), transparent 48%),
+    linear-gradient(160deg, #edf5fc, #f8fbff 54%, #dce8f2);
+}
+
+.forge button,
+.titleCard button,
+.caseOpening button,
+.investigation button,
+.court button,
+.verdict button,
+.investigation select,
+.investigation textarea {
+  color: inherit;
+  font: inherit;
+}
+
+.eyebrow {
+  margin: 0;
+  color: color-mix(in srgb, var(--v2-accent) 72%, var(--v2-muted));
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+
+.archiveButton,
+.investigationHeader > button,
+.investigationHeaderActions > button,
+.courtHeader > button,
+.forgeActions button,
+.verdictActions button {
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 0.7rem;
+  padding: 0.65rem 0.85rem;
+  background: var(--v2-field);
+  cursor: pointer;
+}
+
+.archiveButton {
+  position: fixed;
+  z-index: 20;
+  top: calc(
+    var(--app-shell-top-nav-height, var(--app-navbar-height, 66px)) +
+      max(0.75rem, env(safe-area-inset-top, 0px))
+  );
+  left: max(0.75rem, env(safe-area-inset-left, 0px));
+  width: fit-content;
+  max-width: calc(100vw - 1.5rem);
+  line-height: 1.1;
+  white-space: nowrap;
+}
+
+.forge {
+  --forge-scene-canvas: #090b15;
+  --forge-title-ink: #f7f5ff;
+  --forge-title-pending: rgba(235, 231, 247, 0.62);
+  --forge-title-shadow: 0 1.2rem 3rem rgba(0, 0, 0, 0.72);
+  --forge-eyebrow-ink: color-mix(in srgb, var(--v2-accent) 72%, var(--v2-muted));
+  --forge-exterior-label-ink: #d6caef;
+  --forge-copy-ink: #d5d1e1;
+  --forge-meta-ink: #8e899e;
+  --forge-waiting-ink: #716e7d;
+  --forge-complete-ink: #aaa7b7;
+  --forge-current-work-ink: #aaa0c7;
+  --forge-substep-ink: #817c91;
+  --forge-substep-complete-ink: #c3bed0;
+  --forge-note-label-ink: #82dce8;
+  --forge-note-copy-ink: #c8cedc;
+  --forge-notice-ink: #c9c4da;
+  --forge-raised-surface: rgba(6, 7, 17, 0.3);
+  display: block;
+  padding: 0;
+  overflow: auto;
+  background: #020308;
+}
+
+.forgeCard {
+  position: relative;
+  width: min(45rem, 100%);
+  padding: clamp(1.5rem, 5vw, 3.4rem);
+  overflow: hidden;
+  border: 1px solid var(--v2-edge);
+  border-radius: 1.4rem;
+  background: linear-gradient(145deg, rgba(26, 27, 50, 0.95), rgba(11, 13, 25, 0.98));
+  box-shadow: 0 2rem 6rem rgba(0, 0, 0, 0.55), inset 0 1px rgba(255, 255, 255, 0.07);
+}
+
+.forgeCard[data-exterior-hero="true"] {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(22rem, 30rem);
+  column-gap: clamp(3rem, 7vw, 9rem);
+  align-items: start;
+  width: 100%;
+  min-height: 100dvh;
+  box-sizing: border-box;
+  padding: clamp(5.5rem, 8vh, 8rem) clamp(2rem, 6vw, 7rem) clamp(3rem, 7vh, 6rem);
+  isolation: isolate;
+  border: 0;
+  border-radius: 0;
+  background: var(--forge-scene-canvas);
+}
+
+.forgeCard[data-exterior-hero="true"]::before,
+.forgeCard[data-exterior-hero="true"]::after {
+  position: absolute;
+  inset: 0;
+  z-index: -2;
+  content: "";
+}
+
+.forgeCard[data-exterior-hero="true"]::before {
+  background: var(--forge-exterior-image) center / cover no-repeat;
+  filter: brightness(var(--forge-exterior-brightness, 0.18)) contrast(var(--forge-exterior-contrast, 0.72)) grayscale(var(--forge-exterior-grayscale, 1)) saturate(var(--forge-exterior-saturation, 0.08)) blur(var(--forge-exterior-blur, 22px));
+  opacity: var(--forge-exterior-opacity, 0);
+  transform: scale(1.055);
+  transition: filter 1.25s cubic-bezier(0.22, 1, 0.36, 1), opacity 1.25s cubic-bezier(0.22, 1, 0.36, 1), transform 1.25s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.forgeCard[data-exterior-hero="true"]::after {
+  z-index: -1;
+  background:
+    linear-gradient(90deg, rgba(4, 6, 12, 0.05) 0 38%, rgba(4, 6, 12, 0.7) 62%, rgba(4, 6, 12, 0.98) 100%),
+    linear-gradient(0deg, rgba(4, 6, 12, 0.82), transparent 38%);
+}
+
+.forgeCard[data-exterior-hero="true"][data-forge-complete="true"]::before {
+  transform: scale(1);
+}
+
+.forgePanel {
+  position: relative;
+  z-index: 2;
+  grid-column: 2;
+  width: 100%;
+}
+
+.forgeCard[data-exterior-hero="true"] > .forgeCaseIdentity {
+  position: sticky;
+  z-index: 2;
+  top: clamp(6rem, 18vh, 12rem);
+  grid-column: 1;
+  grid-row: 1;
+  width: min(42rem, 100%);
+  margin: clamp(5rem, 18vh, 12rem) 0 0;
+  text-wrap: balance;
+}
+
+.forgeCaseIdentity h1 {
+  max-width: 42rem;
+  margin: 0.65rem 0 0;
+  font-size: clamp(3.4rem, 7vw, 7.2rem);
+  line-height: 0.88;
+  letter-spacing: -0.07em;
+  color: var(--forge-title-ink);
+  text-shadow: var(--forge-title-shadow);
+  animation: forgeTitleReveal 760ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.forgeCaseIdentity[data-title-ready="false"] h1 {
+  max-width: 28rem;
+  color: var(--forge-title-pending);
+  font-size: clamp(2.2rem, 4vw, 4rem);
+  letter-spacing: -0.045em;
+}
+
+@keyframes forgeTitleReveal {
+  from { opacity: 0; transform: translateY(0.6rem); }
+  to { opacity: 1; transform: none; }
+}
+
+.forgeExteriorStatus {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  margin: 0 0 0.7rem;
+  color: var(--forge-exterior-label-ink);
+  font-size: 0.72rem;
+  font-weight: 760;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.forgeExteriorStatus > span { color: #66e5ea; text-shadow: 0 0 0.75rem currentColor; }
+
+.forgeStatusHeading {
+  max-width: 26rem;
+  margin: 0.5rem 0;
+  font-size: clamp(2rem, 6vw, 3.4rem);
+  line-height: 0.96;
+  letter-spacing: -0.055em;
+}
+
+@media (max-width: 1120px) {
+  .forgeCard[data-exterior-hero="true"] {
+    display: block;
+    padding: 5.5rem clamp(1.25rem, 5vw, 3rem) 3rem;
+  }
+
+  .forgeCard[data-exterior-hero="true"]::after {
+    background:
+      linear-gradient(180deg, rgba(4, 6, 12, 0.36), rgba(4, 6, 12, 0.86) 58%, rgba(4, 6, 12, 0.98) 100%),
+      linear-gradient(90deg, rgba(4, 6, 12, 0.16), rgba(4, 6, 12, 0.58));
+  }
+
+  .forgePanel {
+    width: min(38rem, 100%);
+    margin-right: auto;
+    margin-left: auto;
+  }
+
+  .forgeCard[data-exterior-hero="true"] > .forgeCaseIdentity {
+    position: relative;
+    top: auto;
+    width: min(46rem, 100%);
+    margin: 0 auto clamp(2rem, 7vh, 4.5rem);
+  }
+
+  .forgeCaseIdentity h1 {
+    font-size: clamp(3rem, 10vw, 6rem);
+  }
+}
+
+.forgeMessage { margin: 0.9rem 0 1.25rem; color: var(--forge-copy-ink); }
+.forgeBackgroundNote {
+  margin: 0.2rem 0 1.2rem;
+  padding: 0.75rem 0.85rem;
+  border: 1px solid rgba(101, 219, 255, 0.2);
+  border-radius: 0.8rem;
+  color: var(--forge-notice-ink);
+  background: var(--forge-raised-surface);
+  font-size: 0.86rem;
+  line-height: 1.45;
+}
+.forgeRecovery {
+  margin: -0.65rem 0 1.2rem;
+  padding: 0.75rem 0.85rem;
+  border-left: 2px solid rgba(255, 129, 156, 0.72);
+  color: #d8cfda;
+  background: rgba(122, 38, 62, 0.12);
+  font-size: 0.9rem;
+  line-height: 1.45;
+}
+
+.forgePrism {
+  position: absolute;
+  top: -3.5rem;
+  right: -2rem;
+  width: 15rem;
+  height: 15rem;
+  opacity: 0.54;
+  transform: rotate(21deg);
+}
+
+.forgePrism i {
+  position: absolute;
+  inset: 0;
+  border: 1px solid rgba(185, 147, 255, 0.42);
+  clip-path: polygon(50% 0, 100% 100%, 0 100%);
+  animation: forgeRefract 4s ease-in-out infinite alternate;
+}
+
+.forgePrism i:nth-child(2) { inset: 2rem; animation-delay: -1.3s; }
+.forgePrism i:nth-child(3) { inset: 4rem; animation-delay: -2.6s; }
+
+@keyframes forgeRefract {
+  to { transform: translate3d(0.55rem, -0.35rem, 0) rotate(2deg); opacity: 0.42; }
+}
+
+.progressTrack {
+  height: 0.28rem;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.progressTrack span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #6959ef, #c48cff, #65dbff);
+  box-shadow: 0 0 1.2rem rgba(155, 119, 255, 0.7);
+  background-size: 180% 100%;
+  animation: forgeProgressShimmer 2.4s linear infinite;
+  transition: width 1600ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@keyframes forgeProgressShimmer {
+  from { background-position: 100% 0; }
+  to { background-position: -80% 0; }
+}
+
+.forgeTiming {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-top: 0.55rem;
+  color: var(--forge-meta-ink);
+  font-size: 0.72rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.forgeStages {
+  display: grid;
+  gap: 0.4rem;
+  margin: 1.4rem 0;
+  padding: 0;
+  list-style: none;
+}
+
+.forgeStages li {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  min-height: 2.4rem;
+  color: var(--forge-waiting-ink);
+}
+
+.forgeStages li span {
+  display: grid;
+  width: 1.6rem;
+  height: 1.6rem;
+  place-items: center;
+  border: 1px solid rgba(255, 255, 255, 0.13);
+  border-radius: 50%;
+  font-size: 0.68rem;
+}
+
+.forgeStages li[data-state="complete"] { color: var(--forge-complete-ink); }
+.forgeStages li[data-state="complete"] span { color: #b8f9e5; border-color: rgba(95, 225, 188, 0.4); }
+.forgeStages li[data-state="active"] { color: white; }
+.forgeStages li[data-state="active"] span { color: white; border-color: #b08aff; box-shadow: 0 0 1rem rgba(167, 126, 255, 0.5); }
+.forgeStages li[data-state="error"] { color: #ffd1dc; }
+.forgeStages li[data-state="error"] span { color: #ffb1c4; border-color: rgba(255, 120, 151, 0.66); box-shadow: 0 0 1rem rgba(255, 90, 130, 0.28); }
+
+.forgeSubsteps {
+  margin: -0.45rem 0 1.1rem;
+  padding: 0.8rem 0.9rem;
+  border: 1px solid rgba(184, 153, 255, 0.16);
+  border-radius: 0.75rem;
+  background: var(--forge-raised-surface);
+}
+
+.forgeSubsteps > p {
+  margin: 0 0 0.45rem;
+  color: var(--forge-current-work-ink);
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+}
+
+.forgeSubsteps ol { display: grid; gap: 0.34rem; margin: 0; padding: 0; list-style: none; }
+.forgeSubsteps li { display: flex; align-items: baseline; gap: 0.52rem; color: var(--forge-substep-ink); font-size: 0.8rem; }
+.forgeSubsteps li > span { width: 0.8rem; color: #8d859f; text-align: center; }
+.forgeSubsteps li[data-state="complete"] { color: var(--forge-substep-complete-ink); }
+.forgeSubsteps li[data-state="complete"] > span { color: #9ee8d0; }
+.forgeSubsteps li[data-state="active"] { color: #fff; font-weight: 700; }
+.forgeSubsteps li[data-state="active"] > span { color: #c6a9ff; animation: forgeSubstepPulse 1.8s ease-in-out infinite; }
+.forgeSubsteps li[data-state="attention"] { color: #ffd1dc; font-weight: 700; }
+.forgeSubsteps li[data-state="attention"] > span { color: #ff9ab6; }
+
+.forgeDetails {
+  margin: 0.25rem 0 1rem;
+  border: 1px solid rgba(184, 153, 255, 0.18);
+  border-radius: 0.8rem;
+  background: rgba(6, 7, 17, 0.24);
+}
+
+.forgeDetails > summary {
+  padding: 0.8rem 0.9rem;
+  color: #c8c1da;
+  cursor: pointer;
+  font-size: 0.8rem;
+  font-weight: 750;
+}
+
+.forgeDetails > div { padding: 0 0.9rem 0.9rem; }
+.forgeDetails .forgeMessage { margin: 0 0 0.85rem; font-size: 0.85rem; }
+.forgeDetails .forgeSubsteps { margin: 0 0 0.85rem; }
+.forgeDetails .localVoiceNotice { margin-top: 0; }
+.forgeDetails small { display: block; margin-top: 0.45rem; color: var(--v2-muted); }
+
+.forgeTip {
+  display: grid;
+  gap: 0.18rem;
+  margin: -0.2rem 0 1rem;
+  padding: 0.75rem 0.85rem;
+  border-left: 2px solid rgba(102, 229, 234, 0.64);
+  background: rgba(57, 140, 158, 0.08);
+}
+
+.forgeTip > span { color: var(--forge-note-label-ink); font-size: 0.67rem; font-weight: 800; letter-spacing: 0.1em; text-transform: uppercase; }
+.forgeTip > p { margin: 0; color: var(--forge-note-copy-ink); font-size: 0.82rem; line-height: 1.4; animation: forgeTipReveal 360ms ease-out both; }
+
+@keyframes forgeSubstepPulse {
+  0%, 100% { opacity: 0.42; transform: scale(0.9); }
+  50% { opacity: 1; transform: scale(1.12); }
+}
+
+@keyframes forgeTipReveal {
+  from { opacity: 0; transform: translateY(0.2rem); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .forgeSubsteps li[data-state="active"] > span,
+  .forgeTip > p { animation: none; }
+}
+
+.localVoiceNotice {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin: 1.1rem 0 0.7rem;
+  padding: 0.85rem;
+  border: 1px solid rgba(99, 219, 255, 0.22);
+  border-radius: 0.8rem;
+  background: rgba(44, 113, 142, 0.1);
+}
+
+.localVoiceNotice > span { color: #69ddff; font-size: 1.25rem; }
+.localVoiceNotice div { display: grid; gap: 0.18rem; }
+.localVoiceNotice small, .forgePanel > small { color: var(--v2-muted); }
+.forgeActions, .verdictActions { display: flex; flex-wrap: wrap; gap: 0.55rem; margin-top: 1rem; }
+.error { color: #ffadbd; }
+
+.productionReadinessCard {
+  width: min(68rem, calc(100vw - 2rem));
+}
+
+.productionReadinessList {
+  display: grid;
+  gap: 0.65rem;
+  margin: 1.1rem 0;
+}
+
+.productionReadinessList article {
+  display: grid;
+  grid-template-columns: minmax(12rem, 1fr) minmax(22rem, 1.5fr) auto;
+  align-items: center;
+  gap: 0.8rem;
+  padding: 0.8rem;
+  border: 1px solid rgba(184, 153, 255, 0.18);
+  border-radius: 0.8rem;
+  background: rgba(6, 7, 17, 0.32);
+}
+
+.productionReadinessList article[data-complete="true"] {
+  border-color: rgba(95, 225, 188, 0.28);
+}
+
+.productionReadinessList article > div:first-child {
+  display: grid;
+  gap: 0.18rem;
+}
+
+.productionReadinessList article small {
+  color: var(--v2-muted);
+  line-height: 1.35;
+}
+
+.productionReadinessList dl {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 0.35rem;
+  margin: 0;
+}
+
+.productionReadinessList dl > div {
+  display: grid;
+  justify-items: center;
+  gap: 0.12rem;
+  padding: 0.4rem;
+  border-radius: 0.5rem;
+  background: rgba(128, 118, 174, 0.08);
+}
+
+.productionReadinessList dt {
+  color: var(--v2-muted);
+  font-size: 0.62rem;
+  text-transform: uppercase;
+}
+
+.productionReadinessList dd {
+  margin: 0;
+  color: var(--v2-text);
+  font-variant-numeric: tabular-nums;
+  font-weight: 800;
+}
+
+@media (max-width: 760px) {
+  .productionReadinessList article { grid-template-columns: 1fr; }
+  .productionReadinessList dl { grid-template-columns: repeat(5, minmax(3.5rem, 1fr)); overflow-x: auto; }
+}
+
+.titleCard {
+  position: relative;
+  isolation: isolate;
+  display: grid;
+  min-height: 100dvh;
+  place-content: center;
+  justify-items: center;
+  overflow: hidden;
+  padding: 5rem 1.5rem;
+  text-align: center;
+  background-color: #05070d;
+}
+
+.titleCoverPlane {
+  position: absolute;
+  z-index: 0;
+  top: 50%;
+  left: 50%;
+  width: max(100%, 177.777778dvh);
+  aspect-ratio: 16 / 9;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+
+.titleCoverMedia {
+  position: absolute;
+  z-index: 0;
+  inset: 0;
+  background-color: #05070d;
+  background-image: var(--mansion-exterior-image);
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: cover;
+  pointer-events: none;
+}
+
+.titleCoverPlane .titleCoverMedia {
+  background-size: 100% 100%;
+}
+
+.titleCoverPlane[data-entry-placement="true"] {
+  pointer-events: auto;
+}
+
+.exteriorEntryPlacementSurface {
+  appearance: none;
+  position: absolute;
+  z-index: 3;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border: 1px solid rgba(188, 232, 255, 0.72);
+  border-radius: 0;
+  background: rgba(100, 205, 255, 0.035);
+  box-shadow: inset 0 0 4rem rgba(105, 207, 255, 0.09);
+  cursor: crosshair;
+  pointer-events: auto;
+}
+
+.exteriorEntryPlacementSurface:focus-visible {
+  outline: 2px solid rgba(238, 249, 255, 0.92);
+  outline-offset: -3px;
+}
+
+.exteriorEntryPlacementHud {
+  position: absolute;
+  z-index: 6;
+  top: clamp(1rem, 4vh, 2.5rem);
+  left: 50%;
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  width: min(38rem, calc(100vw - 2rem));
+  box-sizing: border-box;
+  padding: 0.85rem 0.9rem 0.85rem 1.05rem;
+  color: #f5f9ff;
+  border: 1px solid rgba(190, 225, 255, 0.42);
+  border-radius: 0.9rem;
+  background: rgba(4, 9, 18, 0.86);
+  box-shadow: 0 1rem 3rem rgba(0, 0, 0, 0.4), 0 0 2rem rgba(109, 199, 255, 0.12);
+  text-align: left;
+  transform: translateX(-50%);
+  backdrop-filter: blur(14px);
+}
+
+.exteriorEntryPlacementHud > div {
+  display: grid;
+  flex: 1;
+  gap: 0.15rem;
+}
+
+.exteriorEntryPlacementHud p,
+.exteriorEntryPlacementHud strong,
+.exteriorEntryPlacementHud span,
+.exteriorEntryPlacementHud small {
+  margin: 0;
+}
+
+.exteriorEntryPlacementHud strong {
+  font-size: 1rem;
+}
+
+.exteriorEntryPlacementHud span,
+.exteriorEntryPlacementHud small {
+  color: rgba(230, 239, 250, 0.76);
+  font-size: 0.78rem;
+}
+
+.exteriorEntryPlacementHud small[role="alert"] {
+  color: #ffb6c6;
+}
+
+.exteriorEntryPlacementHud button {
+  flex: 0 0 auto;
+  padding: 0.55rem 0.72rem;
+  color: inherit;
+  border: 1px solid rgba(220, 235, 255, 0.28);
+  border-radius: 0.65rem;
+  background: rgba(255, 255, 255, 0.08);
+  cursor: pointer;
+}
+
+.titleCard[data-theme="light"] .exteriorEntryPlacementHud {
+  color: #101923;
+  border-color: rgba(28, 66, 94, 0.24);
+  background: rgba(247, 251, 255, 0.9);
+  box-shadow: 0 1rem 3rem rgba(25, 44, 59, 0.18), 0 0 2rem rgba(61, 153, 208, 0.1);
+}
+
+.titleCard[data-theme="light"] .exteriorEntryPlacementHud span,
+.titleCard[data-theme="light"] .exteriorEntryPlacementHud small {
+  color: rgba(16, 25, 35, 0.72);
+}
+
+.titleCard[data-theme="light"] .exteriorEntryPlacementHud small[role="alert"] {
+  color: #9e2745;
+}
+
+.titleCard[data-theme="light"] .exteriorEntryPlacementHud button {
+  border-color: rgba(28, 66, 94, 0.22);
+  background: rgba(41, 91, 126, 0.08);
+}
+
+.titleCard[data-first-person-exterior="true"] {
+  padding: 0;
+}
+
+.titleCard[data-exterior-entering="true"]::after {
+  position: absolute;
+  z-index: 8;
+  inset: 0;
+  content: "";
+  background: #000;
+  pointer-events: none;
+  animation: exteriorThresholdFade 1.2s ease-in both;
+}
+
+.titleCard[data-theme="light"][data-exterior-entering="true"]::after {
+  background: #fff;
+}
+
+.exteriorInvestigationThought {
+  --dialogue-accent: #a98cff;
+  position: absolute;
+  z-index: 4;
+  bottom: clamp(1.4rem, 5vh, 4rem);
+  left: clamp(1.25rem, 5vw, 5.5rem);
+  width: min(34rem, calc(100vw - 2.5rem));
+  box-sizing: border-box;
+  padding: 1rem 1.15rem;
+  color: var(--v2-text);
+  border: 1px solid color-mix(in srgb, var(--dialogue-accent), transparent 42%);
+  border-radius: 0.85rem;
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--dialogue-accent), transparent 88%), transparent 46%),
+    rgba(7, 9, 18, 0.96);
+  box-shadow:
+    inset 3px 0 0 color-mix(in srgb, var(--dialogue-accent), white 14%),
+    0 1rem 3rem rgba(0, 0, 0, 0.64),
+    0 0 2.4rem color-mix(in srgb, var(--dialogue-accent), transparent 82%);
+  pointer-events: none;
+  animation: titleCardSettle 260ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  backdrop-filter: blur(16px);
+}
+
+.exteriorInvestigationThought small {
+  color: color-mix(in srgb, var(--dialogue-accent), white 28%);
+  font-weight: 800;
+}
+
+.exteriorInvestigationThought p {
+  margin: 0.35rem 0 0;
+  line-height: 1.45;
+}
+
+.titleCardContent {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  justify-items: center;
+  padding: clamp(1.4rem, 3vw, 2.5rem);
+  border: 1px solid rgba(208, 194, 255, 0.2);
+  border-radius: 1.2rem;
+  background: rgba(5, 7, 15, 0.52);
+  box-shadow: 0 2rem 6rem rgba(0, 0, 0, 0.48);
+  backdrop-filter: blur(12px);
+  animation: titleCardSettle 720ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.titleCardContent[data-door-threshold="true"] {
+  position: absolute;
+  z-index: 3;
+  top: clamp(4.5rem, 9vh, 7rem);
+  left: clamp(1.25rem, 5vw, 5.5rem);
+  justify-items: start;
+  width: min(34rem, calc(100vw - 2.5rem));
+  padding: clamp(1rem, 2vw, 1.6rem);
+  text-align: left;
+  backdrop-filter: blur(8px);
+}
+
+.titleCardContent[data-door-threshold="true"] .titlePrism { font-size: 3.4rem; }
+.titleCardContent[data-door-threshold="true"] h1 {
+  max-width: 31rem;
+  font-size: clamp(2rem, 4.7vw, 4.3rem);
+}
+.titleCardContent[data-door-threshold="true"] .titleMetadata {
+  justify-content: flex-start;
+  margin: 0.9rem 0 0;
+}
+
+@keyframes titleCardSettle {
+  from { opacity: 0; transform: translateY(0.7rem) scale(0.985); }
+  to { opacity: 1; transform: none; }
+}
+
+.mysteryPlayerOrb {
+  --player-orb-color: #ae8cff;
+  display: grid;
+  width: 2.85rem;
+  aspect-ratio: 1;
+  box-sizing: border-box;
+  place-items: center;
+  color: color-mix(in srgb, var(--player-orb-color) 62%, #fff);
+  border: 1px solid color-mix(in srgb, var(--player-orb-color) 72%, #fff);
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at 38% 30%, rgba(255, 255, 255, 0.22), transparent 24%),
+    radial-gradient(circle, color-mix(in srgb, var(--player-orb-color) 58%, #141226), rgba(7, 9, 17, 0.96) 72%);
+  box-shadow:
+    inset 0 0 0.75rem rgba(255, 255, 255, 0.08),
+    0 0 1.25rem color-mix(in srgb, var(--player-orb-color) 42%, transparent);
+  filter: drop-shadow(0 0.55rem 0.7rem rgba(0, 0, 0, 0.48));
+  font-style: normal;
+  pointer-events: none;
+}
+.mysteryPlayerOrbGlyph { width: 1.35rem; height: 1.35rem; }
+
+.caseOpening {
+  position: relative;
+  display: grid;
+  min-height: 100dvh;
+  overflow: hidden;
+  background: #000;
+}
+
+.caseOpeningStage {
+  position: relative;
+  display: grid;
+  min-height: 100dvh;
+  place-items: center;
+  background-color: #000;
+  cursor: pointer;
+}
+
+.caseOpeningStage:focus-visible { outline: 3px solid #fff; outline-offset: -3px; }
+
+.caseOpeningDialogue {
+  --dialogue-accent: #a98cff;
+  position: absolute;
+  z-index: 8;
+  left: 50%;
+  bottom: clamp(2rem, 8vh, 7.4rem);
+  width: min(48rem, calc(100vw - 2rem));
+  padding: 1rem 1.15rem;
+  border: 1px solid color-mix(in srgb, var(--dialogue-accent), transparent 42%);
+  border-radius: 0.85rem;
+  color: var(--v2-text);
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--dialogue-accent), transparent 88%), transparent 46%),
+    rgba(7, 9, 18, 0.96);
+  box-shadow:
+    inset 3px 0 0 color-mix(in srgb, var(--dialogue-accent), white 14%),
+    0 1rem 3rem rgba(0, 0, 0, 0.64),
+    0 0 2.4rem color-mix(in srgb, var(--dialogue-accent), transparent 82%);
+  cursor: pointer;
+  transform: translateX(-50%);
+  backdrop-filter: blur(16px);
+}
+
+.caseOpeningDialogue small { color: color-mix(in srgb, var(--dialogue-accent), white 28%); font-weight: 800; }
+.caseOpeningDialogue p { margin: 0.35rem 0 0; line-height: 1.45; }
+.caseOpeningStage[aria-busy="true"] { cursor: progress; }
+
+.caseOpeningJourney {
+  position: relative;
+  display: grid;
+  width: min(74rem, calc(100vw - 2rem));
+  height: min(76dvh, 52rem);
+  min-height: 28rem;
+  padding: 1.25rem;
+  box-sizing: border-box;
+  border: 1px solid rgba(219, 202, 255, 0.16);
+  border-radius: 1.35rem;
+  background:
+    radial-gradient(ellipse at 50% 34%, rgba(107, 87, 159, 0.17), transparent 58%),
+    rgba(5, 7, 13, 0.96);
+  box-shadow: 0 2.4rem 7rem rgba(0, 0, 0, 0.72), inset 0 0 5rem rgba(105, 78, 170, 0.08);
+  animation: caseOpeningJourneyIn 520ms cubic-bezier(.2, .78, .2, 1) both;
+}
+.caseOpeningJourney > header {
+  position: absolute;
+  z-index: 12;
+  top: 1.15rem;
+  left: 1.35rem;
+  display: grid;
+}
+.caseOpeningJourney > header small {
+  color: #aeb4c8;
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+.caseOpeningJourney > header strong {
+  color: #f3efff;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 1.4rem;
+  font-weight: 500;
+}
+/* Same 2:1 board as the map, so its cells stay square here too. */
+.caseOpeningMansionCanvas {
+  position: relative;
+  inset: auto;
+  align-self: center;
+  width: 100%;
+  height: auto;
+  max-height: calc(100% - 3rem);
+  aspect-ratio: 2 / 1;
+  margin-top: 2rem;
+}
+.caseOpeningJourneyRoom {
+  position: absolute;
+  z-index: 1;
+  display: grid;
+  box-sizing: border-box;
+  place-items: center;
+  padding: 0.45rem;
+  color: transparent;
+  border: 1px solid rgba(203, 196, 218, 0.2);
+  border-radius: 0.3rem;
+  background: linear-gradient(145deg, rgba(25, 28, 37, 0.96), rgba(8, 10, 16, 0.98));
+  box-shadow: 0.28rem 0.34rem 0 rgba(2, 3, 7, 0.7), inset 0 0 1.2rem rgba(255, 255, 255, 0.025);
+}
+.caseOpeningJourneyRoom[data-route="true"] {
+  border-color: rgba(189, 167, 255, 0.38);
+  background: linear-gradient(145deg, rgba(51, 45, 70, 0.96), rgba(13, 15, 24, 0.98));
+}
+.caseOpeningJourneyRoom[data-destination="true"] {
+  z-index: 4;
+  color: #f6f1ff;
+  border-color: color-mix(in srgb, var(--player-orb-color, #ae8cff), white 16%);
+  box-shadow:
+    0 0 0 2px rgba(5, 7, 13, 0.92),
+    0 0 1.8rem color-mix(in srgb, var(--player-orb-color, #ae8cff), transparent 68%);
+}
+.caseOpeningJourneyRoom strong {
+  overflow: hidden;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: clamp(0.68rem, 1.1vw, 0.94rem);
+  font-style: normal;
+  font-weight: 500;
+  text-align: center;
+  text-overflow: ellipsis;
+  text-shadow: 0 1px 0.6rem #000;
+  white-space: nowrap;
+}
+.caseOpeningJourney .mansionCorridor[data-route="true"] {
+  border-color: rgba(189, 167, 255, 0.32);
+  background: linear-gradient(145deg, rgba(47, 42, 63, 0.94), rgba(12, 14, 21, 0.98));
+}
+.caseOpeningJourneyStatus {
+  position: absolute;
+  z-index: 15;
+  right: 1.25rem;
+  bottom: 1rem;
+  left: 1.25rem;
+  color: #cfc6e8;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.7rem;
+  font-weight: 760;
+  letter-spacing: 0.1em;
+  text-align: center;
+  text-transform: uppercase;
+}
+@keyframes caseOpeningJourneyIn {
+  from { opacity: 0; transform: scale(0.985); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+.titlePrism {
+  color: #b9a0ff;
+  font-size: 7rem;
+  line-height: 0.8;
+  text-shadow: -1rem 0 rgba(77, 218, 255, 0.2), 1rem 0 rgba(255, 77, 150, 0.17), 0 0 3rem rgba(172, 131, 255, 0.46);
+}
+
+.titleCard h1 {
+  max-width: 55rem;
+  margin: 0.6rem 0 0.3rem;
+  font-size: clamp(2.6rem, 8vw, 6.5rem);
+  line-height: 0.9;
+  letter-spacing: -0.065em;
+}
+
+.titleCardContent > p:not(.eyebrow) { color: var(--v2-muted); }
+.titleMetadata { display: flex; flex-wrap: wrap; justify-content: center; gap: 0.5rem; margin: 1.3rem; }
+.titleMetadata span { padding: 0.45rem 0.65rem; border: 1px solid var(--v2-edge); border-radius: 99px; color: #d7d0e9; font-size: 0.76rem; }
+/* Defense stance: the opposing Prosecutor's surface case, read before the door opens. */
+.titleCaseSummary { max-width: 34rem; margin: 0 auto 1.2rem; color: #d7d0e9; font-size: 0.92rem; line-height: 1.5; text-align: center; opacity: 0.88; }
+
+.primaryAction {
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: 0.75rem;
+  padding: 0.9rem 1.25rem;
+  background: linear-gradient(135deg, #7658e8, #a55ddd);
+  box-shadow: 0 0.8rem 2.2rem rgba(83, 38, 163, 0.32);
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.primaryAction:disabled,
+.forge button:disabled,
+.titleCard button:disabled,
+.investigation button:disabled,
+.court button:disabled,
+.verdict button:disabled { cursor: not-allowed; opacity: 0.45; }
+
+.titleDoor {
+  appearance: none;
+  position: absolute;
+  z-index: 2;
+  top: var(--mansion-door-y, 54%);
+  left: var(--mansion-door-x, 53%);
+  width: clamp(9rem, 18vmin, 15rem);
+  aspect-ratio: 1;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle, rgba(255, 255, 255, 0.2), rgba(126, 220, 255, 0.09) 28%, rgba(196, 142, 255, 0.045) 52%, transparent 74%);
+  cursor: pointer;
+  pointer-events: auto;
+  transform: translate(-50%, -50%);
+  transition: filter 220ms ease, opacity 220ms ease, transform 220ms ease;
+  animation: titleDoorArrival 720ms cubic-bezier(.2, .78, .2, 1) 380ms both;
+}
+.titleDoor::before {
+  position: absolute;
+  inset: 9%;
+  content: "";
+  border: 1px solid rgba(181, 232, 255, 0.5);
+  border-radius: 50%;
+  box-shadow:
+    inset 0 0 2rem rgba(185, 221, 255, 0.12),
+    0 0 2.2rem rgba(126, 220, 255, 0.28),
+    0 0 4.5rem rgba(177, 126, 255, 0.2);
+  animation: titleDoorBeacon 2.4s ease-in-out infinite;
+}
+.titleDoorFocus {
+  position: absolute;
+  inset: 24%;
+  display: grid;
+  place-items: center;
+  border: 2px solid rgba(238, 248, 255, 0.72);
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(221, 246, 255, 0.2), rgba(164, 132, 255, 0.08) 54%, transparent 72%);
+  box-shadow: inset 0 0 1.6rem rgba(255, 255, 255, 0.12), 0 0 2.4rem rgba(173, 225, 255, 0.42);
+  opacity: 0.9;
+  transition: border-color 220ms ease, box-shadow 220ms ease, opacity 220ms ease, transform 220ms ease;
+  animation: titleDoorBreath 3.2s ease-in-out infinite;
+}
+.titleDoorMark {
+  position: relative;
+  display: block;
+  width: 1.05rem;
+  height: 1.45rem;
+  border: 2px solid rgba(255, 255, 255, 0.92);
+  border-radius: 0.52rem 0.52rem 0.18rem 0.18rem;
+  box-shadow: 0 0 0.8rem rgba(211, 242, 255, 0.78), 0 0 1.7rem rgba(183, 139, 255, 0.5);
+}
+.titleDoorMark::after {
+  position: absolute;
+  top: 52%;
+  right: 0.16rem;
+  width: 0.18rem;
+  aspect-ratio: 1;
+  content: "";
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 0 0.45rem #fff;
+}
+.titleEntryAction {
+  position: absolute;
+  top: calc(100% + 0.35rem);
+  left: 50%;
+  min-width: max-content;
+  padding: 0.42rem 0.68rem;
+  color: #fff;
+  border: 1px solid rgba(218, 237, 255, 0.38);
+  border-radius: 999px;
+  background: rgba(4, 8, 16, 0.68);
+  box-shadow: 0 0.5rem 1.4rem rgba(0, 0, 0, 0.32);
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  transform: translateX(-50%);
+  backdrop-filter: blur(8px);
+}
+.titleDoor:hover:not(:disabled),
+.titleDoor:focus-visible {
+  outline: none;
+  filter: brightness(1.32);
+  transform: translate(-50%, -50%) scale(1.035);
+}
+.titleDoor:hover:not(:disabled) .titleDoorFocus,
+.titleDoor:focus-visible .titleDoorFocus {
+  border-color: rgba(255, 255, 255, 0.9);
+  box-shadow: inset 0 0 2.2rem rgba(255, 255, 255, 0.14), 0 0 3.4rem rgba(222, 202, 255, 0.42), 0 0 6rem rgba(255, 255, 255, 0.18);
+  opacity: 1;
+  transform: scale(0.9);
+}
+@keyframes titleDoorArrival { from { opacity: 0; transform: translate(-50%, -42%) scale(0.96); } to { opacity: 1; transform: translate(-50%, -50%); } }
+@keyframes titleDoorBreath { 0%, 100% { opacity: 0.55; transform: scale(0.96); } 50% { opacity: 0.9; transform: scale(1.04); } }
+@keyframes titleDoorBeacon { 0%, 100% { opacity: 0.62; transform: scale(0.96); } 50% { opacity: 1; transform: scale(1.04); } }
+@keyframes exteriorThresholdFade { from { opacity: 0; } to { opacity: 1; } }
+
+.investigation,
+.court { position: relative; overflow: hidden; }
+
+.investigation {
+  min-height: calc(100dvh - var(--app-shell-top-nav-height, 50px));
+}
+
+.roomLoadingOverlay {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100dvh;
+  max-width: none;
+  max-height: none;
+  margin: 0;
+  border: 0;
+  padding: 0;
+  background: #000;
+  color: #fff;
+}
+.roomLoadingOverlay[open] { display: grid; place-items: center; }
+.roomLoadingOverlay::backdrop { background: #000; }
+.roomLoadingSpinner {
+  width: 2rem;
+  height: 2rem;
+  border: 2px solid rgba(255, 255, 255, 0.22);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: roomLoadingSpin 800ms linear infinite;
+}
+.roomLoadingOverlay[data-theme="light"] {
+  background: #fff;
+  color: #101923;
+}
+.roomLoadingOverlay[data-theme="light"]::backdrop { background: #fff; }
+.roomLoadingOverlay[data-theme="light"] .roomLoadingSpinner {
+  border-color: rgba(16, 25, 35, 0.22);
+  border-top-color: #101923;
+}
+@keyframes roomLoadingSpin { to { transform: rotate(360deg); } }
+
+/* Resume cover: the case's title card over the loading scene. Start fades the whole
+ * dialog out through the theme color, so the scene beneath crossfades in. */
+.arrivalCard { position: fixed; inset: 0; width: 100vw; height: 100dvh; max-width: none; max-height: none; margin: 0; border: 0; padding: 0; overflow: hidden; color: #f3eefc; background: #05070d; opacity: 1; transition: opacity 760ms ease; }
+.arrivalCard[open] { display: grid; place-items: center; }
+.arrivalCard::backdrop { background: #05070d; opacity: 1; transition: opacity 760ms ease; }
+.arrivalCard .titleCoverMedia { opacity: 0.55; }
+.arrivalCard[data-theme="light"] { color: #171326; background: #f6f3fc; }
+.arrivalCard[data-theme="light"]::backdrop { background: #f6f3fc; }
+.arrivalCard[data-theme="light"] .titleCoverMedia { opacity: 0.35; }
+.arrivalCard[data-leaving="true"], .arrivalCard[data-leaving="true"]::backdrop { opacity: 0; pointer-events: none; }
+
+/* Arrival: Start and Resume prepare the investigator's spoken line behind the
+   loading screen, then they speak it alone before the blurred venue. The
+   exterior clears to the door on dismissal. */
+.titleCard[data-entry-stage] .titleCoverPlane { transition: filter 640ms ease; }
+.titleCard[data-entry-stage="speaking"] .titleCoverPlane { filter: blur(18px) saturate(0.85) brightness(0.72); }
+.titleCard[data-entry-stage="loading"] .titleDoor, .titleCard[data-entry-stage="speaking"] .titleDoor { opacity: 0; pointer-events: none; }
+.entryArrival { position: absolute; inset: 0; z-index: 5; display: grid; align-content: end; justify-items: center; padding: 0 1.25rem clamp(1.4rem, 5vh, 4rem); box-sizing: border-box; cursor: pointer; animation: roomActorReveal 320ms ease-out both; }
+.entryArrivalActor { --actor-color: #72d7ff; display: grid; justify-items: center; width: min(30rem, 44vw); margin-bottom: -1.25rem; filter: drop-shadow(0 1.5rem 2rem rgba(0, 0, 0, 0.56)); pointer-events: none; }
+.entryArrivalBox { --dialogue-accent: #a98cff; position: relative; width: min(38rem, calc(100vw - 2.5rem)); box-sizing: border-box; padding: 1rem 1.15rem 1.6rem; color: var(--v2-text); border: 1px solid color-mix(in srgb, var(--dialogue-accent), transparent 42%); border-radius: 0.85rem; background: linear-gradient(90deg, color-mix(in srgb, var(--dialogue-accent), transparent 88%), transparent 46%), rgba(7, 9, 18, 0.96); box-shadow: inset 3px 0 0 color-mix(in srgb, var(--dialogue-accent), white 14%), 0 1rem 3rem rgba(0, 0, 0, 0.64), 0 0 2.4rem color-mix(in srgb, var(--dialogue-accent), transparent 82%); backdrop-filter: blur(16px); }
+.entryArrivalBox p { position: relative; margin: 0.45rem 0 0; font-size: 1.02rem; line-height: 1.55; }
+.entryArrivalBox .dialogueContinueHint { position: absolute; right: 1rem; bottom: 0.4rem; }
+.titleCard[data-theme="light"] .entryArrivalBox { background: linear-gradient(90deg, color-mix(in srgb, var(--dialogue-accent), transparent 86%), transparent 46%), rgba(255, 255, 255, 0.9); }
+@media (max-width: 720px) { .entryArrivalActor { width: min(18rem, 60vw); } }
+@media (prefers-reduced-motion: reduce) { .entryArrival { animation: none; } .titleCard[data-entry-stage] .titleCoverPlane { transition: none; } }
+.arrivalCardContent { position: relative; z-index: 1; display: grid; justify-items: center; width: min(38rem, calc(100vw - 2.5rem)); box-sizing: border-box; padding: clamp(1.4rem, 3vw, 2.5rem); border: 1px solid rgba(208, 194, 255, 0.2); border-radius: 1.2rem; text-align: center; background: rgba(5, 7, 15, 0.58); box-shadow: 0 2rem 6rem rgba(0, 0, 0, 0.48); backdrop-filter: blur(12px); animation: titleCardSettle 720ms cubic-bezier(0.22, 1, 0.36, 1) both; }
+.arrivalCard[data-theme="light"] .arrivalCardContent { border-color: rgba(103, 65, 170, 0.22); background: rgba(255, 255, 255, 0.72); }
+.arrivalCard h1 { margin: 0.2rem 0 0.6rem; font-size: clamp(1.9rem, 4.5vw, 3.4rem); letter-spacing: -0.03em; }
+.arrivalCardDescription { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 4; line-clamp: 4; overflow: hidden; max-width: 34rem; margin: 0; color: #cfc8dd; font-size: 0.95rem; line-height: 1.55; }
+.arrivalCard[data-theme="light"] .arrivalCardDescription { color: #4a4460; }
+.arrivalCard[data-theme="light"] .titleMetadata span { border-color: rgba(103, 65, 170, 0.3); color: #3d3554; }
+.arrivalCardResume { margin: 0 0 1rem; color: var(--v2-accent, #a98cff); font-size: 0.78rem; font-weight: 800; letter-spacing: 0.1em; text-transform: uppercase; }
+@media (prefers-reduced-motion: reduce) {
+  .arrivalCard, .arrivalCard::backdrop { transition: none; }
+  .arrivalCardContent { animation: none; }
+}
+
+.investigation[data-opening-map-reveal="true"]::after {
+  position: absolute;
+  z-index: 30;
+  inset: 0;
+  content: "";
+  pointer-events: none;
+  background: #000;
+  animation: caseOpeningReveal 1.85s cubic-bezier(.16, .74, .2, 1) both;
+}
+
+.investigation[data-exterior-room-reveal="true"]::after {
+  position: absolute;
+  z-index: 30;
+  inset: 0;
+  content: "";
+  pointer-events: none;
+  background: #000;
+  animation: exteriorRoomReveal 1.85s cubic-bezier(.16, .74, .2, 1) both;
+}
+
+@keyframes caseOpeningReveal {
+  0%, 14% { opacity: 1; }
+  to { opacity: 0; }
+}
+
+@keyframes exteriorRoomReveal {
+  0%, 12% { opacity: 1; }
+  100% { opacity: 0; }
+}
+
+.investigationHeader,
+.courtHeader {
+  position: relative;
+  z-index: 12;
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: 1rem;
+  min-height: 4.8rem;
+  padding: 0.7rem 1rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(7, 9, 17, 0.86);
+  backdrop-filter: blur(18px);
+}
+
+.investigationHeader > div,
+.courtHeader > div { text-align: center; }
+.investigationHeader > button:last-child,
+.courtHeader > button:last-child { justify-self: end; }
+.investigationHeader button span { min-width: 1.3rem; margin-left: 0.35rem; padding: 0.12rem 0.35rem; border-radius: 99px; background: #8b6bec; font-size: 0.68rem; }
+
+.investigationHeaderActions {
+  display: flex;
+  min-width: 0;
+  max-width: min(48vw, 38rem);
+  flex-wrap: wrap;
+  align-items: center;
+  justify-self: end;
+  justify-content: flex-end;
+  gap: 0.55rem;
+  color: var(--v2-text, var(--fg));
+  font: inherit;
+}
+
+.investigationHeaderIdentity {
+  min-width: 0;
+  color: var(--v2-text, var(--fg));
+  line-height: 1.05;
+  text-align: center;
+}
+
+.investigationHeaderIdentity .eyebrow {
+  overflow: hidden;
+  color: color-mix(in srgb, var(--v2-accent, var(--accent, #a98cff)) 72%, var(--v2-muted, var(--fg-muted)));
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.investigationHeaderIdentity strong {
+  display: block;
+  margin-top: 0.1rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.investigationHeaderActions > button {
+  border-color: color-mix(in srgb, currentColor 16%, transparent);
+  color: inherit;
+  background: var(--v2-field, color-mix(in srgb, currentColor 5%, transparent));
+  font: inherit;
+}
+
+.investigationHeaderActions[data-shared-session-header="true"] {
+  max-width: none;
+  flex-wrap: nowrap;
+  gap: 0.45rem;
+}
+
+.investigationHeaderActions[data-shared-session-header="true"] > button {
+  padding: 0.48rem 0.68rem;
+  border-radius: 0.6rem;
+  font-size: 0.76rem;
+  white-space: nowrap;
+}
+
+.investigationHeaderActions[data-shared-session-header="true"] .roomArtStyleToggle {
+  padding: 0.14rem;
+}
+
+.investigationHeaderActions[data-shared-session-header="true"] .roomArtStyleToggle > button {
+  padding: 0.34rem 0.5rem;
+}
+
+@media (max-width: 1120px) {
+  .investigationHeader {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .investigationHeaderActions {
+    grid-column: 1 / -1;
+    width: 100%;
+    max-width: none;
+  }
+}
+
+.roomArtStyleToggle {
+  display: inline-flex;
+  padding: 0.18rem;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 0.62rem;
+  background: rgba(2, 4, 10, 0.62);
+}
+
+.roomArtStyleToggle > button {
+  padding: 0.42rem 0.58rem;
+  border: 0;
+  border-radius: 0.44rem;
+  color: #aaa5ba;
+  background: transparent;
+  cursor: pointer;
+  font-size: 0.72rem;
+}
+
+.roomArtStyleToggle > button[aria-pressed="true"] {
+  color: #fff;
+  background: linear-gradient(145deg, rgba(139, 107, 236, 0.88), rgba(74, 58, 143, 0.94));
+  box-shadow: inset 0 1px rgba(255, 255, 255, 0.16), 0 0 0.8rem rgba(139, 107, 236, 0.18);
+}
+
+.investigationHeaderActions[data-theme="light"] .roomArtStyleToggle {
+  border-color: rgba(69, 91, 113, 0.22);
+  background: rgba(255, 255, 255, 0.68);
+}
+
+.investigationHeaderActions[data-theme="light"] .roomArtStyleToggle > button {
+  color: #5c7186;
+}
+
+.investigationHeaderActions[data-theme="light"] .roomArtStyleToggle > button[aria-pressed="true"] {
+  color: #fff;
+}
+
+.investigationHeaderActions[data-theme="light"] > button {
+  border-color: rgba(69, 91, 113, 0.22);
+  color: #172638;
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.roomArtUpgradeButton {
+  padding: 0.48rem 0.62rem !important;
+  border-color: rgba(102, 229, 234, 0.34) !important;
+  color: #dffcff !important;
+  font-size: 0.68rem !important;
+  white-space: nowrap;
+}
+
+.mansionBoard {
+  --mystery-panel: rgba(17, 20, 35, 0.88);
+  --mystery-line: rgba(197, 192, 255, 0.18);
+  --mystery-text: #f7f4ff;
+  --mystery-muted: #aaa5ba;
+  --mystery-violet: #a98cff;
+  --mystery-cyan: #66e5ea;
+  --mystery-gold: #e3bd71;
+  position: relative;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  width: min(92rem, calc(100% - 2rem));
+  height: calc(100dvh - var(--app-shell-top-nav-height, 50px) - 1.5rem);
+  min-height: 0;
+  margin: 0.75rem auto 0;
+  padding: clamp(1rem, 1.8vw, 1.55rem) clamp(1rem, 1.8vw, 1.55rem) 7.8rem;
+  box-sizing: border-box;
+  overflow: hidden;
+  border: 1px solid rgba(229, 192, 116, 0.3);
+  border-radius: 1.4rem;
+  background:
+    radial-gradient(ellipse at 50% 12%, rgba(102, 229, 234, 0.09), transparent 38%),
+    linear-gradient(145deg, rgba(18, 20, 31, 0.98), rgba(7, 9, 15, 0.98));
+  box-shadow: 0 2.4rem 7rem rgba(0, 0, 0, 0.46), inset 0 0 5rem rgba(99, 77, 155, 0.07);
+}
+
+.mansionBoard::before {
+  position: absolute;
+  inset: 0;
+  content: "";
+  pointer-events: none;
+  opacity: 0.32;
+  background:
+    linear-gradient(90deg, transparent 49.8%, rgba(229, 192, 116, 0.12) 50%, transparent 50.2%),
+    radial-gradient(circle at 50% 118%, rgba(229, 192, 116, 0.16), transparent 42%);
+  mix-blend-mode: screen;
+}
+
+/* Visuals mode: the whole board wears the prism ring that the Visuals button
+ * already carries, movement controls read as paused, and the hint switches to
+ * the mode's own instructions, so asset editing cannot be mistaken for play. */
+.mansionBoard[data-visuals-mode="true"] {
+  border-color: transparent;
+  box-shadow:
+    0 2.4rem 7rem rgba(0, 0, 0, 0.46),
+    0 0 3.5rem color-mix(in srgb, var(--prism-m, #7b5cff) 26%, transparent),
+    inset 0 0 5rem rgba(99, 77, 155, 0.07);
+}
+.mansionBoard[data-visuals-mode="true"]::after {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  content: "";
+  pointer-events: none;
+  padding: 2px;
+  border-radius: inherit;
+  background: linear-gradient(110deg, var(--prism-p, #ff4d6d), var(--prism-r, #ff9f1c) 29%, var(--prism-i, #b7e63a) 60%, var(--prism-s, #2fd3e3) 82%, var(--prism-m, #7b5cff));
+  mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  opacity: 0.92;
+}
+.mansionBoard[data-visuals-mode="true"] .mansionHeading .eyebrow {
+  color: transparent;
+  background: linear-gradient(110deg, var(--prism-p, #ff4d6d), var(--prism-r, #ff9f1c) 29%, var(--prism-i, #b7e63a) 60%, var(--prism-s, #2fd3e3) 82%, var(--prism-m, #7b5cff));
+  -webkit-background-clip: text;
+  background-clip: text;
+  font-weight: 800;
+}
+.mansionRoomDetails[data-visuals-mode="true"] { opacity: 0.72; }
+.mansionRoomDetails[data-visuals-mode="true"] > button:disabled { border-style: dashed; }
+.mansionHint[data-visuals-mode="true"] { color: var(--mystery-cyan); opacity: 0.92; font-weight: 700; }
+.investigationModeBackButton:disabled { opacity: 0.55; cursor: not-allowed; }
+
+.mansionHeading {
+  position: relative;
+  z-index: 4;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: end;
+  gap: 1rem;
+  width: min(102rem, 100%);
+  margin: 0 auto 0.85rem;
+}
+.mansionHeading > div:first-child > strong { display: block; margin-top: 0.15rem; font-family: Georgia, "Times New Roman", serif; font-size: clamp(1.55rem, 2vw, 2.15rem); font-weight: 500; }
+
+.mansionWorkspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  min-width: 0;
+  min-height: 0;
+  gap: 1rem;
+}
+.mansionWorkspace[data-with-assets="true"] { grid-template-columns: minmax(0, 1fr) minmax(16rem, 20rem); }
+.mansionMapStage {
+  grid-column: 1;
+  grid-row: 1;
+  min-width: 0;
+  min-height: 0;
+  container-type: size;
+  display: grid;
+  place-items: center;
+}
+
+.mansionAssetActions { justify-self: end; }
+.mansionFloorPicker { display: flex; justify-self: end; gap: 0.45rem; }
+.mansionFloorPicker button {
+  display: grid;
+  width: 2.35rem;
+  height: 2.35rem;
+  place-items: center;
+  border: 1px solid rgba(229, 192, 116, 0.24);
+  border-radius: 999px;
+  background: rgba(8, 10, 17, 0.7);
+  cursor: pointer;
+}
+.mansionFloorPicker button[data-selected="true"] {
+  color: #17110a;
+  border-color: #f4d494;
+  background: #e9c77e;
+  box-shadow: 0 0 1.2rem rgba(233, 199, 126, 0.28);
+}
+.mansionFloorPicker button[data-deck-control="true"] {
+  grid-template-columns: auto minmax(0, 1fr);
+  column-gap: 0.38rem;
+  width: auto;
+  min-width: 8.6rem;
+  padding: 0.38rem 0.62rem;
+  border-radius: 0.65rem;
+  text-align: left;
+}
+.mansionFloorPicker button[data-deck-control="true"] > span { font-weight: 900; }
+.mansionFloorPicker button[data-deck-control="true"] > small {
+  overflow: hidden;
+  max-width: 8rem;
+  color: inherit;
+  font-size: 0.67rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mansionViewport {
+  position: relative;
+  align-self: center;
+  height: min(100cqh, 50cqw, 51rem);
+  aspect-ratio: 2 / 1;
+  min-height: 0;
+  max-width: 100%;
+  margin: auto;
+  overflow: visible;
+  border: 0;
+  border-radius: 1.25rem;
+  background:
+    radial-gradient(ellipse at 50% 70%, rgba(7, 9, 13, 0.15), rgba(3, 4, 8, 0.88) 74%),
+    linear-gradient(180deg, rgba(31, 36, 49, 0.64), rgba(4, 6, 10, 0.9));
+  box-shadow: 0 2rem 4rem rgba(0, 0, 0, 0.42), inset 0 0 0 1px rgba(229, 192, 116, 0.12);
+  perspective: 1100px;
+}
+
+.mansionOutsideTravelTarget {
+  position: absolute;
+  z-index: 1;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: inherit;
+  background: transparent;
+  cursor: pointer;
+}
+.mansionOutsideTravelTarget:focus-visible {
+  outline: 2px solid rgba(102, 229, 234, 0.76);
+  outline-offset: -0.45rem;
+}
+.mansionOutsideTravelTarget[data-selected="true"] {
+  background:
+    radial-gradient(ellipse at 50% 50%, transparent 42%, rgba(102, 229, 234, 0.1) 70%, rgba(169, 140, 255, 0.17));
+  box-shadow:
+    inset 0 0 0 2px rgba(102, 229, 234, 0.72),
+    inset 0 0 4rem rgba(102, 229, 234, 0.12),
+    0 0 2rem rgba(102, 229, 234, 0.12);
+}
+.mansionOutsideTravelTarget:disabled { cursor: default; }
+
+.mansionCanvas {
+  position: absolute;
+  z-index: 2;
+  inset: 3%;
+  width: 94%;
+  height: 94%;
+  opacity: 1;
+  overflow: visible;
+  border-radius: 1rem;
+  background:
+    linear-gradient(rgba(229, 192, 116, 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(229, 192, 116, 0.035) 1px, transparent 1px),
+    radial-gradient(ellipse at 50% 40%, rgba(72, 69, 104, 0.22), transparent 62%);
+  background-size: 28px 28px, 28px 28px, auto;
+  transform: rotateX(3deg) rotateZ(-0.55deg) scale(0.965);
+  transform-style: preserve-3d;
+  animation: mansionArrival 360ms cubic-bezier(.2, .78, .2, 1) both;
+  pointer-events: none;
+}
+
+.mansionCanvas[data-map-style="hull-deck-v1"] {
+  background:
+    linear-gradient(rgba(102, 229, 234, 0.025) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(102, 229, 234, 0.025) 1px, transparent 1px),
+    radial-gradient(ellipse at 50% 48%, rgba(40, 115, 135, 0.2), transparent 68%);
+  background-size: 28px 28px, 28px 28px, auto;
+  transform: rotateX(3deg) rotateZ(-1.8deg) scale(0.955);
+}
+
+/* Overhead exterior: the venue seen from above, laid under the tiles inside the map's
+ * rounded widescreen frame. The layer clips and fades only the outer edges, wide enough
+ * that a hull running the length of the board keeps its bow and stern; the plane mirrors
+ * the canvas tilt so the structure stays registered with the rooms. */
+.mansionOverheadLayer { position: absolute; z-index: 0; inset: 0; overflow: hidden; border-radius: 1.25rem; pointer-events: none; -webkit-mask-image: radial-gradient(ellipse 92% 88% at 50% 50%, #000 58%, transparent 100%); mask-image: radial-gradient(ellipse 92% 88% at 50% 50%, #000 58%, transparent 100%); }
+/* With a real exterior under the tiles the chart's slant comes off: deck and tiles sit
+ * level, and the plane keeps the canvas transform so they stay registered. */
+.mansionOverheadPlane { position: absolute; inset: 3%; width: 94%; height: 94%; transform: rotateX(3deg) scale(0.965); transform-style: preserve-3d; }
+.mansionCanvas[data-deck-plan="true"] { transform: rotateX(3deg) scale(0.965); }
+/* Dark theme: the plate recedes a little and needs no scrim. Light theme: it brightens
+ * and takes a soft paper wash so ship and water sit in the board like a faded chart. */
+.mansionDeckPlan { position: absolute; display: block; object-fit: fill; pointer-events: none; user-select: none; filter: saturate(0.8) brightness(0.9); animation: mansionArrival 360ms cubic-bezier(.2, .78, .2, 1) both; transition: opacity 180ms ease; }
+.mansionOverheadScrim { position: absolute; inset: -20%; pointer-events: none; display: none; }
+.investigation[data-theme="light"] .mansionDeckPlan { filter: saturate(0.65) brightness(1.08) contrast(0.92); }
+.investigation[data-theme="light"] .mansionOverheadScrim { display: block; background: rgba(246, 243, 252, 0.3); }
+.investigation[data-theme="light"] .mansionOverheadLayer { -webkit-mask-image: radial-gradient(ellipse 96% 92% at 50% 50%, #000 66%, transparent 100%); mask-image: radial-gradient(ellipse 96% 92% at 50% 50%, #000 66%, transparent 100%); }
+/* The player's placement: pan in board units, then turn and zoom about the board center. */
+.mansionOverheadPlacement { position: absolute; inset: 0; transform-origin: 50% 50%; will-change: transform; }
+/* With an exterior under them the tiles turn to glass, and the ambient blocks that only
+ * dressed the structure outside the room cluster go; blocks between rooms stay. */
+.mansionCanvas[data-deck-plan="true"] .mansionRoom { background: linear-gradient(150deg, rgba(47, 49, 59, 0.62), rgba(20, 24, 31, 0.7)); }
+.mansionCanvas[data-deck-plan="true"] .mansionCorridor { background: repeating-linear-gradient(90deg, rgba(229, 199, 137, 0.05) 0 0.35rem, transparent 0.35rem 0.7rem), linear-gradient(145deg, rgba(33, 35, 44, 0.5), rgba(13, 16, 22, 0.58)); }
+.mansionCanvas[data-deck-plan="true"] .mansionAmbientSpace { display: none; }
+.mansionPlanAdjust { margin-left: 0.4rem; padding: 0.3rem 0.65rem; border: 1px solid rgba(102, 229, 234, 0.38); border-radius: 999px; background: rgba(8, 10, 17, 0.7); color: var(--mystery-cyan); font-size: 0.66rem; font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase; cursor: pointer; }
+.mansionPlanAdjust:disabled { opacity: 0.5; cursor: default; }
+.investigation[data-theme="light"] .mansionPlanAdjust { background: var(--v2-field, #fff); }
+.mansionCanvas[data-deck-plan="true"] .mansionRoom > strong, .mansionCanvas[data-deck-plan="true"] .mansionRoom > small { text-shadow: 0 1px 2px #000, 0 0 0.6rem #000, 0 0 1.1rem rgba(0, 0, 0, 0.85); }
+.investigation[data-theme="light"] .mansionCanvas[data-deck-plan="true"] .mansionRoom > strong, .investigation[data-theme="light"] .mansionCanvas[data-deck-plan="true"] .mansionRoom > small { text-shadow: 0 1px 2px rgba(255, 255, 255, 0.9), 0 0 0.6rem #fff, 0 0 1rem rgba(255, 255, 255, 0.85); }
+.mansionPlanToggle { display: inline-flex; align-items: center; gap: 0.4rem; margin-left: 0.6rem; color: var(--v2-muted, #b9b3c6); font-size: 0.7rem; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; }
+.mansionPlanToggle input[type="range"] { width: 5rem; }
+.venueHullOutline {
+  position: absolute;
+  z-index: -1;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.venueHullOutline polygon {
+  fill: rgba(27, 43, 53, 0.82);
+  stroke: rgba(116, 224, 231, 0.54);
+  stroke-width: 0.42;
+  vector-effect: non-scaling-stroke;
+  filter: drop-shadow(0.5rem 0.75rem 0.6rem rgba(0, 0, 0, 0.4));
+}
+
+.venueMapOrientation {
+  position: absolute;
+  z-index: 6;
+  inset: 0;
+  color: rgba(151, 228, 234, 0.7);
+  font-size: 0.58rem;
+  font-weight: 850;
+  letter-spacing: 0.12em;
+  pointer-events: none;
+}
+
+.venueMapOrientation span,
+.venueMapOrientation strong { position: absolute; }
+.venueMapOrientation [data-edge="top"] { top: 0.8%; left: 50%; transform: translateX(-50%); }
+.venueMapOrientation [data-edge="right"] { top: 50%; right: -0.3rem; transform: translateY(-50%) rotate(90deg); }
+.venueMapOrientation [data-edge="bottom"] { bottom: 0.4%; left: 50%; transform: translateX(-50%); }
+.venueMapOrientation [data-edge="left"] { top: 50%; left: -0.8rem; transform: translateY(-50%) rotate(-90deg); }
+.venueMapOrientation strong { top: 4%; left: 4%; color: rgba(239, 230, 255, 0.74); letter-spacing: 0.06em; }
+
+.venueConnectorLanding {
+  position: absolute;
+  z-index: 4;
+  display: grid;
+  width: 1.25rem;
+  height: 1.25rem;
+  place-items: center;
+  color: #d8fbff;
+  border: 1px solid rgba(102, 229, 234, 0.68);
+  border-radius: 0.32rem;
+  background: rgba(11, 37, 47, 0.92);
+  box-shadow: 0 0 0 3px rgba(102, 229, 234, 0.08), 0 0 1rem rgba(102, 229, 234, 0.22);
+  font-size: 0.82rem;
+  font-style: normal;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+
+@keyframes mansionArrival {
+  from { transform: rotateX(3deg) rotateZ(-0.55deg) translateY(0.65rem) scale(0.95); }
+}
+
+.mansionRoom {
+  position: absolute;
+  z-index: 1;
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+  box-sizing: border-box;
+  place-items: center;
+  align-content: center;
+  grid-auto-rows: min-content;
+  gap: 0.08rem;
+  padding: 0.5rem;
+  overflow: visible;
+  color: color-mix(in srgb, var(--mystery-text) 76%, var(--mystery-muted)) !important;
+  border: 1px solid rgba(216, 197, 166, 0.36);
+  border-radius: 0.34rem;
+  background: linear-gradient(150deg, rgba(47, 49, 59, 0.96), rgba(20, 24, 31, 0.98));
+  box-shadow:
+    inset 0 0 1.7rem rgba(255, 232, 183, 0.035),
+    0.35rem 0.42rem 0 rgba(4, 5, 9, 0.76),
+    0.6rem 0.8rem 1.25rem rgba(0, 0, 0, 0.34);
+  cursor: pointer;
+  pointer-events: auto;
+  transition: border-color 150ms ease, background 150ms ease, transform 150ms ease;
+}
+.mansionCorridor {
+  position: absolute;
+  z-index: 0;
+  box-sizing: border-box;
+  border: 1px solid rgba(204, 189, 163, 0.2);
+  border-radius: 0.22rem;
+  background:
+    repeating-linear-gradient(90deg, rgba(229, 199, 137, 0.06) 0 0.35rem, transparent 0.35rem 0.7rem),
+    linear-gradient(145deg, rgba(33, 35, 44, 0.94), rgba(13, 16, 22, 0.96));
+  box-shadow: inset 0 0 1rem rgba(255, 225, 170, 0.035), 0.25rem 0.3rem 0 rgba(4, 5, 9, 0.62);
+  pointer-events: none;
+}
+/* Ambient spaces wear the same room silhouette as a semantic room (wall, lit
+ * top edge, side face, drop) but stay quieter and inert: no label, no hover,
+ * no route. A player reads them as rooms that cannot be entered. */
+.mansionAmbientSpace {
+  --ambient-floor-top: rgba(41, 43, 52, 0.96);
+  --ambient-floor-bottom: rgba(18, 21, 28, 0.98);
+  --ambient-wall: rgba(216, 197, 166, 0.2);
+  --ambient-bevel: rgba(238, 217, 179, 0.2);
+  --ambient-face-top: #1c1720;
+  --ambient-face-bottom: #08090e;
+  position: absolute;
+  z-index: 0;
+  display: block;
+  box-sizing: border-box;
+  overflow: visible;
+  border: 1px solid var(--ambient-wall);
+  border-radius: 0.34rem;
+  background: linear-gradient(150deg, var(--ambient-floor-top), var(--ambient-floor-bottom));
+  box-shadow:
+    inset 0 0 1.7rem rgba(255, 232, 183, 0.02),
+    0.35rem 0.42rem 0 rgba(4, 5, 9, 0.62),
+    0.6rem 0.8rem 1.25rem rgba(0, 0, 0, 0.26);
+  opacity: 0.9;
+  pointer-events: none;
+  user-select: none;
+}
+.mansionAmbientSpace::before {
+  position: absolute;
+  inset: -1px;
+  content: "";
+  pointer-events: none;
+  border-top: 4px solid var(--ambient-bevel);
+  border-left: 4px solid color-mix(in srgb, var(--ambient-bevel) 55%, transparent);
+  border-radius: inherit;
+}
+.mansionAmbientSpace::after {
+  position: absolute;
+  right: -0.42rem;
+  bottom: -0.42rem;
+  width: 0.42rem;
+  height: calc(100% - 0.2rem);
+  content: "";
+  pointer-events: none;
+  opacity: 0.6;
+  background: linear-gradient(180deg, var(--ambient-face-top), var(--ambient-face-bottom));
+  clip-path: polygon(0 0, 100% 8%, 100% 100%, 0 94%);
+}
+.mansionAmbientSpace[data-pattern="inboard-compartment"] {
+  --ambient-floor-top: rgba(45, 44, 50, 0.96);
+}
+.mansionAmbientSpace[data-pattern="closed-volume"] {
+  --ambient-floor-top: rgba(40, 46, 54, 0.96);
+}
+
+.mansionRoom::before {
+  position: absolute;
+  inset: -1px;
+  content: "";
+  pointer-events: none;
+  border-top: 4px solid rgba(238, 217, 179, 0.38);
+  border-left: 4px solid rgba(182, 167, 149, 0.2);
+  border-radius: inherit;
+}
+.mansionRoom::after {
+  position: absolute;
+  right: -0.42rem;
+  bottom: -0.42rem;
+  width: 0.42rem;
+  height: calc(100% - 0.2rem);
+  content: "";
+  pointer-events: none;
+  opacity: 0.7;
+  background: linear-gradient(180deg, #211b25, #090b10);
+  clip-path: polygon(0 0, 100% 8%, 100% 100%, 0 94%);
+}
+.mansionRoom[data-discovered="true"] { color: var(--mystery-text) !important; }
+.mansionRoom[data-room-art] {
+  background:
+    linear-gradient(180deg, rgba(8, 10, 17, 0.28), rgba(8, 10, 17, 0.64)),
+    linear-gradient(145deg, rgba(63, 57, 74, 0.08), rgba(7, 9, 15, 0.2)),
+    var(--mansion-room-image) center / cover no-repeat;
+  box-shadow:
+    inset 0 0 1.9rem rgba(3, 5, 10, 0.42),
+    0.35rem 0.42rem 0 rgba(4, 5, 9, 0.76),
+    0.6rem 0.8rem 1.25rem rgba(0, 0, 0, 0.34);
+}
+.mansionRoom[data-searched="true"] { border-color: color-mix(in srgb, var(--mystery-cyan) 74%, #fff); }
+.mansionRoom:not([data-discovered="true"]) { color: transparent !important; border-color: rgba(255, 255, 255, 0.08); background: linear-gradient(145deg, rgba(13, 15, 20, 0.94), rgba(5, 6, 9, 0.98)); }
+.mansionRoom[data-current="true"] { outline: 1px solid rgba(169, 140, 255, 0.78); outline-offset: 3px; }
+.mansionRoom[data-selected="true"] {
+  z-index: 5;
+  border-color: rgba(241, 209, 143, 0.82);
+  box-shadow: 0 0 0 1px rgba(241, 209, 143, 0.14), 0.55rem 0.72rem 1.8rem rgba(0, 0, 0, 0.48), 0 0 2rem rgba(102, 229, 234, 0.09);
+  transform: translateY(-3px);
+}
+.mansionRoom[data-selected="true"]:not([data-room-art]) {
+  background: linear-gradient(145deg, rgba(59, 52, 67, 0.98), rgba(23, 30, 38, 0.98));
+}
+.mansionRoom:hover:not(:disabled) { border-color: var(--mystery-cyan); filter: brightness(1.08); }
+.mansionRoom[data-locked="true"] { opacity: 0.52; border-style: dashed; }
+.mansionRoom[data-visuals-mode="true"] {
+  opacity: 1;
+  border-style: solid;
+  filter: saturate(1.08);
+}
+.mansionRoom[data-visuals-mode="true"][data-visual-readiness="fallback"] {
+  border-color: rgba(241, 190, 91, 0.92);
+  box-shadow: inset 0 0 1.4rem rgba(241, 190, 91, 0.12), 0 0 1.25rem rgba(241, 190, 91, 0.24);
+}
+.mansionRoom[data-visuals-mode="true"][data-visual-readiness="default"] {
+  border-color: rgba(90, 219, 232, 0.9);
+  box-shadow: inset 0 0 1.4rem rgba(90, 219, 232, 0.1), 0 0 1.25rem rgba(90, 219, 232, 0.22);
+}
+.mansionRoom[data-visuals-mode="true"][data-visual-readiness="upgraded"] {
+  border-color: rgba(177, 134, 255, 0.94);
+  box-shadow: inset 0 0 1.4rem rgba(177, 134, 255, 0.12), 0 0 1.35rem rgba(177, 134, 255, 0.28);
+}
+.mansionRoom:focus-visible { outline: 3px solid #fff; outline-offset: 2px; }
+.mansionRoom > strong, .mansionRoom > small { max-width: 100%; overflow: hidden; font-family: Georgia, "Times New Roman", serif; font-size: clamp(0.66rem, 0.76vw, 0.86rem); font-weight: 500; line-height: 1.05; text-overflow: ellipsis; text-shadow: 0 1px 0.5rem #000; white-space: nowrap; }
+
+.mansionRoomVisualStatus {
+  position: relative;
+  z-index: 3;
+  display: inline-flex;
+  align-items: center;
+  min-height: 1.4rem;
+  padding: 0.24rem 0.48rem;
+  color: #f9fbff !important;
+  border: 1px solid color-mix(in srgb, currentColor 38%, transparent);
+  border-radius: 999px;
+  background: rgba(5, 8, 14, 0.84);
+  box-shadow: 0 0.4rem 1rem rgba(0, 0, 0, 0.35);
+  font: 760 0.58rem/1 system-ui;
+  letter-spacing: 0.08em;
+  text-shadow: none;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.mansionOccupant {
+  position: absolute;
+  z-index: 2;
+  display: grid;
+  width: 2rem;
+  height: 2rem;
+  place-items: center;
+  border: 1px solid color-mix(in srgb, currentColor 75%, #fff);
+  border-radius: 50%;
+  background: rgba(5, 7, 12, 0.94);
+  box-shadow: 0 0 0 3px rgba(5, 7, 12, 0.7), 0 0 1rem color-mix(in srgb, currentColor 36%, transparent);
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+.mansionOccupantGlyph { width: 1.1rem; height: 1.1rem; }
+.mansionRoomCompleteMark { position: absolute; top: 0.22rem; right: 0.3rem; display: grid; width: 1.15rem; height: 1.15rem; place-items: center; color: #061318; border: 1px solid color-mix(in srgb, var(--mystery-cyan) 68%, #fff); border-radius: 50%; background: color-mix(in srgb, var(--mystery-cyan) 82%, #fff); box-shadow: 0 0 0.7rem rgba(102, 229, 234, 0.32); font-size: 0.72rem; font-style: normal; font-weight: 800; }
+
+.mansionDoor { position: absolute; z-index: 6; display: block; width: 1.1rem; height: 0.18rem; background: #f0ce8a; box-shadow: 0 0 0.75rem rgba(240, 206, 138, 0.5); pointer-events: none; transform: translate(-50%, -50%); }
+.mansionDoor[data-orientation="vertical"] { width: 0.18rem; height: 1.1rem; }
+
+.mansionPlayerOrb {
+  position: absolute;
+  z-index: 10;
+  width: clamp(2rem, 3vw, 2.75rem);
+  transform: translate(-50%, -50%);
+  will-change: left, top;
+}
+.mansionTravelSkip {
+  position: absolute;
+  z-index: 12;
+  inset: 0;
+  display: grid;
+  align-items: end;
+  justify-items: center;
+  padding: 1rem;
+  color: inherit;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  pointer-events: auto;
+}
+.mansionTravelSkip span {
+  padding: 0.4rem 0.65rem;
+  color: #f8edda;
+  border: 1px solid rgba(240, 206, 138, 0.34);
+  border-radius: 999px;
+  background: rgba(7, 9, 15, 0.86);
+  box-shadow: 0 0.7rem 1.6rem rgba(0, 0, 0, 0.36);
+  font-size: 0.72rem;
+  backdrop-filter: blur(10px);
+}
+.mansionTravelSkip:focus-visible { outline: 3px solid #fff; outline-offset: -3px; }
+
+.mansionRoomDetails {
+  position: relative;
+  z-index: 4;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 0.55rem 1.2rem;
+  width: min(102rem, 100%);
+  box-sizing: border-box;
+  margin: 0.85rem auto 0;
+  padding: 0.7rem 0.85rem;
+  border: 1px solid rgba(229, 192, 116, 0.24);
+  border-radius: 0.8rem;
+  background: rgba(7, 9, 15, 0.78);
+  backdrop-filter: blur(16px);
+}
+.mansionRoomDetails[data-outside="true"] {
+  border-color: rgba(102, 229, 234, 0.34);
+  background: linear-gradient(135deg, rgba(102, 229, 234, 0.08), rgba(169, 140, 255, 0.08));
+}
+.mansionRoomDetails > div { display: grid; gap: 0.08rem; }
+.mansionRoomDetails > div small, .mansionRoomDetails > div span, .mansionRoomDetails dt { color: var(--mystery-muted); font-size: 0.65rem; letter-spacing: 0.05em; text-transform: uppercase; }
+.mansionRoomDetails > div strong { font-family: Georgia, "Times New Roman", serif; font-size: 1.05rem; font-weight: 500; }
+.mansionRoomDetails dl { display: flex; grid-column: 2; grid-row: 1; gap: 1.25rem; margin: 0; }
+.mansionRoomDetails dl div { display: flex; align-items: baseline; gap: 0.28rem; }
+.mansionRoomDetails dd { margin: 0; font-size: 0.78rem; }
+.mansionRoomDetails button { grid-column: 3; grid-row: 1; min-width: 8.5rem; min-height: 2.6rem; padding: 0.6rem 0.85rem; color: #17110a; font-weight: 760; border: 1px solid #f0d091; border-radius: 0.65rem; background: linear-gradient(180deg, #f0d091, #c89c50); box-shadow: 0 0.7rem 1.8rem rgba(0, 0, 0, 0.28); cursor: pointer; }
+.mansionRoomDetails button:disabled { color: #a59c90; border-color: rgba(255, 255, 255, 0.14); background: rgba(255, 255, 255, 0.07); box-shadow: none; cursor: not-allowed; }
+.securedRoomStatus { grid-column: 1 / 3; margin: 0.2rem 0 0; color: #d5c8aa; font-size: 0.74rem; }
+.mansionAssetActions { display: flex; align-items: center; justify-content: flex-end; gap: 0.5rem; }
+.roomVisualsMagicButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.38rem;
+  min-height: 2.2rem;
+  padding: 0.45rem 0.7rem;
+  color: #17131d !important;
+  text-shadow: 0 1px rgba(255, 255, 255, 0.35);
+  border: 0;
+  border-radius: 0.65rem;
+  background: linear-gradient(110deg, var(--prism-p, #ff4d6d), var(--prism-r, #ff9f1c) 29%, var(--prism-i, #b7e63a) 60%, var(--prism-s, #2fd3e3) 82%, var(--prism-m, #7b5cff));
+  box-shadow: 0 0.75rem 1.7rem color-mix(in srgb, var(--prism-m, #7b5cff) 24%, transparent), inset 0 1px rgba(255, 255, 255, 0.52);
+  font-weight: 820;
+  cursor: pointer;
+}
+.roomVisualsMagicButton[aria-pressed="true"] { filter: saturate(1.12) brightness(1.06); }
+.roomVisualsMagicButton:disabled { cursor: wait; opacity: 0.7; }
+.foundItemVisualsPanel {
+  position: relative;
+  z-index: 1;
+  grid-column: 2;
+  grid-row: 1;
+  align-self: stretch;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  min-width: 0;
+  min-height: 0;
+  gap: 0.7rem;
+  overflow: hidden;
+  padding: 0.85rem;
+  color: var(--v2-text);
+  border: 1px solid color-mix(in srgb, var(--v2-accent) 30%, var(--v2-edge));
+  border-radius: 0.9rem;
+  background: color-mix(in srgb, var(--v2-panel) 94%, transparent);
+  box-shadow: var(--v2-shadow);
+  backdrop-filter: blur(18px) saturate(0.9);
+}
+.foundItemVisualsPanel > header strong,
+.foundItemVisualsPanel > header small { display: block; }
+.foundItemVisualsPanel > header strong { margin: 0; font: 700 1rem/1.25 var(--font-ui, system-ui, sans-serif); }
+.foundItemVisualsPanel > header small,
+.foundItemVisualsPanel > small { margin-top: 0.18rem; color: var(--v2-muted); font-size: 0.7rem; line-height: 1.35; }
+.foundItemVisualsPanel > div { display: grid; align-content: start; min-height: 0; overflow: auto; overscroll-behavior: contain; gap: 0.45rem; }
+.foundItemVisualsPanel > div > button {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-rows: auto auto;
+  align-items: center;
+  gap: 0.08rem 0.55rem;
+  padding: 0.58rem 0.65rem;
+  color: var(--v2-text);
+  text-align: left;
+  border: 1px solid var(--v2-edge);
+  border-radius: 0.7rem;
+  background: var(--v2-field);
+  cursor: pointer;
+}
+.foundItemVisualsPanel > div > button > span { grid-row: 1 / 3; font-size: 1.2rem; }
+.foundItemVisualsPanel > div > button > strong { overflow: hidden; font-size: 0.78rem; text-overflow: ellipsis; white-space: nowrap; }
+.foundItemVisualsPanel > div > button > small { color: var(--v2-muted); font-size: 0.64rem; }
+.foundItemVisualsPanel > div > button > em { grid-column: 3; grid-row: 1 / 3; color: var(--v2-accent); font-size: 0.68rem; font-style: normal; font-weight: 800; }
+.foundItemVisualsPanel > div > button:hover:not(:disabled),
+.foundItemVisualsPanel > div > button:focus-visible { border-color: var(--v2-accent); outline: none; }
+.foundItemVisualsPanel > div > button:disabled { opacity: 0.55; cursor: not-allowed; }
+.keepVenueUpdates {
+  display: flex;
+  gap: 0.65rem;
+  align-items: flex-start;
+  padding: 0.85rem 0.9rem;
+  border: 1px solid color-mix(in srgb, var(--v2-accent) 28%, var(--v2-edge));
+  border-radius: 0.7rem;
+  background: rgba(150, 116, 255, 0.1);
+  cursor: pointer;
+}
+.keepVenueUpdates input { margin-block-start: 0.18rem; flex: 0 0 auto; }
+.keepVenueUpdates span { display: grid; gap: 0.22rem; min-width: 0; }
+.keepVenueUpdates strong { color: var(--v2-text); font-size: 0.86rem; font-weight: 800; }
+.keepVenueUpdates small { color: var(--v2-muted); font-size: 0.74rem; font-weight: 600; line-height: 1.4; }
+.keepVenueUpdates:has(input:disabled) { opacity: 0.62; cursor: default; }
+.caseFile .keepVenueUpdates { margin: 0.35rem 0 0.9rem; }
+.theoryBoardFields > .keepVenueUpdates { color: inherit; font-weight: 600; }
+.mansionHint { position: absolute; left: max(1.55rem, calc((100% - 102rem) / 2)); bottom: 5.45rem; margin: 0; color: var(--mystery-muted); font-size: 0.7rem; opacity: 0.66; }
+
+.roomVisualDialogBackdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  border: 0;
+  background: var(--v2-backdrop);
+  backdrop-filter: blur(12px) saturate(0.78);
+  cursor: default;
+}
+.roomVisualDialog {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  z-index: 81;
+  display: grid;
+  width: min(34rem, calc(100vw - 2rem));
+  gap: 1rem;
+  padding: 1.25rem;
+  color: var(--v2-text);
+  border: 1px solid color-mix(in srgb, var(--v2-accent) 28%, var(--v2-edge));
+  border-radius: 1.1rem;
+  background:
+    radial-gradient(circle at 92% 0, color-mix(in srgb, var(--v2-accent) 10%, transparent), transparent 48%),
+    var(--v2-panel);
+  box-shadow: var(--v2-shadow), 0 0 2.2rem color-mix(in srgb, var(--v2-accent) 10%, transparent);
+  transform: translate(-50%, -50%);
+}
+.roomVisualDialog[data-readiness="fallback"] { border-color: rgba(241, 190, 91, 0.5); }
+.roomVisualDialog[data-readiness="upgraded"] { border-color: rgba(177, 134, 255, 0.58); }
+.roomVisualDialog header,
+.roomVisualDialog footer { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+.roomVisualDialog h2 { margin: 0.2rem 0 0; font-family: Georgia, "Times New Roman", serif; font-size: 1.65rem; font-weight: 500; }
+.roomVisualDialog p { margin: 0; color: var(--v2-muted); line-height: 1.55; }
+.roomVisualDialog header button,
+.roomVisualDialog footer button {
+  min-height: 2.35rem;
+  padding: 0.55rem 0.8rem;
+  color: var(--v2-text);
+  border: 1px solid var(--v2-edge);
+  border-radius: 0.7rem;
+  background: var(--v2-field);
+  cursor: pointer;
+}
+.roomVisualDialog footer { justify-content: flex-end; }
+.roomVisualDialog footer .roomVisualPrimaryAction {
+  color: #17131d !important;
+  border-color: rgba(255, 255, 255, 0.42);
+  background: linear-gradient(110deg, var(--prism-p, #ff4d6d), var(--prism-r, #ff9f1c) 29%, var(--prism-i, #b7e63a) 60%, var(--prism-s, #2fd3e3) 82%, var(--prism-m, #7b5cff));
+  box-shadow: 0 0.75rem 1.7rem color-mix(in srgb, var(--prism-m, #7b5cff) 22%, transparent), inset 0 1px rgba(255, 255, 255, 0.5);
+  font-weight: 820;
+}
+.roomVisualDialog button:disabled { cursor: not-allowed; filter: grayscale(0.6); opacity: 0.48; }
+.roomVisualDiscoveryNotice { padding: 0.85rem 0.95rem; border: 1px solid rgba(177, 134, 255, 0.2); border-radius: 0.75rem; background: rgba(177, 134, 255, 0.07); }
+.roomVisualDiscoveryNotice code { font-family: inherit; font-weight: 760; }
+.roomVisualOnlineNotice { color: #f1c77e !important; font-size: 0.78rem; }
+
+.investigation[data-theme="light"] .roomVisualDialogBackdrop {
+  background: rgba(73, 93, 111, 0.28);
+  backdrop-filter: blur(12px) saturate(0.9);
+}
+
+.investigation[data-theme="light"] .roomVisualDialog {
+  border-color: color-mix(in srgb, var(--v2-accent) 32%, var(--v2-edge));
+  background:
+    radial-gradient(circle at 92% 0, rgba(106, 75, 192, 0.09), transparent 48%),
+    rgba(248, 251, 255, 0.98);
+  box-shadow: 0 1.8rem 5rem rgba(49, 70, 91, 0.24), 0 0 2rem rgba(106, 75, 192, 0.09);
+}
+
+.investigation[data-theme="light"] .roomVisualDiscoveryNotice {
+  border-color: rgba(106, 75, 192, 0.22);
+  background: rgba(106, 75, 192, 0.07);
+}
+
+.investigation[data-theme="light"] .roomVisualOnlineNotice {
+  color: #815714 !important;
+}
+
+.sceneRepairControl {
+  position: fixed;
+  z-index: 66;
+  right: 1rem;
+  bottom: 5.25rem;
+  display: flex;
+  align-items: center;
+  gap: 0.42rem;
+}
+.sceneRepairButton,
+.sceneRepairDismissButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 2.7rem;
+  min-height: 2.7rem;
+  padding: 0.55rem 0.72rem;
+  color: var(--v2-text, #f7f4ff);
+  border: 1px solid color-mix(in srgb, var(--v2-accent, #a98cff) 48%, var(--v2-edge, rgba(255, 255, 255, 0.18)));
+  border-radius: 999px;
+  background:
+    radial-gradient(circle at 30% 22%, color-mix(in srgb, var(--v2-accent, #a98cff) 20%, transparent), transparent 48%),
+    var(--v2-panel, rgba(10, 11, 18, 0.92));
+  box-shadow: 0 0.8rem 2rem rgba(0, 0, 0, 0.28), 0 0 1.5rem color-mix(in srgb, var(--v2-accent, #a98cff) 16%, transparent);
+  font-size: 1rem;
+  font-weight: 850;
+  cursor: pointer;
+  backdrop-filter: blur(14px);
+}
+.titleCard .sceneRepairControl { bottom: 1rem; }
+.sceneRepairControl[data-undo="true"] .sceneRepairButton { padding-inline: 0.8rem; }
+.sceneRepairControl[data-undo="true"] .sceneRepairButton > span { font-size: 1.15rem; }
+.sceneRepairButton strong { font-size: 0.72rem; letter-spacing: 0.03em; }
+.sceneRepairDismissButton { min-width: 0; font-size: 0.7rem; font-weight: 800; }
+.sceneRepairButton:hover:not(:disabled),
+.sceneRepairButton:focus-visible,
+.sceneRepairDismissButton:hover:not(:disabled),
+.sceneRepairDismissButton:focus-visible { border-color: var(--v2-accent, #a98cff); outline: none; filter: brightness(1.12); }
+
+.sceneRepairBackdrop {
+  position: fixed;
+  z-index: 82;
+  inset: 0;
+  border: 0;
+  background: var(--v2-backdrop, rgba(2, 4, 10, 0.62));
+  backdrop-filter: blur(12px) saturate(0.78);
+  cursor: default;
+}
+.sceneRepairDialog {
+  position: fixed;
+  z-index: 83;
+  top: 50%;
+  left: 50%;
+  display: grid;
+  width: min(39rem, calc(100vw - 2rem));
+  max-height: min(42rem, calc(100dvh - 2rem));
+  gap: 1rem;
+  overflow: auto;
+  padding: 1.25rem;
+  color: var(--v2-text, #f7f4ff);
+  border: 1px solid color-mix(in srgb, var(--v2-accent, #a98cff) 34%, var(--v2-edge, rgba(255, 255, 255, 0.18)));
+  border-radius: 1.1rem;
+  background:
+    radial-gradient(circle at 92% 0, color-mix(in srgb, var(--v2-accent, #a98cff) 11%, transparent), transparent 48%),
+    var(--v2-panel, #0d0f18);
+  box-shadow: var(--v2-shadow, 0 1.8rem 5rem rgba(0, 0, 0, 0.48));
+  transform: translate(-50%, -50%);
+}
+.sceneRepairDialog header { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+.sceneRepairDialog h2 { margin: 0.2rem 0 0; font-family: Georgia, "Times New Roman", serif; font-size: 1.65rem; font-weight: 500; }
+.sceneRepairDialog > p { margin: 0; color: var(--v2-muted, #b9b3c6); line-height: 1.55; }
+.sceneRepairDialog header button {
+  min-height: 2.35rem;
+  padding: 0.55rem 0.8rem;
+  color: var(--v2-text, #f7f4ff);
+  border: 1px solid var(--v2-edge, rgba(255, 255, 255, 0.18));
+  border-radius: 0.7rem;
+  background: var(--v2-field, rgba(255, 255, 255, 0.06));
+  cursor: pointer;
+}
+.sceneRepairOptions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.7rem; }
+.sceneRepairOptions[data-layout="three"] { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.sceneRepairOptions[data-hidden="true"] { display: none; }
+.sceneRepairItemList, .sceneRepairEmojiPicker { display: grid; gap: 0.55rem; }
+.sceneRepairItemList > small, .sceneRepairEmojiPicker > small { color: var(--v2-muted, #b9b3c6); font-size: 0.78rem; }
+.sceneRepairItemList > button, .sceneRepairEmojiPicker > button { display: flex; align-items: center; gap: 0.6rem; padding: 0.6rem 0.75rem; border: 1px solid var(--v2-edge); border-radius: 0.65rem; color: var(--v2-text); background: var(--v2-field, rgba(255, 255, 255, 0.055)); font: inherit; text-align: left; cursor: pointer; }
+.sceneRepairItemList > button:hover:not(:disabled), .sceneRepairEmojiPicker > button:hover { border-color: var(--v2-accent, #a98cff); }
+.sceneRepairItemList > button > span { font-size: 1.3rem; }
+.sceneRepairEmojiPicker > label { display: grid; gap: 0.3rem; color: var(--v2-muted, #b9b3c6); font-size: 0.72rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; }
+.sceneRepairEmojiPicker > label > input { padding: 0.65rem 0.8rem; border: 1px solid var(--v2-edge); border-radius: 0.65rem; color: var(--v2-text); background: var(--v2-field, rgba(255, 255, 255, 0.055)); font: inherit; }
+.sceneRepairEmojiResults { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0.55rem; }
+.sceneRepairEmojiResults > button { display: grid; place-items: center; gap: 0.3rem; min-height: 5.2rem; padding: 0.6rem 0.4rem; border: 1px solid var(--v2-edge); border-radius: 0.8rem; color: var(--v2-text); background: linear-gradient(145deg, color-mix(in srgb, var(--v2-accent, #a98cff) 8%, transparent), transparent 58%), var(--v2-field, rgba(255, 255, 255, 0.055)); font: inherit; cursor: pointer; }
+.sceneRepairEmojiResults > button:hover:not(:disabled), .sceneRepairEmojiResults > button:focus-visible { border-color: var(--v2-accent, #a98cff); outline: none; transform: translateY(-1px); }
+.sceneRepairEmojiResults > button > span { font-family: "Apple Color Emoji", "Segoe UI Emoji", sans-serif; font-size: 2rem; line-height: 1; }
+.sceneRepairEmojiResults > button > small { overflow: hidden; max-width: 100%; color: var(--v2-muted, #b9b3c6); font-size: 0.66rem; text-overflow: ellipsis; white-space: nowrap; }
+.sceneRepairOptions button {
+  display: grid;
+  min-height: 5.3rem;
+  gap: 0.35rem;
+  padding: 0.85rem;
+  color: var(--v2-text, #f7f4ff);
+  text-align: left;
+  border: 1px solid var(--v2-edge, rgba(255, 255, 255, 0.18));
+  border-radius: 0.82rem;
+  background: var(--v2-field, rgba(255, 255, 255, 0.055));
+  cursor: pointer;
+}
+.sceneRepairOptions button:hover:not(:disabled),
+.sceneRepairOptions button:focus-visible { border-color: var(--v2-accent, #a98cff); outline: none; background: color-mix(in srgb, var(--v2-accent, #a98cff) 10%, var(--v2-field, rgba(255, 255, 255, 0.055))); }
+.sceneRepairOptions strong { font-size: 0.87rem; }
+.sceneRepairOptions span { color: var(--v2-muted, #b9b3c6); font-size: 0.72rem; line-height: 1.35; }
+@media (max-width: 620px) {
+  .sceneRepairOptions[data-layout="three"] { grid-template-columns: 1fr; }
+}
+.sceneRepairDialog footer { padding-top: 0.1rem; border-top: 1px solid var(--v2-edge, rgba(255, 255, 255, 0.16)); }
+.sceneRepairDialog footer small { color: var(--v2-muted, #b9b3c6); line-height: 1.45; }
+
+.itemSynthesisQueue {
+  display: grid;
+  gap: 0.7rem;
+  width: 100%;
+  max-height: min(42vh, 23rem);
+  overflow: auto;
+}
+.itemSynthesisGroup { display: grid; gap: 0.35rem; }
+.itemSynthesisGroup > strong {
+  color: color-mix(in srgb, var(--loader-muted) 86%, var(--prism-s));
+  font: 800 0.62rem/1 system-ui, sans-serif;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+}
+.itemSynthesisJobs {
+  display: grid;
+  gap: 0.4rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.itemSynthesisJobs li {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.55rem;
+  border: 1px solid var(--loader-line);
+  border-radius: 12px;
+  padding: 0.55rem;
+  background: color-mix(in srgb, var(--prism-m) 7%, transparent);
+}
+.itemSynthesisJobs li > span {
+  display: grid;
+  place-items: center;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 0.65rem;
+  background: color-mix(in srgb, var(--prism-s) 12%, transparent);
+  font-size: 1rem;
+}
+.itemSynthesisJobs li > div:not(.itemSynthesisActions) {
+  display: grid;
+  min-width: 0;
+  gap: 0.16rem;
+}
+.itemSynthesisJobs b {
+  overflow: hidden;
+  color: var(--loader-ink);
+  font-size: 0.77rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.itemSynthesisJobs small {
+  overflow: hidden;
+  color: var(--loader-muted);
+  font-size: 0.65rem;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.itemSynthesisActions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 0.3rem; }
+.itemSynthesisActions button {
+  min-height: 1.8rem;
+  border: 1px solid var(--loader-line);
+  border-radius: 999px;
+  padding: 0 0.55rem;
+  color: var(--loader-ink);
+  background: color-mix(in srgb, var(--prism-m) 13%, transparent);
+  font: 750 0.62rem/1 system-ui, sans-serif;
+  cursor: pointer;
+}
+.itemSynthesisActions button:hover:not(:disabled),
+.itemSynthesisActions button:focus-visible {
+  border-color: color-mix(in srgb, var(--prism-s) 65%, var(--loader-line));
+  outline: none;
+}
+.itemSynthesisActions button:disabled { cursor: wait; opacity: 0.55; }
+
+@media (max-width: 520px) {
+  .itemSynthesisJobs li { grid-template-columns: auto minmax(0, 1fr); }
+  .itemSynthesisActions { grid-column: 1 / -1; justify-content: flex-start; }
+}
+
+.investigation[data-theme="light"] .sceneRepairBackdrop,
+.titleCard[data-theme="light"] .sceneRepairBackdrop {
+  background: rgba(73, 93, 111, 0.28);
+  backdrop-filter: blur(12px) saturate(0.9);
+}
+.investigation[data-theme="light"] .sceneRepairDialog,
+.titleCard[data-theme="light"] .sceneRepairDialog {
+  background:
+    radial-gradient(circle at 92% 0, rgba(106, 75, 192, 0.09), transparent 48%),
+    rgba(248, 251, 255, 0.98);
+  box-shadow: 0 1.8rem 5rem rgba(49, 70, 91, 0.24), 0 0 2rem rgba(106, 75, 192, 0.09);
+}
+
+.partnerFindings {
+  min-height: calc(100dvh - var(--app-shell-top-nav-height, 50px));
+  padding: clamp(3rem, 9vw, 8rem) max(1rem, calc((100vw - 72rem) / 2));
+  background:
+    radial-gradient(circle at 28% 30%, rgba(169, 140, 255, 0.2), transparent 38%),
+    linear-gradient(145deg, #141427, #080a12 68%);
+}
+.partnerFindings h1 { max-width: 36rem; margin: 0.3rem 0 0.8rem; font-size: clamp(2.4rem, 6vw, 5rem); letter-spacing: -0.055em; }
+.partnerFindings > p:last-child { max-width: 40rem; color: var(--v2-muted); font-size: 1rem; line-height: 1.6; }
+
+.roomScene {
+  position: relative;
+  overflow: hidden;
+  /* The stage takes the art's own shape: page-wide until the viewport runs out
+   * of height, then as tall as the viewport allows and centered. The fitted
+   * art frame fills it edge to edge, so nothing is left to letterbox or
+   * pillarbox in black; the page shows beneath or beside the stage instead. */
+  --room-stage-height-limit: calc(100dvh - var(--app-shell-top-nav-height, 50px));
+  width: min(100%, calc(var(--room-stage-height-limit) * var(--room-art-aspect, 1.7777778)));
+  aspect-ratio: var(--room-art-aspect, 1.7777778);
+  margin: 0 auto;
+  opacity: 1;
+  transform: none;
+  background: #000;
+  container-type: size;
+}
+.roomScene::before {
+  position: absolute;
+  z-index: 0;
+  inset: -2rem;
+  content: "";
+  background-color: #000;
+  background-image: var(--room-image);
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: cover;
+  filter: blur(28px) saturate(0.72) brightness(0.42);
+  opacity: 0.72;
+  transform: scale(1.04);
+  pointer-events: none;
+}
+/* The room introduction plays on the same stage; it never regrows to the viewport. */
+.roomScene[data-room-introduction] {
+  aspect-ratio: var(--room-art-aspect, 1.7777778);
+}
+.roomSecuring { position: absolute; z-index: 20; inset: 0; display: grid; place-content: center; justify-items: center; gap: 0.35rem; padding: 2rem; text-align: center; background: radial-gradient(circle, rgba(38, 32, 55, 0.9), rgba(7, 9, 16, 0.98)); }
+.roomSecuring strong { font-size: clamp(1.35rem, 4vw, 2.4rem); }
+.roomSecuring span { color: #b9b1c8; }
+
+.roomArtFrame {
+  position: absolute;
+  inset: 0;
+  width: min(100cqw, calc(100cqh * var(--room-art-aspect)));
+  height: min(100cqh, calc(100cqw * var(--room-art-inverse-aspect)));
+  margin: auto;
+  overflow: hidden;
+  background: #000;
+}
+.roomBackdropImage {
+  display: block;
+  position: absolute;
+  z-index: 1;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  filter: blur(0);
+  transform: none;
+  transition: filter 220ms ease;
+  pointer-events: none;
+  user-select: none;
+}
+.roomBackdropImage[data-blurred="true"] {
+  filter: blur(12px);
+}
+.roomBackdropImage[data-art-style="mosaic"] {
+  image-rendering: pixelated;
+}
+.roomBackdropImage[data-upgrade-layer="true"] {
+  opacity: 0;
+  transition: opacity 180ms ease, filter 220ms ease;
+}
+.roomBackdropImage[data-upgrade-layer="true"][data-loaded="true"][data-active="true"] {
+  opacity: 1;
+}
+.roomParallaxLayer {
+  position: absolute;
+  z-index: 1;
+  inset: 0;
+  overflow: hidden;
+  transform: translate3d(var(--room-parallax-x, 0px), var(--room-parallax-y, 0px), 0) scale(var(--room-parallax-scale, 1));
+  transition: transform 420ms cubic-bezier(0.18, 0.78, 0.25, 1);
+}
+.roomScene[data-art-style="mosaic"] .roomParallaxLayer {
+  transform: none;
+}
+.roomScene[data-art-crossfading="true"] .roomParallaxLayer {
+  transition: none;
+}
+.roomShade { position: absolute; z-index: 3; inset: auto 0 0; height: 46%; background: linear-gradient(180deg, transparent, rgba(6, 8, 15, 0.24) 38%, rgba(6, 8, 15, 0.93)); pointer-events: none; }
+.roomScene[data-art-style="mosaic"] .roomShade { background: linear-gradient(180deg, transparent, rgba(6, 8, 15, 0.22) 42%, rgba(6, 8, 15, 0.88)); }
+.roomTitle { position: absolute; z-index: 2; top: 1.4rem; left: 1.4rem; padding: 0.65rem 0.85rem; border-left: 2px solid #ae8cff; background: rgba(6, 8, 15, 0.63); backdrop-filter: blur(12px); }
+.roomTitle h1 { margin: 0.1rem 0 0; }
+.roomTitle small { color: #bbb2ce; }
+.roomActor {
+  --actor-color: #a98cff;
+  position: absolute;
+  z-index: 4;
+  left: 50%;
+  bottom: 19.5rem;
+  display: grid;
+  justify-items: center;
+  width: min(30rem, 44vw);
+  filter: drop-shadow(0 1.5rem 2rem rgba(0, 0, 0, 0.56));
+  transform: translateX(-50%);
+  pointer-events: none;
+  animation: none;
+  transition: left 420ms cubic-bezier(0.2, 0.8, 0.2, 1), transform 420ms cubic-bezier(0.2, 0.8, 0.2, 1), opacity 260ms ease, filter 220ms ease;
+}
+.roomScene[data-room-introduction="persona"] .roomActor { animation: roomActorReveal 320ms ease-out both; }
+@keyframes roomActorReveal { from { opacity: 0; } to { opacity: 1; } }
+.roomActor[data-prosecutor-speaking="true"]:not(.roomProsecutorActor) { opacity: 0.78; transform: translateX(-40%) translateY(0.4rem) scale(0.9); }
+.roomProsecutorActor { z-index: 4; }
+/* Talk / Present two-shot: the suspect steps right, the investigator slides in
+   from the left, and whoever is not speaking sits back a touch. */
+.roomActor[data-staging="two-shot"]:not(.roomProsecutorActor) { left: 60%; transform: translateX(-50%) scale(0.94); }
+.roomProsecutorActor[data-staging="two-shot"] { left: 25%; transform: translateX(-50%) scale(0.9); }
+.roomProsecutorActor[data-staging="two-shot"][data-first-entry="true"] { animation: prosecutorSlideIn 420ms cubic-bezier(0.2, 0.85, 0.25, 1) both; }
+.roomActor[data-staging="two-shot"][data-thinking="true"] { filter: drop-shadow(0 1.5rem 2rem rgba(0, 0, 0, 0.56)) drop-shadow(0 0 1.1rem color-mix(in srgb, var(--actor-color), transparent 55%)); }
+@keyframes prosecutorSlideIn { from { opacity: 0; transform: translateX(-130%) scale(0.9); } to { opacity: 1; transform: translateX(-50%) scale(0.9); } }
+/* Present drag: the suspect lights up as a drop target. */
+.roomActor[data-drop-target="armed"] { filter: drop-shadow(0 1.5rem 2rem rgba(0, 0, 0, 0.56)) drop-shadow(0 0 1.2rem rgba(192, 165, 255, 0.5)); }
+.roomActor[data-drop-target="hover"] { filter: drop-shadow(0 1.5rem 2rem rgba(0, 0, 0, 0.56)) drop-shadow(0 0 2rem rgba(192, 165, 255, 0.95)) brightness(1.08); }
+.roomActor[data-staging="two-shot"][data-first-entry="true"]:not(.roomProsecutorActor) { animation: interrogationEntrance 420ms cubic-bezier(0.2, 0.85, 0.25, 1) both; }
+@keyframes interrogationEntrance { from { opacity: 0; transform: translateX(-50%) translateY(1.4rem) scale(0.94); } to { opacity: 1; transform: translateX(-50%) scale(1); } }
+
+.roomActorDrift {
+  position: relative;
+  display: grid;
+  width: 100%;
+  justify-items: center;
+  animation: roomActorIdleDrift var(--room-actor-drift-duration, 7.4s) linear var(--room-actor-drift-delay, 0ms) infinite;
+  will-change: transform;
+}
+.roomActorDrift > :not(strong):not([data-signal-voice-action]) { max-height: 56vh; }
+.roomActor[data-art-style="mosaic"] :global([data-chat-mini-bot-avatar="true"][data-size="room"]) {
+  --chat-mini-bot-render-size: min(30rem, 44vw, 56vh);
+  --chat-mini-bot-glyph-size: max(18px, calc(var(--chat-mini-bot-render-size) * 0.12));
+  /* Mini's authored chassis occupies 78.90625% of its square while the Full
+     HD Debate body occupies 94%. Compensate for that transparent inset so the
+     two visible metal frames—not merely their layout boxes—share a footprint. */
+  transform: scale(1.19128713);
+}
+.roomActorDrift > strong { margin-top: -0.5rem; padding: 0.45rem 0.7rem; border-bottom: 2px solid var(--actor-color); background: rgba(6, 7, 14, 0.78); }
+@keyframes roomActorIdleDrift {
+  /* Counter-rotation keeps the persona upright while the conjugated scale
+     turns the circular translation into a gentle vertical oval. One full
+     turn returns with the same matrix and velocity, so the loop never snaps
+     or brakes at its boundary. */
+  from { transform: scaleX(0.5) rotate(0turn) translate3d(6px, 0, 0) rotate(0turn) scaleX(2); }
+  to { transform: scaleX(0.5) rotate(1turn) translate3d(6px, 0, 0) rotate(-1turn) scaleX(2); }
+}
+.roomProsecutorCue {
+  --actor-color: #72d7ff;
+  position: absolute;
+  z-index: 7;
+  left: clamp(1rem, 7vw, 7rem);
+  bottom: 11.2rem;
+  display: grid;
+  width: min(20rem, 34vw);
+  justify-items: center;
+  filter: drop-shadow(0 1rem 1.5rem rgba(0, 0, 0, 0.5));
+  pointer-events: none;
+  animation: prosecutorEnters 420ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+.roomProsecutorCue > :not(strong):not([data-signal-voice-action]) { max-width: 100%; max-height: 48vh; }
+.roomProsecutorCue > strong { padding: 0.38rem 0.55rem; border-bottom: 2px solid var(--actor-color); background: rgba(6, 7, 14, 0.84); font-size: 0.72rem; text-align: center; }
+@keyframes prosecutorEnters { from { opacity: 0; transform: translateX(-2.5rem) scale(0.94); } to { opacity: 1; transform: none; } }
+
+.roomScene[data-parallax-enabled="true"] .roomParallaxLayer { will-change: transform; }
+
+.hotspots { position: absolute; z-index: 5; inset: 0; pointer-events: none; }
+/* Examine keeps the standard OS cursor: a custom lens tracked the pointer on
+   every move and competed with the scan for the main thread. */
+.hotspots button {
+  position: absolute;
+  inset: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  transition: opacity 150ms ease;
+  cursor: pointer;
+  pointer-events: auto;
+}
+.hotspots button:focus-visible { outline: none; }
+.hotspots button:disabled { cursor: default; pointer-events: none; }
+.hotspots button[data-examining="true"] { opacity: 0; }
+
+/* Examine scan: the clicked region is analysed while its observation is
+   fetched. A sweep band loops inside the exact hotspot polygon (a transform,
+   so it composites), then resolves into the observation box. */
+.examinationScan {
+  position: absolute;
+  z-index: 7;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  background:
+    repeating-linear-gradient(180deg, rgba(194, 244, 255, 0.14) 0 1px, transparent 1px 6px),
+    rgba(105, 229, 255, 0.12);
+  box-shadow:
+    inset 0 0 0 1px rgba(230, 255, 255, 0.7),
+    inset 0 0 1.4rem rgba(105, 229, 255, 0.5);
+}
+.examinationScan::before {
+  content: "";
+  position: absolute;
+  inset: -40% 0;
+  background: linear-gradient(180deg, transparent 0%, rgba(150, 242, 255, 0.05) 40%, rgba(224, 255, 255, 0.62) 50%, rgba(150, 242, 255, 0.05) 60%, transparent 100%);
+  animation: examinationScanSweep 1.2s linear infinite;
+  will-change: transform;
+}
+@keyframes examinationScanSweep { from { transform: translateY(-45%); } to { transform: translateY(45%); } }
+.examinationScan[data-phase="resolved"] { animation: examinationScanResolve 460ms ease-out both; }
+.examinationScan[data-phase="resolved"]::before { animation: none; opacity: 0; }
+@keyframes examinationScanResolve {
+  from { opacity: 1; background-color: rgba(224, 255, 255, 0.5); }
+  to { opacity: 0; }
+}
+.examinationGrid {
+  position: absolute;
+  z-index: 6;
+  inset: 0;
+  overflow: hidden;
+  background-image:
+    linear-gradient(to right, transparent calc(100% - 1px), rgba(194, 244, 255, 0.2) calc(100% - 1px)),
+    linear-gradient(to bottom, transparent calc(100% - 1px), rgba(194, 244, 255, 0.2) calc(100% - 1px));
+  background-size:
+    var(--examine-grid-cell-width) 100%,
+    100% var(--examine-grid-cell-height);
+  pointer-events: none;
+  transform: none;
+  /* The grid crossfades to alpha radially on both axes: full strength across
+     the middle of the room, fading out toward every edge and clear in the
+     corners, so it never sits under the floating title, commands, and buttons. */
+  --examine-grid-mask: radial-gradient(
+    ellipse 62% 62% at 50% 50%,
+    #000 40%,
+    rgba(0, 0, 0, 0.85) 60%,
+    rgba(0, 0, 0, 0.25) 82%,
+    transparent 100%
+  );
+  -webkit-mask-image: var(--examine-grid-mask);
+  mask-image: var(--examine-grid-mask);
+}
+.examinationGrid i {
+  position: absolute;
+  box-sizing: border-box;
+  border: 1px solid rgba(230, 255, 255, 0.82);
+  background: rgba(150, 242, 255, 0.34);
+  box-shadow:
+    inset 0 0 0.55rem rgba(224, 255, 255, 0.72),
+    0 0 0.7rem rgba(105, 229, 255, 0.68);
+  filter: none;
+  transform: none;
+  transition: background 160ms ease, box-shadow 240ms ease;
+}
+@media (prefers-reduced-motion: reduce) {
+  .examinationGrid i { transition: none; }
+  .examinationScan::before { animation: none; opacity: 0.35; }
+  .examinationScan[data-phase="resolved"] { animation: none; opacity: 0; }
+}
+
+.roomComplete { position: absolute; z-index: 7; inset: 0; display: grid; align-content: center; justify-items: center; padding: 2rem; color: #f5f1ff; text-align: center; pointer-events: none; text-shadow: 0 0.25rem 1.25rem rgba(0, 0, 0, 0.94); animation: roomCompleteDissolve 600ms ease 2.8s forwards; }
+.roomComplete p { margin: 0; max-width: 26rem; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: clamp(0.72rem, 1.2vw, 0.92rem); letter-spacing: 0.14em; text-transform: uppercase; }
+.roomComplete strong { margin-top: 0.55rem; font-family: Georgia, serif; font-size: clamp(1.8rem, 5vw, 4.5rem); font-weight: 400; }
+@keyframes roomCompleteDissolve { to { opacity: 0; } }
+
+.investigationDialogueModal {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100dvh;
+  max-width: none;
+  max-height: none;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  color: inherit;
+  background: transparent;
+  overflow: hidden;
+  overscroll-behavior: none;
+  touch-action: none;
+  outline: none;
+}
+.investigationDialogueModal::backdrop { background: transparent; }
+.dialogueBox,
+.courtReaction {
+  --dialogue-accent: #a98cff;
+  position: absolute;
+  z-index: 8;
+  left: 50%;
+  bottom: 8.2rem;
+  width: min(48rem, calc(100vw - 2rem));
+  padding: 1rem 1.15rem;
+  border: 1px solid color-mix(in srgb, var(--dialogue-accent), transparent 48%);
+  border-radius: 0.85rem;
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--dialogue-accent), transparent 91%), transparent 42%),
+    rgba(7, 9, 18, 0.92);
+  box-shadow:
+    inset 3px 0 0 color-mix(in srgb, var(--dialogue-accent), white 16%),
+    0 1rem 3rem rgba(0, 0, 0, 0.42),
+    0 0 2rem color-mix(in srgb, var(--dialogue-accent), transparent 86%);
+  transform: translateX(-50%);
+  backdrop-filter: blur(16px);
+}
+
+.dialogueBox small, .courtReaction strong { color: color-mix(in srgb, var(--dialogue-accent), white 28%); font-weight: 800; }
+.dialogueBox p, .courtReaction p { margin: 0.35rem 0 0; line-height: 1.45; }
+/* A set width and height from the moment the box appears: the full line
+   reserves the paragraph invisibly while the typewriter paints over it, and a
+   floor keeps short observations from shrinking the box. */
+.dialogueBox { min-height: 7.6rem; }
+.dialogueText { position: relative; }
+.dialogueTextReserve { visibility: hidden; }
+.dialogueTextRevealed { position: absolute; inset: 0; }
+.dialogueBox[data-speaker="persona"] {
+  border-color: color-mix(in srgb, var(--dialogue-accent, #a98cff), transparent 48%);
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--dialogue-accent, #a98cff), transparent 91%), transparent 42%),
+    rgba(7, 9, 18, 0.94);
+  box-shadow:
+    inset 3px 0 0 color-mix(in srgb, var(--dialogue-accent, #a98cff), white 16%),
+    0 1rem 3rem rgba(0, 0, 0, 0.42),
+    0 0 2rem color-mix(in srgb, var(--dialogue-accent, #a98cff), transparent 86%);
+}
+.dialogueBox[data-speaker="persona"] small {
+  color: color-mix(in srgb, var(--dialogue-accent, #a98cff), white 28%);
+}
+.dialogueBox[data-casekeeper-stage="narration"] {
+  animation: casekeeperNarrationDialogueIn 180ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+.dialogueSpeakerSignature {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.42rem;
+  letter-spacing: 0.02em;
+}
+.dialogueSpeakerSignature i {
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  color: color-mix(in srgb, var(--dialogue-accent, #a98cff), white 24%);
+  border: 1px solid color-mix(in srgb, var(--dialogue-accent, #a98cff), transparent 44%);
+  background: color-mix(in srgb, var(--dialogue-accent, #a98cff), transparent 84%);
+}
+.dialogueSpeakerSignature i { width: 1.45rem; height: 1.45rem; border-radius: 50%; }
+.casekeeperThinkingDots {
+  display: inline-block;
+  width: 1ch;
+  overflow: hidden;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 1.12rem;
+  font-weight: 800;
+  letter-spacing: 0;
+  white-space: nowrap;
+  animation: casekeeperThinkingDots 1.15s steps(1, end) infinite;
+}
+.casekeeperThinkingDots > span { display: block; width: 3ch; }
+/* A pending line's beat fades in after a moment so quick lines never flash it. */
+.casekeeperThinkingDots[data-pending-line="true"] {
+  opacity: 0;
+  animation: casekeeperThinkingDots 1.15s steps(1, end) infinite, dialoguePendingDotsIn 1ms 320ms forwards;
+}
+@keyframes dialoguePendingDotsIn { to { opacity: 1; } }
+.dialogueBox[data-examination="true"] { cursor: pointer; }
+.dialogueContinueHint {
+  display: block;
+  margin-top: 0.7rem;
+  color: #d4c6ff;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.72rem;
+  font-weight: 750;
+  letter-spacing: 0.12em;
+  text-align: right;
+  text-transform: uppercase;
+  animation: observationContinuePulse 1.6s ease-in-out infinite;
+}
+.dialogueContinueHint[data-pending="true"] { visibility: hidden; animation: none; }
+/* Between speakers the box is dismissed while the suspect thinks; the modal
+   stays mounted so a stray click lands nowhere. */
+.dialogueBox[data-handoff="true"] { visibility: hidden; }
+@keyframes observationContinuePulse { 50% { opacity: 0.55; } }
+@keyframes casekeeperThinkingDots {
+  0%, 32% { width: 1ch; }
+  33%, 65% { width: 2ch; }
+  66%, 100% { width: 3ch; }
+}
+@keyframes casekeeperNarrationDialogueIn {
+  from { opacity: 0.35; transform: translateX(-50%) translateY(0.35rem); }
+  to { opacity: 1; transform: translateX(-50%); }
+}
+
+.investigationCommands,
+.courtActions {
+  --console-accent: #a98cff;
+  position: fixed;
+  z-index: 14;
+  left: 50%;
+  bottom: 1rem;
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(6.4rem, 1fr);
+  gap: 0.55rem;
+  width: min(37rem, calc(100vw - 2rem));
+  padding: 1.48rem 0.72rem 0.78rem;
+  border: 1px solid rgba(213, 202, 255, 0.24);
+  border-radius: 1.15rem;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.085), transparent 0.42rem),
+    radial-gradient(circle at 12% 0, rgba(95, 221, 255, 0.11), transparent 28%),
+    radial-gradient(circle at 88% 0, rgba(255, 99, 181, 0.1), transparent 28%),
+    linear-gradient(145deg, rgba(31, 34, 48, 0.98), rgba(7, 8, 14, 0.98) 72%);
+  box-shadow:
+    0 0.18rem 0 rgba(255, 255, 255, 0.1) inset,
+    0 -0.2rem 0.7rem rgba(0, 0, 0, 0.72) inset,
+    0 0.85rem 0 #03040a,
+    0 1.5rem 3.6rem rgba(0, 0, 0, 0.58),
+    0 0 2.5rem color-mix(in srgb, var(--console-accent), transparent 88%);
+  transform: translateX(-50%);
+  backdrop-filter: blur(22px);
+  isolation: isolate;
+}
+.investigationCommands {
+  transition: opacity 160ms ease, transform 240ms cubic-bezier(0.32, 0.72, 0, 1);
+  will-change: opacity, transform;
+}
+.investigationCommands[data-dismissed="true"] {
+  opacity: 0;
+  pointer-events: none;
+  transform: translateX(-50%) translateY(calc(100% + 3rem));
+}
+.courtActions { --console-accent: #ff72b6; width: min(29rem, calc(100vw - 2rem)); }
+.investigationCommands::before,
+.courtActions::before {
+  content: attr(data-console-label);
+  position: absolute;
+  z-index: 2;
+  top: 0.45rem;
+  left: 1rem;
+  color: color-mix(in srgb, var(--console-accent), white 28%);
+  font-size: 0.56rem;
+  font-weight: 850;
+  letter-spacing: 0.19em;
+  line-height: 1;
+  text-transform: uppercase;
+  text-shadow: 0 0 0.8rem color-mix(in srgb, var(--console-accent), transparent 34%);
+}
+.investigationCommands::after,
+.courtActions::after {
+  content: "";
+  position: absolute;
+  z-index: 1;
+  top: 0.55rem;
+  right: 0.95rem;
+  width: 2.6rem;
+  height: 0.24rem;
+  border-radius: 99px;
+  background: linear-gradient(90deg, #55ddff, #a98cff 52%, #ff63ad);
+  box-shadow: 0 0 0.9rem color-mix(in srgb, var(--console-accent), transparent 32%);
+  opacity: 0.72;
+}
+
+.investigationCommands button,
+.courtActions button {
+  --command-accent: #b99cff;
+  position: relative;
+  z-index: 3;
+  display: grid;
+  align-content: center;
+  justify-items: center;
+  gap: 0.26rem;
+  min-width: 0;
+  min-height: 4.65rem;
+  padding: 0.48rem 0.65rem 0.58rem;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 0.72rem;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.115), transparent 32%),
+    linear-gradient(180deg, #252936, #11131d 74%);
+  box-shadow:
+    0 0.11rem 0 rgba(255, 255, 255, 0.1) inset,
+    0 -0.22rem 0.5rem rgba(0, 0, 0, 0.42) inset,
+    0 0.34rem 0 #060710,
+    0 0.55rem 0.85rem rgba(0, 0, 0, 0.42);
+  color: #eeeaf6;
+  font-size: 0.72rem;
+  font-weight: 820;
+  letter-spacing: 0.035em;
+  cursor: pointer;
+  transform: translateY(0);
+  transition: border-color 120ms ease, box-shadow 120ms ease, color 120ms ease, transform 90ms ease;
+}
+.investigationCommands button[data-command="move"] { --command-accent: #67ddff; }
+.investigationCommands button[data-command="examine"] { --command-accent: #aa90ff; }
+.investigationCommands button[data-command="talk"] { --command-accent: #ffbd6a; }
+.investigationCommands button[data-command="present"] { --command-accent: #ff6db4; }
+.courtActions button[data-command="press"] { --command-accent: #ff9568; }
+.courtActions button[data-command="objection"] { --command-accent: #ff5ba9; }
+.courtActions button[data-command="think"] { --command-accent: #76dfff; }
+.investigationCommands button span,
+.courtActions button span {
+  display: grid;
+  width: 2rem;
+  height: 2rem;
+  place-items: center;
+  border: 1px solid color-mix(in srgb, var(--command-accent), transparent 48%);
+  border-radius: 50%;
+  background: radial-gradient(circle, color-mix(in srgb, var(--command-accent), transparent 76%), rgba(3, 5, 10, 0.9) 68%);
+  box-shadow: 0 0 0.7rem color-mix(in srgb, var(--command-accent), transparent 72%), 0 0.12rem 0.22rem rgba(0, 0, 0, 0.72) inset;
+  color: var(--command-accent);
+  font-size: 1.05rem;
+  line-height: 1;
+  text-shadow: 0 0 0.7rem var(--command-accent);
+}
+.investigationCommands button:hover:not(:disabled),
+.courtActions button:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--command-accent), transparent 46%);
+  color: white;
+  box-shadow:
+    0 0.11rem 0 rgba(255, 255, 255, 0.13) inset,
+    0 -0.22rem 0.5rem rgba(0, 0, 0, 0.42) inset,
+    0 0.42rem 0 #060710,
+    0 0.7rem 1rem rgba(0, 0, 0, 0.48),
+    0 0 1rem color-mix(in srgb, var(--command-accent), transparent 78%);
+  transform: translateY(-0.08rem);
+}
+.investigationCommands button:active:not(:disabled),
+.courtActions button:active:not(:disabled),
+.investigationCommands button[data-active="true"],
+.courtActions button[data-active="true"] {
+  border-color: color-mix(in srgb, var(--command-accent), white 8%);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--command-accent), transparent 82%), transparent 46%),
+    linear-gradient(180deg, #151823, #0b0d15);
+  box-shadow:
+    0 0.16rem 0.45rem rgba(0, 0, 0, 0.7) inset,
+    0 0.08rem 0 #05060c,
+    0 0 1.35rem color-mix(in srgb, var(--command-accent), transparent 64%);
+  color: white;
+  transform: translateY(0.3rem);
+}
+.investigationCommands button[data-active="true"] span,
+.courtActions button[data-active="true"] span {
+  background: radial-gradient(circle, color-mix(in srgb, var(--command-accent), white 28%) 0 5%, color-mix(in srgb, var(--command-accent), transparent 70%) 38%, rgba(3, 5, 10, 0.92) 72%);
+  box-shadow: 0 0 1rem color-mix(in srgb, var(--command-accent), transparent 38%), 0 0 0.25rem var(--command-accent) inset;
+}
+.investigationCommands button:focus-visible,
+.courtActions button:focus-visible,
+.fileChargesButton:focus-visible { outline: 2px solid #f4edff; outline-offset: 3px; }
+.investigationCommands button:disabled,
+.courtActions button:disabled { filter: saturate(0.25); opacity: 0.42; transform: none; }
+
+.investigationModeBackButton {
+  position: fixed;
+  z-index: 18;
+  left: 1rem;
+  bottom: 1rem;
+  padding: 0.68rem 0.82rem;
+  border: 1px solid color-mix(in srgb, var(--v2-accent) 34%, var(--v2-edge));
+  border-radius: 0.72rem;
+  color: var(--v2-text);
+  background: color-mix(in srgb, var(--v2-chrome) 94%, transparent);
+  box-shadow: var(--v2-shadow), inset 0 1px rgba(255, 255, 255, 0.1);
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 760;
+  cursor: pointer;
+  backdrop-filter: blur(16px);
+}
+.investigationModeBackButton:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--v2-accent) 62%, var(--v2-edge));
+}
+.investigationModeBackButton:disabled {
+  opacity: 0.48;
+  cursor: default;
+}
+
+.choiceTray {
+  position: fixed;
+  z-index: 30;
+  right: 1rem;
+  bottom: 6.3rem;
+  width: min(31rem, calc(100vw - 2rem));
+  max-height: min(68dvh, 42rem);
+  padding: 1rem;
+  overflow: auto;
+  border: 1px solid var(--v2-edge);
+  border-radius: 1rem;
+  background: rgba(10, 12, 23, 0.97);
+  box-shadow: 0 1.5rem 5rem rgba(0, 0, 0, 0.58);
+  animation: trayIn 180ms ease-out both;
+}
+
+@keyframes trayIn { from { opacity: 0; transform: translateY(0.8rem); } }
+.choiceTray header, .caseFile header, .theoryBoard header { display: flex; align-items: start; justify-content: space-between; gap: 1rem; margin-bottom: 0.8rem; }
+.choiceTray h2, .caseFile h2, .theoryBoard h2 { margin: 0.18rem 0; }
+.choiceTray header button, .caseFile header button, .theoryBoard header button { border: 0; background: transparent; color: #b9b3c6; cursor: pointer; }
+.topicHelp { margin: -0.2rem 0 0.9rem; color: #aaa5b6; font-size: 0.78rem; line-height: 1.45; }
+.topicGroups { display: grid; gap: 0.9rem; }
+.topicGroup { display: grid; gap: 0.4rem; }
+.topicGroup h3 { margin: 0; color: #aaa5b6; font-size: 0.68rem; font-weight: 800; letter-spacing: 0.1em; text-transform: uppercase; }
+.topicList { display: grid; gap: 0.45rem; }
+.topicList button { display: flex; align-items: center; gap: 0.65rem; padding: 0.8rem; text-align: left; border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 0.65rem; background: rgba(255, 255, 255, 0.035); cursor: pointer; }
+.topicIcon { display: grid; flex: 0 0 auto; width: 1.4rem; height: 1.4rem; place-items: center; border-radius: 50%; background: rgba(169, 140, 255, 0.16); color: #c0a5ff; }
+.topicCopy { display: grid; gap: 0.12rem; }
+.topicCopy strong { font: inherit; }
+.topicCopy small { color: #817b8b; font-size: 0.66rem; font-weight: 750; letter-spacing: 0.04em; text-transform: uppercase; }
+.topicList button[data-complete="true"] { color: #97939f; }
+.topicList button[data-blocked="true"] { color: #817b8b; cursor: not-allowed; opacity: 0.72; }
+.topicList button[data-blocked="true"] .topicIcon { background: rgba(255, 255, 255, 0.06); color: #77717f; }
+
+.recordGrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr)); gap: 0.5rem; }
+.recordGrid button { display: grid; align-content: start; justify-items: start; gap: 0.2rem; min-height: 7.5rem; padding: 0.75rem; text-align: left; border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 0.7rem; background: rgba(255, 255, 255, 0.035); cursor: pointer; }
+.recordGrid button:hover { border-color: #a98cff; }
+.recordGrid button > span { font-size: 1.5rem; }
+.recordGrid button small { color: #aaa5b6; line-height: 1.3; }
+.recordAssetImage { width: 3.5rem; height: 3.5rem; object-fit: contain; }
+/* Present as a drawer of physical items: click for a blurb, drag onto the suspect to ask. */
+.itemDrawer { animation: drawerIn 220ms cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+@keyframes drawerIn { from { opacity: 0; transform: translateX(2.4rem); } }
+.itemDrawerHelp { margin: -0.2rem 0 0.9rem; color: #aaa5b6; font-size: 0.78rem; line-height: 1.45; }
+.itemShelf { display: grid; grid-template-columns: repeat(auto-fill, minmax(6.4rem, 1fr)); gap: 0.5rem; }
+.itemShelf > p { grid-column: 1 / -1; margin: 0; color: #aaa5b6; }
+.itemTile { display: grid; justify-items: center; gap: 0.3rem; padding: 0.7rem 0.45rem 0.6rem; text-align: center; border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 0.8rem; background: rgba(255, 255, 255, 0.035); color: inherit; cursor: grab; touch-action: none; user-select: none; -webkit-user-select: none; }
+.itemTile:hover, .itemTile:focus-visible { border-color: #a98cff; }
+.itemTile[data-selected="true"] { border-color: #c0a5ff; background: rgba(169, 140, 255, 0.14); }
+.itemTile[data-dragging="true"] { opacity: 0.35; cursor: grabbing; }
+.itemTile:disabled { cursor: not-allowed; opacity: 0.55; }
+.itemTile > span[aria-hidden] { font-size: 2.2rem; line-height: 3.5rem; }
+.itemTile strong { font-size: 0.78rem; line-height: 1.25; }
+.itemTile small { color: #817b8b; font-size: 0.62rem; font-weight: 750; letter-spacing: 0.06em; text-transform: uppercase; }
+/* An item this suspect has already seen keeps its place on the shelf with a check, so the next choice is deliberate. */
+.itemTile { position: relative; }
+.itemTile[data-presented="true"] { border-color: rgba(111, 211, 154, 0.42); background: rgba(111, 211, 154, 0.07); }
+.itemTile[data-presented="true"] small { color: #7fd7a4; }
+.itemTileShown { position: absolute; top: 0.35rem; right: 0.35rem; display: grid; width: 1.15rem; height: 1.15rem; place-items: center; border-radius: 50%; background: #6fd39a; color: #06130c; font-size: 0.7rem; font-style: normal; font-weight: 850; line-height: 1; box-shadow: 0 0.1rem 0.4rem rgba(0, 0, 0, 0.35); }
+.itemBlurb { display: grid; gap: 0.55rem; margin-top: 0.8rem; padding: 0.85rem; border: 1px solid rgba(192, 165, 255, 0.34); border-radius: 0.8rem; background: rgba(169, 140, 255, 0.08); }
+.itemBlurb h3 { margin: 0; font-size: 1rem; }
+.itemBlurb p { margin: 0; color: #cfc9dc; font-size: 0.86rem; line-height: 1.45; }
+.itemBlurb small { color: #aaa5b6; font-size: 0.72rem; }
+.itemBlurb button { justify-self: start; padding: 0.55rem 0.85rem; border: 1px solid rgba(255, 255, 255, 0.14); border-radius: 0.6rem; background: rgba(255, 255, 255, 0.06); color: inherit; cursor: pointer; }
+.itemBlurb button:hover { border-color: #a98cff; }
+.itemBlurb button:disabled { cursor: not-allowed; opacity: 0.55; }
+.itemDragGhost { position: fixed; z-index: 60; display: grid; justify-items: center; gap: 0.25rem; width: 6.4rem; padding: 0.55rem; border: 1px solid rgba(192, 165, 255, 0.6); border-radius: 0.8rem; background: rgba(10, 12, 23, 0.94); box-shadow: 0 1rem 2.5rem rgba(0, 0, 0, 0.55); transform: translate(-50%, -50%) rotate(-3deg); pointer-events: none; }
+.itemDragGhost img { width: 3.2rem; height: 3.2rem; object-fit: contain; }
+.itemDragGhost > span[aria-hidden] { font-size: 2rem; line-height: 3.2rem; }
+.itemDragGhost strong { font-size: 0.72rem; text-align: center; }
+
+.fileChargesButton {
+  position: fixed;
+  z-index: 15;
+  right: 1rem;
+  bottom: 1rem;
+  padding: 0.82rem 1.05rem;
+  border: 1px solid rgba(255, 151, 199, 0.58);
+  border-radius: 0.72rem;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.13), transparent 28%), linear-gradient(145deg, #8b285f, #4d163c);
+  box-shadow: 0 0.13rem 0 rgba(255, 255, 255, 0.13) inset, 0 -0.2rem 0.45rem rgba(28, 3, 19, 0.52) inset, 0 0.35rem 0 #260a1d, 0 0.8rem 1.8rem rgba(18, 3, 14, 0.46);
+  color: #fff7fb !important;
+  font-weight: 850;
+  letter-spacing: 0.025em;
+  cursor: pointer;
+  transition: border-color 120ms ease, box-shadow 120ms ease, transform 90ms ease;
+}
+.fileChargesButton:hover { border-color: rgba(255, 196, 224, 0.9); box-shadow: 0 0.13rem 0 rgba(255, 255, 255, 0.16) inset, 0 -0.2rem 0.45rem rgba(28, 3, 19, 0.52) inset, 0 0.42rem 0 #260a1d, 0 0.9rem 2rem rgba(255, 76, 161, 0.18); transform: translateY(-0.07rem); }
+.fileChargesButton:active { box-shadow: 0 0.18rem 0.45rem rgba(28, 3, 19, 0.72) inset, 0 0.08rem 0 #260a1d, 0 0 1.3rem rgba(255, 76, 161, 0.22); transform: translateY(0.27rem); }
+.theoryHint { position: fixed; z-index: 10; right: 1rem; bottom: 1.2rem; max-width: 18rem; color: #85808f; font-size: 0.65rem; text-align: right; }
+
+.acquisitionNotice {
+  position: fixed;
+  z-index: 49;
+  top: 6.5rem;
+  right: 1rem;
+  width: min(27rem, calc(100vw - 2rem));
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.9rem;
+  border: 1px solid rgba(124, 233, 255, 0.45);
+  border-radius: 0.9rem;
+  background: linear-gradient(145deg, rgba(14, 25, 39, 0.98), rgba(12, 10, 25, 0.98));
+  box-shadow: 0 1rem 3rem rgba(0, 0, 0, 0.5), 0 0 1.4rem rgba(103, 218, 255, 0.12);
+  animation: fileUpdateIn 220ms ease-out both;
+}
+.acquisitionNotice > span { font-size: 1.55rem; }
+.acquisitionNotice > div { min-width: 0; display: grid; gap: 0.12rem; }
+.acquisitionNotice small { color: #72dfef; font-size: 0.65rem; font-weight: 850; letter-spacing: 0.1em; text-transform: uppercase; }
+.acquisitionNotice strong { color: #f7f4ff; }
+.acquisitionNotice p { margin: 0.15rem 0 0; overflow: hidden; color: #bbb7c7; font-size: 0.72rem; text-overflow: ellipsis; white-space: nowrap; }
+.acquisitionNotice button { padding: 0.45rem 0.6rem; border: 1px solid rgba(140, 221, 239, 0.3); border-radius: 0.55rem; background: rgba(92, 190, 216, 0.09); color: #eafcff; font: inherit; font-size: 0.7rem; font-weight: 800; cursor: pointer; }
+.acquisitionNotice button:last-child { padding: 0.25rem; border: 0; background: transparent; color: #9d98a8; font-size: 1.1rem; }
+@keyframes fileUpdateIn { from { opacity: 0; transform: translateY(-0.7rem); } }
+
+.caseFile,
+.theoryBoard {
+  position: fixed;
+  z-index: 50;
+  top: 0;
+  right: 0;
+  width: min(33rem, 100vw);
+  height: 100dvh;
+  padding: 1.2rem;
+  overflow: auto;
+  border-left: 1px solid var(--v2-edge);
+  background: rgba(8, 10, 20, 0.98);
+  box-shadow: -2rem 0 6rem rgba(0, 0, 0, 0.55), 0 0 0 100vmax rgba(1, 2, 5, 0.48);
+  animation: fileIn 220ms ease-out both;
+}
+
+@keyframes fileIn { from { transform: translateX(100%); } }
+.caseFileBackdrop { position: fixed; z-index: 49; inset: 0; background: rgba(1, 2, 5, 0.62); backdrop-filter: blur(14px) saturate(0.82); -webkit-backdrop-filter: blur(14px) saturate(0.82); }
+.caseFile { top: 0.75rem; right: 0.75rem; width: min(52rem, calc(100vw - 1.5rem)); height: calc(100dvh - 1.5rem); overflow: hidden; border: 1px solid var(--v2-edge); border-radius: 1.1rem; background: rgba(8, 10, 20, 0.96); box-shadow: -2rem 0 6rem rgba(0, 0, 0, 0.55), 0 1.5rem 4rem rgba(0, 0, 0, 0.35); display: grid; grid-template-rows: auto minmax(0, 1fr); }
+.caseFileLayout { min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr); overflow: hidden; }
+/* The investigator stands in the blurred room to the left of the file, drawn exactly like a selected bot tile. */
+.caseFileInvestigatorStage { position: fixed; z-index: 50; inset: 0.75rem calc(min(52rem, calc(100vw - 1.5rem)) + 1.5rem) 0.75rem 0.75rem; display: grid; align-content: center; justify-items: center; gap: 0.9rem; pointer-events: none; }
+.caseFileInvestigatorStage > button { filter: drop-shadow(0 1.6rem 3rem rgba(0, 0, 0, 0.55)); }
+.caseFileInvestigatorStage > small { color: #d9d3ea; font-size: 0.72rem; font-weight: 850; letter-spacing: 0.14em; text-transform: uppercase; text-shadow: 0 0.2rem 1rem rgba(0, 0, 0, 0.7); }
+/* The investigator's embodied bot, sized and plated like a room actor. */
+.caseFileInvestigatorActor { --actor-color: #a98cff; display: grid; justify-items: center; width: min(30rem, 44vw); filter: drop-shadow(0 1.6rem 3rem rgba(0, 0, 0, 0.55)); pointer-events: none; }
+.caseFileInvestigatorActor > :not(strong) { max-height: 56vh; }
+.caseFileInvestigatorActor :global([data-chat-mini-bot-avatar="true"][data-size="room"]) { --chat-mini-bot-render-size: min(30rem, 44vw, 56vh); }
+.caseFileInvestigatorActor > strong { margin-top: -0.5rem; padding: 0.45rem 0.7rem; border-bottom: 2px solid var(--actor-color); background: rgba(6, 7, 14, 0.78); color: #f3f0ff; }
+/* While the Case File is open nothing behind its blur runs: lights and effects
+   are withdrawn in the experience; the grid, scan, hotspots, and every looping
+   animation stop here. */
+.roomScene[data-suspended="true"] .examinationGrid,
+.roomScene[data-suspended="true"] .examinationScan,
+.roomScene[data-suspended="true"] .hotspots { display: none; }
+.roomScene[data-suspended="true"] * { animation-play-state: paused !important; }
+.caseFileContents { min-width: 0; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding-right: 0.2rem; }
+.caseFileVoiceStatus { display: flex; flex-wrap: wrap; align-items: center; gap: 0.6rem; }
+.caseFileVoiceStatus button { padding: 0.35rem 0.7rem; border: 1px solid rgba(192, 165, 255, 0.5); border-radius: 0.55rem; background: rgba(169, 140, 255, 0.14); color: inherit; font: inherit; font-size: 0.78rem; cursor: pointer; }
+.caseFileVoiceStatus button:hover { border-color: #c0a5ff; }
+.caseFileVoiceStatus button:disabled { cursor: progress; opacity: 0.6; }
+.caseFileContents section { display: grid; gap: 0.45rem; margin: 1.3rem 0; }
+.caseFileContents section:first-child { margin-top: 0.2rem; }
+.caseFile h3 { margin: 0; color: #a59dbb; font-size: 0.72rem; letter-spacing: 0.12em; text-transform: uppercase; }
+.caseFile article { display: flex; gap: 0.7rem; padding: 0.75rem; border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 0.7rem; background: rgba(255, 255, 255, 0.03); }
+.caseFile article > span { font-size: 1.4rem; }
+.caseFileAssetImage { width: 5rem; height: 5rem; flex: 0 0 auto; object-fit: contain; border-radius: 0.5rem; background: rgba(255, 255, 255, 0.035); }
+.caseFile article div { display: grid; gap: 0.15rem; }
+.caseFile article small, .caseFileContents > small { color: #9994a6; text-transform: capitalize; }
+.caseFile article p { margin: 0.25rem 0 0; color: #c5c1cd; font-size: 0.82rem; }
+.caseFileEmpty { margin: 0; padding: 0.75rem; border: 1px dashed rgba(255, 255, 255, 0.09); border-radius: 0.7rem; color: #8f899a; font-size: 0.78rem; }
+.caseFileObservationSection { min-height: 0; }
+.caseFileObservationEntries { display: grid; gap: 0.45rem; max-block-size: clamp(9rem, 29dvh, 17rem); overflow-y: auto; overscroll-behavior: contain; padding-right: 0.2rem; }
+.caseFileObservationEntries:focus-visible { outline: 2px solid rgba(135, 219, 241, 0.8); outline-offset: 0.2rem; }
+
+@media (max-width: 700px) {
+  .caseFile { top: 0; right: 0; width: 100vw; height: 100dvh; border-radius: 0; }
+  .caseFileLayout { grid-template-columns: minmax(0, 1fr); }
+  .caseFileInvestigatorStage { display: none; }
+  .caseFileObservationEntries { max-block-size: min(31dvh, 15rem); }
+}
+
+.theoryBoard { display: grid; grid-template-rows: auto minmax(0, 1fr) auto; gap: 0.8rem; overflow: hidden; }
+.theoryBoardFields { min-height: 0; display: grid; align-content: start; gap: 0.8rem; overflow-y: auto; overscroll-behavior: contain; padding-right: 0.25rem; }
+.theoryBoardFields > label { display: grid; gap: 0.35rem; color: var(--v2-muted); font-size: 0.76rem; font-weight: 700; }
+.theoryBoard textarea, .theoryBoard select { min-height: 2.8rem; padding: 0.65rem; border: 1px solid var(--v2-edge); border-radius: 0.6rem; color: var(--v2-text); background: var(--v2-field); resize: vertical; }
+.theoryBoard textarea { min-height: 5rem; }
+.theoryBoard fieldset { display: grid; gap: 0.4rem; padding: 0.8rem; border: 1px solid var(--v2-edge); border-radius: 0.7rem; }
+.theoryBoard fieldset label { display: flex; gap: 0.45rem; }
+.theoryBoardFields > p { color: var(--v2-muted); font-size: 0.78rem; }
+.theoryBoard .caseCharge small { color: var(--v2-accent); }
+.theoryBoard .caseCharge strong { color: var(--v2-text); }
+.theoryBoardActions { display: grid; gap: 0.55rem; padding-top: 0.8rem; border-top: 1px solid var(--v2-edge); }
+.theoryBoardActions > button:not(.primaryAction) { padding: 0.65rem 0.8rem; border: 1px solid var(--v2-edge); border-radius: 0.6rem; background: var(--v2-panel); cursor: pointer; }
+.theoryBoardActions > .primaryAction { color: #fff; }
+.caseCheckActions { display: grid; gap: 0.65rem; }
+.caseCheckActions > div { display: grid; gap: 0.55rem; padding: 0.85rem; border: 1px solid var(--v2-edge); border-radius: 0.7rem; }
+.caseCheckActions h3 { margin: 0 0 0.5rem; font-size: 1rem; }
+.caseCheckActions p { margin: 0; font-size: 0.82rem; line-height: 1.5; }
+.caseCheckActions button { min-width: 0; padding: 0.65rem 0.8rem; border: 1px solid var(--v2-edge); border-radius: 0.6rem; background: var(--v2-panel); color: inherit; cursor: pointer; font: inherit; }
+.caseCheckActions button.primaryAction { background: var(--v2-accent); color: var(--v2-bg); }
+.caseCheckActions button:disabled { opacity: 0.5; cursor: default; }
+.theoryBoard header button { color: var(--v2-muted); }
+.investigation[data-theme="light"] .caseCheckActions .error { color: #a12d46; }
+.caseFileHeaderActions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 0.8rem; }
+.caseCharge { display: grid; gap: 0.25rem; padding: 0.8rem; border: 1px solid rgba(184, 156, 255, 0.32); border-radius: 0.7rem; background: rgba(150, 116, 255, 0.08); }
+.caseCharge small { color: #b89cff; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; }
+.caseCharge strong { color: #f5f1ff; }
+
+.court {
+  position: relative;
+  overflow: hidden;
+  background: #05060b;
+}
+
+.credibility { position: relative; z-index: 5; display: flex; align-items: center; justify-content: center; gap: 0.6rem; padding: 0.7rem; color: #b8b1c3; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.1em; }
+.credibility div { display: flex; gap: 0.24rem; }
+.credibility i { width: 1.8rem; height: 0.32rem; border-radius: 99px; background: rgba(255, 255, 255, 0.1); }
+.credibility i[data-full="true"] { background: linear-gradient(90deg, #ff5c9a, #af72ff); box-shadow: 0 0 0.8rem rgba(245, 85, 174, 0.45); }
+
+.courtStage {
+  position: fixed;
+  z-index: 1;
+  inset: 4.8rem 0 0;
+  overflow: hidden;
+  isolation: isolate;
+  background: #05060b;
+}
+.courtStage::after {
+  content: "";
+  position: absolute;
+  z-index: 1;
+  inset: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(180deg, rgba(3, 4, 8, 0.06) 52%, rgba(3, 4, 8, 0.7) 100%),
+    radial-gradient(ellipse at 50% 44%, transparent 42%, rgba(2, 3, 7, 0.34) 100%);
+}
+.courtBackdrop {
+  position: absolute;
+  z-index: 0;
+  inset: 0;
+  background: url("/debate/forum-dark.webp") center / cover no-repeat;
+  animation: courtCameraCut 180ms ease-out both;
+}
+.court[data-theme="light"] .courtBackdrop { background-image: url("/debate/forum-light.webp"); }
+.courtStage[data-camera="witness"] .courtBackdrop {
+  background-image: url("/debate/whodunnit-witness-dark.png");
+  background-position: center;
+}
+.court[data-theme="light"] .courtStage[data-camera="witness"] .courtBackdrop {
+  background-image: url("/debate/whodunnit-witness-light.png");
+}
+.courtStage[data-camera="judge"] .courtBackdrop {
+  background-image: url("/debate/moderator-dark.webp");
+}
+.court[data-theme="light"] .courtStage[data-camera="judge"] .courtBackdrop {
+  background-image: url("/debate/moderator-light.webp");
+}
+.courtStage[data-camera="prosecution"] .courtBackdrop {
+  transform: translate3d(-24%, -10%, 0) scale(1.48);
+}
+.courtStage[data-camera="defense"] .courtBackdrop {
+  transform: translate3d(24%, -10%, 0) scale(1.48);
+}
+@keyframes courtCameraCut {
+  from { opacity: 0.7; }
+  to { opacity: 1; }
+}
+
+.wideCourtComposition { position: absolute; z-index: 2; inset: 0; pointer-events: none; }
+.wideEvidenceTable {
+  position: absolute;
+  z-index: 2;
+  left: 50%;
+  bottom: -3rem;
+  width: min(52rem, 58vw);
+  height: auto;
+  object-fit: contain;
+  filter: drop-shadow(0 1.3rem 1.6rem rgba(0, 0, 0, 0.62));
+  transform: translate(calc(-50% + var(--whodunnit-wide-evidence-table-offset-x, 0%)), var(--whodunnit-wide-evidence-table-offset-y, 0%)) scale(var(--whodunnit-wide-evidence-table-scale, 1));
+  transform-origin: center bottom;
+}
+:global([data-camera-view="moderator"]) .wideEvidenceTable {
+  transform: translate(calc(-50% + var(--debate-moderator-table-offset-x, 0%)), var(--debate-moderator-table-offset-y, 0%)) scale(var(--debate-moderator-table-scale, 1));
+}
+.wideWitnessSilhouette {
+  position: absolute;
+  z-index: 5;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transform: translate(var(--whodunnit-wide-witness-silhouette-offset-x, 0%), var(--whodunnit-wide-witness-silhouette-offset-y, 0%)) scale(var(--whodunnit-wide-witness-silhouette-scale, 1));
+  transform-origin: center bottom;
+}
+.wideCourtPresence {
+  --court-presence-color: #a98cff;
+  position: absolute;
+  z-index: 3;
+  display: grid;
+  width: clamp(5rem, 10vw, 10rem);
+  justify-items: center;
+  opacity: 0.64;
+  filter: grayscale(0.45) brightness(0.72) drop-shadow(0 1rem 1.5rem rgba(0, 0, 0, 0.56));
+  transition: opacity 180ms ease, filter 180ms ease, transform 180ms ease;
+}
+.wideCourtPresence[data-role="prosecution"] { right: 7%; bottom: 16%; }
+.wideCourtPresence[data-role="defense"] { left: 7%; bottom: 16%; }
+.wideCourtPresence[data-role="judge"] { left: 50%; bottom: 31%; transform: translateX(-50%) scale(0.78); }
+.wideCourtPresence[data-speaking="true"] {
+  opacity: 1;
+  filter: drop-shadow(0 0 1.5rem color-mix(in srgb, var(--court-presence-color), transparent 42%)) drop-shadow(0 1rem 1.5rem rgba(0, 0, 0, 0.56));
+}
+.wideCourtPresence[data-role="judge"][data-speaking="true"] { transform: translateX(-50%) scale(0.84); }
+.wideCourtPresence > :not(small) { max-width: 100%; max-height: 9rem; }
+.wideCourtPresence small { padding: 0.2rem 0.4rem; border-bottom: 2px solid var(--court-presence-color); background: rgba(6, 8, 14, 0.78); font-size: 0.55rem; letter-spacing: 0.08em; text-transform: uppercase; }
+
+.galleryRail {
+  position: absolute;
+  z-index: 2;
+  right: -2%;
+  bottom: 13.5rem;
+  left: -2%;
+  height: 3.5rem;
+  border-top: 1px solid rgba(231, 225, 255, 0.3);
+  border-bottom: 1px solid rgba(0, 0, 0, 0.78);
+  background: linear-gradient(180deg, rgba(54, 51, 65, 0.96), rgba(7, 8, 14, 0.98));
+  box-shadow: 0 -1rem 2.5rem rgba(0, 0, 0, 0.32), 0 1.2rem 3rem rgba(0, 0, 0, 0.78);
+  transform: perspective(40rem) rotateX(58deg);
+  transform-origin: bottom;
+}
+
+/* The public gallery behind the bench: the jury and the suspects not on the stand or in the dock. */
+.courtGallery { position: absolute; z-index: 2; inset: 0; pointer-events: none; }
+.courtGallerySeat {
+  --court-presence-color: #a98cff;
+  position: absolute;
+  bottom: 46%;
+  left: var(--court-seat-x, 50%);
+  display: grid;
+  width: clamp(3.4rem, 6.2vw, 6rem);
+  justify-items: center;
+  opacity: 0;
+  filter: grayscale(0.6) brightness(0.62) drop-shadow(0 0.6rem 1rem rgba(0, 0, 0, 0.55));
+  transform: translate(calc(-50% + var(--court-seat-walk, 0%)), 0.6rem) scale(0.92);
+  transition: opacity 520ms ease, transform 640ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.courtGallerySeat[data-row="1"] { bottom: 50.5%; width: clamp(3rem, 5.4vw, 5.2rem); filter: grayscale(0.7) brightness(0.55) drop-shadow(0 0.5rem 0.9rem rgba(0, 0, 0, 0.55)); }
+.courtGallerySeat[data-side="left"] { --court-seat-walk: -6%; }
+.courtGallerySeat[data-side="right"] { --court-seat-walk: 6%; }
+.courtGallerySeat[data-arrived="true"] { opacity: 0.78; transform: translate(-50%, 0) scale(1); }
+.courtGallerySeat > :not(small) { max-width: 100%; max-height: 5.2rem; }
+.courtGallerySeat small { margin-top: 0.15rem; padding: 0.12rem 0.32rem; border-bottom: 1px solid var(--court-presence-color); background: rgba(6, 8, 14, 0.72); color: #cfc9dc; font-size: 0.48rem; letter-spacing: 0.08em; text-transform: uppercase; white-space: nowrap; }
+.courtArrivalChrome { position: absolute; z-index: 9; top: 1.1rem; left: 50%; display: grid; grid-template-columns: auto auto; gap: 0.15rem 0.7rem; align-items: baseline; padding: 0.55rem 0.9rem 0.65rem; border: 1px solid rgba(213, 202, 255, 0.24); border-radius: 0.8rem; background: rgba(7, 9, 18, 0.86); color: #f3eefc; transform: translateX(-50%); backdrop-filter: blur(14px); pointer-events: none; }
+.courtArrivalChrome span { color: #aaa5b7; font-size: 0.6rem; letter-spacing: 0.1em; text-transform: uppercase; }
+.courtArrivalChrome strong { font-size: 0.82rem; }
+.courtArrivalChrome i { grid-column: 1 / -1; display: block; height: 0.22rem; border-radius: 99px; background: rgba(255, 255, 255, 0.1); overflow: hidden; }
+.courtArrivalChrome i::before { content: ""; display: block; width: calc(var(--court-arrival-progress, 0) * 100%); height: 100%; border-radius: inherit; background: linear-gradient(90deg, #ff5c9a, #af72ff); transition: width 160ms linear; }
+/* While the Court assembles, testimony and the console wait; the room is the whole scene. */
+.court[data-arrival="true"] :is(.testimony, .courtReaction, .courtActions, .credibility, .choiceTray) { visibility: hidden; }
+/* Think is the Prosecutor's private reasoning, not an address to the Court. */
+.courtReaction[data-thought="true"] { font-style: italic; border-style: dashed; }
+.courtReaction[data-thought="true"] strong { font-style: normal; }
+/* The witness stand takes an item dragged from the drawer, as the suspect does in the room. */
+.witnessAvatar[data-drop-target="armed"] { filter: drop-shadow(0 2rem 3rem rgba(0, 0, 0, 0.62)) drop-shadow(0 0 1.4rem rgba(255, 114, 182, 0.35)); }
+.witnessAvatar[data-drop-target="hover"] { filter: drop-shadow(0 2rem 3rem rgba(0, 0, 0, 0.62)) drop-shadow(0 0 2.2rem rgba(255, 114, 182, 0.7)); }
+.counselComposition { position: absolute; z-index: 7; inset: 0; pointer-events: none; }
+.counselSeat {
+  --counsel-color: #a98cff;
+  position: absolute;
+  bottom: 14.6rem;
+  display: grid;
+  width: min(11rem, 17vw);
+  justify-items: center;
+  opacity: 0.58;
+  filter: grayscale(0.55) brightness(0.75) drop-shadow(0 1rem 1.7rem rgba(0, 0, 0, 0.48));
+  transition: opacity 180ms ease, filter 180ms ease, transform 180ms ease;
+}
+.counselSeat[data-speaking="true"] { opacity: 1; filter: drop-shadow(0 0 1.7rem color-mix(in srgb, var(--counsel-color), transparent 40%)) drop-shadow(0 1rem 1.7rem rgba(0, 0, 0, 0.48)); }
+.counselSeat[data-side="prosecution"] {
+  right: clamp(0.75rem, 3vw, 3rem);
+  transform: translate(var(--whodunnit-prosecution-mini-offset-x, 0%), var(--whodunnit-prosecution-mini-offset-y, 0%)) scale(var(--whodunnit-prosecution-mini-scale, 1));
+  transform-origin: right bottom;
+}
+.counselSeat[data-side="defense"] {
+  left: clamp(0.75rem, 3vw, 3rem);
+  transform: translate(var(--whodunnit-defense-mini-offset-x, 0%), var(--whodunnit-defense-mini-offset-y, 0%)) scale(var(--whodunnit-defense-mini-scale, 1));
+  transform-origin: left bottom;
+}
+.counselAvatar { display: grid; width: 100%; max-height: 10rem; place-items: end center; padding: 0; overflow: hidden; background: none; }
+.counselAvatar > * { max-width: 100%; max-height: 10rem; }
+.counselIdentity { display: grid; width: 100%; padding: 0.42rem 0.55rem; border-bottom: 2px solid var(--counsel-color); background: rgba(7, 9, 18, 0.86); text-align: center; }
+.counselIdentity small { color: #aaa5b7; font-size: 0.62rem; text-transform: uppercase; letter-spacing: 0.08em; }
+.counselGlyph { display: none; width: 3rem; height: 3rem; place-items: center; border: 1px solid color-mix(in srgb, var(--counsel-color), transparent 35%); border-radius: 50%; color: var(--counsel-color); background: rgba(7, 9, 18, 0.92); box-shadow: 0 0 1rem color-mix(in srgb, var(--counsel-color), transparent 58%); }
+
+.witnessStand { position: absolute; z-index: 3; inset: 0; overflow: hidden; pointer-events: none; }
+.witnessAvatar { position: absolute; z-index: 3; left: 50%; bottom: clamp(21rem, 36vh, 27rem); display: grid; width: min(28rem, 36vw); height: min(53vh, 34rem); place-items: end center; filter: drop-shadow(0 2rem 3rem rgba(0, 0, 0, 0.62)); transform: translate(-50%, var(--whodunnit-witness-offset-y, 0%)) scale(var(--whodunnit-witness-scale, 1)); transform-origin: center bottom; }
+.witnessAvatar > :not([data-signal-voice-action]) { max-height: 100%; }
+.witnessStandAsset { position: absolute; z-index: 4; inset: 0; width: 100%; height: 100%; object-fit: cover; filter: drop-shadow(0 2rem 2.5rem rgba(0, 0, 0, 0.48)); }
+
+/* Stage Alignment hosts the Court in a smaller frame than live playback.
+   Keep its composition proportional to the player camera instead of letting
+   live viewport units enlarge and crop the preview actors and foreground. */
+:global([data-whodunnit-court-preview]) .wideEvidenceTable { bottom: -4%; width: 42%; }
+:global([data-whodunnit-court-preview]) .wideCourtPresence { width: 8%; }
+:global([data-whodunnit-court-preview]) .wideCourtPresence > :not(small) { max-height: 13%; }
+:global([data-whodunnit-court-preview]) .galleryRail { bottom: 19%; height: 5%; }
+:global([data-whodunnit-court-preview]) .counselSeat { bottom: 21%; width: 9%; }
+:global([data-whodunnit-court-preview]) .counselAvatar,
+:global([data-whodunnit-court-preview]) .counselAvatar > * { max-height: 13%; }
+:global([data-whodunnit-court-preview]) .witnessAvatar { bottom: 36%; width: 23%; height: 49%; }
+
+.courtPodiumFocus,
+.courtJudgeFocus { position: absolute; z-index: 3; inset: 0; pointer-events: none; }
+.courtPodiumFocus {
+  transform-origin: center;
+}
+.courtPodiumFocus[data-side="prosecution"] { transform: translate3d(-24%, -10%, 0) scale(1.48); }
+.courtPodiumFocus[data-side="defense"] { transform: translate3d(24%, -10%, 0) scale(1.48); }
+.courtPodiumAvatar { position: absolute; z-index: 3; bottom: 30.5%; display: block; width: clamp(126px, 11.4vw, 180px); filter: drop-shadow(0 24px 28px rgba(0, 0, 0, 0.42)); transform: translateX(-50%); }
+.courtJudgeAvatar { position: absolute; z-index: 3; bottom: 14rem; display: grid; width: min(30rem, 38vw); height: min(61vh, 40rem); place-items: end center; filter: drop-shadow(0 2rem 3rem rgba(0, 0, 0, 0.62)); }
+.courtPodiumAvatar > :not([data-signal-voice-action]),
+.courtJudgeAvatar > :not([data-signal-voice-action]) { max-width: 100%; max-height: 100%; }
+.courtPodiumFocus[data-side="prosecution"] .courtPodiumAvatar { left: 84.9%; }
+.courtPodiumFocus[data-side="defense"] .courtPodiumAvatar { left: 15.1%; }
+.courtPodiumForeground { position: absolute; z-index: 4; inset: 0; background: url("/debate/forum-dark-foreground.png") center / cover no-repeat; }
+.court[data-theme="light"] .courtPodiumForeground { background-image: url("/debate/forum-light-foreground.png"); }
+.courtJudgeAvatar { left: 50%; bottom: 14.5rem; width: min(30rem, 38vw); transform: translateX(-50%); }
+.courtPodiumIdentity { position: absolute; z-index: 6; bottom: 27%; display: grid; min-width: 14rem; padding: 0.55rem 0.9rem; border-bottom: 3px solid var(--court-presence-color); background: rgba(7, 9, 18, 0.9); text-align: center; transform: translateX(-50%); backdrop-filter: blur(12px); }
+.courtPodiumIdentity small { color: #aaa5b7; font-size: 0.62rem; text-transform: uppercase; letter-spacing: 0.08em; }
+.courtPodiumFocus[data-side="prosecution"] .courtPodiumIdentity { left: 84.9%; }
+.courtPodiumFocus[data-side="defense"] .courtPodiumIdentity { left: 15.1%; }
+.courtJudgeFocus .courtPodiumIdentity { bottom: 15rem; left: 50%; }
+.courtJudgeGavel { position: absolute; z-index: 5; right: calc(50% - 15rem); bottom: 12.6rem; width: min(10rem, 17vw); height: auto; filter: drop-shadow(0 0.9rem 1.2rem rgba(0, 0, 0, 0.72)); }
+
+.courtEvidenceProjectors {
+  position: absolute;
+  z-index: 8;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.courtEvidenceProjector {
+  --court-projector-accent: #72d7ff;
+  --court-projector-anchor: 53%;
+  position: absolute;
+  top: clamp(7.75rem, 14vh, 11rem);
+  bottom: clamp(25rem, 41vh, 32rem);
+  display: grid;
+  width: min(29rem, 31vw);
+  grid-template-rows: minmax(0, 1fr) 4.4rem;
+  align-items: end;
+}
+.courtEvidenceProjector[data-projector-side="image"] { left: clamp(1rem, 4.5vw, 6rem); }
+.courtEvidenceProjector[data-projector-side="record"] {
+  --court-projector-accent: #c281ff;
+  --court-projector-anchor: 47%;
+  right: clamp(1rem, 4.5vw, 6rem);
+}
+.courtEvidenceProjection {
+  position: relative;
+  z-index: 3;
+  display: grid;
+  min-height: 0;
+  align-self: stretch;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--court-projector-accent), transparent 48%);
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--court-projector-accent), transparent 91%), transparent 38%),
+    linear-gradient(155deg, rgba(14, 18, 31, 0.91), rgba(5, 8, 17, 0.84));
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.035),
+    inset 0 0 2.4rem color-mix(in srgb, var(--court-projector-accent), transparent 91%),
+    0 1.8rem 4rem rgba(0, 0, 0, 0.5),
+    0 0 2rem color-mix(in srgb, var(--court-projector-accent), transparent 83%);
+  clip-path: polygon(1.2% 3%, 98.7% 0, 96.8% 97%, 2.8% 100%);
+  backdrop-filter: blur(13px) saturate(1.12);
+  animation: courtEvidenceResolve 460ms cubic-bezier(0.16, 0.8, 0.24, 1) both;
+}
+.courtEvidenceProjector[data-projector-side="record"] .courtEvidenceProjection { animation-delay: 90ms; }
+.court[data-theme="light"] .courtEvidenceProjection {
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--court-projector-accent), transparent 88%), transparent 38%),
+    linear-gradient(155deg, rgba(19, 22, 34, 0.88), rgba(7, 10, 18, 0.82));
+}
+.courtEvidenceProjection::before {
+  content: "";
+  position: absolute;
+  z-index: 4;
+  inset: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(180deg, transparent 0 45%, color-mix(in srgb, var(--court-projector-accent), transparent 78%) 50%, transparent 55%),
+    repeating-linear-gradient(180deg, rgba(255, 255, 255, 0.025) 0 1px, transparent 1px 4px);
+  mix-blend-mode: screen;
+  animation: courtEvidenceScan 520ms ease-out both;
+}
+.courtEvidenceProjection::after {
+  content: "";
+  position: absolute;
+  z-index: 4;
+  inset: 0;
+  pointer-events: none;
+  border-top: 1px solid color-mix(in srgb, var(--court-projector-accent), white 24%);
+  border-bottom: 1px solid color-mix(in srgb, var(--court-projector-accent), transparent 28%);
+  opacity: 0.5;
+  transform: translateX(2px);
+  mix-blend-mode: screen;
+}
+.courtEvidenceProjection small {
+  position: relative;
+  z-index: 5;
+  color: color-mix(in srgb, var(--court-projector-accent), white 40%);
+  font-size: 0.58rem;
+  font-weight: 750;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+.courtEvidenceProjector[data-projector-side="image"] .courtEvidenceProjection {
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 0.45rem;
+  padding: 0.75rem;
+}
+.courtEvidenceVisual {
+  position: relative;
+  z-index: 2;
+  display: grid;
+  min-height: 0;
+  place-items: center;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.055);
+  background:
+    radial-gradient(circle at 50% 45%, color-mix(in srgb, var(--court-projector-accent), transparent 88%), transparent 58%),
+    rgba(1, 4, 10, 0.48);
+}
+.courtEvidenceVisual img {
+  width: 100%;
+  height: 100%;
+  max-height: 100%;
+  padding: clamp(0.45rem, 1vw, 0.9rem);
+  object-fit: contain;
+  filter: drop-shadow(0 0.85rem 1.4rem rgba(0, 0, 0, 0.55));
+}
+.courtEvidenceVisual > span {
+  display: grid;
+  place-items: center;
+  color: white;
+  font-size: clamp(3rem, 7vw, 6.5rem);
+  filter: drop-shadow(0 0 1.25rem color-mix(in srgb, var(--court-projector-accent), transparent 52%));
+}
+.courtEvidenceProjector[data-projector-side="record"] .courtEvidenceProjection {
+  align-content: center;
+  gap: clamp(0.4rem, 0.9vh, 0.75rem);
+  padding: clamp(1rem, 2vw, 1.5rem);
+}
+.courtEvidenceProjector[data-projector-side="record"] strong,
+.courtEvidenceProjector[data-projector-side="record"] p,
+.courtEvidenceProjector[data-projector-side="record"] span { position: relative; z-index: 5; }
+.courtEvidenceProjector[data-projector-side="record"] strong {
+  font-size: clamp(1.05rem, 1.75vw, 1.55rem);
+  line-height: 1.05;
+  text-wrap: balance;
+}
+.courtEvidenceProjector[data-projector-side="record"] p {
+  display: -webkit-box;
+  margin: 0;
+  overflow: hidden;
+  color: #d3cedb;
+  font-size: clamp(0.72rem, 1.05vw, 0.92rem);
+  line-height: 1.45;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 5;
+}
+.courtEvidenceProjector[data-projector-side="record"] span {
+  color: #9690a2;
+  font-size: 0.58rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.courtEvidenceBeam {
+  position: absolute;
+  z-index: 1;
+  bottom: 2.9rem;
+  left: calc(var(--court-projector-anchor) - 24%);
+  width: 48%;
+  height: 48%;
+  opacity: 0.46;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--court-projector-accent), transparent 92%), color-mix(in srgb, var(--court-projector-accent), transparent 58%));
+  filter: blur(0.5rem);
+  clip-path: polygon(42% 100%, 58% 100%, 100% 0, 0 0);
+  mix-blend-mode: screen;
+  animation: courtEvidenceBeamResolve 520ms ease-out both;
+}
+.courtEvidenceProjectorMount {
+  position: absolute;
+  z-index: 5;
+  bottom: 0;
+  left: var(--court-projector-anchor);
+  width: 5.4rem;
+  height: 4.2rem;
+  filter: drop-shadow(0 1rem 1rem rgba(0, 0, 0, 0.76));
+  transform: translateX(-50%);
+}
+.courtEvidenceSocket {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: 1.5rem;
+  border: 1px solid rgba(222, 228, 242, 0.24);
+  background:
+    linear-gradient(180deg, rgba(143, 151, 168, 0.42), rgba(19, 23, 32, 0.94) 38%, rgba(4, 6, 11, 0.98)),
+    repeating-linear-gradient(90deg, transparent 0 0.8rem, rgba(255, 255, 255, 0.05) 0.8rem 0.85rem);
+  box-shadow: inset 0 1px rgba(255, 255, 255, 0.16), 0 0.4rem 0 rgba(2, 3, 7, 0.72);
+  clip-path: polygon(7% 0, 93% 0, 100% 42%, 86% 100%, 14% 100%, 0 42%);
+}
+.courtEvidencePrism {
+  position: absolute;
+  z-index: 2;
+  top: 0;
+  left: 50%;
+  width: 3.2rem;
+  height: 3rem;
+  border: 1px solid color-mix(in srgb, var(--court-projector-accent), white 24%);
+  background:
+    linear-gradient(128deg, rgba(255, 255, 255, 0.62) 0 7%, transparent 8% 28%, color-mix(in srgb, var(--court-projector-accent), transparent 42%) 29% 48%, transparent 49%),
+    linear-gradient(230deg, color-mix(in srgb, var(--court-projector-accent), transparent 35%), rgba(15, 18, 31, 0.48) 58%, rgba(255, 255, 255, 0.28));
+  box-shadow:
+    inset 0 0 1.2rem rgba(255, 255, 255, 0.28),
+    0 0 0.8rem color-mix(in srgb, var(--court-projector-accent), transparent 28%),
+    0 0 2.4rem color-mix(in srgb, var(--court-projector-accent), transparent 60%);
+  clip-path: polygon(50% 0, 100% 86%, 50% 100%, 0 86%);
+  transform: translateX(-50%) perspective(8rem) rotateX(-8deg);
+  transform-origin: center bottom;
+}
+.courtEvidencePrism::after {
+  content: "";
+  position: absolute;
+  inset: 32% 34% 22%;
+  border-radius: 50%;
+  background: white;
+  box-shadow: 0 0 0.8rem 0.25rem var(--court-projector-accent);
+  mix-blend-mode: screen;
+}
+@keyframes courtEvidenceResolve {
+  from { opacity: 0; filter: blur(0.45rem); transform: translateY(0.9rem) scaleY(0.86); }
+  54% { opacity: 0.82; transform: translateY(0.15rem) scaleY(1.015); }
+  to { opacity: 1; filter: blur(0); transform: none; }
+}
+@keyframes courtEvidenceScan {
+  from { opacity: 0; transform: translateY(-42%); }
+  38% { opacity: 0.72; }
+  to { opacity: 0.16; transform: translateY(42%); }
+}
+@keyframes courtEvidenceBeamResolve {
+  from { opacity: 0; transform: scaleY(0.05); transform-origin: bottom; }
+  to { opacity: 0.46; transform: scaleY(1); transform-origin: bottom; }
+}
+
+.testimony { position: fixed; z-index: 10; left: 50%; bottom: 8.4rem; width: min(52rem, calc(100vw - 2rem)); padding: 1rem 1.2rem; border: 1px solid rgba(176, 146, 255, 0.35); border-radius: 0.9rem; background: rgba(7, 9, 18, 0.93); box-shadow: 0 1.4rem 4rem rgba(0, 0, 0, 0.55); transform: translateX(-50%); backdrop-filter: blur(18px); }
+.testimony p { margin: 0.4rem 0; font-size: clamp(1rem, 2vw, 1.25rem); line-height: 1.45; }
+.testimony p[role="button"],
+.courtReaction[role="button"] { cursor: pointer; }
+.testimony p[role="button"]:focus-visible,
+.courtReaction[role="button"]:focus-visible { outline: 2px solid #c0a8ff; outline-offset: 0.2rem; }
+.testimony > small { color: #9b95aa; }
+.testimonyNav { display: flex; align-items: center; justify-content: space-between; color: #b4adbf; font-size: 0.74rem; }
+.testimonyNav button { width: 2.2rem; height: 2.2rem; border: 1px solid rgba(255, 255, 255, 0.13); border-radius: 50%; background: rgba(255, 255, 255, 0.04); cursor: pointer; }
+
+.courtReaction { position: fixed; bottom: 16.2rem; width: min(39rem, calc(100vw - 2rem)); }
+.courtActions { bottom: 0.75rem; }
+
+.prosecutionChoice { position: fixed; z-index: 70; inset: 50% auto auto 50%; display: grid; width: min(38rem, calc(100vw - 2rem)); gap: 0.55rem; padding: 1.3rem; border: 1px solid rgba(184, 153, 255, 0.46); border-radius: 1rem; background: rgba(9, 11, 22, 0.98); box-shadow: 0 2rem 7rem rgba(0, 0, 0, 0.72), 0 0 0 100vmax rgba(2, 3, 8, 0.58); transform: translate(-50%, -50%); }
+.prosecutionChoice h2 { margin: 0.2rem 0 0.7rem; }
+.prosecutionChoice button { padding: 0.8rem; text-align: left; border: 1px solid rgba(255, 255, 255, 0.12); border-radius: 0.65rem; background: rgba(255, 255, 255, 0.04); cursor: pointer; }
+.prosecutionChoice button:hover { border-color: #a98cff; background: rgba(169, 140, 255, 0.12); }
+
+.callout { --mystery-callout-color: #b292ff; position: fixed; z-index: 90; inset: 0; display: grid; place-items: center; overflow: hidden; pointer-events: none; animation: calloutLife 1.65s ease both; }
+.callout::before { content: ""; position: absolute; left: -20%; width: 140%; height: 9rem; background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--mystery-callout-color), #13051d 55%) 18%, color-mix(in srgb, var(--mystery-callout-color), #13051d 35%) 80%, transparent); transform: rotate(-7deg) skewX(-15deg); box-shadow: 0 0 4rem color-mix(in srgb, var(--mystery-callout-color), transparent 48%); }
+.callout span { position: relative; z-index: 2; padding: 0.15em; color: white; font-size: clamp(3rem, 11vw, 9rem); font-weight: 1000; font-style: italic; line-height: 0.82; letter-spacing: -0.075em; text-align: center; -webkit-text-stroke: 1px rgba(255, 255, 255, 0.6); text-shadow: 0.06em 0.07em #190719, -0.03em -0.03em var(--mystery-callout-color), 0 0 0.35em var(--mystery-callout-color); transform: rotate(-7deg) skewX(-8deg); animation: calloutText 1.65s cubic-bezier(0.12, 0.78, 0.18, 1) both; }
+@keyframes calloutLife { 0% { opacity: 0; } 9%, 73% { opacity: 1; } 100% { opacity: 0; visibility: hidden; } }
+@keyframes calloutText { 0% { transform: translateX(-100vw) rotate(-7deg) skewX(-8deg) scale(1.4); } 16% { transform: translateX(0) rotate(-7deg) skewX(-8deg) scale(1); } 78% { transform: translateX(0) rotate(-7deg) skewX(-8deg) scale(1); } 100% { transform: translateX(80vw) rotate(-7deg) skewX(-8deg) scale(0.9); } }
+@keyframes calloutStaticLife { 0%, 75% { opacity: 1; } 100% { opacity: 0; visibility: hidden; } }
+
+.verdict { display: grid; align-content: start; justify-items: center; gap: 1rem; padding: 7rem max(1rem, calc((100vw - 62rem) / 2)) 4rem; text-align: center; }
+.verdict > h1 { margin: 0; font-size: clamp(4rem, 14vw, 10rem); line-height: 0.82; letter-spacing: -0.075em; }
+.verdict > h1[data-result="guilty"] { color: #ff77aa; text-shadow: 0 0 2rem rgba(255, 65, 139, 0.35); }
+.verdict > h1[data-result="not_guilty"] { color: #7de5ff; text-shadow: 0 0 2rem rgba(77, 213, 255, 0.3); }
+.verdict > h1[data-result="mixed"] { color: #d7c7ff; font-size: clamp(3.2rem, 10vw, 7.5rem); text-shadow: 0 0 2rem rgba(151, 111, 255, 0.3); }
+.verdict > h1[data-case-check-result] { max-width: 100%; overflow-wrap: anywhere; font-size: clamp(2.8rem, 10vw, 7rem); line-height: 1; }
+.verdict > h1[data-case-check-result="correct"] { color: var(--v2-accent, #7de5ff); }
+.defendantVerdicts { display: grid; grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr)); gap: 0.65rem; width: min(42rem, 100%); }
+.defendantVerdicts article { display: grid; gap: 0.3rem; padding: 0.9rem; border: 1px solid rgba(255, 255, 255, 0.12); border-radius: 0.75rem; background: rgba(255, 255, 255, 0.035); }
+.defendantVerdicts article span { font-weight: 900; letter-spacing: 0.08em; }
+.defendantVerdicts article[data-result="guilty"] span { color: #ff77aa; }
+.defendantVerdicts article[data-result="not_guilty"] span { color: #7de5ff; }
+.truthGrade { width: min(42rem, 100%); padding: 1.1rem; border: 1px solid var(--v2-edge); border-radius: 0.9rem; background: rgba(255, 255, 255, 0.035); }
+.truthGrade h2 { margin: 0; text-transform: capitalize; }
+.truthGrade p { color: #b9b4c4; }
+.ballots { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.65rem; width: 100%; text-align: left; }
+.ballots h2 { grid-column: 1 / -1; margin-bottom: 0; }
+.ballots article { display: grid; grid-template-columns: 1fr auto; gap: 0.25rem 0.65rem; padding: 0.85rem; border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 0.75rem; background: rgba(255, 255, 255, 0.03); }
+.ballots article span { color: #b89cff; font-weight: 800; text-transform: uppercase; }
+.ballots article p, .ballots article small { grid-column: 1 / -1; margin: 0; color: #aaa5b4; }
+.ballots article small { color: #ff9cca; }
+
+/* Light-mode shell and control palettes. Photographic rooms, the threshold
+   walk, CRT projection, and the courtroom stage remain authored scene fields;
+   their surrounding navigation and every actionable surface stay Light. */
+.forge[data-theme="light"] {
+  --forge-scene-canvas: #fff;
+  --forge-title-ink: #101923;
+  --forge-title-pending: #354a5f;
+  --forge-title-shadow: 0 1px rgba(255, 255, 255, 0.94), 0 0.45rem 1.4rem rgba(255, 255, 255, 0.82);
+  --forge-eyebrow-ink: #513890;
+  --forge-exterior-label-ink: #4a386c;
+  --forge-copy-ink: #364b60;
+  --forge-meta-ink: #42586e;
+  --forge-waiting-ink: #465b70;
+  --forge-complete-ink: #3e625a;
+  --forge-current-work-ink: #513f78;
+  --forge-substep-ink: #465b70;
+  --forge-substep-complete-ink: #3e625a;
+  --forge-note-label-ink: #17697e;
+  --forge-note-copy-ink: #31495f;
+  --forge-notice-ink: #364b60;
+  --forge-raised-surface: rgba(235, 243, 249, 0.98);
+}
+
+.forge[data-theme="light"] .forgeCard[data-exterior-hero="true"]::after {
+  background: none;
+}
+
+.titleCard[data-theme="light"] {
+  --title-card-title-ink: #101923;
+  --title-card-eyebrow-ink: #513890;
+  background-color: #05070d;
+}
+
+.caseOpening[data-theme="light"] {
+  background: #000;
+}
+
+.court[data-theme="light"] {
+  background: #05060b;
+}
+
+.forge[data-theme="light"] .forgeCard:not([data-exterior-hero="true"]),
+.forge[data-theme="light"] .forgeCard[data-exterior-hero="true"] .forgePanel,
+.titleCard[data-theme="light"] .titleCardContent,
+.verdict[data-theme="light"] :is(
+    .truthGrade,
+    .defendantVerdicts article,
+    .ballots article
+  ) {
+  border-color: var(--v2-edge);
+  color: var(--v2-text);
+  background: var(--v2-chrome);
+  box-shadow: var(--v2-shadow), inset 0 1px rgba(255, 255, 255, 0.76);
+}
+
+.titleCard[data-theme="light"] .titleCardContent {
+  z-index: 7;
+}
+
+.titleCard[data-theme="light"] .titleCardContent h1 {
+  color: var(--title-card-title-ink);
+}
+
+.titleCard[data-theme="light"] .titleCardContent .eyebrow {
+  color: var(--title-card-eyebrow-ink);
+}
+
+.forge[data-theme="light"] .forgeCard[data-exterior-hero="true"] .forgePanel {
+  box-sizing: border-box;
+  border: 1px solid rgba(255, 255, 255, 0.72);
+  border-radius: 1.1rem;
+  padding: clamp(1rem, 2vw, 1.4rem);
+  backdrop-filter: blur(18px) saturate(1.06);
+}
+
+.forge[data-theme="light"] .forgeCard[data-exterior-hero="true"] > .forgeCaseIdentity {
+  color: var(--forge-title-ink);
+}
+
+.forge[data-theme="light"] .forgeCard[data-exterior-hero="true"] .forgeCaseIdentity h1 {
+  color: var(--forge-title-ink);
+}
+
+.forge[data-theme="light"] .eyebrow {
+  color: var(--forge-eyebrow-ink);
+}
+
+.forge[data-theme="light"] .forgeExteriorStatus {
+  color: var(--forge-exterior-label-ink);
+}
+
+.forge[data-theme="light"] :is(
+    .forgeMessage,
+    .forgeBackgroundNote,
+    .forgeRecovery,
+    .forgeTiming,
+    .forgeStages li,
+    .forgeSubsteps li,
+    .forgeDetails > summary,
+    .forgeTip > p
+  ) {
+  color: var(--forge-copy-ink);
+}
+
+.forge[data-theme="light"] .forgeTiming { color: var(--forge-meta-ink); font-size: 0.75rem; }
+.forge[data-theme="light"] .forgeStages li { color: var(--forge-waiting-ink); }
+.forge[data-theme="light"] .forgeStages li[data-state="complete"] { color: var(--forge-complete-ink); }
+.forge[data-theme="light"] .forgeSubsteps > p { color: var(--forge-current-work-ink); font-size: 0.72rem; }
+.forge[data-theme="light"] .forgeSubsteps li { color: var(--forge-substep-ink); }
+.forge[data-theme="light"] .forgeSubsteps li[data-state="complete"] { color: var(--forge-substep-complete-ink); }
+.forge[data-theme="light"] .forgeTip {
+  border-left-color: rgba(23, 105, 126, 0.66);
+  background: rgba(222, 239, 245, 0.92);
+}
+.forge[data-theme="light"] .forgeTip > span { color: var(--forge-note-label-ink); font-size: 0.72rem; }
+.forge[data-theme="light"] .forgeTip > p { color: var(--forge-note-copy-ink); }
+.forge[data-theme="light"] .forgeBackgroundNote { color: var(--forge-notice-ink); }
+.forge[data-theme="light"] .forgeRecovery { color: #7c2f45; background: rgba(251, 238, 242, 0.96); }
+.forge[data-theme="light"] .localVoiceNotice > span { color: var(--forge-note-label-ink); }
+.forge[data-theme="light"] :is(.localVoiceNotice small, .forgePanel > small) { color: var(--forge-meta-ink); }
+
+.forge[data-theme="light"] .forgeStages li > span {
+  border-color: rgba(54, 75, 96, 0.3);
+  color: var(--forge-meta-ink);
+}
+
+.forge[data-theme="light"] .forgeStages li[data-state="complete"] > span,
+.forge[data-theme="light"] .forgeSubsteps li[data-state="complete"] > span {
+  border-color: rgba(36, 114, 95, 0.38);
+  color: #24725f;
+}
+
+.forge[data-theme="light"] .forgeStages li[data-state="active"] > span {
+  border-color: #7658b5;
+  color: #513890;
+  background: rgba(106, 75, 192, 0.09);
+}
+
+.forge[data-theme="light"] .forgeSubsteps li[data-state="active"] > span {
+  color: #6545a7;
+}
+
+.forge[data-theme="light"] .forgeExteriorStatus > span {
+  color: var(--forge-note-label-ink);
+  text-shadow: none;
+}
+
+.forge[data-theme="light"] :is(
+    .forgeBackgroundNote,
+    .forgeSubsteps,
+    .forgeDetails,
+    .localVoiceNotice
+  ) {
+  border-color: var(--v2-edge);
+  background: var(--forge-raised-surface);
+}
+
+.forge[data-theme="light"] .productionReadinessList article {
+  border-color: var(--v2-edge);
+  background: var(--forge-raised-surface);
+}
+
+.forge[data-theme="light"] .productionReadinessList dl > div {
+  background: rgba(210, 225, 237, 0.66);
+}
+
+.forge[data-theme="light"] .progressTrack {
+  background: rgba(69, 91, 113, 0.14);
+}
+
+.forge[data-theme="light"] :is(
+    .forgeStages li[data-state="active"],
+    .forgeSubsteps li[data-state="active"]
+  ) {
+  color: var(--v2-text);
+}
+
+.forge[data-theme="light"] :is(
+    .forgeStages li[data-state="error"],
+    .forgeSubsteps li[data-state="attention"],
+    .error
+  ) {
+  color: #a62c4c;
+}
+
+.titleCard[data-theme="light"] .titleCardContent > p:not(.eyebrow),
+.titleCard[data-theme="light"] .titleMetadata span,
+.verdict[data-theme="light"] :is(
+    .truthGrade p,
+    .ballots article p,
+    .ballots article small
+  ) {
+  color: var(--v2-muted);
+}
+
+.caseOpening[data-theme="light"] :is(
+    .caseOpeningDialogue,
+    .caseOpeningJourney
+  ) {
+  border-color: var(--v2-edge);
+  color: var(--v2-text);
+  background: var(--v2-chrome);
+  box-shadow: var(--v2-shadow);
+}
+
+.caseOpening[data-theme="light"] .caseOpeningJourney > header :is(small, strong),
+.caseOpening[data-theme="light"] .caseOpeningJourneyStatus {
+  color: var(--v2-text);
+}
+
+.caseOpening[data-theme="light"] .caseOpeningJourneyRoom {
+  border-color: var(--v2-edge);
+  background: linear-gradient(145deg, #f8fbff, #dce9f2);
+  box-shadow: 0.28rem 0.34rem 0 rgba(112, 130, 147, 0.22), inset 0 0 1.2rem rgba(255, 255, 255, 0.52);
+}
+
+.caseOpening[data-theme="light"] .caseOpeningJourneyRoom[data-route="true"],
+.caseOpening[data-theme="light"] .mansionCorridor[data-route="true"] {
+  border-color: color-mix(in srgb, var(--v2-accent) 42%, var(--v2-edge));
+  background: linear-gradient(145deg, #f4effc, #ded3f1);
+}
+
+.caseOpening[data-theme="light"] .caseOpeningJourneyRoom[data-destination="true"] {
+  color: var(--v2-text);
+}
+
+.caseOpening[data-theme="light"] .caseOpeningJourneyRoom strong {
+  text-shadow: none;
+}
+
+.investigation[data-theme="light"] .investigationHeader,
+.court[data-theme="light"] .courtHeader {
+  border-bottom-color: var(--v2-edge);
+  color: var(--v2-text);
+  background: var(--v2-chrome);
+  box-shadow: 0 0.7rem 2rem rgba(49, 70, 91, 0.14);
+}
+
+.forge[data-theme="light"] :is(
+    .archiveButton,
+    .forgeActions button
+  ),
+.titleCard[data-theme="light"] .archiveButton,
+.investigation[data-theme="light"] :is(
+    .investigationHeader > button,
+    .investigationHeaderActions > button
+  ),
+.court[data-theme="light"] .courtHeader > button,
+.verdict[data-theme="light"] :is(
+    .archiveButton,
+    .verdictActions button
+  ) {
+  border-color: var(--v2-edge);
+  color: var(--v2-text);
+  background: var(--v2-field);
+  box-shadow: 0 0.4rem 1rem rgba(49, 70, 91, 0.12);
+}
+
+.investigation[data-theme="light"] .mansionBoard {
+  --mystery-panel: rgba(248, 251, 255, 0.96);
+  --mystery-line: rgba(69, 91, 113, 0.22);
+  --mystery-text: #172638;
+  --mystery-muted: #5c7186;
+  --mystery-violet: #6a4bc0;
+  --mystery-cyan: #147e88;
+  --mystery-gold: #926b19;
+  border-color: color-mix(in srgb, var(--mystery-gold) 30%, var(--mystery-line));
+  background:
+    radial-gradient(ellipse at 50% 10%, rgba(20, 126, 136, 0.1), transparent 38%),
+    radial-gradient(circle at 14% 82%, rgba(106, 75, 192, 0.055), transparent 34%),
+    linear-gradient(145deg, rgba(253, 254, 255, 0.98), rgba(237, 244, 249, 0.98));
+  box-shadow:
+    0 2rem 5.5rem rgba(49, 70, 91, 0.16),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.72),
+    inset 0 0 5rem rgba(106, 75, 192, 0.045);
+}
+
+.investigation[data-theme="light"] .mansionBoard::before {
+  opacity: 0.2;
+  mix-blend-mode: multiply;
+}
+
+.investigation[data-theme="light"] .mansionBoard[data-visuals-mode="true"] {
+  box-shadow:
+    0 2rem 5.5rem rgba(49, 70, 91, 0.16),
+    0 0 3rem rgba(106, 75, 192, 0.22),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.72);
+}
+
+.investigation[data-theme="light"] .mansionFloorPicker button,
+.investigation[data-theme="light"] .mansionRoomDetails,
+.investigation[data-theme="light"] .mansionTravelSkip span {
+  border-color: var(--v2-edge);
+  color: var(--v2-text);
+  background: var(--v2-field);
+}
+
+.investigation[data-theme="light"] .mansionFloorPicker button[data-selected="true"] {
+  color: #172638;
+  border-color: color-mix(in srgb, var(--mystery-gold) 58%, var(--v2-edge));
+  background: color-mix(in srgb, var(--mystery-gold) 22%, white);
+}
+
+.investigation[data-theme="light"] .mansionViewport {
+  border: 1px solid rgba(74, 105, 126, 0.2);
+  background:
+    radial-gradient(ellipse at 50% 42%, rgba(255, 255, 255, 0.98), rgba(224, 237, 245, 0.9) 68%, rgba(205, 222, 233, 0.94)),
+    #e8f1f6;
+  box-shadow:
+    0 1.6rem 3.4rem rgba(49, 70, 91, 0.16),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.76),
+    inset 0 -2rem 5rem rgba(65, 108, 130, 0.06);
+}
+
+.investigation[data-theme="light"] .mansionCanvas {
+  background:
+    linear-gradient(rgba(49, 91, 115, 0.11) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(49, 91, 115, 0.11) 1px, transparent 1px),
+    linear-gradient(rgba(49, 91, 115, 0.055) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(49, 91, 115, 0.055) 1px, transparent 1px),
+    radial-gradient(ellipse at 50% 44%, rgba(35, 126, 139, 0.09), transparent 68%);
+  background-size: 140px 140px, 140px 140px, 28px 28px, 28px 28px, auto;
+}
+
+.investigation[data-theme="light"] .venueHullOutline polygon {
+  fill: rgba(207, 229, 237, 0.62);
+  stroke: rgba(18, 108, 121, 0.64);
+  stroke-width: 0.55;
+  filter: drop-shadow(0.45rem 0.65rem 0.48rem rgba(49, 70, 91, 0.18));
+}
+
+.investigation[data-theme="light"] .venueMapOrientation {
+  color: rgba(20, 105, 116, 0.78);
+}
+
+.investigation[data-theme="light"] .venueMapOrientation strong {
+  color: rgba(48, 36, 72, 0.72);
+}
+
+.investigation[data-theme="light"] .venueConnectorLanding {
+  color: #0d5260;
+  border-color: rgba(20, 126, 136, 0.64);
+  background: rgba(250, 254, 255, 0.97);
+  box-shadow: 0 0 0 3px rgba(20, 126, 136, 0.1), 0 0 0.9rem rgba(20, 126, 136, 0.2);
+}
+
+.investigation[data-theme="light"] .mansionAmbientSpace {
+  --ambient-floor-top: #dcd8cf;
+  --ambient-floor-bottom: #c3cccd;
+  --ambient-wall: rgba(75, 96, 116, 0.34);
+  --ambient-bevel: rgba(255, 255, 255, 0.62);
+  --ambient-face-top: #9aa7b0;
+  --ambient-face-bottom: #6f7f8b;
+  box-shadow:
+    inset 0 1px rgba(255, 255, 255, 0.4),
+    0.35rem 0.42rem 0 rgba(60, 82, 97, 0.16),
+    0.6rem 0.8rem 1.25rem rgba(49, 70, 91, 0.1);
+  opacity: 0.92;
+}
+
+.investigation[data-theme="light"] .mansionAmbientSpace[data-pattern="inboard-compartment"] {
+  --ambient-floor-top: #e0d6c6;
+}
+
+.investigation[data-theme="light"] .mansionAmbientSpace[data-pattern="closed-volume"] {
+  --ambient-floor-top: #d0dadb;
+}
+
+.investigation[data-theme="light"] .mansionCorridor {
+  border-color: rgba(54, 82, 97, 0.54);
+  background:
+    repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.18) 0 0.35rem, transparent 0.35rem 0.72rem),
+    linear-gradient(145deg, #87a4b2, #5d7d8d);
+  box-shadow:
+    inset 0 1px rgba(244, 251, 253, 0.42),
+    inset 0 0 1.1rem rgba(31, 69, 85, 0.13),
+    0.25rem 0.3rem 0 rgba(60, 82, 97, 0.18),
+    0.55rem 0.75rem 1.2rem rgba(49, 70, 91, 0.12);
+}
+
+.investigation[data-theme="light"] .mansionDoor {
+  background: #f5c75f;
+  box-shadow: 0 0 0 1px rgba(121, 82, 8, 0.18), 0 0 0.7rem rgba(215, 151, 31, 0.48);
+}
+
+.investigation[data-theme="light"] .mansionRoom:not([data-room-art]) {
+  border-color: rgba(75, 96, 116, 0.42);
+  color: var(--v2-text);
+  background: linear-gradient(150deg, #fcfeff, #d9e7f0);
+  box-shadow:
+    inset 0 0 1.3rem rgba(255, 255, 255, 0.42),
+    0.25rem 0.3rem 0 rgba(78, 99, 116, 0.3),
+    0.55rem 0.7rem 1.2rem rgba(49, 70, 91, 0.14);
+}
+
+.investigation[data-theme="light"] .mansionRoom:not([data-discovered="true"]):not([data-room-art]) {
+  color: var(--v2-muted);
+  border-color: rgba(79, 101, 119, 0.34);
+  background: linear-gradient(145deg, #d4e0e8, #bdced9);
+}
+
+.investigation[data-theme="light"] .mansionRoom[data-selected="true"]:not([data-room-art]) {
+  border-color: color-mix(in srgb, var(--v2-accent) 46%, var(--v2-edge));
+  background: linear-gradient(145deg, #f6f1fd, #d9caef);
+  box-shadow:
+    inset 0 0 1.3rem rgba(255, 255, 255, 0.46),
+    0.3rem 0.36rem 0 rgba(92, 72, 128, 0.24),
+    0 0 0 1px rgba(106, 75, 192, 0.12),
+    0 0 1.65rem rgba(106, 75, 192, 0.22);
+}
+
+.investigation[data-theme="light"] .mansionRoom::before {
+  border-top-color: rgba(255, 255, 255, 0.72);
+  border-left-color: rgba(194, 211, 222, 0.56);
+}
+
+.investigation[data-theme="light"] .mansionRoom::after {
+  opacity: 0.82;
+  background: linear-gradient(180deg, #78909f, #425968);
+}
+
+.investigation[data-theme="light"] .mansionRoom[data-room-art] {
+  border-color: rgba(58, 79, 94, 0.58);
+  background:
+    linear-gradient(180deg, rgba(8, 19, 29, 0.04), rgba(8, 19, 29, 0.3)),
+    linear-gradient(145deg, rgba(255, 255, 255, 0.08), rgba(16, 32, 45, 0.08)),
+    var(--mansion-room-image) center / cover no-repeat;
+  box-shadow:
+    inset 0 0 1.2rem rgba(10, 28, 42, 0.16),
+    0.3rem 0.36rem 0 rgba(58, 77, 91, 0.4),
+    0.6rem 0.8rem 1.35rem rgba(49, 70, 91, 0.2);
+}
+
+.investigation[data-theme="light"] .mansionRoom[data-current="true"] {
+  outline-color: rgba(91, 58, 171, 0.66);
+}
+
+.investigation[data-theme="light"] .mansionRoom[data-selected="true"][data-room-art] {
+  border-color: rgba(180, 127, 25, 0.86);
+  box-shadow:
+    0.3rem 0.36rem 0 rgba(86, 65, 30, 0.38),
+    0 0 0 1px rgba(229, 181, 82, 0.24),
+    0 0 1.8rem rgba(185, 125, 20, 0.24);
+}
+
+.investigation[data-theme="light"] .mansionRoom:not([data-room-art]) > :is(strong, small) {
+  text-shadow: 0 1px rgba(255, 255, 255, 0.72);
+}
+
+.investigation[data-theme="light"] .mansionRoom[data-visuals-mode="true"][data-visual-readiness="fallback"] {
+  box-shadow: inset 0 0 1.1rem rgba(216, 145, 21, 0.14), 0 0 1.25rem rgba(216, 145, 21, 0.3);
+}
+
+.investigation[data-theme="light"] .mansionRoom[data-visuals-mode="true"][data-visual-readiness="default"] {
+  box-shadow: inset 0 0 1.1rem rgba(18, 142, 157, 0.12), 0 0 1.25rem rgba(18, 142, 157, 0.28);
+}
+
+.investigation[data-theme="light"] .mansionRoom[data-visuals-mode="true"][data-visual-readiness="upgraded"] {
+  box-shadow: inset 0 0 1.1rem rgba(106, 75, 192, 0.14), 0 0 1.35rem rgba(106, 75, 192, 0.3);
+}
+
+.investigation[data-theme="light"] .mansionOccupant {
+  background: #f8fbff;
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.76), 0 0 1rem color-mix(in srgb, currentColor 24%, transparent);
+}
+
+.investigation[data-theme="light"] :is(
+    .partnerFindings,
+    .choiceTray,
+    .acquisitionNotice,
+    .caseFile,
+    .theoryBoard
+  ),
+.court[data-theme="light"] :is(
+    .choiceTray,
+    .acquisitionNotice,
+    .caseFile,
+    .theoryBoard,
+    .testimony,
+    .prosecutionChoice
+  ) {
+  border-color: var(--v2-edge);
+  color: var(--v2-text);
+  background: var(--v2-chrome);
+  box-shadow: var(--v2-shadow);
+}
+
+.investigation[data-theme="light"] .caseFileBackdrop,
+.court[data-theme="light"] .caseFileBackdrop {
+  background: var(--v2-backdrop);
+}
+
+.investigation[data-theme="light"] :is(.dialogueBox, .courtReaction) {
+  border-color: color-mix(in srgb, var(--dialogue-accent) 46%, var(--v2-edge));
+  color: var(--v2-text);
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--dialogue-accent), transparent 91%), transparent 42%),
+    var(--v2-chrome);
+  box-shadow: var(--v2-shadow);
+}
+
+.investigation[data-theme="light"] .dialogueBox[data-speaker="persona"] {
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--dialogue-accent, #6a4bc0), transparent 91%), transparent 42%),
+    var(--v2-chrome);
+}
+
+.investigation[data-theme="light"] .investigationCommands,
+.court[data-theme="light"] .courtActions {
+  border-color: var(--v2-edge);
+  color: var(--v2-text);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.72), transparent 0.42rem),
+    radial-gradient(circle at 12% 0, rgba(95, 221, 255, 0.08), transparent 28%),
+    radial-gradient(circle at 88% 0, rgba(255, 99, 181, 0.07), transparent 28%),
+    linear-gradient(145deg, #f8fbff, #dce9f2);
+  box-shadow: var(--v2-shadow), inset 0 1px rgba(255, 255, 255, 0.84);
+}
+
+.investigation[data-theme="light"] .investigationCommands button,
+.court[data-theme="light"] .courtActions button,
+.investigation[data-theme="light"] .choiceTray button,
+.court[data-theme="light"] :is(.choiceTray, .prosecutionChoice) button {
+  border-color: var(--v2-edge);
+  color: var(--v2-text);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.9), #dce7ef 74%);
+  box-shadow: 0 0.35rem 0.9rem rgba(49, 70, 91, 0.13);
+}
+
+.investigation[data-theme="light"] .investigationCommands button:is(:active, [data-active="true"]),
+.court[data-theme="light"] .courtActions button:is(:active, [data-active="true"]) {
+  border-color: color-mix(in srgb, var(--command-accent) 52%, var(--v2-edge));
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--command-accent) 12%, white), transparent 46%),
+    linear-gradient(180deg, #f8fbff, #d6e3ed);
+}
+
+/* The room and Court are scene media. Keep their light-independent art while
+   pinning every caption and projection overlay to readable scene ink. */
+.investigation[data-theme="light"] :is(
+    .roomScene,
+    .roomSecuring,
+    .roomTitle,
+    .roomActorDrift > strong,
+    .roomProsecutorCue > strong
+  ),
+.court[data-theme="light"] :is(
+    .courtStage,
+    .wideCourtPresence small,
+    .galleryRail,
+    .counselIdentity,
+    .counselGlyph,
+    .courtPodiumIdentity,
+    .courtEvidenceProjection,
+    .courtEvidenceVisual
+  ) {
+  --v2-text: #f7f5ff;
+  --v2-muted: #aca8bd;
+  color: var(--v2-text);
+}
+
+.court[data-theme="light"] .courtEvidenceProjectors {
+  color: #f7f5ff;
+}
+
+.verdict[data-theme="light"] :is(.defendantVerdicts article, .ballots article) {
+  background: var(--v2-raised);
+}
+
+.verdict[data-theme="light"] .verdictActions button:hover:not(:disabled),
+.forge[data-theme="light"] :is(.archiveButton, .forgeActions button):hover:not(:disabled),
+.titleCard[data-theme="light"] .archiveButton:hover:not(:disabled),
+.investigation[data-theme="light"] :is(
+    .investigationHeader > button,
+    .investigationHeaderActions > button,
+    .investigationCommands button,
+    .choiceTray button
+  ):hover:not(:disabled),
+.court[data-theme="light"] :is(
+    .courtHeader > button,
+    .courtActions button,
+    .choiceTray button,
+    .prosecutionChoice button
+  ):hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--v2-accent) 48%, var(--v2-edge));
+  background-color: color-mix(in srgb, var(--v2-accent) 8%, white);
+}
+
+:is(
+    .forge,
+    .titleCard,
+    .caseOpening,
+    .investigation,
+    .court,
+    .verdict
+  )[data-theme="light"] :is(
+    button,
+    input,
+    select,
+    textarea,
+    [role="button"]
+  ):focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--v2-accent) 72%, #147e88);
+  outline-offset: 2px;
+}
+
+:is(
+    .forge,
+    .titleCard,
+    .investigation,
+    .court,
+    .verdict
+  )[data-theme="light"] :is(button, input, select, textarea):disabled {
+  color: color-mix(in srgb, var(--v2-muted) 72%, transparent);
+  border-color: color-mix(in srgb, var(--v2-edge) 72%, transparent);
+  cursor: not-allowed;
+}
+
+@media (max-width: 760px) {
+  .forge { padding: 4.5rem 0.65rem 1rem; }
+  .forgeCard[data-exterior-hero="true"] { min-height: calc(100dvh - 5.5rem); padding: 1.25rem; }
+  .forgeCard[data-exterior-hero="true"]::after { background: linear-gradient(0deg, rgba(4, 6, 12, 0.98) 0 64%, rgba(4, 6, 12, 0.46) 100%); }
+  .forgeCard[data-exterior-hero="true"] > :not(.forgePrism) { width: 100%; }
+  .titleCardContent[data-door-threshold="true"] {
+    top: 4.5rem;
+    right: 1rem;
+    left: 1rem;
+    width: auto;
+  }
+  .titleCardContent[data-door-threshold="true"] .titlePrism { display: none; }
+  .titleCardContent[data-door-threshold="true"] h1 { font-size: clamp(1.8rem, 10vw, 3.2rem); }
+  .titleCardContent[data-door-threshold="true"] .titleMetadata span:nth-child(n + 3) { display: none; }
+  .titleDoor { width: clamp(7rem, 28vw, 10rem); }
+  .caseOpeningJourney {
+    width: calc(100vw - 1rem);
+    height: min(78dvh, 42rem);
+    min-height: 20rem;
+    padding: 0.7rem;
+  }
+  .caseOpeningJourney > header { top: 0.7rem; left: 0.85rem; }
+  .caseOpeningJourneyStatus { right: 0.75rem; bottom: 0.65rem; left: 0.75rem; font-size: 0.58rem; }
+  .investigationHeader, .courtHeader { grid-template-columns: auto 1fr auto; }
+  .investigationHeader > div, .courtHeader > div { text-align: left; }
+  .investigationHeaderIdentity .eyebrow, .courtHeader .eyebrow { display: none; }
+  .investigationHeaderActions { gap: 0.3rem; }
+  .roomArtStyleToggle > button { padding-inline: 0.4rem; font-size: 0.64rem; }
+  .investigationHeaderActions > button { padding-inline: 0.55rem; }
+  .mansionBoard { padding-inline: 0.6rem; }
+  .mansionHeading { grid-template-columns: minmax(0, 1fr) auto; align-items: center; }
+  .mansionAssetActions { grid-column: 1 / -1; grid-row: 2; justify-self: start; }
+  .mansionFloorPicker { grid-column: 2; grid-row: 1; }
+  .mansionWorkspace[data-with-assets="true"] { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) minmax(6rem, 25%); gap: 0.5rem; }
+  .foundItemVisualsPanel { grid-column: 1; grid-row: 2; padding: 0.5rem; gap: 0.35rem; }
+  .foundItemVisualsPanel > header small, .foundItemVisualsPanel > small { display: none; }
+  .mansionViewport { min-height: 0; }
+  .mansionCanvas { inset: 3%; }
+  .mansionRoom { padding: 0.25rem; }
+  .mansionRoom > strong, .mansionRoom > small { font-size: 0.62rem; }
+  .mansionRoomDetails { grid-template-columns: minmax(0, 1fr) auto; gap: 0.5rem; }
+  .mansionRoomDetails dl { display: none; }
+  .mansionRoomDetails button { min-width: 7.5rem; max-width: 10rem; }
+  .mansionHint { display: none; }
+  .investigationCommands, .courtActions { width: calc(100vw - 1rem); bottom: 0.5rem; grid-auto-columns: 1fr; gap: 0.35rem; padding: 1.35rem 0.42rem 0.55rem; }
+  .investigationCommands button, .courtActions button { min-height: 4.15rem; padding-inline: 0.25rem; }
+  .roomActor { left: 50%; bottom: 15.5rem; width: 72vw; }
+  .roomProsecutorCue { left: 0.5rem; bottom: 11.8rem; width: 6.5rem; }
+  .dialogueBox { bottom: 7rem; }
+  .investigation:has(.fileChargesButton) .dialogueBox { bottom: 10.45rem; }
+  .testimony { bottom: 7.1rem; }
+  .theoryHint { display: none; }
+  .fileChargesButton { right: 0.7rem; bottom: 6.9rem; }
+  .courtReaction { bottom: 15.6rem; }
+  .witnessAvatar { bottom: 19rem; width: min(66vw, 24rem); }
+  .witnessStandAsset { width: 100%; }
+  .counselSeat { bottom: 15rem; width: 6.8rem; }
+  .counselSeat[data-side="prosecution"] { right: 0.45rem; }
+  .counselSeat[data-side="defense"] { left: 0.45rem; }
+  .counselIdentity { padding-inline: 0.25rem; }
+  .counselIdentity strong { overflow: hidden; max-width: 100%; font-size: 0.68rem; text-overflow: ellipsis; white-space: nowrap; }
+  .courtJudgeAvatar { right: auto; bottom: 14rem; left: 50%; width: min(72vw, 28rem); transform: translateX(-50%); }
+  .courtJudgeFocus .courtPodiumIdentity { bottom: 14.8rem; min-width: 12rem; }
+  .courtJudgeGavel { right: calc(50% - 10rem); bottom: 13rem; }
+  .courtEvidenceProjectors {
+    top: 4.6rem;
+    right: 0.55rem;
+    bottom: auto;
+    left: 0.55rem;
+    display: grid;
+    grid-template-columns: minmax(7rem, 0.85fr) minmax(0, 1.15fr);
+    height: min(10rem, 24vh);
+    gap: 0.45rem;
+    padding: 0.45rem;
+    border: 1px solid rgba(199, 180, 255, 0.26);
+    border-radius: 0.85rem;
+    background: rgba(5, 8, 17, 0.88);
+    box-shadow: 0 1rem 2.4rem rgba(0, 0, 0, 0.52);
+    backdrop-filter: blur(14px);
+  }
+  .courtEvidenceProjector,
+  .courtEvidenceProjector[data-projector-side="image"],
+  .courtEvidenceProjector[data-projector-side="record"] {
+    position: relative;
+    inset: auto;
+    display: block;
+    width: auto;
+  }
+  .courtEvidenceProjection {
+    height: 100%;
+    clip-path: none;
+  }
+  .courtEvidenceProjector[data-projector-side="image"] .courtEvidenceProjection,
+  .courtEvidenceProjector[data-projector-side="record"] .courtEvidenceProjection { padding: 0.58rem; }
+  .courtEvidenceProjector[data-projector-side="record"] .courtEvidenceProjection { gap: 0.25rem; }
+  .courtEvidenceProjector[data-projector-side="record"] strong { font-size: 0.82rem; }
+  .courtEvidenceProjector[data-projector-side="record"] p { font-size: 0.66rem; line-height: 1.25; -webkit-line-clamp: 3; }
+  .courtEvidenceProjector[data-projector-side="record"] span { display: none; }
+  .courtEvidenceBeam,
+  .courtEvidenceProjectorMount { display: none; }
+  .wideCourtPresence { width: 4.8rem; }
+  .wideCourtPresence[data-role="prosecution"] { right: 4%; }
+  .wideCourtPresence[data-role="defense"] { left: 4%; }
+  .ballots { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 560px) {
+  .investigationModeBackButton { left: 0.5rem; bottom: 0.5rem; }
+  .investigationCommands::before, .courtActions::before { left: 0.7rem; font-size: 0.5rem; }
+  .investigationCommands::after, .courtActions::after { right: 0.7rem; width: 2rem; }
+  .investigationCommands button, .courtActions button { min-height: 3.9rem; font-size: 0.64rem; }
+  .investigationCommands button span, .courtActions button span { width: 1.65rem; height: 1.65rem; font-size: 0.9rem; }
+  .counselAvatar { display: none; }
+  .counselGlyph { display: grid; }
+  .counselSeat { width: 5.4rem; opacity: 0.76; filter: none; }
+  .counselSeat[data-speaking="true"] { filter: drop-shadow(0 0 1.2rem color-mix(in srgb, var(--counsel-color), transparent 36%)); }
+  .counselIdentity small { display: none; }
+  .galleryRail { bottom: 13.8rem; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .roomLoadingSpinner { animation: none; }
+  .progressTrack span { transition: none; }
+  .forgeCard[data-exterior-hero="true"]::before { transition: none; }
+  .forgeCaseIdentity h1 { animation: none; }
+  .titleCardContent { animation: none; }
+  .titleDoor,
+  .titleDoor::before,
+  .titleDoorFocus { animation: none; }
+  .titleCard[data-exterior-entering="true"]::after { animation: none; opacity: 1; }
+  .caseOpeningJourney { animation: none; }
+  .mansionCanvas { animation: none; }
+  .mansionRoom { transition: none; }
+  .forgePrism i,
+  .progressTrack span,
+  .investigation[data-opening-map-reveal="true"]::after,
+  .roomScene,
+  .roomProsecutorCue,
+  .acquisitionNotice,
+  .choiceTray,
+  .caseFile,
+  .theoryBoard { animation: none; }
+  .investigation[data-exterior-room-reveal="true"]::after {
+    animation: exteriorRoomReveal 320ms ease-out both;
+  }
+  .callout { inset: 42% 0 auto; animation: calloutStaticLife 1.65s step-end both; }
+  .callout span { animation: none; }
+  .courtBackdrop { animation: none; }
+  .courtEvidenceProjection,
+  .courtEvidenceProjection::before,
+  .courtEvidenceBeam { animation: none; }
+  .courtEvidenceProjection::before { opacity: 0.06; }
+  .counselSeat,
+  .wideCourtPresence { transition: none; }
+  .investigationCommands button,
+  .courtActions button,
+  .fileChargesButton { transition: none; }
+  .investigationCommands { transition: none; }
+  .roomParallaxLayer { transform: none; transition: opacity 180ms ease; }
+  .roomBackdrop, .roomBackdrop[data-blurred="true"] { transform: scale(1.025); transition: opacity 180ms ease; }
+  .roomActor[data-prosecutor-speaking="true"] { opacity: 1; transform: translateX(-50%); }
+  .roomActor,
+  .roomActor[data-first-entry] { animation: none; }
+  .roomProsecutorActor[data-staging="two-shot"][data-first-entry="true"] { animation: none; }
+  .itemDrawer { animation: none; }
+  .roomActorDrift { animation: none; transform: none; will-change: auto; }
+  .dialogueContinueHint { animation: none; }
+  .dialogueBox[data-casekeeper-stage="narration"] { animation: none; }
+  .casekeeperThinkingDots { width: 3ch; animation: none; }
+}
+
+/* Side rooms: the venue's ordinary spaces, named and doored, never entered. They wear
+ * the room tile at a quieter pitch and take no hover or selection. */
+.mansionRoom[data-side-room="true"] { cursor: default; color: color-mix(in srgb, var(--mystery-muted) 78%, var(--mystery-text)) !important; border-color: rgba(216, 197, 166, 0.22); background: linear-gradient(150deg, rgba(38, 40, 49, 0.94), rgba(17, 20, 27, 0.96)); }
+.mansionRoom[data-side-room="true"]:hover { border-color: rgba(216, 197, 166, 0.28); filter: none; }
+.mansionRoom[data-side-room="true"] > strong { font-size: 0.66rem; font-weight: 600; opacity: 0.88; }
+.mansionCanvas[data-deck-plan="true"] .mansionRoom[data-side-room="true"] { background: linear-gradient(150deg, rgba(38, 40, 49, 0.56), rgba(17, 20, 27, 0.64)); }
+.investigation[data-theme="light"] .mansionRoom[data-side-room="true"] { color: #4a5a6c !important; border-color: rgba(75, 96, 116, 0.28); background: linear-gradient(150deg, #e4e1da, #d0d7d9); }
+.investigation[data-theme="light"] .mansionRoom[data-side-room="true"]:hover { border-color: rgba(75, 96, 116, 0.34); }

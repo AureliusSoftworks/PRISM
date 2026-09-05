@@ -25,6 +25,19 @@ describe("account backup browser-local state", () => {
     assert.match(exportSource, /wildcardDecks:\s*commandCenterWildcardDecks/u);
   });
 
+  it("exports the personal avatar ink library with the account archive", () => {
+    const exportSource = sourceBetween(
+      "async function exportAccountAsPrismArchive()",
+      "function parseAccountBackupFromJson",
+    );
+
+    assert.match(
+      exportSource,
+      /await loadEncryptedAvatarDetailInkTemplates\(\s*user\.id,[\s\S]{0,100}window\.localStorage/u,
+    );
+    assert.match(exportSource, /\{ avatarInkTemplates \}/u);
+  });
+
   it("normalizes and restores Prompt Center state after the server snapshot", () => {
     const parseSource = sourceBetween(
       "function parseAccountBackupFromJson",
@@ -43,7 +56,10 @@ describe("account backup browser-local state", () => {
     assert.match(restoreSource, /setCommandCenterPreferredModel/u);
     assert.match(restoreSource, /setCommandCenterCommands/u);
     assert.match(restoreSource, /setCommandCenterWildcardDecks/u);
-    assert.match(restoreSource, /commandCenterStateStorageKey\(user\.id\)/u);
+    assert.match(
+      restoreSource,
+      /writeBrowserOwnerJsonV1\(\{\s*ownerId: user\.id,\s*logicalKey: "command-center-state"/u,
+    );
     assert.ok(
       importSource.indexOf("await refreshAll()") <
         importSource.indexOf("restoreAccountCommandCenter(backup.commandCenter)"),
@@ -59,5 +75,36 @@ describe("account backup browser-local state", () => {
 
     assert.match(parseSource, /\("commandCenter" in record/u);
     assert.match(parseSource, /return \{ snapshot: record \};/u);
+  });
+
+  it("normalizes and restores saved avatar ink after the server snapshot", () => {
+    const parseSource = sourceBetween(
+      "function parseAccountBackupFromJson",
+      "function restoreAccountBotLibraryGroups",
+    );
+    const restoreSource = sourceBetween(
+      "function restoreAccountAvatarInkTemplates",
+      "async function importAccountFromPrismFile",
+    );
+    const importSource = sourceBetween(
+      "async function importAccountFromPrismFile",
+      "async function handleAccountImportFileSelection",
+    );
+
+    assert.match(
+      parseSource,
+      /normalizeAvatarDetailInkTemplates\(\s*record\.avatarInkTemplates/u,
+    );
+    assert.match(
+      restoreSource,
+      /saveEncryptedAvatarDetailInkTemplates\(user\.id, templates\)/u,
+    );
+    assert.ok(
+      importSource.indexOf("await refreshAll") <
+        importSource.indexOf(
+          "restoreAccountAvatarInkTemplates(backup.avatarInkTemplates)",
+        ),
+      "Saved avatar ink should be restored after the server snapshot refresh",
+    );
   });
 });

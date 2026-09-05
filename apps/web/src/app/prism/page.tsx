@@ -35,7 +35,11 @@ const workflow = [
 
 export default function PrismPage() {
   return (
-    <main className={styles.pageShell}>
+    <main
+      className={styles.pageShell}
+      data-prism-public-handoff="true"
+      data-prism-document-theme-surface="true"
+    >
       <section className={styles.hero} aria-labelledby="prism-title">
         <div className={styles.orb} aria-hidden="true">
           <span />

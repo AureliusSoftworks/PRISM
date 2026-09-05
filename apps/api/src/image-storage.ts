@@ -15,6 +15,7 @@ import {
 } from "node:fs";
 import { dirname, relative, resolve } from "node:path";
 import { resolveDbPath } from "./db.ts";
+import { assertRefractionActive, currentRefractionSignal, onRefractionRollback } from "./refraction-cancellation.ts";
 
 const GENERATED_SUBDIR = "generated-images";
 const ASSET_CLEANUP_TRASH_SUBDIR = "asset-cleanup-trash";
@@ -67,14 +68,53 @@ export function buildGeneratedImageRelativePath(userId: string, imageId: string)
 }
 
 /**
- * Sidecar WebP thumbnail for a stored PNG (`*.png` → `*.thumb.webp`).
+ * Sidecar WebP thumbnail for a stored primary (`*.png` or `*.cold.webp` → `*.thumb.webp`).
  */
 export function thumbWebpRelativePathFromPngRelativePath(localRelPath: string): string {
   const t = localRelPath.trim();
-  if (!t.endsWith(".png")) {
-    throw new Error("Expected generated image path to end with .png.");
+  if (t.endsWith(".png")) {
+    return `${t.slice(0, -".png".length)}.thumb.webp`;
   }
-  return `${t.slice(0, -".png".length)}.thumb.webp`;
+  if (t.endsWith(".cold.webp")) {
+    return `${t.slice(0, -".cold.webp".length)}.thumb.webp`;
+  }
+  throw new Error("Expected generated image path to end with .png or .cold.webp.");
+}
+
+/** Canonical hot PNG path for an image id under a user. */
+export function buildGeneratedImageColdRelativePath(
+  userId: string,
+  imageId: string,
+): string {
+  if (!/^[a-zA-Z0-9_-]+$/.test(userId) || !/^[a-zA-Z0-9_-]+$/.test(imageId)) {
+    throw new Error("Invalid image path segment.");
+  }
+  return `${GENERATED_SUBDIR}/${userId}/${imageId}.cold.webp`;
+}
+
+export function buildGeneratedImageCompressUndoRelativePath(
+  primaryRelativePath: string,
+): string {
+  const t = primaryRelativePath.trim();
+  if (t.endsWith(".png")) {
+    return `${t.slice(0, -".png".length)}.compress-undo.png`;
+  }
+  if (t.endsWith(".cold.webp")) {
+    return `${t.slice(0, -".cold.webp".length)}.compress-undo.png`;
+  }
+  throw new Error("Expected generated image path to end with .png or .cold.webp.");
+}
+
+export function isColdGeneratedImageRelativePath(localRelPath: string): boolean {
+  return localRelPath.trim().endsWith(".cold.webp");
+}
+
+export function contentTypeForGeneratedImageRelativePath(
+  localRelPath: string,
+): "image/png" | "image/webp" {
+  return isColdGeneratedImageRelativePath(localRelPath)
+    ? "image/webp"
+    : "image/png";
 }
 
 /**
@@ -96,9 +136,54 @@ export function resolveAbsoluteUnderDataRoot(localRelPath: string): string {
 }
 
 export function writeGeneratedImageBytes(localRelPath: string, bytes: Buffer): void {
+  assertRefractionActive();
   const absolute = resolveAbsoluteUnderDataRoot(localRelPath);
   mkdirSync(dirname(absolute), { recursive: true });
+  if (currentRefractionSignal()) {
+    // Atomic no-overwrite, and register cleanup only after this run created the
+    // file. An EEXIST collision must never make rollback delete somebody else's.
+    writeFileSync(absolute, bytes, { flag: "wx" });
+    onRefractionRollback(`new-image-file:${localRelPath}`, () => {
+      invalidateGeneratedImageThumbnail(localRelPath);
+      tryUnlinkGeneratedImageFile(localRelPath);
+    });
+    return;
+  }
   writeFileSync(absolute, bytes);
+}
+
+/** Replaces one generated image without exposing a partially written file. */
+export function replaceGeneratedImageBytesAtomically(
+  localRelPath: string,
+  bytes: Buffer,
+): void {
+  const absolute = resolveAbsoluteUnderDataRoot(localRelPath);
+  mkdirSync(dirname(absolute), { recursive: true });
+  const temporaryPath = `${absolute}.${randomBytes(8).toString("hex")}.tmp`;
+  let descriptor: number | null = null;
+  try {
+    descriptor = openSync(temporaryPath, "wx", 0o600);
+    writeFileSync(descriptor, bytes);
+    fsyncSync(descriptor);
+    closeSync(descriptor);
+    descriptor = null;
+    renameSync(temporaryPath, absolute);
+  } finally {
+    if (descriptor !== null) closeSync(descriptor);
+    if (existsSync(temporaryPath)) unlinkSync(temporaryPath);
+  }
+}
+
+/** Removes a rebuildable thumbnail after its canonical PNG changes. */
+export function invalidateGeneratedImageThumbnail(localRelPath: string): void {
+  try {
+    const absolute = resolveAbsoluteUnderDataRoot(
+      thumbWebpRelativePathFromPngRelativePath(localRelPath),
+    );
+    if (existsSync(absolute)) unlinkSync(absolute);
+  } catch {
+    // A later GET /thumb can retry once the primary path is valid again.
+  }
 }
 
 /** Restore/import writes must never replace an existing file on an id collision. */
@@ -114,6 +199,29 @@ export function writeGeneratedImageBytesExclusive(
 export function readGeneratedImageBytes(localRelPath: string): Buffer {
   const absolute = resolveAbsoluteUnderDataRoot(localRelPath);
   return readFileSync(absolute);
+}
+
+/** Existing bytes owned by one generated PNG, including its thumbnail sidecar. */
+export function generatedImageStorageSizeBytes(localRelPath: string): number {
+  let total = 0;
+  const related = [
+    localRelPath.trim(),
+    thumbWebpRelativePathFromPngRelativePath(localRelPath),
+  ];
+  try {
+    related.push(buildGeneratedImageCompressUndoRelativePath(localRelPath));
+  } catch {
+    // Primary may already be invalid; size stays zero for related helpers.
+  }
+  for (const relatedPath of related) {
+    try {
+      const absolute = resolveAbsoluteUnderDataRoot(relatedPath);
+      if (existsSync(absolute)) total += statSync(absolute).size;
+    } catch {
+      // Invalid, missing, or unreadable paths contribute no reclaimable bytes.
+    }
+  }
+  return total;
 }
 
 function writeJsonAtomically(
@@ -144,7 +252,7 @@ function writeJsonAtomically(
   }
 }
 
-/** Best-effort delete of stored PNG and its `.thumb.webp` sidecar; ignores missing files. */
+/** Best-effort delete of stored primary, thumbnail, and compress-undo sidecars. */
 export function tryUnlinkGeneratedImageFile(localRelPath: string | null | undefined): void {
   if (!localRelPath?.trim()) return;
   const rel = localRelPath.trim();
@@ -161,6 +269,15 @@ export function tryUnlinkGeneratedImageFile(localRelPath: string | null | undefi
     const thumbAbs = resolveAbsoluteUnderDataRoot(thumbRel);
     if (existsSync(thumbAbs)) {
       unlinkSync(thumbAbs);
+    }
+  } catch {
+    // ignore
+  }
+  try {
+    const undoRel = buildGeneratedImageCompressUndoRelativePath(rel);
+    const undoAbs = resolveAbsoluteUnderDataRoot(undoRel);
+    if (existsSync(undoAbs)) {
+      unlinkSync(undoAbs);
     }
   } catch {
     // ignore
@@ -203,15 +320,24 @@ export function quarantineGeneratedImageFiles(
   ) {
     throw new Error("Asset cleanup can quarantine only this account's generated images.");
   }
-  const plannedFiles = uniquePaths.flatMap((primaryRelativePath) =>
-    [
+  const plannedFiles = uniquePaths.flatMap((primaryRelativePath) => {
+    const related = [
       primaryRelativePath,
       thumbWebpRelativePathFromPngRelativePath(primaryRelativePath),
-    ].map((sourceRelativePath) => ({
+    ];
+    try {
+      const undoRel = buildGeneratedImageCompressUndoRelativePath(primaryRelativePath);
+      if (existsSync(resolveAbsoluteUnderDataRoot(undoRel))) {
+        related.push(undoRel);
+      }
+    } catch {
+      // Primary extension already validated by thumb helper above.
+    }
+    return related.map((sourceRelativePath) => ({
       sourceRelativePath,
       quarantineRelativePath: `${recoveryRelativePath}/${sourceRelativePath}`,
-    })),
-  );
+    }));
+  });
 
   try {
     if (manifestRelativePath && recoveryManifest !== undefined) {
@@ -253,6 +379,13 @@ export function quarantineGeneratedImageFiles(
         primaryRelativePath,
         thumbWebpRelativePathFromPngRelativePath(primaryRelativePath),
       ];
+      try {
+        relatedPaths.push(
+          buildGeneratedImageCompressUndoRelativePath(primaryRelativePath),
+        );
+      } catch {
+        // ignore
+      }
       for (const sourceRelativePath of relatedPaths) {
         const sourceAbsolutePath = resolveAbsoluteUnderDataRoot(sourceRelativePath);
         if (!existsSync(sourceAbsolutePath)) continue;
@@ -408,9 +541,20 @@ export function listGeneratedImageRecoveryBatchesForUser(
 export function purgeGeneratedImageRecoveryBatch(
   batch: GeneratedImageRecoveryBatch,
 ): void {
+  purgeGeneratedImageQuarantine(batch.journal.userId, batch.quarantine);
+}
+
+/** Permanently removes one validated owner-scoped quarantine directory. */
+export function purgeGeneratedImageQuarantine(
+  userId: string,
+  quarantine: GeneratedImageQuarantineResult,
+): void {
+  if (!/^[a-zA-Z0-9_-]+$/.test(userId)) {
+    throw new Error("Invalid asset cleanup recovery owner.");
+  }
   const expected =
-    `${ASSET_CLEANUP_TRASH_SUBDIR}/${batch.journal.userId}/${batch.journal.recoveryId}`;
-  if (batch.quarantine.recoveryRelativePath !== expected) {
+    `${ASSET_CLEANUP_TRASH_SUBDIR}/${userId}/${quarantine.recoveryId}`;
+  if (quarantine.recoveryRelativePath !== expected) {
     throw new Error("Invalid asset cleanup recovery batch path.");
   }
   const absolute = resolveAbsoluteUnderDataRoot(expected);

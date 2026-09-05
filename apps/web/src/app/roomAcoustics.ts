@@ -47,6 +47,66 @@ export const SIGNAL_STUDIO_FOLEY_ROOM_SEND = {
   wet: 0.11,
 } as const satisfies RoomAcousticsSend;
 
+/** One shared return for the producer's audience-only soundboard group. */
+export const SIGNAL_STUDIO_SOUNDBOARD_ROOM_SEND = {
+  profile: SIGNAL_STUDIO_ROOM_PROFILE,
+  wet: 0.1,
+} as const satisfies RoomAcousticsSend;
+
+export const DEBATE_FORUM_ROOM_PROFILE = {
+  id: "debate-prismatic-forum-v1",
+  durationSeconds: 0.72,
+  preDelaySeconds: 0.018,
+  lowCutHz: 150,
+  highCutHz: 3_700,
+  decayExponent: 2.9,
+  diffusionGain: 0.032,
+  earlyReflections: [
+    { delaySeconds: 0.019, gain: 0.68, stereoOffsetSeconds: 0.0012 },
+    { delaySeconds: 0.031, gain: 0.46, stereoOffsetSeconds: -0.001 },
+    { delaySeconds: 0.049, gain: 0.31, stereoOffsetSeconds: 0.0014 },
+    { delaySeconds: 0.078, gain: 0.2, stereoOffsetSeconds: -0.0012 },
+    { delaySeconds: 0.112, gain: 0.12, stereoOffsetSeconds: 0.0008 },
+  ],
+} as const satisfies RoomAcousticsProfile;
+
+export const DEBATE_FORUM_VOICE_ROOM_SEND = {
+  profile: DEBATE_FORUM_ROOM_PROFILE,
+  wet: 0.055,
+} as const satisfies RoomAcousticsSend;
+
+export const DEBATE_FORUM_FOLEY_ROOM_SEND = {
+  profile: DEBATE_FORUM_ROOM_PROFILE,
+  wet: 0.095,
+} as const satisfies RoomAcousticsSend;
+
+export const DEBATE_TURNABOUT_ROOM_PROFILE = {
+  id: "debate-court-of-record-v1",
+  durationSeconds: 0.94,
+  preDelaySeconds: 0.026,
+  lowCutHz: 135,
+  highCutHz: 4_100,
+  decayExponent: 2.72,
+  diffusionGain: 0.036,
+  earlyReflections: [
+    { delaySeconds: 0.024, gain: 0.72, stereoOffsetSeconds: 0.0015 },
+    { delaySeconds: 0.039, gain: 0.5, stereoOffsetSeconds: -0.0013 },
+    { delaySeconds: 0.061, gain: 0.35, stereoOffsetSeconds: 0.0017 },
+    { delaySeconds: 0.094, gain: 0.23, stereoOffsetSeconds: -0.0015 },
+    { delaySeconds: 0.139, gain: 0.14, stereoOffsetSeconds: 0.001 },
+  ],
+} as const satisfies RoomAcousticsProfile;
+
+export const DEBATE_TURNABOUT_VOICE_ROOM_SEND = {
+  profile: DEBATE_TURNABOUT_ROOM_PROFILE,
+  wet: 0.072,
+} as const satisfies RoomAcousticsSend;
+
+export const DEBATE_TURNABOUT_FOLEY_ROOM_SEND = {
+  profile: DEBATE_TURNABOUT_ROOM_PROFILE,
+  wet: 0.12,
+} as const satisfies RoomAcousticsSend;
+
 export interface RoomAcousticsConnection {
   /** Stop immediately, such as when playback is cancelled. */
   disconnect(): void;

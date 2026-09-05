@@ -3,37 +3,56 @@ import assert from "node:assert/strict";
 import {
   coffeeArrivalAutoplayCanScheduleNow,
   coffeeArrivalAutoplayRetryDelayMs,
+  coffeeAwkwardSilencePressure,
   coffeeAutoplayForceTurnShouldRun,
   coffeeAutoplayWatchdogShouldWake,
   coffeeCenterFeedMessagesDuringPendingReveal,
   coffeeComposerUsesRichInput,
-  coffeeDraftChangeCountsAsTyping,
   coffeeDirectedMentionBotIds,
   coffeeEmptyTurnAutoplayRetryDelayMs,
-  coffeeGeneratedReplyRevealDeferralMs,
   coffeeLoopTimerOwnsAutoplayTurn,
+  coffeeMessagesWithHeardCutoffs,
+  coffeeMonotonicDeadlineRemainingMs,
   coffeePendingSubmittedUserLineVisible,
   coffeePersistedUserLineOwnsPendingReveal,
+  coffeeRevealLineIsCutOffV1,
   coffeeRevealPreparationMayCommit,
+  coffeeRevealVoiceEndSealsTableLineV1,
   coffeeSentenceCaseTableProse,
   coffeeShouldQueueAssistantRevealAfterUserTyping,
   coffeeShouldIgnoreStaleTurnResponse,
   coffeeShouldWaitForPendingBotRevealBeforeNextTurn,
   coffeeSubmittedUserMessageFromTurn,
   coffeeTableMessageContentIsVisible,
-  coffeeTableTalkAutoplayDeferralMs,
+  coffeeTableStallShapeV1,
+  coffeeUserTableTypingShouldRestart,
   coffeeVoicePlaybackOwnsAutoplayGate,
   coffeeVisibleDirectedMentionBotIds,
 } from "./coffee-user-reveal-flow.ts";
+import {
+  COFFEE_REVEAL_COARSE_COMMIT_MS,
+  coffeeRevealCoarseShouldCommit,
+  coffeeRevealVisibleLength,
+  publishCoffeeRevealProgress,
+  resetCoffeeRevealProgressForTests,
+  subscribeCoffeeRevealProgress,
+} from "./coffeeRevealProgressChannel.ts";
 
 describe("coffee user reveal flow", () => {
-  it("keeps the Coffee table composer rich so mentions render as chips", () => {
+  it("keeps live Coffee and Signal composers native regardless of Markdown preference", () => {
     assert.equal(
       coffeeComposerUsesRichInput({
         variant: "coffee-table",
         markdownEditorEnabled: false,
       }),
-      true,
+      false,
+    );
+    assert.equal(
+      coffeeComposerUsesRichInput({
+        variant: "coffee-table",
+        markdownEditorEnabled: true,
+      }),
+      false,
     );
     assert.equal(
       coffeeComposerUsesRichInput({
@@ -54,7 +73,14 @@ describe("coffee user reveal flow", () => {
         variant: "signal",
         markdownEditorEnabled: false,
       }),
-      true,
+      false,
+    );
+    assert.equal(
+      coffeeComposerUsesRichInput({
+        variant: "signal",
+        markdownEditorEnabled: true,
+      }),
+      false,
     );
   });
 
@@ -102,6 +128,66 @@ describe("coffee user reveal flow", () => {
     );
   });
 
+  it("does not seal a table line when voice ends because the speaker was cut off", () => {
+    assert.equal(
+      coffeeRevealLineIsCutOffV1("line-1", "line-1"),
+      true,
+    );
+    assert.equal(coffeeRevealLineIsCutOffV1("line-1", "line-2"), false);
+    assert.equal(
+      coffeeRevealVoiceEndSealsTableLineV1({
+        messageId: "line-1",
+        activeMessageId: "line-1",
+        cutOffMessageId: null,
+      }),
+      true,
+    );
+    assert.equal(
+      coffeeRevealVoiceEndSealsTableLineV1({
+        messageId: "line-1",
+        activeMessageId: "line-1",
+        cutOffMessageId: "line-1",
+      }),
+      false,
+    );
+    assert.equal(
+      coffeeRevealVoiceEndSealsTableLineV1({
+        messageId: "line-1",
+        activeMessageId: "line-2",
+        cutOffMessageId: null,
+      }),
+      false,
+    );
+  });
+
+  it("projects one audience-heard cutoff across committed and pending message sources", () => {
+    const interrupted = {
+      id: "line-1",
+      role: "assistant",
+      content: "This full sentence was never heard.",
+      botId: "bot-1",
+    };
+    const cutoff = {
+      sourceMessage: interrupted,
+      heardContent: "This full sen—",
+    };
+
+    assert.deepEqual(
+      coffeeMessagesWithHeardCutoffs({
+        messages: [interrupted],
+        cutoffs: [cutoff],
+      }),
+      [{ ...interrupted, content: "This full sen—" }],
+    );
+    assert.deepEqual(
+      coffeeMessagesWithHeardCutoffs({
+        messages: [],
+        cutoffs: [cutoff],
+      }),
+      [{ ...interrupted, content: "This full sen—" }],
+    );
+  });
+
   it("keeps arrival autoplay waking while the opener reveal is still busy", () => {
     assert.equal(coffeeArrivalAutoplayCanScheduleNow("idle"), true);
     assert.equal(coffeeArrivalAutoplayCanScheduleNow("playerComposing"), true);
@@ -123,6 +209,57 @@ describe("coffee user reveal flow", () => {
         sessionFinished: false,
       }),
       true,
+    );
+  });
+
+  it("does not restart a finished player typewriter when pending reveal deps refresh", () => {
+    assert.equal(
+      coffeeUserTableTypingShouldRestart({
+        settled: true,
+        visibleLength: 0,
+        fullDisplayLength: 24,
+      }),
+      false,
+    );
+    assert.equal(
+      coffeeUserTableTypingShouldRestart({
+        settled: false,
+        visibleLength: 24,
+        fullDisplayLength: 24,
+      }),
+      false,
+    );
+    assert.equal(
+      coffeeUserTableTypingShouldRestart({
+        settled: false,
+        visibleLength: 12,
+        fullDisplayLength: 24,
+      }),
+      true,
+    );
+    assert.equal(
+      coffeeUserTableTypingShouldRestart({
+        settled: false,
+        visibleLength: 0,
+        fullDisplayLength: 0,
+      }),
+      false,
+    );
+  });
+
+  it("keeps the pending center feed seeded with the player line before the bot types", () => {
+    const pendingMessages = [
+      { id: "u1", role: "user", content: "Hello table." },
+      { id: "a1", role: "assistant", content: "Hello back." },
+    ];
+    const feed = coffeeCenterFeedMessagesDuringPendingReveal({
+      messages: pendingMessages,
+      pendingMessageId: "a1",
+      revealInProgress: true,
+    });
+    assert.deepEqual(
+      feed.map((message) => message.id),
+      ["u1"],
     );
   });
 
@@ -191,9 +328,52 @@ describe("coffee user reveal flow", () => {
     );
   });
 
+  it("keeps ownership when a follow-up action message is the newest user row", () => {
+    // Coffee review 8e012a9d: sending `*twiddles thumbs*` after a text message
+    // re-surfaced the earlier send as a phantom line beside its persisted twin.
+    assert.equal(
+      coffeePersistedUserLineOwnsPendingReveal({
+        messages: [
+          { role: "user", content: "...oh really? I'll have to check that out." },
+          { role: "assistant", content: "You're gonna love it!" },
+          { role: "user", content: "*Twiddles thumbs*" },
+        ],
+        userRevealText: "...oh really? I'll have to check that out.",
+      }),
+      true,
+    );
+  });
+
+  it("keeps Power Mute ellipsis visible when asked", () => {
+    assert.equal(
+      coffeeTableMessageContentIsVisible("...", undefined, {
+        keepPowerMuteEllipsis: true,
+      }),
+      true,
+    );
+    assert.equal(
+      coffeeTableMessageContentIsVisible(" … ", undefined, {
+        keepPowerMuteEllipsis: true,
+      }),
+      true,
+    );
+  });
+
   it("hides punctuation-only interruption pause rows from the table", () => {
     assert.equal(coffeeTableMessageContentIsVisible("..."), false);
     assert.equal(coffeeTableMessageContentIsVisible(" … "), false);
+    assert.equal(
+      coffeeTableMessageContentIsVisible("...", {
+        v: 1,
+        name: "socialSilence",
+        provenance: "social",
+        mode: "coffee",
+        seed: "coffee:silence",
+        volleyTurn: 2,
+        holdMs: 1_600,
+      }),
+      true,
+    );
     assert.equal(coffeeTableMessageContentIsVisible("*pauses*"), true);
     assert.equal(coffeeTableMessageContentIsVisible("Still here."), true);
   });
@@ -305,8 +485,6 @@ describe("coffee user reveal flow", () => {
       hasConversation: true,
       sessionPhase: "live",
       autoplayPaused: false,
-      devModeEnabled: false,
-      draft: "",
       rhythmState: "idle" as const,
       loopScheduled: false,
       requestInFlight: false,
@@ -349,12 +527,14 @@ describe("coffee user reveal flow", () => {
       }),
       false,
     );
+    // A composing player never blocks the wake path; playerComposing stays
+    // schedulable so bots keep talking while the user types.
     assert.equal(
       coffeeAutoplayWatchdogShouldWake({
         ...strandedRoom,
-        draft: "still typing",
+        rhythmState: "playerComposing",
       }),
-      false,
+      true,
     );
     assert.equal(
       coffeeAutoplayWatchdogShouldWake({
@@ -433,8 +613,6 @@ describe("coffee user reveal flow", () => {
       hasPresentBot: true,
       sessionPhase: "arriving",
       autoplayPaused: false,
-      devModeEnabled: false,
-      draft: "",
       requestInFlight: false,
       pendingReveal: false,
       timerPresent: true,
@@ -484,87 +662,34 @@ describe("coffee user reveal flow", () => {
     );
   });
 
-  it("defers Coffee autoplay while Table talk is active or freshly edited", () => {
-    assert.equal(
-      coffeeTableTalkAutoplayDeferralMs({
-        conversationId: "coffee-1",
-        draft: "wait",
-        lastTypedAtMs: 1000,
-        lastTypedConversationId: "coffee-1",
-        nowMs: 10_000,
-        graceMs: 5200,
+  it("uses monotonic deadlines and bounded wall-clock silence pressure", () => {
+    assert.equal(coffeeMonotonicDeadlineRemainingMs(12_000, 10_500), 1_500);
+    assert.equal(coffeeMonotonicDeadlineRemainingMs(12_000, 13_000), 0);
+    assert.deepEqual(
+      coffeeAwkwardSilencePressure({
+        lastActivityAtMs: 20_000,
+        sessionStartedAtMs: 0,
+        nowMs: 54_999,
+        savedTopic: "Gratitude",
       }),
-      5200,
+      { pressure: 0, focus: null },
     );
-    assert.equal(
-      coffeeTableTalkAutoplayDeferralMs({
-        conversationId: "coffee-1",
-        draft: "",
-        lastTypedAtMs: 10_000,
-        lastTypedConversationId: "coffee-1",
-        nowMs: 12_000,
-        graceMs: 5200,
-      }),
-      3200,
-    );
-    assert.equal(
-      coffeeTableTalkAutoplayDeferralMs({
-        conversationId: "coffee-2",
-        draft: "wait",
-        lastTypedAtMs: 10_000,
-        lastTypedConversationId: "coffee-1",
-        nowMs: 12_000,
-        graceMs: 5200,
-      }),
-      0,
-    );
-  });
-
-  it("does not hide generated bot replies behind an empty Table Talk grace window", () => {
-    assert.equal(
-      coffeeGeneratedReplyRevealDeferralMs({
-        conversationId: "coffee-1",
-        draft: "",
-        includeCooldown: false,
-        lastTypedAtMs: 10_000,
-        lastTypedConversationId: "coffee-1",
-        nowMs: 12_000,
-        graceMs: 5200,
-      }),
-      0,
-    );
-    assert.equal(
-      coffeeGeneratedReplyRevealDeferralMs({
-        conversationId: "coffee-1",
-        draft: "wait",
-        includeCooldown: false,
-        lastTypedAtMs: 10_000,
-        lastTypedConversationId: "coffee-1",
-        nowMs: 12_000,
-        graceMs: 5200,
-      }),
-      5200,
-    );
-    assert.equal(
-      coffeeGeneratedReplyRevealDeferralMs({
-        conversationId: "coffee-1",
-        draft: "wait",
-        includeCooldown: true,
-        lastTypedAtMs: 10_000,
-        lastTypedConversationId: "coffee-1",
-        nowMs: 12_000,
-        graceMs: 5200,
-      }),
-      0,
-    );
-  });
-
-  it("does not treat no-op empty Table Talk syncs as typing activity", () => {
-    assert.equal(coffeeDraftChangeCountsAsTyping("", ""), false);
-    assert.equal(coffeeDraftChangeCountsAsTyping("  ", ""), false);
-    assert.equal(coffeeDraftChangeCountsAsTyping("", "hi"), true);
-    assert.equal(coffeeDraftChangeCountsAsTyping("hi", ""), true);
-    assert.equal(coffeeDraftChangeCountsAsTyping("hi", "hi there"), true);
+    const breaker = coffeeAwkwardSilencePressure({
+      lastActivityAtMs: 20_000,
+      sessionStartedAtMs: 0,
+      nowMs: 60_000,
+      savedTopic: "Gratitude",
+    });
+    assert.ok(breaker.pressure > 0 && breaker.pressure <= 1);
+    assert.match(breaker.focus ?? "", /awkward silence/u);
+    const pivot = coffeeAwkwardSilencePressure({
+      lastActivityAtMs: 20_000,
+      sessionStartedAtMs: 0,
+      nowMs: 90_000,
+      savedTopic: "Gratitude",
+    });
+    assert.equal(pivot.pressure, 0.875);
+    assert.match(pivot.focus ?? "", /without renaming or rewriting/u);
   });
 
   it("returns ordered unique seated bot mentions for directed Coffee rounds", () => {
@@ -607,6 +732,164 @@ describe("coffee user reveal flow", () => {
         "Hey Patrick Star, look at S".length,
       ),
       ["bot-patrick", "bot-sponge"],
+    );
+  });
+});
+
+describe("Coffee reveal progress channel", () => {
+  it("publishes every character without going through React state", () => {
+    resetCoffeeRevealProgressForTests();
+    const seen: number[] = [];
+    const unsubscribe = subscribeCoffeeRevealProgress(() => {
+      seen.push(coffeeRevealVisibleLength());
+    });
+    for (const length of [1, 2, 3]) publishCoffeeRevealProgress(length);
+    // Republishing the same character is not a change and must not notify.
+    publishCoffeeRevealProgress(3);
+    publishCoffeeRevealProgress(-4);
+    unsubscribe();
+    publishCoffeeRevealProgress(9);
+    assert.deepEqual(seen, [1, 2, 3, 0]);
+    assert.equal(coffeeRevealVisibleLength(), 9);
+    resetCoffeeRevealProgressForTests();
+  });
+
+  it("mirrors into coarse React state on a fixed cadence, never a frame-rate one", () => {
+    // Review 47d7aa3d: per-character full-surface reconciliation pinned a
+    // five-seat table at 1 FPS. Seat mouths animate at one phase, so the
+    // mirror commits no faster than that — and the interval is a constant, not
+    // a function of measured FPS, because an FPS-gated interval oscillates.
+    assert.equal(COFFEE_REVEAL_COARSE_COMMIT_MS, 120);
+    assert.equal(
+      coffeeRevealCoarseShouldCommit({
+        nowMs: 1_000,
+        lastCommitAtMs: 960,
+        nextLength: 12,
+        totalLength: 90,
+      }),
+      false,
+    );
+    assert.equal(
+      coffeeRevealCoarseShouldCommit({
+        nowMs: 1_080,
+        lastCommitAtMs: 960,
+        nextLength: 12,
+        totalLength: 90,
+      }),
+      true,
+    );
+    // A finished line always lands, so it never sits a phase short of complete.
+    assert.equal(
+      coffeeRevealCoarseShouldCommit({
+        nowMs: 1_000,
+        lastCommitAtMs: 999,
+        nextLength: 90,
+        totalLength: 90,
+      }),
+      true,
+    );
+  });
+});
+
+describe("Coffee table stall recovery", () => {
+  const healthy = {
+    phase: "live",
+    requestInFlight: false,
+    loopTimerArmed: false,
+    cooldownTimerArmed: false,
+    rhythmState: "idle" as const,
+    pendingRevealPresent: false,
+    pendingSpeakerPresent: false,
+  };
+
+  it("leaves a healthy cooldown alone while its hand-off timer is armed", () => {
+    // A live cooldown and a stranded one are identical apart from this timer.
+    // Counting against the healthy one would eventually cut real turns short.
+    assert.equal(
+      coffeeTableStallShapeV1({
+        ...healthy,
+        rhythmState: "cooldown",
+        cooldownTimerArmed: true,
+        pendingRevealPresent: true,
+      }),
+      false,
+    );
+  });
+
+  it("catches a cooldown whose hand-off timer was cancelled", () => {
+    // Session 2253b3903a: 100 minutes at 66 FPS with busy 0ms/s, Send greyed,
+    // because `cooldown` disables the composer and the reconciliation effect
+    // refuses to reset out of it.
+    assert.equal(
+      coffeeTableStallShapeV1({
+        ...healthy,
+        rhythmState: "cooldown",
+        cooldownTimerArmed: false,
+        pendingRevealPresent: true,
+      }),
+      true,
+    );
+    // Also when nothing is pending — the bare stranded state, which the older
+    // shape check could not see at all.
+    assert.equal(
+      coffeeTableStallShapeV1({
+        ...healthy,
+        rhythmState: "cooldown",
+        cooldownTimerArmed: false,
+      }),
+      true,
+    );
+  });
+
+  it("keeps the shapes the earlier watchdog already covered", () => {
+    // Review 8e012a9d: a thinking seat that lost its request.
+    assert.equal(
+      coffeeTableStallShapeV1({
+        ...healthy,
+        rhythmState: "botThinking",
+        pendingSpeakerPresent: true,
+      }),
+      true,
+    );
+    // Session 6d6f1239: a pending reveal that never started.
+    assert.equal(
+      coffeeTableStallShapeV1({ ...healthy, pendingRevealPresent: true }),
+      true,
+    );
+    // A pending speaker with the rhythm already back at idle.
+    assert.equal(
+      coffeeTableStallShapeV1({ ...healthy, pendingSpeakerPresent: true }),
+      true,
+    );
+  });
+
+  it("never fires while anything is still progressing", () => {
+    for (const progressing of [
+      { requestInFlight: true },
+      { loopTimerArmed: true },
+      { rhythmState: "tableTyping" as const },
+      { rhythmState: "userTableTyping" as const },
+      { phase: "topic" },
+      { phase: "finished" },
+    ]) {
+      assert.equal(
+        coffeeTableStallShapeV1({
+          ...healthy,
+          pendingRevealPresent: true,
+          pendingSpeakerPresent: true,
+          ...progressing,
+        }),
+        false,
+        JSON.stringify(progressing),
+      );
+    }
+  });
+
+  it("stays quiet on an ordinary idle table between turns", () => {
+    assert.equal(coffeeTableStallShapeV1(healthy), false);
+    assert.equal(
+      coffeeTableStallShapeV1({ ...healthy, rhythmState: "playerComposing" }),
+      false,
     );
   });
 });

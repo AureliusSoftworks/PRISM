@@ -2,21 +2,25 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import {
-  COFFEE_ACCOUNT_DEFAULT_MODEL_LABEL,
-  COFFEE_ACCOUNT_DEFAULT_MODEL_META,
+  COFFEE_AUTO_MODEL_LABEL,
+  COFFEE_AUTO_MODEL_META,
   coffeeModelPickerAriaLabel,
 } from "./coffee-model-controls.ts";
 
 describe("Coffee model controls", () => {
-  it("distinguishes the account model from automatic response routing", () => {
-    assert.equal(COFFEE_ACCOUNT_DEFAULT_MODEL_LABEL, "Account default");
+  it("describes contextual Auto inside the selected response lane", () => {
+    assert.equal(COFFEE_AUTO_MODEL_LABEL, "Auto");
     assert.equal(
-      COFFEE_ACCOUNT_DEFAULT_MODEL_META,
-      "uses the model saved in Settings",
+      COFFEE_AUTO_MODEL_META,
+      "Picks model & effort",
     );
     assert.equal(
       coffeeModelPickerAriaLabel("online"),
-      "Coffee session model for online replies. Account default uses the model saved in Settings.",
+      "Coffee session model for online replies. Auto lets Prism choose the model and Effort contextually.",
+    );
+    assert.equal(
+      coffeeModelPickerAriaLabel("auto"),
+      "Coffee session model. Auto lets Prism choose the model and Effort inside the selected privacy lane.",
     );
   });
 });

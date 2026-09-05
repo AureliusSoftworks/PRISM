@@ -5,6 +5,7 @@ import {
   resolveZenLiveBotPresenceActionText,
   sanitizeZenLiveBotActionText,
   zenLiveBotCanvasSideFromCenterX,
+  zenLiveBotFacingForCanvasSide,
   zenLiveBotFaceScaleYForCanvasSide,
   zenLiveActionPlateFace,
 } from "./zenLiveActions.ts";
@@ -15,14 +16,46 @@ describe("sanitizeZenLiveBotActionText", () => {
       sanitizeZenLiveBotActionText(
         'Smiles warmly, gestures to the dancing, and sings softly "You are a joy to see"'
       ),
-      "Smiles warmly, gestures to the dancing"
+      "Smiles warmly"
     );
   });
 
   it("strips dangling speech bridge words", () => {
     assert.equal(
       sanitizeZenLiveBotActionText("offers a warm smile and a gentle wave back, saying"),
-      "offers a warm smile and a gentle wave back"
+      "Offers a warm smile"
+    );
+  });
+
+  it("reduces paragraph-like action prose to one physical beat", () => {
+    assert.equal(
+      sanitizeZenLiveBotActionText(
+        "Tilts head slightly, a small, nervous smile flickering across his face, eyes darting around as if expecting something"
+      ),
+      "Tilts head slightly"
+    );
+  });
+
+  it("drops chained gestures even without punctuation", () => {
+    assert.equal(
+      sanitizeZenLiveBotActionText("offers a warm smile and a gentle wave back"),
+      "Offers a warm smile"
+    );
+  });
+
+  it("caps an unpunctuated action at a short readable beat", () => {
+    assert.equal(
+      sanitizeZenLiveBotActionText(
+        "keeps his gaze fixed on the doorway across the silent room"
+      ),
+      "Keeps his gaze fixed on the doorway"
+    );
+  });
+
+  it("sentence-cases all-caps action text for the canvas", () => {
+    assert.equal(
+      sanitizeZenLiveBotActionText("SMILES GENTLY"),
+      "Smiles gently",
     );
   });
 });
@@ -32,12 +65,12 @@ describe("isZenLiveBotPresenceActionVerbose", () => {
     assert.equal(isZenLiveBotPresenceActionVerbose("smiles gently"), false);
   });
 
-  it("expands fuller or phrase-like action beats", () => {
+  it("keeps compacted legacy action beats out of the verbose layout", () => {
     assert.equal(
       isZenLiveBotPresenceActionVerbose(
         "rests one hand over his heart, then offers a small nod toward your courage"
       ),
-      true
+      false
     );
   });
 });
@@ -52,7 +85,7 @@ describe("resolveZenLiveBotPresenceActionText", () => {
         userActionVisible: false,
         hasBot: true,
       }),
-      "smiles gently"
+      "Smiles gently"
     );
   });
 
@@ -64,7 +97,7 @@ describe("resolveZenLiveBotPresenceActionText", () => {
         userActionVisible: false,
         hasBot: true,
       }),
-      "smiles gently"
+      "Smiles gently"
     );
   });
 
@@ -76,7 +109,7 @@ describe("resolveZenLiveBotPresenceActionText", () => {
         userActionVisible: false,
         hasBot: true,
       }),
-      "replying"
+      "Replying"
     );
   });
 
@@ -129,15 +162,19 @@ describe("zenLiveActionPlateFace", () => {
       rotateDeg: 90,
     });
     assert.deepEqual(zenLiveActionPlateFace("warm", "dot"), {
-      text: ":∙",
+      text: ":.",
       rotateDeg: 90,
     });
     assert.deepEqual(zenLiveActionPlateFace("warm", "at"), {
       text: ":@",
       rotateDeg: 90,
     });
+    assert.deepEqual(zenLiveActionPlateFace("warm", "click"), {
+      text: ":ʘ",
+      rotateDeg: 90,
+    });
     assert.deepEqual(zenLiveActionPlateFace("warm", "narrow"), {
-      text: ":o",
+      text: ":ɵ",
       rotateDeg: 90,
     });
     assert.deepEqual(zenLiveActionPlateFace("warm", "open-wide"), {
@@ -174,6 +211,8 @@ describe("zenLiveBotCanvasSideFromCenterX", () => {
 
 describe("zenLiveBotFaceScaleYForCanvasSide", () => {
   it("flips left-side Zen bots to face right and leaves right-side bots facing left", () => {
+    assert.equal(zenLiveBotFacingForCanvasSide("left"), "right");
+    assert.equal(zenLiveBotFacingForCanvasSide("right"), "left");
     assert.equal(zenLiveBotFaceScaleYForCanvasSide("left"), "-1");
     assert.equal(zenLiveBotFaceScaleYForCanvasSide("right"), "1");
   });

@@ -32,6 +32,11 @@ describe("bot group canvas filtering", () => {
       /if \(activeBotLibraryGroupFilter\) \{[\s\S]*?openBotLibraryGroupBotContextMenu/,
     );
     assert.equal(pageSource.match(/openCanvasBotContextMenu\(/g)?.length, 2);
+    assert.match(
+      pageSource,
+      /const focusedBotLibraryGroup = activeBotLibraryGroupFilter/,
+    );
+    assert.doesNotMatch(pageSource, /activeBotGroupRoomFilter/);
   });
 
   it("clears a selected Chat persona when switching groups so the group hero can render", () => {
@@ -66,7 +71,7 @@ describe("bot group canvas filtering", () => {
     assert.match(heroSource, /label: "Export group"/);
     assert.match(
       heroSource,
-      /openAddBotFromLibraryGroupDialog\(\s*focusedBotLibraryGroup\.id,?\s*\)/,
+      /openBotLibraryGroupManager\(\{[\s\S]*?selectedGroupId: focusedBotLibraryGroup\.id/,
     );
     assert.match(heroSource, />Add bots</);
     assert.match(heroSource, />Group actions</);
@@ -75,6 +80,37 @@ describe("bot group canvas filtering", () => {
     assert.match(
       cssSource,
       /\.botGroupHero\s*\{[\s\S]*?width:\s*min\([\s\S]*?--empty-state-browser-width[\s\S]*?var\(--bot-library-group-gradient\)/,
+    );
+  });
+
+  it("uses complete light-theme dashboard chrome and clears expanded navbar height", () => {
+    assert.match(
+      cssSource,
+      /\.themeLight \.canvasBotBrowserRail\s*\{[\s\S]*?background:\s*linear-gradient\([\s\S]*?#fff 84%/,
+    );
+    assert.match(
+      cssSource,
+      /\.themeLight \.canvasBotBrowserRail \.coffeeSearchBar input\s*\{[\s\S]*?color:\s*var\(--fg\)/,
+    );
+    assert.match(
+      cssSource,
+      /\.themeLight \.canvasBotBrowserRail \.botLibraryGroupControl\s*\{[\s\S]*?--bot-library-group-trigger-text:[\s\S]*?--bot-library-group-trigger-shadow:\s*none/,
+    );
+    assert.match(
+      cssSource,
+      /\.botGroupHeroStage\s*\{[\s\S]*?--bot-group-hero-navbar-clearance:[\s\S]*?--app-shell-top-nav-height[\s\S]*?padding:\s*calc\(32px \+ var\(--bot-group-hero-navbar-clearance\)\) 0 32px/,
+    );
+    assert.match(
+      cssSource,
+      /\.themeLight \.botGroupHero\s*\{[\s\S]*?background-blend-mode:\s*normal, normal/,
+    );
+    assert.match(
+      cssSource,
+      /\.themeLight \.botGroupDashboard\s*\{[\s\S]*?background-blend-mode:\s*normal, normal/,
+    );
+    assert.match(
+      cssSource,
+      /@media \(max-width: 820px\)\s*\{[\s\S]*?\.botGroupHeroStage\s*\{[\s\S]*?padding-block:\s*calc\(32px \+ var\(--bot-group-hero-navbar-clearance\)\) 32px/,
     );
   });
 
@@ -101,6 +137,11 @@ describe("bot group canvas filtering", () => {
       heroSource,
       /if \(!focusedBotLibraryGroup\.builtIn\) \{[\s\S]*?label: "Edit details"[\s\S]*?label: "Delete group"/,
     );
+    assert.match(
+      heroSource,
+      /botLibraryGroupAllowsRoomAtmosphere\(focusedBotLibraryGroup\)[\s\S]*?>Atmosphere</,
+    );
+    assert.match(heroSource, />Group actions</);
   });
 
   it("suppresses compact grid placeholders while a group filter is active", () => {
@@ -110,39 +151,33 @@ describe("bot group canvas filtering", () => {
     );
   });
 
-  it("returns group-picker focus after selection and focuses the group-first dialog", () => {
+  it("returns group-picker focus after selection and focuses the group manager", () => {
     assert.match(
       pageSource,
       /const pick = \(nextValue: string\): void => \{[\s\S]*?setOpen\(false\);[\s\S]*?triggerRef\.current\?\.focus\(\);/,
     );
     assert.match(
       pageSource,
-      /const pickBotMode = dialog\.mode === "pick-bot"[\s\S]*?<select[\s\S]*?value=\{pickBotMode \? selectedBotId : selectedGroupId\}[\s\S]*?autoFocus/,
+      /className=\{`\$\{styles\.botPreferredModelsModal\} \$\{styles\.botLibraryGroupManager\}`\}[\s\S]*?<input[\s\S]*?autoFocus/,
     );
   });
 
-  it("offers direct group creation with an in-dialog member roster", () => {
-    assert.equal(
-      pageSource.match(
-        /onCreateGroup=\{\(\) => openCreateBotLibraryGroupDialog\(\[\]\)\}/g,
-      )?.length,
-      2,
-    );
+  it("offers direct group creation in the staged manager workspace", () => {
     assert.match(
       pageSource,
       /data-tutorial-target="chat-new-group"[\s\S]*?<Plus/,
     );
-    assert.doesNotMatch(
-      pageSource,
-      /function openCreateBotLibraryGroupDialog\([\s\S]{0,260}uniqueSelected\.length < 2\) return/,
-    );
     assert.match(
       pageSource,
-      /className=\{styles\.botLibraryGroupMemberGrid\}[\s\S]*?sortedPanelBots\.map\([\s\S]*?toggleBotLibraryGroupDialogMember/,
+      /function openBotLibraryGroupManager[\s\S]*?function addBotLibraryGroupManagerGroup/,
     );
     assert.match(
       cssSource,
-      /\.botLibraryGroupMemberGrid\s*\{[\s\S]*?grid-template-columns: repeat\(2, minmax\(0, 1fr\)\)/,
+      /\.botLibraryGroupManagerWorkspace\s*\{[\s\S]*?grid-template-columns: minmax\(190px, 0\.32fr\)/,
+    );
+    assert.match(
+      pageSource,
+      /data-group-gradient-preview="true"[\s\S]*?Current members[\s\S]*?Add from Library/,
     );
     assert.match(
       tutorialSource,
@@ -172,7 +207,7 @@ describe("bot group canvas filtering", () => {
     );
     assert.match(
       pageSource,
-      /\{ungroupedPanelBots\.length > 0 \? \([\s\S]*?value=\{BOT_LIBRARY_GROUP_FILTER_UNGROUPED\}/,
+      /options=\{botLibraryGroupFilterOptions\}/,
     );
     assert.match(
       pageSource,

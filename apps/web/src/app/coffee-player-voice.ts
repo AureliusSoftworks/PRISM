@@ -5,6 +5,11 @@ import {
   type NormalizedBotAudioVoiceProfileV1,
   type VoiceMode,
 } from "@localai/shared";
+import {
+  prismAudioContext,
+  prismAudioOutputNode,
+} from "./replayAudioMasterCapture.ts";
+import { resumeAudioContextIfNeeded } from "./audioContextRecovery.ts";
 
 const COFFEE_PLAYER_SHUSH_BASE_DURATION_MS = 440;
 const COFFEE_PLAYER_SHUSH_EXTRA_H_DURATION_MS = 110;
@@ -25,8 +30,8 @@ export function coffeePlayerPlaybackProfile(
 }
 
 export function coffeePlayerEnglishEngine(args: {
-  accountProvider: "local" | "openai" | "anthropic";
-  coffeeProvider: "local" | "openai" | "anthropic";
+  accountProvider: "local" | "ollama_cloud" | "openai" | "anthropic";
+  coffeeProvider: "local" | "ollama_cloud" | "openai" | "anthropic";
   offlineProtectedBotPresent: boolean;
   selectedEngine: EnglishVoiceEngine;
 }): EnglishVoiceEngine {
@@ -65,14 +70,11 @@ export function coffeePlayerStaticShushDurationForPlayback(args: {
 }
 
 function coffeePlayerShushContext(): AudioContext | null {
-  if (typeof window === "undefined" || typeof window.AudioContext !== "function") {
-    return null;
-  }
   if (
     !coffeePlayerShushAudioContext ||
     coffeePlayerShushAudioContext.state === "closed"
   ) {
-    coffeePlayerShushAudioContext = new window.AudioContext();
+    coffeePlayerShushAudioContext = prismAudioContext();
   }
   return coffeePlayerShushAudioContext;
 }
@@ -93,13 +95,7 @@ export async function playCoffeePlayerStaticShush(args: {
   );
   const volume = Math.max(0, Math.min(1, args.volume));
   if (!context || volume <= 0 || args.signal.aborted) return false;
-  if (context.state === "suspended") {
-    try {
-      await context.resume();
-    } catch {
-      return false;
-    }
-  }
+  if (!(await resumeAudioContextIfNeeded(context))) return false;
   if (args.signal.aborted) return false;
 
   const durationSeconds = durationMs / 1_000;
@@ -136,10 +132,11 @@ export async function playCoffeePlayerStaticShush(args: {
   source.connect(highpass);
   highpass.connect(lowpass);
   lowpass.connect(output);
-  output.connect(context.destination);
+  output.connect(prismAudioOutputNode(context));
 
   return await new Promise<boolean>((resolve) => {
     let finished = false;
+    let aborting = false;
     const finish = (completed: boolean) => {
       if (finished) return;
       finished = true;
@@ -153,15 +150,20 @@ export async function playCoffeePlayerStaticShush(args: {
       resolve(completed);
     };
     const abort = () => {
+      aborting = true;
+      const releaseEndsAt = context.currentTime + 0.08;
+      output.gain.cancelScheduledValues(context.currentTime);
+      output.gain.setValueAtTime(output.gain.value, context.currentTime);
+      output.gain.linearRampToValueAtTime(0, releaseEndsAt);
       try {
-        source.stop();
+        source.stop(releaseEndsAt);
       } catch {
         // The source may already have reached its scheduled end.
+        finish(false);
       }
-      finish(false);
     };
     args.signal.addEventListener("abort", abort, { once: true });
-    source.onended = () => finish(true);
+    source.onended = () => finish(!aborting);
     source.start(startsAt);
     source.stop(endsAt);
     args.onStart?.(durationMs);

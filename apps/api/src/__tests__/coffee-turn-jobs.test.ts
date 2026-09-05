@@ -2,6 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
   cancelCoffeeTurnJobsForConversation,
+  COFFEE_TURN_JOB_TTL_MS,
   coffeeThinkingCutInDelayMs,
   getActiveCoffeeTurnJobForConversation,
   getCoffeeTurnJob,
@@ -9,8 +10,13 @@ import {
   setCoffeeTurnJobPhase,
   startCoffeeTurnJob,
 } from "../coffee-turn-jobs.ts";
+import { AutoFallbackExhaustedError } from "../auto-fallback.ts";
 
 describe("Coffee turn jobs", () => {
+  it("retains jobs beyond the ten-minute AUTO ceiling", () => {
+    assert.equal(COFFEE_TURN_JOB_TTL_MS, 12 * 60_000);
+  });
+
   it("publishes thinking before a completed response and advances through speaking", async () => {
     let release!: () => void;
     const wait = new Promise<void>((resolve) => { release = resolve; });
@@ -150,6 +156,58 @@ describe("Coffee turn jobs", () => {
     interruptCoffeeTurnJob("u-autoplay", autonomousTurn.id);
   });
 
+  it("frees the table when a reveal the client never finished is abandoned", async () => {
+    // An interrupted Signal-style cut-off leaves the speaker's job in
+    // `voicing`: the line exists, but the client never reveals it to the end
+    // and so never posts `completed`. The table must still take its next turn
+    // instead of generating nothing until the job's TTL expires.
+    const abandoned = startCoffeeTurnJob({
+      userId: "u-abandoned",
+      conversationId: "c-abandoned",
+      run: async ({ setPhase }) => {
+        setPhase("thinking", "jefferson");
+        return {
+          speakerBotId: "jefferson",
+          stale: false,
+        } as unknown as Awaited<ReturnType<Parameters<typeof startCoffeeTurnJob>[0]["run"]>>;
+      },
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    assert.equal(getCoffeeTurnJob("u-abandoned", abandoned.id)?.phase, "voicing");
+    assert.equal(
+      getActiveCoffeeTurnJobForConversation("u-abandoned", "c-abandoned"),
+      null,
+      "an unfinished reveal still held the floor",
+    );
+
+    setCoffeeTurnJobPhase("u-abandoned", abandoned.id, "speaking");
+    assert.equal(
+      getActiveCoffeeTurnJobForConversation("u-abandoned", "c-abandoned"),
+      null,
+      "playback still held the floor",
+    );
+    interruptCoffeeTurnJob("u-abandoned", abandoned.id);
+  });
+
+  it("still holds the table while a bot is choosing or thinking", async () => {
+    const thinking = startCoffeeTurnJob({
+      userId: "u-floor",
+      conversationId: "c-floor",
+      run: async ({ setPhase }) => {
+        setPhase("thinking", "washington");
+        return await new Promise(() => {});
+      },
+    });
+    await Promise.resolve();
+    assert.equal(
+      getActiveCoffeeTurnJobForConversation("u-floor", "c-floor")?.id,
+      thinking.id,
+    );
+    interruptCoffeeTurnJob("u-floor", thinking.id);
+  });
+
   it("expires abandoned in-memory jobs and aborts their work", async () => {
     let aborted = false;
     const started = startCoffeeTurnJob({
@@ -166,5 +224,36 @@ describe("Coffee turn jobs", () => {
     await new Promise((resolve) => setTimeout(resolve, 5));
     assert.equal(getCoffeeTurnJob("u5", started.id), null);
     assert.equal(aborted, true);
+  });
+
+  it("publishes retry lineage and the latest cursor with a structured failure", async () => {
+    let latestCursor = "message-7";
+    const started = startCoffeeTurnJob({
+      userId: "u-lineage",
+      conversationId: "c-lineage",
+      selectionKind: "auto",
+      retry: {
+        v: 1,
+        retryOfJobId: "job-previous",
+        expectedLatestMessageCursor: "message-6",
+        ordinal: 1,
+      },
+      latestMessageCursor: "message-6",
+      getLatestMessageCursor: () => latestCursor,
+      run: async ({ setPhase }) => {
+        setPhase("thinking", "mira");
+        latestCursor = "message-8";
+        throw new AutoFallbackExhaustedError([]);
+      },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const failed = getCoffeeTurnJob("u-lineage", started.id);
+    assert.equal(failed?.phase, "failed");
+    assert.equal(failed?.failure?.speakerBotId, "mira");
+    assert.equal(failed?.failure?.latestMessageCursor, "message-8");
+    assert.equal(failed?.failure?.retry?.retryOfJobId, "job-previous");
+    assert.equal(failed?.retry?.ordinal, 1);
+    assert.match(failed?.error ?? "", /All Auto models failed/u);
   });
 });

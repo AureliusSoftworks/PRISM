@@ -21,12 +21,13 @@ Slate and Story remain separate experiences:
 - **Slate:** "Let's turn this into something good." An editorial production
   workspace.
 
-Story remains a preview applet while Slate is built. Story earns graduation only
-when choices materially alter later events; current-run character memory and
-world facts remain coherent; consequences persist; players can discover moments
-they would not have outlined; and playing a scene feels meaningfully different
-from asking Slate to write one. Do not remove Story or fold its player experience
-into Slate during Slate V1.
+Story's early implementation remains separate but disabled from release while
+it matures. Story earns preview status only when choices materially alter later
+events; current-run character memory and world facts remain coherent;
+consequences persist; players can discover moments they would not have outlined;
+and playing a scene feels meaningfully different from asking Slate to write one.
+Do not remove Story's implementation or fold its player experience into Slate
+during Slate V1.
 
 ## V1 scope
 
@@ -66,15 +67,34 @@ cross-workstream dependency index lives in `docs/slate-master-plan.md`.
 
 ## Workspace contract
 
-The primary workspace has three conceptual regions:
+The primary workspace is one calm writer's cockpit:
 
-1. **Structure rail** — acts, chapters, scenes, characters, and unresolved
-   threads. Structural cards can be added, removed, pinned, redirected, and
-   rearranged.
-2. **Manuscript canvas** — beautifully typeset, directly editable prose.
-   Human edits autosave and are authoritative.
-3. **Direction panel** — concise project-, chapter-, scene-, or selection-level
-   notes and actions. It is not a chat transcript.
+1. **Story Map** — a collapsible act, chapter, and scene hierarchy. Cast,
+   Threads, Arcs, Timeline, and World open as focused projections rather than
+   permanent widgets.
+2. **Manuscript canvas** — the visually dominant, beautifully typeset, directly
+   editable focused section. Human edits autosave and are authoritative.
+3. **Adaptive inspector** — exactly one context-relevant surface, such as a
+   character, Continuity evidence, revision, or history.
+4. **Director bar** — natural-language project-, section-, or selection-level
+   direction with one editable Beat, Passage, or Scene scope. It is not a chat
+   transcript.
+
+Focus mode hides every surrounding region. Full-book reading is a virtualized
+projection over authoritative sections, never a second editable manuscript.
+Provider, export, recovery, and project configuration live in focused drawers.
+
+The canvas may show one contextual question at the affected passage. A hard
+Continuity conflict or writer-invoked `Unstick me` action offers exactly three
+grounded choices plus `Describe the vibe...`. The custom path accepts natural
+language, compiles it into direction, and resumes the same persisted operation.
+Soft concerns remain non-blocking.
+
+History offers a quiet, section-scoped `Export Slate Review` action. The export
+contains accepted prose plus ordered safe provenance for direction compilation,
+Continuity retrieval and preflight, clarification, generation, acceptance,
+extraction, concerns, and generation promotion. It excludes hidden model
+reasoning, credentials, and unrelated project or sibling-book prose.
 
 The direction panel can open a bounded **Lux / Umbra inner dialogue** when a
 creative decision benefits from visible counterpoint. Lux develops the humane,
@@ -101,6 +121,13 @@ bring up an earlier exchange unless the writer explicitly asks about one still
 in that buffer. The companion is advisory chrome, not a fourth document region:
 it cannot mutate prose, Continuity, structure, or titles.
 
+Cross-surface discussion is selection-led. Zen can send an exact, previewed
+passage into a new project's spark or attach it to an existing project as a
+read-only source card. Slate can preview an exact manuscript selection and
+stage it in Zen for discussion. No transfer includes surrounding transcripts,
+manuscript, Continuity, or memory, and the Zen draft is not a conversation turn
+until the writer deliberately sends it.
+
 The workspace moves through three phases without forcing a rigid wizard:
 
 ### Shape
@@ -125,6 +152,8 @@ The workspace moves through three phases without forcing a rigid wizard:
 - Draft an approved scene or section without repetitive conversational prompting.
 - Show exactly which planned section Slate is writing.
 - Allow start, stop, continue, and redirect actions.
+- Present generated prose as an inline proposal. It becomes manuscript evidence
+  only after acceptance or deliberate human incorporation.
 - Preserve the approved structure and any locked material.
 
 ### Refine
@@ -157,6 +186,21 @@ The workspace moves through three phases without forcing a rigid wizard:
    Once a spark-led manuscript has enough prose, Slate surfaces a visible title
    checkpoint. It recommends a replacement only when materially stronger, and
    accepting it remains an explicit writer action.
+10. Direct editing, autosave, opening, and deterministic export never wait for
+    Continuity or a model. Only an AI writing operation may pause before its
+    prose call for a material high-confidence conflict.
+
+## Mirror contract
+
+- An account may own named Mirror profiles or pen names. Each project pins an
+  immutable profile version and may add a project or POV overlay.
+- Quick setup accepts writer-owned samples plus short description, dialogue,
+  and interiority/action exercises.
+- Directions, research, quotations, imported material, and untouched AI prose
+  never train Mirror. Eligible human writing produces a reviewable new Voice
+  Card version; it never silently changes an existing project.
+- Mirror controls voice, rhythm, diction, and density. Output length follows
+  explicit direction, the editable scope, and project rhythm instead.
 
 ## Persistent project contract
 
@@ -208,7 +252,8 @@ silently synchronize or rewrite content across applets.
 
 ### Stage 1 — Slate standalone foundation
 
-Ship the V1 vertical slice above. Story remains unchanged and separately usable.
+Ship the V1 vertical slice above. Story remains separate and disabled until it
+earns preview status.
 
 ### Stage 2 — Story to Slate: `Develop in Slate`
 

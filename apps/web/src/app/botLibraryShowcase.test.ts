@@ -16,18 +16,101 @@ describe("selected bot library showcase", () => {
       pageSource,
       /className=\{styles\.botPanelHubShowcase\}[\s\S]*?data-prism-panel-layer="true"/
     );
-    assert.match(pageSource, /node\.dataset\.prismPanelLayer !== "true"/);
+    assert.match(pageSource, /if \(event\.target !== event\.currentTarget\) return;/);
     assert.match(pageSource, /className=\{`\$\{styles\.zenLiveBotPresencePlate\} \$\{styles\.botPanelHubAvatarPlate\}`\}/);
-    assert.match(pageSource, /regenerateBotHubAudioSample\(bot\)/);
-    assert.match(pageSource, /void playBotHubVoicePreview\(bot, "premium"\)/);
-    assert.match(pageSource, /void playBotHubVoicePreview\(bot, "bottish"\)/);
+    for (const mode of ["english", "premium", "babble", "bottish"]) {
+      assert.match(
+        pageSource,
+        new RegExp(`playShowcaseVoiceMode\\("${mode}"\\)`),
+      );
+    }
     assert.match(pageSource, /"--zen-live-bot-avatar-size":[\s\S]*?"min\(520px, 72vmin\)"/);
     assert.match(pageSource, /\{renderBotHubShowcase\(\)\}[\s\S]*?\{renderUsagePanel\(\)\}/);
-    assert.match(cssSource, /\.botPanelHubShowcase\s*\{[\s\S]*?position:\s*fixed;[\s\S]*?inset:\s*0 min\(479px, calc\(100vw - 32px\)\) 0 0;/);
+    assert.match(
+      cssSource,
+      /\.botPanelHubShowcase\s*\{[\s\S]*?position:\s*fixed;[\s\S]*?top:\s*var\(\s*--app-shell-top-nav-height[\s\S]*?right:\s*min\(479px, calc\(100vw - 32px\)\);[\s\S]*?bottom:\s*0;[\s\S]*?left:\s*0;/,
+    );
     assert.match(cssSource, /@keyframes botPanelHubAvatarIdle/);
+    assert.doesNotMatch(
+      normalizedCssSource,
+      /\.botPanelHubAvatarPlate \.zenLiveBotPresenceBody\s*\{[\s\S]*?--zen-live-bot-avatar-face-glyph-size:/,
+    );
+  });
+
+  it("keeps the populated drawer painted above its showcase after WebKit settles the entrance animation", () => {
+    const panelRule = normalizedCssSource.slice(
+      normalizedCssSource.indexOf(".panel {"),
+      normalizedCssSource.indexOf('.panel[data-closing="true"]'),
+    );
+    const showcaseRule = normalizedCssSource.slice(
+      normalizedCssSource.indexOf(".botPanelHubShowcase {"),
+      normalizedCssSource.indexOf(
+        '.botPanelHubShowcase[data-panel="bots"][data-bot-view="botHub"]',
+      ),
+    );
+
+    assert.match(panelRule, /z-index:\s*102;/u);
+    assert.match(panelRule, /transform:\s*translateX\(0\);/u);
+    assert.match(panelRule, /opacity:\s*1;/u);
+    assert.match(showcaseRule, /z-index:\s*100;/u);
+  });
+
+  it("matches the Avatar Editor alloy and buckle proportions", () => {
     assert.match(
       normalizedCssSource,
-      /\.botPanelHubAvatarPlate \.zenLiveBotPresenceBody\s*\{[\s\S]*?--zen-live-bot-avatar-face-glyph-size:\s*calc\(var\(--zen-live-bot-body-frame-size\) \* 0\.217\)/
+      /\.botPanelHubAvatarPlate \.zenLiveBotPresenceBody\s*\{[\s\S]*?--zen-live-bot-body-glyph-size:\s*calc\(var\(--zen-live-bot-body-frame-size\) \* 0\.145\)/,
+    );
+    assert.match(
+      pageSource,
+      /const previewVoicePreset = profile\.core\.communicationStyle;[\s\S]*?const avatarStyle = botAvatarFoundryPreviewStyle\([\s\S]*?previewVoicePreset/,
+    );
+    const showcaseSource = pageSource.slice(
+      pageSource.indexOf("const renderBotHubShowcase"),
+      pageSource.indexOf("const renderSharedPanels"),
+    );
+    const showcasePlateSource = pageSource.slice(
+      pageSource.indexOf("function BotHubVoicePreviewAvatarPlate"),
+      pageSource.indexOf("function ZenLiveBotPresencePlate"),
+    );
+    assert.match(
+      showcaseSource,
+      /const showcaseVoicePreset = coffeeSeatVoicePreset\(bot\);[\s\S]*?botAvatarFullScaleIdentityStyle\([\s\S]*?voicePreset: showcaseVoicePreset/,
+    );
+    assert.match(
+      showcasePlateSource,
+      /<ZenLiveBotMannequin[\s\S]*?voicePreset=\{showcaseVoicePreset\}/,
+    );
+    assert.match(
+      showcasePlateSource,
+      /metalAlloyEnabled=\{!isDefaultPrism\}/,
+    );
+  });
+
+  it("reserves the triangle for Prism and keeps persona glyphs canonical", () => {
+    assert.match(
+      pageSource,
+      /function resolveCustomBotGlyph\([\s\S]*?value !== DEFAULT_PRISM_BOT_GLYPH[\s\S]*?: DEFAULT_BOT_GLYPH;/,
+    );
+    const showcaseSource = pageSource.slice(
+      pageSource.indexOf("const renderBotHubShowcase"),
+      pageSource.indexOf("const renderSharedPanels"),
+    );
+    const showcasePlateSource = pageSource.slice(
+      pageSource.indexOf("function BotHubVoicePreviewAvatarPlate"),
+      pageSource.indexOf("function ZenLiveBotPresencePlate"),
+    );
+    assert.match(
+      showcasePlateSource,
+      /glyph=\{[\s\S]*?bot[\s\S]*?\? resolveCustomBotGlyph\(bot\.glyph\)[\s\S]*?: DEFAULT_PRISM_BOT_GLYPH[\s\S]*?\}/,
+    );
+    assert.match(showcaseSource, /<BotHubVoicePreviewAvatarPlate/);
+    assert.match(
+      pageSource,
+      /const seededGlyph: BotGlyphName = resolveCustomBotGlyph\(bot\.glyph\);/,
+    );
+    assert.doesNotMatch(
+      pageSource,
+      /bot && isBotGlyphName\(bot\.glyph\) \? bot\.glyph : defaultPrismGlyph/,
     );
   });
 
@@ -73,27 +156,137 @@ describe("selected bot library showcase", () => {
   });
 
   it("keeps the large preview silent and plays only from its voice buttons", () => {
+    const showcaseSource = pageSource.slice(
+      pageSource.indexOf("const renderBotHubShowcase"),
+      pageSource.indexOf("const renderSharedPanels"),
+    );
     const previewSource = pageSource.slice(
       pageSource.indexOf("className={styles.botPanelHubAvatarPreview}"),
       pageSource.indexOf("className={styles.botPanelHubShowcasePrompt}")
     );
     assert.doesNotMatch(previewSource, /onClick=/);
     assert.doesNotMatch(previewSource, /playBotHubVoicePreview/);
+    assert.match(showcaseSource, /aria-label="Voice preview mode"/);
+    for (const mode of ["english", "premium", "babble", "bottish"]) {
+      assert.match(
+        showcaseSource,
+        new RegExp(`onClick=\\{\\(\\) => void playShowcaseVoiceMode\\("${mode}"\\)\\}`),
+      );
+    }
+  });
+
+  it("opens every Avatar Studio section directly from the bot hub", () => {
+    const hubSource = pageSource.slice(
+      pageSource.indexOf('{botPanelView === "botHub"'),
+      pageSource.indexOf("{/* One form, two modes.", pageSource.indexOf('{botPanelView === "botHub"')),
+    );
     assert.match(
-      pageSource,
-      /aria-label="Voice preview mode"[\s\S]*?isMarketplacePreview[\s\S]*?playBotHubVoicePreview\(bot, "english"\)[\s\S]*?regenerateBotHubAudioSample\(bot\)[\s\S]*?playBotHubVoicePreview\(bot, "premium"\)[\s\S]*?playBotHubVoicePreview\(bot, "bottish"\)/
+      hubSource,
+      /BOT_AVATAR_CUSTOMIZER_TABS\.map\(\(tab\) =>/,
+    );
+    assert.match(
+      hubSource,
+      /data-avatar-studio-shortcut=\{tab\.value\}/,
+    );
+    assert.match(
+      hubSource,
+      /openBotCustomizer\(\s*selectedBotPanelBot,\s*tab\.value,\s*\)/,
+    );
+    for (const [value, label] of [
+      ["face", "Identity"],
+      ["profile", "Profile"],
+      ["powers", "Powers"],
+      ["eyes", "Eyes"],
+      ["mouth", "Mouth"],
+      ["voice", "Voice"],
+      ["sfx", "SFX"],
+      ["settings", "Settings"],
+      ["details", "Details"],
+    ] as const) {
+      assert.match(
+        pageSource,
+        new RegExp(`\\{ value: "${value}", label: "${label}" \\}`),
+      );
+    }
+  });
+
+  it("speaks the bot hub test line without creating a chat or LLM turn", () => {
+    const showcaseSource = pageSource.slice(
+      pageSource.indexOf("const renderBotHubShowcase"),
+      pageSource.indexOf("const renderSharedPanels"),
+    );
+    const hubSource = pageSource.slice(
+      pageSource.indexOf('{botPanelView === "botHub"'),
+      pageSource.indexOf(
+        "{/* One form, two modes.",
+        pageSource.indexOf('{botPanelView === "botHub"'),
+      ),
+    );
+    const submitSource = pageSource.slice(
+      pageSource.indexOf("async function submitBotHubVoiceEcho"),
+      pageSource.indexOf("async function previewSelectedBotVoice"),
+    );
+    const playbackSource = pageSource.slice(
+      pageSource.indexOf("async function playBotHubVoicePreview"),
+      pageSource.indexOf("async function submitBotHubVoiceEcho"),
+    );
+    assert.match(
+      playbackSource,
+      /options: \{ exactText\?: string \} = \{\}/,
+    );
+    assert.ok(
+      playbackSource.indexOf("const exactPreviewText") <
+        playbackSource.indexOf("await resolveBotHubVoicePreviewText(bot)"),
+      "exact text should be selected before generated sample text is resolved",
+    );
+    assert.match(
+      submitSource,
+      /playBotHubVoicePreview\(bot, mode, \{ exactText \}\)/,
+    );
+    assert.doesNotMatch(
+      submitSource,
+      /sendMessage|createConversation|resolveBotHubVoicePreviewText|\/api\//,
+    );
+    assert.match(
+      showcaseSource,
+      /placeholder="Type exactly what this bot should say…"/,
+    );
+    assert.ok(
+      showcaseSource.indexOf("className={styles.botPanelHubVoiceTest}") >
+        showcaseSource.indexOf("className={styles.botPanelHubVoiceChoices}"),
+      "the composer should follow the four sample buttons",
+    );
+    assert.doesNotMatch(hubSource, /botPanelHubVoiceTest/);
+    assert.match(
+      normalizedCssSource,
+      /\.botPanelHubVoiceTest\s*\{[^}]*width:\s*min\(560px, calc\(100vw - 48px\)\);/,
     );
   });
 
-  it("regenerates and automatically plays every English sample in one click", () => {
-    const regenerationSource = pageSource.slice(
-      pageSource.indexOf("async function regenerateBotHubAudioSample"),
-      pageSource.indexOf("async function loadElevenLabsVoiceCatalog")
+  it("seeds one editable sample and routes every voice button through it", () => {
+    const openHubSource = pageSource.slice(
+      pageSource.indexOf("function openBotPanelHub"),
+      pageSource.indexOf("async function createBot"),
     );
-    assert.match(regenerationSource, /voicePreviewAudioCacheRef\.current\.clear\(\)/);
-    assert.match(regenerationSource, /JSON\.stringify\(\{ voicePreviewLine: null \}\)/);
-    assert.match(regenerationSource, /await playBotHubVoicePreview\(regeneratedBot, "english"\)/);
-    assert.match(pageSource, /previewStatus === "generating" \|\| previewStatus === "playing"/);
+    const showcaseSource = pageSource.slice(
+      pageSource.indexOf("const renderBotHubShowcase"),
+      pageSource.indexOf("const renderSharedPanels"),
+    );
+    assert.match(
+      openHubSource,
+      /setBotHubVoiceEchoDraft\([\s\S]*?bot\.voice_preview_line\?\.trim\(\) \|\| VOICE_PREVIEW_TEXT/,
+    );
+    assert.match(
+      showcaseSource,
+      /voiceTestBot \? \{ exactText: botHubVoiceEchoDraft \} : undefined/,
+    );
+    for (const mode of ["english", "premium", "babble", "bottish"]) {
+      assert.match(
+        showcaseSource,
+        new RegExp(`playShowcaseVoiceMode\\("${mode}"\\)`),
+      );
+    }
+    assert.doesNotMatch(pageSource, /regenerateBotHubAudioSample/);
   });
 
   it("keeps the Bots panel open when the surrounding backdrop is clicked", () => {
@@ -113,17 +306,56 @@ describe("selected bot library showcase", () => {
     );
   });
 
+  it("refreshes the current account's bots whenever the library opens", () => {
+    const refreshBotsSource = pageSource.slice(
+      pageSource.indexOf("async function refreshBots"),
+      pageSource.indexOf(
+        "async function refreshImages",
+        pageSource.indexOf("async function refreshBots"),
+      ),
+    );
+    const openLibrarySource = pageSource.slice(
+      pageSource.indexOf("function openExistingBotLibrary"),
+      pageSource.indexOf("function selectBotPanelShowcase"),
+    );
+
+    assert.match(refreshBotsSource, /captureAccountOwnerGeneration\(\)/u);
+    assert.match(refreshBotsSource, /runForAccountOwner\(ownerGeneration/u);
+    assert.match(
+      refreshBotsSource,
+      /if \(botsResult\.status === "stale"\) return \[\];/u,
+    );
+    assert.match(
+      openLibrarySource,
+      /openRightPanel\("bots"\);[\s\S]*?void refreshBots\(\)\s*\.catch/u,
+    );
+    assert.match(openLibrarySource, /isPrismBackendUnavailableError\(err\)/u);
+    assert.match(openLibrarySource, /setBotLibraryRefreshing\(true\)/u);
+    assert.match(openLibrarySource, /\.finally\(\(\) =>/u);
+    assert.match(
+      pageSource,
+      /botLibraryRefreshing\s*\?\s*"Loading library…"/u,
+    );
+    assert.match(
+      pageSource,
+      /botLibraryRefreshing && bots\.length === 0[\s\S]*?role="status"[\s\S]*?Loading your bots…/u,
+    );
+  });
+
   it("uses thinking while generating and then plays on the same click", () => {
     assert.match(pageSource, /showThinkingSpinner=\{previewStatus === "generating"\}/);
     assert.match(pageSource, /Generating audio sample…/);
     assert.match(pageSource, /voiceModeDisplayName\(previewMode\)[\s\S]*?preview played\./);
-    assert.match(pageSource, /data-talking=\{previewTalking \? "true"/);
+    assert.match(
+      pageSource,
+      /data-talking=\{previewPlaybackActive \? "true"/,
+    );
   });
 
   it("awaits persona copy and plays the first English sample", () => {
     const previewHandlerSource = pageSource.slice(
       pageSource.indexOf("async function playBotHubVoicePreview"),
-      pageSource.indexOf("async function previewSelectedBotVoice")
+      pageSource.indexOf("async function playZenHeroVoicePreview")
     );
     assert.match(
       previewHandlerSource,
@@ -136,7 +368,11 @@ describe("selected bot library showcase", () => {
     assert.match(previewHandlerSource, /await resolveBotHubVoicePreviewText\(bot\)/);
     assert.match(
       previewHandlerSource,
-      /const previewText = `My name is \$\{showcaseName\}\./
+      /const spokenShowcaseName = antiTruth/,
+    );
+    assert.match(
+      previewHandlerSource,
+      /My name is \$\{spokenShowcaseName\}\./,
     );
     assert.equal(previewHandlerSource.match(/await previewSelectedVoice\(/g)?.length, 1);
     assert.doesNotMatch(previewHandlerSource, /generateOnly/);
@@ -148,7 +384,7 @@ describe("selected bot library showcase", () => {
       "useEffect(() => {\n    voicePreviewPlaybackRunRef.current += 1;",
     );
     const resetEffectEnd = pageSource.indexOf(
-      "  useEffect(() => {\n    signalVoiceClipCacheRef.current.clear();",
+      "  useEffect(() => {\n    signalVoicePrefetchSchedulerRef.current.clear();",
       resetEffectStart,
     );
     const resetEffectSource = pageSource.slice(
@@ -194,12 +430,30 @@ describe("selected bot library showcase", () => {
     assert.match(pageSource, /BOT_AVATAR_PREVIEW_MOUTH_SHAPES/);
     assert.match(pageSource, /window\.setInterval\(advanceMouthShape, 118\)/);
     assert.match(pageSource, /mouthShape=\{previewMouthShape\}/);
+    assert.match(pageSource, /data-bot-hub-mouth-renderer="isolated"/);
+    assert.match(
+      pageSource,
+      /useSyncExternalStore\(\s*subscribeBotHubVoicePreviewMouth/,
+    );
+    assert.doesNotMatch(pageSource, /setBotHubPreviewMouthShape/);
+    assert.doesNotMatch(pageSource, /setBotHubPreviewVoicing/);
     assert.doesNotMatch(
       pageSource.slice(
         pageSource.indexOf("const renderBotHubShowcase"),
         pageSource.indexOf("const renderSharedPanels")
       ),
       /mouthShape=\{previewStatus === "playing" \? "open-small"/
+    );
+  });
+
+  it("paces Bottish from audio progress instead of the rapid Babble timer", () => {
+    assert.match(
+      pageSource,
+      /botHubVoicePreview\.mode === "bottish"[\s\S]{0,180}return;/,
+    );
+    assert.match(
+      pageSource,
+      /mode === "bottish"[\s\S]{0,500}bottishMouthShapeAtAlignedElapsedMs\(\{/,
     );
   });
 
@@ -219,7 +473,13 @@ describe("selected bot library showcase", () => {
     );
     assert.match(
       pageSource,
-      /const previewTalking =\s*previewStatus === "playing" && botHubPreviewVoicing/,
+      /const previewPlaybackActive = previewStatus === "playing";[\s\S]{0,240}mouthSnapshot\.botId === showcaseVoiceId[\s\S]{0,120}mouthSnapshot\.talking/,
+    );
+    assert.match(pageSource, /isTalking=\{previewTalking\}/);
+    assert.match(
+      pageSource,
+      /voiceLightTarget=\{botVoiceLightTarget\([\s\S]{0,100}"bot-preview"[\s\S]{0,100}"hub"/,
+      "provider-timed mouth pauses keep the always-alive frame bound to voice energy",
     );
   });
 
@@ -242,6 +502,23 @@ describe("selected bot library showcase", () => {
     assert.match(cssSource, /\.botPanelHubShowcase\[data-panel="images"\]/);
   });
 
+  it("dismisses the bot management hub only from the empty showcase backdrop", () => {
+    const showcaseSource = pageSource.slice(
+      pageSource.indexOf("const renderBotHubShowcase"),
+      pageSource.indexOf("const renderSharedPanels"),
+    );
+
+    assert.match(
+      showcaseSource,
+      /const showcaseBackdropDismissible =\s*panel === "bots" && botPanelView === "botHub"/u,
+    );
+    assert.match(showcaseSource, /data-bot-hub-showcase-backdrop="true"/u);
+    assert.match(
+      showcaseSource,
+      /if \(event\.target !== event\.currentTarget\) return;\s*closePanel\(\);/u,
+    );
+  });
+
   it("offers English, Premium, Babble, and Bottish independently of the global voice mode", () => {
     assert.match(pageSource, /mode: Exclude<VoicePlaybackChoice, "mute">/);
     assert.match(pageSource, /playBotHubVoicePreview\(\s*bot: Bot \| null,\s*mode: Exclude<VoicePlaybackChoice, "mute">/);
@@ -249,8 +526,12 @@ describe("selected bot library showcase", () => {
     assert.match(pageSource, /aria-pressed=\{previewMode === "english"\}/);
     assert.match(pageSource, /aria-pressed=\{previewMode === "premium"\}/);
     assert.match(pageSource, /aria-pressed=\{previewMode === "babble"\}/);
-    assert.match(pageSource, /playBotHubVoicePreview\(bot, "premium"\)/);
-    assert.match(pageSource, /playBotHubVoicePreview\(bot, "babble"\)/);
+    assert.match(pageSource, /playShowcaseVoiceMode\("premium"\)/);
+    assert.match(pageSource, /playShowcaseVoiceMode\("babble"\)/);
+    assert.match(
+      pageSource,
+      /playBotHubVoicePreview\([\s\S]*?bot,[\s\S]*?mode,[\s\S]*?voiceTestBot \? \{ exactText: botHubVoiceEchoDraft \} : undefined/,
+    );
     assert.match(pageSource, /mode === "premium" \? "english" : mode/);
     assert.match(pageSource, /mode === "premium" \? "elevenlabs" : "builtin"/);
     assert.match(
@@ -262,7 +543,7 @@ describe("selected bot library showcase", () => {
     assert.doesNotMatch(
       pageSource.slice(
         pageSource.indexOf("async function playBotHubVoicePreview"),
-        pageSource.indexOf("async function loadElevenLabsVoiceCatalog")
+        pageSource.indexOf("async function playZenHeroVoicePreview")
       ),
       /settings\.voiceMode/
     );
@@ -278,26 +559,46 @@ describe("selected bot library showcase", () => {
   it("shows Prism first and separates library preview from bot management", () => {
     assert.match(pageSource, /botPanelShowcaseIsDefaultPrism/);
     assert.match(pageSource, /showcaseName = bot\?\.name \?\? "Prism"/);
-    assert.match(pageSource, />\s*Customize Prism\s*</);
     assert.match(pageSource, /onClick=\{\(\) => selectBotPanelShowcase\(null\)\}/);
-    assert.match(pageSource, /selectBotPanelShowcase\(b\);/);
-    assert.match(pageSource, /onDoubleClick=\{\(event\) => \{[\s\S]*?openBotPanelHub\(b\);/);
+    assert.match(
+      pageSource,
+      /onClick=\{\(\) =>\s*selectBotPanelShowcase\(b\)\s*\}/
+    );
+    assert.match(
+      pageSource,
+      /onDoubleClick=\{\(event\) => \{[\s\S]*?openBotPanelHub\(b,\s*\{[\s\S]*?origin: "library"/,
+    );
     assert.match(pageSource, /double-click to manage/);
     assert.match(cssSource, /\.botCard\[data-preview-selected="true"\]/);
+  });
+
+  it("keeps customization out of the Default Prism Library preview", () => {
+    const previewStart = pageSource.indexOf("const renderBotHubShowcase");
+    const previewEnd = pageSource.indexOf(
+      "const renderSharedPanels",
+      previewStart,
+    );
+    assert.notEqual(previewStart, -1);
+    assert.notEqual(previewEnd, -1);
+    assert.doesNotMatch(
+      pageSource.slice(previewStart, previewEnd),
+      /Customize Prism/,
+    );
   });
 
   it("keeps Default Prism visible on the Bots home panel", () => {
     assert.match(pageSource, /className=\{styles\.botPanelHomePrismCard\}/);
     assert.match(pageSource, /aria-label="Default Prism bot"/);
-    assert.match(pageSource, /scheduleKey="bots-home-default-prism"/);
-    assert.match(pageSource, /faceStyle=\{zenDefaultPrismFaceStyle\}/);
-    assert.match(pageSource, /frameMaterialSeed=\{PRISM_FACTORY_CLEAN_FRAME_SEED\}/);
+    assert.match(
+      pageSource,
+      /<PrismTriangleMark\s+className=\{styles\.botPanelHomePrismGlyph\}/,
+    );
     assert.match(
       pageSource,
       /className=\{styles\.botPanelHomePrismCustomize\}[\s\S]*?onClick=\{openDefaultBotCustomizer\}[\s\S]*?Customize Prism/,
     );
     assert.match(cssSource, /\.botPanelHomePrismCard\s*\{[\s\S]*?grid-column:\s*1 \/ -1;/);
-    assert.match(cssSource, /\.botPanelHomePrismAvatarPlate/);
+    assert.match(cssSource, /\.botPanelHomePrismGlyph/);
     assert.match(cssSource, /\.botPanelHomePrismCustomize/);
   });
 
@@ -341,9 +642,14 @@ describe("selected bot library showcase", () => {
     assert.match(pageSource, /function resolveVoicePreviewProfile\(/);
     assert.doesNotMatch(pageSource, /defaultSystemVoiceName/);
     assert.doesNotMatch(pageSource, /defaultElevenLabsVoiceId/);
-    assert.match(
-      pageSource,
-      /const profile = resolveVoicePreviewProfile\(authoredProfile\);[\s\S]*?JSON\.stringify\(profile\)/
+    assert.match(pageSource, /avatarVoicePlaybackCacheProfile\(profile\)/);
+    const cacheProfileSource = pageSource.slice(
+      pageSource.indexOf("function avatarVoicePlaybackCacheProfile"),
+      pageSource.indexOf("function BotAvatarSfxEditor"),
     );
+    assert.match(cacheProfileSource, /normalizeBotAudioVoiceProfileV1\(profile\)/);
+    assert.match(cacheProfileSource, /return JSON\.stringify\(\{[\s\S]*voiceProfile,[\s\S]*speechprintRuleset:/);
+    assert.match(cacheProfileSource, /avatarSfx:\s*_avatarSfx/);
+    assert.match(cacheProfileSource, /avatarSfxMuted:\s*_avatarSfxMuted/);
   });
 });

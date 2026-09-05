@@ -3,6 +3,14 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 const pageSource = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
+const avatarSfxSource = readFileSync(
+  new URL("./botAvatarSfx.ts", import.meta.url),
+  "utf8",
+);
+const voiceEffectsSource = readFileSync(
+  new URL("./voiceEffects.ts", import.meta.url),
+  "utf8",
+);
 
 function sourceBefore(marker: string, length = 2_200): string {
   const markerIndex = pageSource.indexOf(marker);
@@ -16,29 +24,184 @@ test("the shared full-avatar renderer owns the looping SFX lifecycle", () => {
   assert.match(pageSource, /data-bot-avatar-sfx-runtime="true"/);
 });
 
+test("Avatar SFX and bot speech share the exact post-effect output node", () => {
+  assert.match(
+    avatarSfxSource,
+    /engine\.output\.connect\(prismAudioOutputNode\(engine\.context\)\)/u,
+  );
+  assert.match(
+    voiceEffectsSource,
+    /destination:\s*prismAudioOutputNode\(context\)/u,
+  );
+});
+
+test("Avatar Studio samples use the shared trimmed attack and release behavior", () => {
+  assert.match(pageSource, /playBotAvatarSfxSampleAudio\(/);
+  assert.match(pageSource, /stopBotAvatarSfxSampleAudio\(/);
+  assert.match(pageSource, /setBotAvatarSfxSampleVolume\(/);
+  assert.doesNotMatch(
+    pageSource,
+    /sample\.src = sampleSfx\.audioDataUrl[\s\S]{0,120}sample\.loop = true/u,
+  );
+});
+
+test("new bot paths attempt unique thinking loops while preserving the fallback", () => {
+  const automaticGenerationCalls = pageSource.match(
+    /generateBotThinkingSfxProfile\(/gu,
+  );
+  assert.ok(
+    (automaticGenerationCalls?.length ?? 0) >= 4,
+    "manual creation, generated drafts, Marketplace installs, and Marketplace updates should each request a loop",
+  );
+  assert.match(pageSource, /settings\.elevenLabsApiKeySource !== "none"/u);
+  assert.match(pageSource, /a PRISM fallback is active/u);
+  assert.match(pageSource, /generateThinkingSfx: true/u);
+  assert.match(pageSource, /onThinkingSfxError:/u);
+  assert.match(pageSource, /thinkingSfxGenerated/u);
+});
+
+test("Avatar Studio presents the built-in fallback without pretending it was uploaded", () => {
+  assert.match(pageSource, /PRISM Computer Calculating/u);
+  assert.match(
+    pageSource,
+    /Built-in fallback · no uploaded file · thinking only/u,
+  );
+  assert.match(pageSource, /aria-label="Avatar sound mode"/u);
+  assert.match(pageSource, />\s*Mute\s*<\/button>/u);
+  assert.match(pageSource, /Use PRISM default avatar sound/u);
+});
+
+test("Avatar Studio presents the quiet physical ceiling as player-facing 100%", () => {
+  const volumeSource = sourceBefore('aria-label="Avatar sound volume"', 2_000);
+  assert.match(volumeSource, /max=\{100\}/u);
+  assert.match(
+    volumeSource,
+    /currentSfx\.volume\s*\/\s*BOT_AVATAR_SFX_MAX_VOLUME/u,
+  );
+  assert.match(
+    volumeSource,
+    /Number\(event\.currentTarget\.value\)\s*\/\s*100\)[\s\S]{0,80}BOT_AVATAR_SFX_MAX_VOLUME/u,
+  );
+});
+
 test("Avatar Studio drives SFX from its idle, blink, talking, and thinking preview", () => {
   const previewSource = sourceBefore(
     "scheduleKey={`${scheduleKey}-${previewMode}-${previewMood}`}",
   );
   assert.match(previewSource, /avatarSfx=\{avatarSfx\}/);
-  assert.match(previewSource, /avatarSfxState=\{previewMode\}/);
+  assert.match(previewSource, /avatarSfxState=\{previewAvatarSfxState\}/);
+  assert.match(
+    pageSource,
+    /const previewAvatarSfxState: BotAvatarSfxState =\s*previewMode === "sip" \? "idle" : previewMode;/,
+  );
 });
 
-test("Zen, Coffee, and Signal resolve each visible bot's SFX and live state", () => {
+test("Zen, Coffee, and live Signal resolve each visible bot's SFX and live state", () => {
   const zenSource = sourceBefore(
-    "scheduleKey={`zen-live-${bot?.id ?? \"prism\"}-${moodHint}`}",
+    'scheduleKey={`zen-live-${bot?.id ?? "prism"}-${moodHint}`}',
   );
-  assert.match(zenSource, /avatarSfx=\{botAvatarSfxForBot\(bot\)\}/);
+  assert.match(
+    zenSource,
+    /avatarSfx=\{[\s\S]{0,160}botAvatarSfxForVoiceBus\([\s\S]{0,100}botAvatarSfxForBot\(bot\)[\s\S]{0,60}voiceBusGain/u,
+  );
   assert.match(zenSource, /showThinkingSpinner \|\| transitioning/);
 
-  const coffeeSource = sourceBefore("scheduleKey={`coffee-live-${bot.id}`}");
-  assert.match(coffeeSource, /avatarSfx=\{botAvatarSfxForBot\(bot\)\}/);
-  assert.match(coffeeSource, /seatIsThinkingThisSeat/);
+  const coffeeSource = sourceBefore(
+    "scheduleKey: `coffee-live-${bot.id}`,",
+    4_000,
+  );
+  assert.match(
+    pageSource,
+    /const seatAvatarSfxGain = coffeeSeatAvatarSfxBusGain\(/u,
+  );
+  assert.match(
+    pageSource,
+    /botAvatarSfxForVoiceBus\(\s*botAvatarSfxForBot\(bot\)[\s\S]{0,120}seatAvatarSfxGain/u,
+  );
+  assert.match(
+    coffeeSource,
+    /avatarSfx: seatAvatarSfx,[\s\S]{0,100}avatarSfxState: seatAvatarSfxState/u,
+  );
 
   const signalSource = sourceBefore(
-    "scheduleKey={`botcast-${avatarState.role}-${bot.id}`}",
+    "scheduleKey: `botcast-${avatarState.role}-${bot.id}`",
+    3_500,
   );
-  assert.match(signalSource, /avatarSfx=\{botAvatarSfxForBot\(bot\)\}/);
+  assert.match(
+    signalSource,
+    /signalMannequinAvatarSfx =[\s\S]{0,180}avatarState\.sfxEnabled[\s\S]{0,220}botAvatarSfxForVoiceBus\([\s\S]{0,120}botAvatarSfxForBot\(bot\)/u,
+  );
   assert.match(signalSource, /avatarState\.talking/);
   assert.match(signalSource, /avatarState\.thinking/);
+});
+
+test("Debate routes the bot's frozen SFX profile through its voice bus", () => {
+  const debateSource = sourceBefore(
+    "scheduleKey={`debate-${avatarState.role}-${botSnapshot.id}`}",
+    3_000,
+  );
+  assert.match(
+    debateSource,
+    /avatarSfx=\{[\s\S]{0,220}botAvatarSfxForVoiceBus\(\s*botAvatarSfxForProfile\(\s*botSnapshot\.voiceProfile,\s*botSnapshot\.id,\s*\),[\s\S]{0,420}settings\.voiceVolume/u,
+  );
+  assert.match(
+    debateSource,
+    /avatarSfxState=\{\s*avatarState\.talking\s*\?\s*"talking"\s*:\s*avatarState\.thinking\s*\?\s*"thinking"\s*:\s*"idle"\s*\}/u,
+  );
+});
+
+test("Signal keeps dashboard avatars quiet and respects Persona SFX triggers on stage", () => {
+  const botcastSource = readFileSync(
+    new URL("./BotcastExperience.tsx", import.meta.url),
+    "utf8",
+  );
+  assert.match(
+    botcastSource,
+    /surface: "archive" \| "dashboard" \| "stage" \| "alignment";/u,
+  );
+  assert.match(botcastSource, /surface: "archive"/u);
+  const liveStageAvatarSource = botcastSource.slice(
+    botcastSource.indexOf("const renderedAvatar = renderAvatar?.(stageBot, {"),
+    botcastSource.indexOf(
+      "if (renderedAvatar !== null",
+      botcastSource.indexOf("const renderedAvatar = renderAvatar?.(stageBot, {"),
+    ),
+  );
+  assert.match(liveStageAvatarSource, /surface: "stage"/u);
+  assert.match(liveStageAvatarSource, /signalAvatarSfxShouldPlay\(\{/u);
+  assert.match(liveStageAvatarSource, /introActive: episodePreRoll !== null/u);
+  assert.match(
+    liveStageAvatarSource,
+    /episodeOutroSfxMutedId === args\.currentEpisode\.id/u,
+  );
+  assert.equal(
+    botcastSource.match(/surface: "dashboard",/gu)?.length,
+    2,
+    "Signal keeps two non-live dashboard avatar surfaces separate from the compact archive",
+  );
+  assert.match(
+    botcastSource,
+    /surface: "alignment",[\s\S]{0,140}sfxEnabled: sfxVoiceBusGain > 0,[\s\S]{0,100}sfxVoiceBusGain/u,
+  );
+  assert.match(
+    pageSource,
+    /botAvatarSfxForVoiceBus\([\s\S]{0,180}avatarState\.sfxVoiceBusGain/u,
+  );
+  const signalMixSource = pageSource.slice(
+    pageSource.indexOf("function botAvatarSfxForVoiceBus"),
+    pageSource.indexOf("function marketplacePreviewBotFromArchive"),
+  );
+  assert.doesNotMatch(signalMixSource, /forcePreview/u);
+  assert.doesNotMatch(signalMixSource, /playWhileIdle: true/u);
+  assert.doesNotMatch(signalMixSource, /playWhileTalking: true/u);
+  assert.doesNotMatch(signalMixSource, /playWhileThinking: true/u);
+
+  const producerSource = sourceBefore(
+    'scheduleKey: "botcast-producer-prism"',
+    3_000,
+  );
+  assert.match(
+    producerSource,
+    /signalPrismAvatarSfx =[\s\S]{0,180}avatarState\.sfxEnabled[\s\S]{0,240}botAvatarSfxForVoiceBus\([\s\S]{0,140}botAvatarSfxForProfile\([\s\S]{0,220}avatarState\.sfxVoiceBusGain/u,
+  );
 });

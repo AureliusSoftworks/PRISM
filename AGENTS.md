@@ -108,6 +108,12 @@ Advanced runtime knobs sent from Chat are ignored server-side. Sandbox compactio
 - Session cookies: HttpOnly, SameSite=Lax
 - All API routes require authentication except `/api/health`
 
+## Persistent LOCAL QA Account
+
+- Reuse the single `codex_qa_admin` PRISM account for authenticated UI testing. Its credentials are stored only as `PRISM_QA_USERNAME` and `PRISM_QA_PASSWORD` in `/Users/jared/secrets.env`; never print or commit them.
+- Never create a second QA account unless Jared explicitly approves it. Run `CODEX_SECRETS_ENV=/Users/jared/secrets.env node scripts/prism-local-qa-account.mjs ensure` to verify or reuse the account; this purpose-built command parses only its own QA keys because the general shell secrets loader may reject unrelated legacy values.
+- Keep QA provider use strictly LOCAL unless Jared explicitly authorizes an ONLINE test. Preserve the real `jared` account and never use it as a synthetic fixture.
+
 ## Branching
 
 - `dev` → active development
@@ -136,3 +142,13 @@ Treat onboarding and contextual tutorials as part of every user-visible feature,
 - Update the tutorial when a player-visible control, workflow, applet, or default changes. If no tutorial change is needed, record that review in the Bead or verification notes.
 - Keep tutorial target selectors stable and backed by tests. A missing, hidden, or stale target is a product regression.
 - Preserve skip, do-it-later, and reset paths so guidance never traps the player.
+
+## Credits Maintenance
+
+- When adding or replacing a direct third-party framework, package, connected
+  service, dataset, font, sound, image, or other external asset, update
+  `apps/web/src/app/aboutCredits.ts` in the same change.
+- Keep direct npm and Cargo dependency coverage green in
+  `apps/web/src/app/aboutCredits.test.ts`; curated services and production
+  assets still require a deliberate registry entry because manifests cannot
+  discover them.

@@ -50,11 +50,13 @@ export async function readBinaryBody(
 
 export class HttpError extends Error {
   readonly statusCode: number;
+  readonly code?: string;
 
-  constructor(statusCode: number, message: string) {
+  constructor(statusCode: number, message: string, code?: string) {
     super(message);
     this.name = "HttpError";
     this.statusCode = statusCode;
+    this.code = code;
   }
 }
 
@@ -116,6 +118,6 @@ export function setCorsHeaders(res: ServerResponse, origin?: string): void {
   res.setHeader("Access-Control-Allow-Origin", allowedOrigin);
   res.setHeader("Vary", "Origin");
   res.setHeader("Access-Control-Allow-Credentials", "true");
-  res.setHeader("Access-Control-Allow-Headers", "content-type, authorization, x-prism-client-access");
+  res.setHeader("Access-Control-Allow-Headers", "content-type, authorization, x-prism-client-access, x-prism-reasoning-effort, x-prism-model-provider, x-prism-model-override");
   res.setHeader("Access-Control-Allow-Methods", "GET,POST,PATCH,DELETE,OPTIONS");
 }

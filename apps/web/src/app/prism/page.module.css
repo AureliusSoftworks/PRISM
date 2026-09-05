@@ -1,14 +1,63 @@
 .pageShell {
-  min-height: 100dvh;
-  padding: clamp(24px, 5vw, 72px);
-  overflow: hidden;
-  color: #edf4fa;
-  background:
+  --public-ink: #edf4fa;
+  --public-muted: rgba(237, 244, 250, 0.58);
+  --public-copy: rgba(237, 244, 250, 0.72);
+  --public-copy-strong: rgba(237, 244, 250, 0.78);
+  --public-line: rgba(237, 244, 250, 0.14);
+  --public-line-soft: rgba(237, 244, 250, 0.12);
+  --public-line-hover: rgba(237, 244, 250, 0.32);
+  --public-panel: rgba(15, 13, 11, 0.72);
+  --public-panel-soft: rgba(237, 244, 250, 0.055);
+  --public-panel-deep: rgba(4, 3, 3, 0.28);
+  --public-primary-ink: #0a0908;
+  --public-primary-fill: linear-gradient(135deg, #edf4fa, #c9fff7);
+  --public-secondary-ink: rgba(237, 244, 250, 0.78);
+  --public-secondary-fill: rgba(237, 244, 250, 0.05);
+  --public-secondary-fill-hover: rgba(237, 244, 250, 0.08);
+  --public-orb-core: rgba(8, 7, 6, 0.54);
+  --public-step-number: rgba(47, 211, 227, 0.86);
+  --public-focus: #b9f8ff;
+  --public-card-shadow: 0 26px 80px rgba(0, 0, 0, 0.3);
+  --public-page-background:
     radial-gradient(circle at 18% 16%, rgba(255, 77, 109, 0.24), transparent 28%),
     radial-gradient(circle at 82% 20%, rgba(47, 211, 227, 0.2), transparent 30%),
     radial-gradient(circle at 54% 86%, rgba(123, 92, 255, 0.24), transparent 34%),
     linear-gradient(135deg, #070605 0%, #12100e 48%, #0b0a09 100%);
+  min-height: 100dvh;
+  padding: clamp(24px, 5vw, 72px);
+  overflow: hidden;
+  color: var(--public-ink);
+  background: var(--public-page-background);
+  color-scheme: dark;
   font-family: var(--font-ui-sans), system-ui, sans-serif;
+}
+
+:global(body[data-prism-theme="light"]) .pageShell {
+  --public-ink: #172638;
+  --public-muted: #657b90;
+  --public-copy: #506980;
+  --public-copy-strong: #3f5b73;
+  --public-line: rgba(74, 103, 132, 0.24);
+  --public-line-soft: rgba(74, 103, 132, 0.18);
+  --public-line-hover: rgba(35, 70, 104, 0.42);
+  --public-panel: rgba(255, 255, 255, 0.78);
+  --public-panel-soft: rgba(255, 255, 255, 0.56);
+  --public-panel-deep: rgba(221, 234, 245, 0.62);
+  --public-primary-ink: #ffffff;
+  --public-primary-fill: linear-gradient(135deg, #172638, #294966);
+  --public-secondary-ink: #294966;
+  --public-secondary-fill: rgba(255, 255, 255, 0.72);
+  --public-secondary-fill-hover: rgba(255, 255, 255, 0.96);
+  --public-orb-core: rgba(248, 251, 255, 0.64);
+  --public-step-number: #087e92;
+  --public-focus: #27567c;
+  --public-card-shadow: 0 24px 68px rgba(31, 74, 112, 0.14);
+  --public-page-background:
+    radial-gradient(circle at 18% 16%, rgba(255, 77, 109, 0.1), transparent 30%),
+    radial-gradient(circle at 82% 20%, rgba(47, 211, 227, 0.1), transparent 32%),
+    radial-gradient(circle at 54% 86%, rgba(123, 92, 255, 0.1), transparent 36%),
+    linear-gradient(135deg, #edf5fc 0%, #f8fbff 48%, #e4eef7 100%);
+  color-scheme: light;
 }
 
 .hero {
@@ -58,7 +107,7 @@
   font-family: var(--font-geist-mono), ui-monospace, monospace;
   font-size: 0.72rem;
   font-weight: 700;
-  color: rgba(237, 244, 250, 0.58);
+  color: var(--public-muted);
 }
 
 .hero h1 {
@@ -74,7 +123,7 @@
 .lede {
   max-width: 650px;
   margin-top: 28px;
-  color: rgba(237, 244, 250, 0.72);
+  color: var(--public-copy);
   font-size: clamp(1.1rem, 2vw, 1.35rem);
   line-height: 1.65;
 }
@@ -102,25 +151,39 @@
 }
 
 .primaryAction {
-  color: #0a0908;
-  background: linear-gradient(135deg, #edf4fa, #c9fff7);
+  color: var(--public-primary-ink);
+  background: var(--public-primary-fill);
   box-shadow: 0 18px 52px rgba(47, 211, 227, 0.18);
 }
 
 .secondaryAction {
-  color: rgba(237, 244, 250, 0.78);
-  border: 1px solid rgba(237, 244, 250, 0.16);
-  background: rgba(237, 244, 250, 0.05);
+  color: var(--public-secondary-ink);
+  border: 1px solid var(--public-line);
+  background: var(--public-secondary-fill);
 }
 
 .primaryAction:hover,
-.secondaryAction:hover {
+.primaryAction:focus-visible,
+.secondaryAction:hover,
+.secondaryAction:focus-visible {
   transform: translateY(-2px);
 }
 
-.secondaryAction:hover {
-  border-color: rgba(237, 244, 250, 0.32);
-  background: rgba(237, 244, 250, 0.08);
+.primaryAction:focus-visible,
+.secondaryAction:focus-visible {
+  outline: 2px solid var(--public-focus);
+  outline-offset: 3px;
+}
+
+.primaryAction:active,
+.secondaryAction:active {
+  transform: translateY(0);
+}
+
+.secondaryAction:hover,
+.secondaryAction:focus-visible {
+  border-color: var(--public-line-hover);
+  background: var(--public-secondary-fill-hover);
 }
 
 .orb {
@@ -143,7 +206,7 @@
   position: absolute;
   inset: 22%;
   border-radius: inherit;
-  background: rgba(8, 7, 6, 0.54);
+  background: var(--public-orb-core);
   backdrop-filter: blur(10px);
 }
 
@@ -152,16 +215,16 @@
   z-index: 1;
   align-self: end;
   padding: 24px;
-  border: 1px solid rgba(237, 244, 250, 0.14);
+  border: 1px solid var(--public-line);
   border-radius: 28px;
-  background: rgba(15, 13, 11, 0.72);
-  box-shadow: 0 26px 80px rgba(0, 0, 0, 0.3);
+  background: var(--public-panel);
+  box-shadow: var(--public-card-shadow);
   backdrop-filter: blur(22px);
 }
 
 .signalCard p:last-child {
   margin-top: 18px;
-  color: rgba(237, 244, 250, 0.74);
+  color: var(--public-copy);
   line-height: 1.65;
 }
 
@@ -217,9 +280,9 @@
   display: flex;
   flex-direction: column;
   justify-content: space-between;
-  border: 1px solid rgba(237, 244, 250, 0.12);
+  border: 1px solid var(--public-line-soft);
   border-radius: 26px;
-  background: rgba(237, 244, 250, 0.055);
+  background: var(--public-panel-soft);
 }
 
 .pillar h2 {
@@ -232,7 +295,7 @@
 }
 
 .pillar span {
-  color: rgba(237, 244, 250, 0.68);
+  color: var(--public-copy);
   line-height: 1.6;
 }
 
@@ -243,9 +306,9 @@
   grid-template-columns: minmax(0, 0.85fr) minmax(320px, 1fr);
   gap: clamp(28px, 6vw, 72px);
   align-items: center;
-  border: 1px solid rgba(237, 244, 250, 0.12);
+  border: 1px solid var(--public-line-soft);
   border-radius: 32px;
-  background: rgba(4, 3, 3, 0.28);
+  background: var(--public-panel-deep);
 }
 
 .workflow h2 {
@@ -269,8 +332,8 @@
   padding: 18px 18px 18px 58px;
   position: relative;
   border-radius: 18px;
-  color: rgba(237, 244, 250, 0.78);
-  background: rgba(237, 244, 250, 0.055);
+  color: var(--public-copy-strong);
+  background: var(--public-panel-soft);
 }
 
 .workflowSteps li::before {
@@ -281,7 +344,7 @@
   transform: translateY(-50%);
   font-family: var(--font-geist-mono), ui-monospace, monospace;
   font-size: 0.72rem;
-  color: rgba(47, 211, 227, 0.86);
+  color: var(--public-step-number);
 }
 
 @media (max-width: 900px) {

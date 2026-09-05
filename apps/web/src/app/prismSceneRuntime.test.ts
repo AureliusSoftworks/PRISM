@@ -14,9 +14,11 @@ function recordWindow(options: {
   nowMs: number;
   deltaMs: number;
   activity?: PrismSceneActivity;
-}): { nowMs: number; qualityChanged?: string } {
+}): { nowMs: number; bad: boolean; good: boolean; proposedChange: boolean } {
   let nowMs = options.nowMs;
-  let qualityChanged: string | undefined;
+  let bad = false;
+  let good = false;
+  let proposedChange = false;
   for (let index = 0; index < PRISM_SCENE_SAMPLE_WINDOW_SIZE; index += 1) {
     nowMs += options.deltaMs;
     const result = options.controller.recordFrame({
@@ -25,13 +27,15 @@ function recordWindow(options: {
       activity: options.activity ?? "interactive",
       foreground: true,
     });
-    qualityChanged = result.qualityChanged ?? qualityChanged;
+    bad ||= result.window?.bad === true;
+    good ||= result.window?.good === true;
+    proposedChange ||= "qualityChanged" in result;
   }
-  return { nowMs, qualityChanged };
+  return { nowMs, bad, good, proposedChange };
 }
 
-describe("PRISM adaptive scene runtime", () => {
-  it("uses the approved three automatic tiers", () => {
+describe("PRISM scene runtime", () => {
+  it("uses the approved three player-selected tiers", () => {
     assert.deepEqual(prismSceneQualityConfig("full", false, 2), {
       quality: "full",
       dprCap: 1.5,
@@ -110,67 +114,36 @@ describe("PRISM adaptive scene runtime", () => {
         qualityCeiling: "full",
       }),
       "ambient",
-      "adaptive degradation to minimal must keep sampling under a High ceiling",
+      "an explicit High ceiling keeps ambient sampling active",
     );
   });
 
-  it("steps down only after two consecutive bad windows", () => {
+  it("reports bad and good windows without changing the rendered tier", () => {
     const controller = new PrismAdaptiveQualityController(0);
     let nowMs = 2_001;
-    let result = recordWindow({ controller, nowMs, deltaMs: 40 });
-    nowMs = result.nowMs;
+    const slow = recordWindow({ controller, nowMs, deltaMs: 40 });
+    nowMs = slow.nowMs;
+    assert.equal(slow.bad, true);
+    assert.equal(slow.proposedChange, false);
     assert.equal(controller.quality, "full");
-    assert.equal(result.qualityChanged, undefined);
-
-    result = recordWindow({ controller, nowMs, deltaMs: 40 });
-    assert.equal(result.qualityChanged, "balanced");
-    assert.equal(controller.quality, "balanced");
-  });
-
-  it("steps up after four good windows once the cooldown has elapsed", () => {
-    const controller = new PrismAdaptiveQualityController(0);
-    let nowMs = 2_001;
-    nowMs = recordWindow({ controller, nowMs, deltaMs: 40 }).nowMs;
-    const down = recordWindow({ controller, nowMs, deltaMs: 40 });
-    nowMs = down.nowMs;
-    assert.equal(controller.quality, "balanced");
-
-    nowMs += 10_001;
     controller.noteDiscontinuity(nowMs);
     nowMs += 2_001;
-    for (let index = 0; index < 3; index += 1) {
-      nowMs = recordWindow({ controller, nowMs, deltaMs: 16 }).nowMs;
-      assert.equal(controller.quality, "balanced");
-    }
-    const up = recordWindow({ controller, nowMs, deltaMs: 16 });
-    assert.equal(up.qualityChanged, "full");
+    const fast = recordWindow({ controller, nowMs, deltaMs: 16 });
+    assert.equal(fast.good, true);
+    assert.equal(fast.proposedChange, false);
     assert.equal(controller.quality, "full");
   });
 
-  it("treats balanced and minimal as hard player-selected ceilings", () => {
+  it("keeps balanced and minimal as fixed player-selected tiers", () => {
     const medium = new PrismAdaptiveQualityController(0, "balanced");
     let nowMs = 2_001;
-    for (let index = 0; index < 4; index += 1) {
-      nowMs = recordWindow({ controller: medium, nowMs, deltaMs: 16 }).nowMs;
-    }
-    assert.equal(medium.quality, "balanced");
-
     nowMs = recordWindow({ controller: medium, nowMs, deltaMs: 40 }).nowMs;
     nowMs = recordWindow({ controller: medium, nowMs, deltaMs: 40 }).nowMs;
-    assert.equal(medium.quality, "minimal");
-    nowMs += 10_001;
-    medium.noteDiscontinuity(nowMs);
-    nowMs += 2_001;
-    for (let index = 0; index < 4; index += 1) {
-      nowMs = recordWindow({ controller: medium, nowMs, deltaMs: 16 }).nowMs;
-    }
     assert.equal(medium.quality, "balanced");
 
     const low = new PrismAdaptiveQualityController(0, "minimal");
     nowMs = 2_001;
-    for (let index = 0; index < 6; index += 1) {
-      nowMs = recordWindow({ controller: low, nowMs, deltaMs: 16 }).nowMs;
-    }
+    recordWindow({ controller: low, nowMs, deltaMs: 16 });
     assert.equal(low.quality, "minimal");
   });
 

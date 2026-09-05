@@ -9,43 +9,51 @@ const BOT_MARKETPLACE_GROUP_ATMOSPHERES: Readonly<
 > = {
   originals: {
     label: "Prismatic mist",
-    src: "/zen-fallback-wallpapers/prismatic-mist.png",
+    src: "/zen-fallback-wallpapers/prismatic-mist.webp",
   },
   "founders-nation-builders": {
     label: "Archive paper wash",
-    src: "/zen-fallback-wallpapers/paper-grain-wash.png",
+    src: "/zen-fallback-wallpapers/paper-grain-wash.webp",
   },
   "classical-wisdom": {
     label: "Soft glass colonnade",
-    src: "/zen-fallback-wallpapers/soft-glass-light.png",
+    src: "/zen-fallback-wallpapers/soft-glass-light.webp",
   },
   "visionary-artists": {
     label: "Mineral aurora",
-    src: "/zen-fallback-wallpapers/mineral-aurora.png",
+    src: "/zen-fallback-wallpapers/mineral-aurora.webp",
   },
   "power-strategy": {
     label: "Ocean haze",
-    src: "/zen-fallback-wallpapers/ocean-haze.png",
+    src: "/zen-fallback-wallpapers/ocean-haze.webp",
   },
   "modern-minds": {
     label: "Prismatic mist",
-    src: "/zen-fallback-wallpapers/prismatic-mist.png",
+    src: "/zen-fallback-wallpapers/prismatic-mist.webp",
   },
   "science-invention": {
     label: "Mineral aurora",
-    src: "/zen-fallback-wallpapers/mineral-aurora.png",
+    src: "/zen-fallback-wallpapers/mineral-aurora.webp",
   },
   "justice-reform": {
     label: "Paper grain wash",
-    src: "/zen-fallback-wallpapers/paper-grain-wash.png",
+    src: "/zen-fallback-wallpapers/paper-grain-wash.webp",
   },
   "story-literature": {
     label: "Ocean haze",
-    src: "/zen-fallback-wallpapers/ocean-haze.png",
+    src: "/zen-fallback-wallpapers/ocean-haze.webp",
+  },
+  "public-domain-fiction": {
+    label: "Archive paper wash",
+    src: "/zen-fallback-wallpapers/paper-grain-wash.webp",
   },
   "power-collection": {
     label: "Mineral aurora",
-    src: "/zen-fallback-wallpapers/mineral-aurora.png",
+    src: "/zen-fallback-wallpapers/mineral-aurora.webp",
+  },
+  "library-dev-backup": {
+    label: "Archive paper wash",
+    src: "/zen-fallback-wallpapers/paper-grain-wash.webp",
   },
 };
 

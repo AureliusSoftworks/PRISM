@@ -4,6 +4,7 @@ import {
   normalizePromptWildcardRunMetadata,
   transformSlateLockedRangesForTextEdit,
   type PromptWildcardRunMetadata,
+  type ProviderReasoningEffort,
   type SlateAiProvider,
   type SlateCharacter,
   type SlateDeliberationConfig,
@@ -197,6 +198,8 @@ export interface SlateAiOperationInput {
   provider: LlmProvider;
   providerName: ProviderName;
   model: string;
+  reasoningEffort?: Exclude<ProviderReasoningEffort, "auto">;
+  turbo?: boolean;
 }
 
 export type SlateShapeWriteConflictReason =
@@ -232,7 +235,9 @@ export class SlateShapeWriteConflictError extends Error {
 
 export interface SlateAccountDefaults {
   preferredProvider: ProviderName;
+  /** @deprecated Retained only for older callers and backup compatibility. */
   preferredLocalModel?: string | null;
+  /** @deprecated Retained only for older callers and backup compatibility. */
   preferredOnlineModel?: string | null;
 }
 
@@ -240,13 +245,9 @@ export function resolveSlateAccountDefaults(
   defaults: SlateAccountDefaults,
 ): { provider: ProviderName; model: string } {
   const provider = defaults.preferredProvider;
-  const preferred =
-    provider === "local"
-      ? defaults.preferredLocalModel
-      : defaults.preferredOnlineModel;
   return {
     provider,
-    model: preferred?.trim() || defaultModelIdForProvider(provider),
+    model: defaultModelIdForProvider(provider),
   };
 }
 
@@ -825,8 +826,8 @@ export function createSlateProject(
     db.prepare(
       `INSERT INTO slate_projects
         (id, user_id, series_id, book_ordinal, title, title_origin, spark,
-         spark_wildcards_json, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         spark_wildcards_json, prose_mode, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'offline', ?, ?)`,
     ).run(
       id,
       userId,
@@ -891,7 +892,9 @@ export function updateSlateProject(
     ) {
       throw new Error("Slate prose mode is invalid.");
     }
-    assign("prose_mode", patch.proseMode);
+    // Legacy clients used prose-mode Auto. New writes keep privacy as a
+    // concrete lane and use Auto only in the separate model selection.
+    assign("prose_mode", patch.proseMode === "auto" ? "offline" : patch.proseMode);
   }
   if (Object.hasOwn(patch, "proseModel")) {
     const model = boundedString(patch.proseModel, "Slate prose model", 240);
@@ -990,9 +993,6 @@ export async function resolveSlateProjectSparkWildcards(
   let prompt = template;
   let replacements: PromptWildcardRunMetadata["wildcardReplacements"] = [];
   if (names.includes("BOT")) {
-    if (botCandidates.length === 0) {
-      throw new Error("Add a bot to your library before using {BOT} in Slate.");
-    }
     const botResolution = resolvePromptBotWildcards({
       prompt,
       candidates: botCandidates,
@@ -1007,6 +1007,10 @@ export async function resolveSlateProjectSparkWildcards(
     provider: ai.provider,
     generationOverrides: {
       model: ai.model,
+      ...(ai.reasoningEffort
+        ? { reasoningEffort: ai.reasoningEffort }
+        : {}),
+      ...(ai.turbo ? { turbo: true } : {}),
       temperature: 0.72,
       maxTokens: 900,
       usagePurpose: "prompt_wildcard",
@@ -1181,6 +1185,10 @@ export async function generateSlateShape(
     ],
     {
       model: ai.model,
+      ...(ai.reasoningEffort
+        ? { reasoningEffort: ai.reasoningEffort }
+        : {}),
+      ...(ai.turbo ? { turbo: true } : {}),
       temperature: 0.7,
       maxTokens: 3_000,
       jsonMode: true,
@@ -1278,14 +1286,32 @@ function focusedStructureContext(
   return structureContext(structure.slice(start, index + 3));
 }
 
-export async function draftSlateStructureItem(
+export interface SlateDraftProposal {
+  structureItemId: string;
+  sectionId: string;
+  prose: string;
+  expectedSectionRevision: number;
+  expectedSectionContentHash: string;
+  expectedStructureJson: string;
+  provider: ProviderName;
+  model: string;
+}
+
+export async function generateSlateStructureItemProposal(
   db: DatabaseSync,
   userId: string,
   projectId: string,
   structureItemId: string,
   direction: unknown,
   ai: SlateAiOperationInput,
-): Promise<SlateProjectDetail> {
+  signal?: AbortSignal,
+  composition: {
+    directionIntent?: string | null;
+    continuityBrief?: string | null;
+    mirrorBrief?: string | null;
+    momentumTarget?: string | null;
+  } = {},
+): Promise<SlateDraftProposal> {
   synchronizeSlateStructureSections(db, userId, projectId);
   const projectSnapshot = projectRow(db, userId, projectId);
   const project = detailFromRow(db, projectSnapshot);
@@ -1321,13 +1347,15 @@ export async function draftSlateStructureItem(
     );
   }
   const focusedDirection = boundedString(direction, "Draft direction", SLATE_DIRECTION_MAX);
-  const continuity = compileSlateDraftContinuityContext(
-    db,
-    userId,
-    projectId,
-    item.id,
-    focusedDirection,
-  );
+  const continuityBrief =
+    composition.continuityBrief?.trim() ||
+    compileSlateDraftContinuityContext(
+      db,
+      userId,
+      projectId,
+      item.id,
+      focusedDirection,
+    ).renderedBrief;
   const raw = await ai.provider.generateResponse(
     [
       {
@@ -1340,45 +1368,104 @@ export async function draftSlateStructureItem(
           `Project: ${project.title}`,
           `Premise: ${project.premise || project.spark}`,
           `Voice: ${project.voice || "Choose a voice that serves the premise."}`,
+          "Composition Orchestrator · Direction Intent",
+          composition.directionIntent?.trim() ||
+            focusedDirection ||
+            project.direction ||
+            "Draft the approved section.",
+          "Composition Orchestrator · Continuity Brief",
+          continuityBrief,
+          composition.mirrorBrief?.trim()
+            ? `Composition Orchestrator · Mirror Brief (style and density only; never output length)\n${composition.mirrorBrief.trim()}`
+            : "Composition Orchestrator · Mirror Brief\nNo pinned Mirror profile; preserve the project's established prose.",
+          `Composition Orchestrator · Momentum Target\n${
+            composition.momentumTarget?.trim() ||
+            "No active Live Wire; serve the writer's immediate scene objective."
+          }`,
           `Non-negotiables: ${project.nonNegotiables.join("; ") || "None stated."}`,
           `Characters: ${project.characters.slice(0, 16).map((character) => `${character.name} — ${character.role}; voice: ${character.voice}`).join(" | ") || "Infer only what the scene needs."}`,
           "Approved nearby structure:",
           focusedStructureContext(project.structure, item.id),
-          "Private Continuity brief:",
-          continuity.renderedBrief,
           `Write now: ${item.kind} "${item.title}" — ${item.summary}`,
           `Section direction: ${item.direction || "Follow the approved summary."}`,
           `Writer's immediate direction: ${focusedDirection || project.direction || "Draft the section cleanly and move the story."}`,
           "Return only the new prose for this section. Do not repeat the section title.",
-        ].join("\n\n"),
+        ].filter(Boolean).join("\n\n"),
       },
     ],
     {
       model: ai.model,
+      ...(ai.reasoningEffort
+        ? { reasoningEffort: ai.reasoningEffort }
+        : {}),
+      ...(ai.turbo ? { turbo: true } : {}),
       temperature: 0.82,
       maxTokens: 4_000,
       usagePurpose: "slate_draft",
+      signal,
     },
   );
   const prose = cleanGeneratedProse(raw);
+  return {
+    structureItemId: item.id,
+    sectionId: sectionSnapshot.id,
+    prose,
+    expectedSectionRevision: sectionSnapshot.revision,
+    expectedSectionContentHash: sectionSnapshot.contentHash,
+    expectedStructureJson: projectSnapshot.structure_json,
+    provider: ai.providerName,
+    model: ai.model,
+  };
+}
+
+export function applySlateStructureItemProposal(
+  db: DatabaseSync,
+  userId: string,
+  projectId: string,
+  proposal: SlateDraftProposal,
+): SlateProjectDetail {
   replaceSlateSectionWithAiProse(
     db,
     userId,
     projectId,
-    item.id,
+    proposal.structureItemId,
     {
-      prose,
+      prose: proposal.prose,
       status: "drafted",
       sourceKind: "ai_draft",
-      provider: ai.providerName,
-      model: ai.model,
-      expectedSectionId: sectionSnapshot.id,
-      expectedRevision: sectionSnapshot.revision,
-      expectedContentHash: sectionSnapshot.contentHash,
-      expectedStructureJson: projectSnapshot.structure_json,
+      provider: proposal.provider,
+      model: proposal.model,
+      expectedSectionId: proposal.sectionId,
+      expectedRevision: proposal.expectedSectionRevision,
+      expectedContentHash: proposal.expectedSectionContentHash,
+      expectedStructureJson: proposal.expectedStructureJson,
     },
   );
   return getSlateProject(db, userId, projectId);
+}
+
+export async function draftSlateStructureItem(
+  db: DatabaseSync,
+  userId: string,
+  projectId: string,
+  structureItemId: string,
+  direction: unknown,
+  ai: SlateAiOperationInput,
+): Promise<SlateProjectDetail> {
+  const proposal = await generateSlateStructureItemProposal(
+    db,
+    userId,
+    projectId,
+    structureItemId,
+    direction,
+    ai,
+  );
+  return applySlateStructureItemProposal(
+    db,
+    userId,
+    projectId,
+    proposal,
+  );
 }
 
 function rangesOverlap(leftStart: number, leftEnd: number, rightStart: number, rightEnd: number): boolean {
@@ -1494,6 +1581,10 @@ export async function proposeSlateRevision(
     ],
     {
       model: ai.model,
+      ...(ai.reasoningEffort
+        ? { reasoningEffort: ai.reasoningEffort }
+        : {}),
+      ...(ai.turbo ? { turbo: true } : {}),
       temperature: 0.65,
       maxTokens: 5_000,
       usagePurpose: "slate_revision",
@@ -1569,6 +1660,7 @@ export function acceptSlateRevision(
   userId: string,
   projectId: string,
   revisionId: string,
+  options: { transactionOwner?: boolean } = {},
 ): SlateProjectDetail {
   const revision = pendingRevisionRow(db, userId, projectId, revisionId);
   ensureSlateProjectSections(db, userId, projectId);
@@ -1612,7 +1704,8 @@ export function acceptSlateRevision(
   }
   if (manuscript.length > SLATE_MANUSCRIPT_MAX) throw new Error("This revision would exceed Slate V1's manuscript size limit.");
   const now = new Date().toISOString();
-  db.exec("BEGIN IMMEDIATE TRANSACTION");
+  const ownsTransaction = options.transactionOwner !== false;
+  if (ownsTransaction) db.exec("BEGIN IMMEDIATE TRANSACTION");
   try {
     db.prepare(
       `INSERT INTO slate_versions
@@ -1646,9 +1739,9 @@ export function acceptSlateRevision(
           SET status = 'accepted', resolved_at = ?
         WHERE revision_id = ? AND project_id = ? AND user_id = ?`,
     ).run(now, revisionId, projectId, userId);
-    db.exec("COMMIT");
+    if (ownsTransaction) db.exec("COMMIT");
   } catch (error) {
-    db.exec("ROLLBACK");
+    if (ownsTransaction) db.exec("ROLLBACK");
     throw error;
   }
   return getSlateProject(db, userId, projectId);

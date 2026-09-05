@@ -61,15 +61,6 @@ export interface PrismMoodInterruptionInput {
 
 export type PrismMoodIgnoredQuestionPenaltyLevel = "light" | "normal" | "elevated";
 
-export interface PrismMoodDebugPatch {
-  annoyanceDelta?: number;
-  warmthDelta?: number;
-  engagementDelta?: number;
-  restraintDelta?: number;
-  reason?: string;
-  freeze?: boolean;
-}
-
 export interface CoffeeSocialLikeSnapshot {
   disposition: number;
   valuesFriction: number;
@@ -772,24 +763,6 @@ export function decayPrismMood(
   });
 }
 
-export function debugPatchPrismMood(
-  previous: PrismMoodState,
-  patch: PrismMoodDebugPatch,
-  now?: string | Date
-): PrismMoodState {
-  const base = sanitizePrismMoodState(previous, previous.mode, now);
-  return withMoodDelta(base, {
-    kind: "debug_nudge",
-    now,
-    reason: patch.reason?.trim() || "Developer Tools nudged mood.",
-    annoyanceDelta: patch.annoyanceDelta ?? 0,
-    warmthDelta: patch.warmthDelta ?? 0,
-    engagementDelta: patch.engagementDelta ?? 0,
-    restraintDelta: patch.restraintDelta ?? 0,
-    frozenOverride: patch.freeze,
-  });
-}
-
 export function resetPrismMood(
   mode: PrismMoodMode = "zen",
   now?: string | Date
@@ -798,7 +771,7 @@ export function resetPrismMood(
   const delta: PrismMoodDelta = {
     kind: "reset",
     at: reset.lastUpdatedAt,
-    reason: "Developer Tools reset mood.",
+    reason: "Mood reset to baseline.",
     annoyanceDelta: 0,
     warmthDelta: 0,
     engagementDelta: 0,
@@ -864,4 +837,37 @@ export function coffeeSocialSnapshotToPrismMoodState(
     recentDeltas: [],
   });
   return state;
+}
+
+/**
+ * Ordinary automatic Coffee cut-ins require a legible current mood, not just
+ * a busy crosstalk setting. Irritated cut-ins need active engagement; joyful
+ * cut-ins need unusually eager, low-restraint energy. Warm/neutral/unknown or
+ * withdrawing states never create an automatic interruption. Power-authored
+ * and explicit player interruptions are evaluated by their own contracts.
+ */
+export function coffeeOrdinaryAutomaticCutInMoodSupportsInterruption(
+  social: CoffeeSocialLikeSnapshot | null | undefined,
+): boolean {
+  if (!social) return false;
+  const mood = coffeeSocialSnapshotToPrismMoodState(social);
+  const engagement = clampPrismMoodValue(social.engagement);
+  const restraint = clampPrismMoodValue(social.restraint);
+  const friction = clampPrismMoodValue(social.valuesFriction);
+  const disposition = clampPrismMoodValue(social.disposition);
+  const leavePressure = clampPrismMoodValue(social.leavePressure);
+  if (leavePressure > 0.5) return false;
+  if (mood.moodKey === "strained" || mood.moodKey === "guarded") {
+    return engagement >= 0.72 && friction >= 0.58 && restraint <= 0.48;
+  }
+  if (mood.moodKey === "joyful") {
+    return (
+      engagement >= 0.82 &&
+      disposition >= 0.78 &&
+      friction <= 0.22 &&
+      restraint <= 0.36 &&
+      leavePressure <= 0.18
+    );
+  }
+  return false;
 }

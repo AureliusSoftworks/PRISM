@@ -4,7 +4,7 @@ import { DatabaseSync } from "node:sqlite";
 import { fallbackEmbedding } from "../providers.ts";
 import {
   analyzeMemoryIntent,
-  createDevSeedMemories,
+  deleteMemoriesAcquiredDuringAppletSessions,
   deleteMemoriesForBotScope,
   deleteMemoryById,
   deleteMemoriesLinkedToMessages,
@@ -20,6 +20,7 @@ import {
   restoreMemory,
   retrieveRelevantMemories,
 } from "../memory.ts";
+import { ensureMemoryEcologyMemorySchema } from "../memory-ecology.ts";
 
 function createMemoryTestDb(): DatabaseSync {
   const db = new DatabaseSync(":memory:");
@@ -29,6 +30,7 @@ function createMemoryTestDb(): DatabaseSync {
       user_id TEXT NOT NULL,
       conversation_id TEXT,
       bot_id TEXT,
+      target_bot_id TEXT,
       ciphertext TEXT NOT NULL,
       iv TEXT NOT NULL,
       tag TEXT NOT NULL,
@@ -662,7 +664,7 @@ describe("persistMemoryCandidates", () => {
     assert.equal(row?.tier, "long_term");
   });
 
-  it("requires confidence and certainty together for long-term promotion", async () => {
+  it("uses the configured direct confidence threshold for long-term promotion", async () => {
     const db = createMemoryTestDb();
     const [memory] = await persistMemoryCandidates(
       db,
@@ -678,8 +680,8 @@ describe("persistMemoryCandidates", () => {
       .prepare("SELECT tier FROM memories WHERE id = ?")
       .get(memory.id) as { tier: string } | undefined;
 
-    assert.equal(memory.tier, "short_term");
-    assert.equal(row?.tier, "short_term");
+    assert.equal(memory.tier, "long_term");
+    assert.equal(row?.tier, "long_term");
   });
 
   it("keeps durable inferred assumptions short-term below high confidence", async () => {
@@ -704,7 +706,7 @@ describe("persistMemoryCandidates", () => {
     assert.equal(row?.durability, 0.95);
   });
 
-  it("promotes high-confidence inferred memories to long-term", async () => {
+  it("keeps high-confidence inferred memories in the Derived layer", async () => {
     const db = createMemoryTestDb();
     const [memory] = await persistMemoryCandidates(
       db,
@@ -717,7 +719,8 @@ describe("persistMemoryCandidates", () => {
     );
 
     assert.equal(memory.source, "inferred");
-    assert.equal(memory.tier, "long_term");
+    assert.equal(memory.tier, "short_term");
+    assert.equal(memory.lifecycle, "derived");
   });
 
   it("promotes high-truth memories even when durability is only baseline", async () => {
@@ -755,7 +758,7 @@ describe("persistMemoryCandidates", () => {
     assert.ok((memory.durability ?? 0) >= 0.88);
   });
 
-  it("treats imported long-term tier as a confidence hint", async () => {
+  it("preserves an explicitly imported long-term tier", async () => {
     const db = createMemoryTestDb();
     const lowConfidence = await restoreMemory(db, "user-1", Buffer.alloc(32, 7), {
       conversationId: "conversation-1",
@@ -780,7 +783,7 @@ describe("persistMemoryCandidates", () => {
       source: "compiled",
     });
 
-    assert.equal(lowConfidence.tier, "short_term");
+    assert.equal(lowConfidence.tier, "long_term");
     assert.equal(highConfidence.tier, "long_term");
   });
 
@@ -940,6 +943,53 @@ describe("persistMemoryCandidates", () => {
 
     assert.equal(row?.bot_id, "bot-1");
     assert.equal(row?.confidence, 0.98);
+  });
+
+  it("aborts encrypted-memory embedding work at the owning deadline", async () => {
+    const db = createMemoryTestDb();
+    const userKey = Buffer.alloc(32, 7);
+    await restoreMemory(db, "user-1", userKey, {
+      conversationId: "conversation-1",
+      botId: "bot-1",
+      text: "You prefer quick memory recall.",
+      confidence: 0.9,
+      certainty: 0.9,
+      category: "user",
+      tier: "long_term",
+      durability: 1,
+      source: "direct",
+    });
+    const controller = new AbortController();
+    let markEmbeddingStarted: (() => void) | null = null;
+    const embeddingStarted = new Promise<void>((resolve) => {
+      markEmbeddingStarted = resolve;
+    });
+    let embeddingAborted = false;
+    globalThis.fetch = ((_input: RequestInfo | URL, init?: RequestInit) => {
+      markEmbeddingStarted?.();
+      return new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () => {
+          embeddingAborted = true;
+          reject(new DOMException("Aborted", "AbortError"));
+        }, { once: true });
+      });
+    }) as typeof fetch;
+
+    const retrieval = retrieveRelevantMemories(
+      db,
+      "user-1",
+      "What do you remember?",
+      userKey,
+      "bot-1",
+      4,
+      { signal: controller.signal },
+    );
+    await embeddingStarted;
+    controller.abort("chat deadline");
+
+    await assert.rejects(retrieval, { name: "AbortError" });
+    assert.equal(embeddingAborted, true);
+    db.close();
   });
 
   it("retrieves global memories plus the active bot and excludes other bots", async () => {
@@ -1131,6 +1181,188 @@ describe("persistMemoryCandidates", () => {
     assert.equal(remaining.n, 0);
   });
 
+  it("revokes all applet-session memory layers without touching other sessions or tenants", () => {
+    const db = createMemoryTestDb();
+    ensureMemoryEcologyMemorySchema(db);
+    db.exec(`
+      CREATE TABLE bot_relationships (
+        user_id TEXT NOT NULL,
+        source_bot_id TEXT NOT NULL,
+        target_bot_id TEXT NOT NULL,
+        score REAL NOT NULL,
+        band TEXT NOT NULL,
+        mood_key TEXT NOT NULL,
+        trend TEXT NOT NULL,
+        last_reason TEXT NOT NULL,
+        recent_reasons TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (user_id, source_bot_id, target_bot_id)
+      );
+    `);
+    const now = new Date().toISOString();
+    const insertMemory = db.prepare(
+      `INSERT INTO memories (
+        id, user_id, conversation_id, bot_id, target_bot_id,
+        ciphertext, iv, tag, confidence, base_confidence, category, tier,
+        lifecycle, durability, source, certainty, source_message_ids,
+        evidence_lineage_known, last_reinforced_at, created_at
+      ) VALUES (?, ?, ?, ?, ?, 'cipher', 'iv', 'tag', 0.95, 0.95, ?, ?, ?, 0.9, ?, 0.95, ?, ?, ?, ?)`,
+    );
+    insertMemory.run(
+      "m-session",
+      "user-1",
+      "coffee-session",
+      "bot-1",
+      null,
+      "user",
+      "long_term",
+      "long_term",
+      "about_you",
+      "[]",
+      0,
+      now,
+      now,
+    );
+    insertMemory.run(
+      "m-legacy",
+      "user-1",
+      null,
+      "bot-1",
+      null,
+      "user",
+      "short_term",
+      "short_term",
+      "direct",
+      '["coffee-message"]',
+      0,
+      now,
+      now,
+    );
+    insertMemory.run(
+      "m-relation",
+      "user-1",
+      "coffee-session",
+      "bot-1",
+      "bot-2",
+      "bot_relation",
+      "long_term",
+      "long_term",
+      "direct",
+      "[]",
+      0,
+      now,
+      now,
+    );
+    insertMemory.run(
+      "m-stable",
+      "user-1",
+      "other-session",
+      "bot-1",
+      null,
+      "user",
+      "short_term",
+      "short_term",
+      "direct",
+      "[]",
+      0,
+      now,
+      now,
+    );
+    insertMemory.run(
+      "m-derived",
+      "user-1",
+      "other-session",
+      "bot-1",
+      "bot-2",
+      "bot_relation",
+      "short_term",
+      "derived",
+      "inferred",
+      "[]",
+      1,
+      now,
+      now,
+    );
+    insertMemory.run(
+      "m-other-user",
+      "user-2",
+      "coffee-session",
+      "bot-1",
+      null,
+      "user",
+      "short_term",
+      "short_term",
+      "direct",
+      '["coffee-message"]',
+      0,
+      now,
+      now,
+    );
+    const link = db.prepare(
+      `INSERT INTO memory_evidence_links
+        (user_id, inferred_memory_id, evidence_memory_id, created_at)
+       VALUES ('user-1', 'm-derived', ?, ?)`,
+    );
+    for (const evidenceId of ["m-session", "m-legacy", "m-stable"]) {
+      link.run(evidenceId, now);
+    }
+    db.prepare(
+      `INSERT INTO memory_acquisition_receipts
+        (id, user_id, memory_id, learner_bot_id, conversation_id, kind, created_at)
+       VALUES ('receipt-session', 'user-1', 'm-session', 'bot-1', 'coffee-session', 'player', ?)`,
+    ).run(now);
+    db.prepare(
+      `INSERT INTO memory_acquisition_receipts
+        (id, user_id, memory_id, learner_bot_id, conversation_id, kind, created_at)
+       VALUES ('receipt-legacy', 'user-1', 'm-legacy', 'bot-1', NULL, 'player', ?)`,
+    ).run(now);
+    db.prepare(
+      `INSERT INTO memory_relationship_projections
+        (user_id, source_bot_id, target_bot_id, base_score, updated_at)
+       VALUES ('user-1', 'bot-1', 'bot-2', 32, ?)`,
+    ).run(now);
+    db.prepare(
+      `INSERT INTO bot_relationships
+        (user_id, source_bot_id, target_bot_id, score, band, mood_key, trend,
+         last_reason, recent_reasons, updated_at)
+       VALUES ('user-1', 'bot-1', 'bot-2', 32, 'tense', 'guarded', 'down',
+               'Coffee evidence', '["Coffee evidence"]', ?)`,
+    ).run(now);
+
+    const result = deleteMemoriesAcquiredDuringAppletSessions(
+      db,
+      "user-1",
+      ["coffee-session"],
+      ["coffee-message"],
+    );
+
+    assert.equal(result.deletedMemories, 3);
+    assert.equal(result.removedDerivedMemories, 1);
+    assert.deepEqual(
+      db
+        .prepare("SELECT id FROM memories ORDER BY id")
+        .all()
+        .map((row) => (row as { id: string }).id),
+      ["m-other-user", "m-stable"],
+    );
+    assert.equal(
+      (db.prepare("SELECT COUNT(*) AS n FROM memory_acquisition_receipts").get() as { n: number }).n,
+      0,
+    );
+    assert.equal(
+      (db.prepare("SELECT COUNT(*) AS n FROM memory_evidence_links").get() as { n: number }).n,
+      0,
+    );
+    assert.equal(
+      (db.prepare("SELECT COUNT(*) AS n FROM memory_relationship_projections").get() as { n: number }).n,
+      0,
+    );
+    assert.equal(
+      (db.prepare("SELECT COUNT(*) AS n FROM bot_relationships").get() as { n: number }).n,
+      0,
+    );
+  });
+
   it("keeps long-term specifics out of automatic culmination deletion", async () => {
     const db = createMemoryTestDb();
     const userKey = Buffer.alloc(32, 7);
@@ -1218,67 +1450,6 @@ describe("persistMemoryCandidates", () => {
       { bot_id: "bot-1", source: "direct", count: 2 },
       { bot_id: "bot-2", source: "direct", count: 1 },
     ]);
-  });
-});
-
-describe("createDevSeedMemories", () => {
-  it("distributes seeded memories across the provided bots", () => {
-    const db = createMemoryTestDb();
-    const created = createDevSeedMemories(
-      db,
-      "user-1",
-      Buffer.alloc(32, 7),
-      5,
-      ["bot-1", "bot-2"]
-    );
-
-    const rows = db
-      .prepare("SELECT bot_id FROM memories ORDER BY created_at ASC")
-      .all() as Array<{ bot_id: string | null }>;
-
-    assert.equal(created, 5);
-    assert.deepEqual(
-      rows.map((row) => row.bot_id),
-      ["bot-1", "bot-2", "bot-1", "bot-2", "bot-1"]
-    );
-  });
-
-  it("can seed all-bot memories unevenly with empty bots", () => {
-    const db = createMemoryTestDb();
-    const randomValues = [0.1, 0.6, 0.2, 0.8, 0.15, 0.45, 0.75];
-    let randomIndex = 0;
-    const created = createDevSeedMemories(
-      db,
-      "user-1",
-      Buffer.alloc(32, 7),
-      6,
-      ["bot-1", "bot-2", "bot-3", "bot-4"],
-      {
-        randomizeAcrossBots: true,
-        random: () => randomValues[randomIndex++ % randomValues.length] ?? 0,
-      }
-    );
-
-    const rows = db
-      .prepare("SELECT bot_id, COUNT(*) AS count FROM memories GROUP BY bot_id")
-      .all() as Array<{ bot_id: string | null; count: number }>;
-    const counts = new Map(rows.map((row) => [row.bot_id, row.count]));
-
-    assert.equal(created, 6);
-    assert.equal(counts.size, 3);
-    assert.deepEqual(
-      [...counts.values()].sort((a, b) => a - b),
-      [1, 2, 3]
-    );
-  });
-
-  it("rejects memory seeding when there are no target bots", () => {
-    const db = createMemoryTestDb();
-
-    assert.throws(
-      () => createDevSeedMemories(db, "user-1", Buffer.alloc(32, 7), 1, []),
-      /at least one bot/i
-    );
   });
 });
 

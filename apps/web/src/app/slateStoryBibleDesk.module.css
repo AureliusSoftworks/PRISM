@@ -1,0 +1,362 @@
+.desk {
+  --surface: var(--slate-paper-surface, #fff);
+  --text: var(--slate-paper-ink, #191714);
+  display: grid;
+  gap: 18px;
+  padding: 14px;
+  color: var(--text);
+  background: color-mix(in srgb, var(--surface) 92%, transparent);
+  border-radius: 16px;
+}
+
+.desk :is(button, input, select, textarea, [tabindex]):focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--slate-s, #50d5c8) 64%, var(--text));
+  outline-offset: 2px;
+}
+
+.desk button:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--slate-s, #50d5c8) 34%, currentColor);
+}
+
+.desk :is(button, input, select, textarea):disabled {
+  cursor: not-allowed;
+  opacity: 0.52;
+}
+
+.liveWire {
+  position: relative;
+  overflow: hidden;
+  padding: 20px 22px;
+  border: 1px solid color-mix(in srgb, var(--text, #191714) 11%, transparent);
+  border-radius: 18px;
+  background:
+    radial-gradient(circle at 100% 0%, rgb(219 136 62 / 13%), transparent 42%),
+    color-mix(in srgb, var(--surface, #f6f2e9) 92%, transparent);
+}
+
+.liveWire > span,
+.trackPair section > span,
+.threadCard header span,
+.timeline article > span {
+  color: color-mix(in srgb, var(--text, #191714) 52%, transparent);
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.liveWire h3 {
+  margin: 9px 0 4px;
+  font-family: var(--font-serif, Georgia, serif);
+  font-size: 1.25rem;
+  font-weight: 540;
+}
+
+.liveWire p,
+.liveWire small {
+  margin: 0;
+  color: color-mix(in srgb, var(--text, #191714) 69%, transparent);
+  line-height: 1.55;
+}
+
+.liveWire small {
+  display: block;
+  margin-top: 10px;
+}
+
+.tabs {
+  display: flex;
+  gap: 4px;
+  overflow-x: auto;
+  padding: 4px;
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--text, #191714) 4%, transparent);
+}
+
+.tabs button {
+  display: inline-flex;
+  flex: 1 0 auto;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 94px;
+  padding: 9px 11px;
+  border: 0;
+  border-radius: 10px;
+  color: color-mix(in srgb, var(--text, #191714) 64%, transparent);
+  background: transparent;
+  cursor: pointer;
+}
+
+.tabs button[data-active="true"] {
+  color: var(--text, #191714);
+  background: color-mix(in srgb, var(--surface, #fff) 92%, transparent);
+  box-shadow: 0 2px 12px rgb(0 0 0 / 5%);
+}
+
+.tabs small {
+  opacity: 0.58;
+}
+
+.content {
+  display: grid;
+  gap: 12px;
+  min-height: 260px;
+}
+
+.characterCard,
+.arcCard,
+.threadCard,
+.worldCard,
+.timeline article {
+  padding: 16px 18px;
+  border: 1px solid color-mix(in srgb, var(--text, #191714) 9%, transparent);
+  border-radius: 15px;
+  background: color-mix(in srgb, var(--surface, #fff) 90%, transparent);
+}
+
+.characterCard header,
+.arcCard > header,
+.threadCard header,
+.worldCard header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.characterCard h3,
+.arcCard h3,
+.threadCard h3,
+.worldCard h3,
+.timeline h3 {
+  margin: 0;
+  font-family: var(--font-serif, Georgia, serif);
+  font-size: 1.02rem;
+  font-weight: 560;
+}
+
+.characterCard header p,
+.threadCard p,
+.worldCard p,
+.timeline p {
+  margin: 4px 0 0;
+  color: color-mix(in srgb, var(--text, #191714) 65%, transparent);
+  line-height: 1.5;
+}
+
+.characterCard header small,
+.arcCard header small,
+.threadCard header small,
+.worldCard header small {
+  color: color-mix(in srgb, var(--text, #191714) 48%, transparent);
+  text-transform: capitalize;
+}
+
+.characterCard dl {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px 20px;
+  margin: 18px 0 0;
+}
+
+.characterCard dl div {
+  min-width: 0;
+}
+
+.characterCard dt {
+  margin-bottom: 3px;
+  color: color-mix(in srgb, var(--text, #191714) 46%, transparent);
+  font-size: 0.72rem;
+}
+
+.characterCard dd {
+  margin: 0;
+  line-height: 1.42;
+}
+
+.trackPair {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  margin-top: 16px;
+}
+
+.trackPair section {
+  min-width: 0;
+  padding: 14px;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--text, #191714) 3%, transparent);
+}
+
+.trackPair p {
+  margin: 7px 0 11px;
+  line-height: 1.45;
+}
+
+.trackPair ol {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.trackPair li {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 0.78rem;
+}
+
+.trackPair li small {
+  opacity: 0.56;
+}
+
+.arcCard footer {
+  display: grid;
+  gap: 2px;
+  margin-top: 13px;
+  color: color-mix(in srgb, var(--text, #191714) 67%, transparent);
+  font-size: 0.8rem;
+}
+
+.curateFooter,
+.arcEditor {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid
+    color-mix(in srgb, var(--text, #191714) 7%, transparent);
+}
+
+.textButton {
+  padding: 0;
+  border: 0;
+  color: color-mix(in srgb, var(--text, #191714) 62%, transparent);
+  background: transparent;
+  font: inherit;
+  cursor: pointer;
+}
+
+.textButton:hover {
+  color: var(--text, #191714);
+}
+
+.curateForm {
+  display: grid;
+  gap: 10px;
+}
+
+.curateForm > label:not(.lockToggle) {
+  display: grid;
+  gap: 5px;
+  color: color-mix(in srgb, var(--text, #191714) 52%, transparent);
+  font-size: 0.72rem;
+}
+
+.curateForm select,
+.curateForm textarea,
+.curateForm input:not([type="checkbox"]) {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 9px 10px;
+  border: 1px solid
+    color-mix(in srgb, var(--text, #191714) 13%, transparent);
+  border-radius: 9px;
+  color: var(--text, #191714);
+  background: color-mix(in srgb, var(--surface, #fff) 94%, transparent);
+  font: inherit;
+}
+
+.curateForm textarea {
+  resize: vertical;
+  line-height: 1.45;
+}
+
+.lockToggle {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: color-mix(in srgb, var(--text, #191714) 65%, transparent);
+  font-size: 0.75rem;
+}
+
+.curateForm > small {
+  color: color-mix(in srgb, var(--text, #191714) 48%, transparent);
+  text-transform: capitalize;
+}
+
+.formActions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+}
+
+.formActions button:not(.textButton) {
+  padding: 7px 10px;
+  border: 1px solid
+    color-mix(in srgb, var(--text, #191714) 13%, transparent);
+  border-radius: 9px;
+  color: var(--surface, #fff);
+  background: var(--text, #191714);
+  cursor: pointer;
+}
+
+.formActions button:disabled {
+  cursor: wait;
+  opacity: 0.55;
+}
+
+.formError {
+  margin: 0;
+  color: #a64031;
+  font-size: 0.75rem;
+}
+
+.threadCard[data-status="due"],
+.threadCard[data-status="missed"] {
+  border-color: rgb(179 99 49 / 30%);
+}
+
+.threadCard header > div {
+  min-width: 0;
+}
+
+.threadCard header small {
+  padding: 3px 7px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--text, #191714) 5%, transparent);
+}
+
+.timeline {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.empty {
+  align-self: center;
+  margin: 0 auto;
+  max-width: 430px;
+  padding: 52px 22px;
+  color: color-mix(in srgb, var(--text, #191714) 55%, transparent);
+  text-align: center;
+  line-height: 1.6;
+}
+
+.provenance {
+  display: grid;
+  gap: 3px;
+  padding-top: 4px;
+  color: color-mix(in srgb, var(--text, #191714) 48%, transparent);
+  font-size: 0.72rem;
+}
+
+@media (max-width: 720px) {
+  .characterCard dl,
+  .trackPair,
+  .timeline {
+    grid-template-columns: 1fr;
+  }
+}

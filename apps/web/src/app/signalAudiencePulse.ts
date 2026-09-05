@@ -34,6 +34,14 @@ export type SignalAudienceSnapshot = {
   featuredReview: SignalFeaturedReview | null;
 };
 
+export type SignalShowAudienceRankingItem = {
+  id: string;
+  name: string;
+  updatedAt: string;
+  audienceRating?: number | null;
+  audienceReviewCount?: number;
+};
+
 const compactAudienceNumber = new Intl.NumberFormat("en-US", {
   notation: "compact",
   maximumFractionDigits: 1,
@@ -96,6 +104,83 @@ export function signalAudienceReviews(
 
 export function formatSignalAudienceViews(totalViews: number): string {
   return compactAudienceNumber.format(Math.max(0, Math.round(totalViews)));
+}
+
+/**
+ * Returns the shared performance color for a five-point audience rating.
+ * Ratings interpolate continuously from red (0) through yellow (2.5) to
+ * green (5), while missing or malformed ratings remain uncolored. Light mode
+ * uses the same hue interpolation at a darker lightness for contrast.
+ */
+export function signalAudienceRatingColor(
+  rating: number | null | undefined,
+  theme: "dark" | "light" = "dark",
+): string | null {
+  if (typeof rating !== "number" || !Number.isFinite(rating)) return null;
+  const boundedRating = Math.max(0, Math.min(5, rating));
+  const hue = Math.round((boundedRating / 5) * 120);
+  // The light-mode palette keeps the same red → yellow → green hue sweep,
+  // but lowers lightness so every intermediate rating remains legible on a
+  // pale Signal surface.
+  return theme === "light"
+    ? `hsl(${hue} 78% 26%)`
+    : `hsl(${hue} 84% 60%)`;
+}
+
+function signalShowAudienceRating(
+  show: SignalShowAudienceRankingItem,
+): number | null {
+  if (signalShowAudienceReviewCount(show) === 0) {
+    return null;
+  }
+
+  const rating = show.audienceRating;
+  return typeof rating === "number" && Number.isFinite(rating)
+    ? Math.max(0, Math.min(5, rating))
+    : null;
+}
+
+function signalShowAudienceReviewCount(
+  show: SignalShowAudienceRankingItem,
+): number {
+  const reviewCount = show.audienceReviewCount;
+  return typeof reviewCount === "number" && Number.isFinite(reviewCount)
+    ? Math.max(0, Math.round(reviewCount))
+    : 0;
+}
+
+function signalShowActivityTime(show: SignalShowAudienceRankingItem): number {
+  const timestamp = Date.parse(show.updatedAt);
+  return Number.isFinite(timestamp) ? timestamp : 0;
+}
+
+/**
+ * Signal's show rail is a public-facing chart: average audience rating leads,
+ * then review count establishes confidence. Unrated shows remain accessible
+ * beneath reviewed shows and retain a deterministic recent-activity order.
+ */
+export function signalShowsByAudienceRating<
+  T extends SignalShowAudienceRankingItem,
+>(shows: readonly T[]): T[] {
+  return [...shows].sort((left, right) => {
+    const leftRating = signalShowAudienceRating(left);
+    const rightRating = signalShowAudienceRating(right);
+    if (leftRating === null && rightRating !== null) return 1;
+    if (leftRating !== null && rightRating === null) return -1;
+    if (leftRating !== null && rightRating !== null) {
+      if (leftRating !== rightRating) return rightRating - leftRating;
+      const reviewDelta =
+        signalShowAudienceReviewCount(right) -
+        signalShowAudienceReviewCount(left);
+      if (reviewDelta !== 0) return reviewDelta;
+    }
+    const activityDelta =
+      signalShowActivityTime(right) - signalShowActivityTime(left);
+    if (activityDelta !== 0) return activityDelta;
+    return (
+      left.name.localeCompare(right.name) || left.id.localeCompare(right.id)
+    );
+  });
 }
 
 export function signalAudienceSnapshot(args: {

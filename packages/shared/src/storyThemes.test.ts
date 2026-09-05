@@ -45,8 +45,8 @@ describe("storyThemes", () => {
       assert.equal(asset.deletable, false);
       assert.equal(asset.editable, false);
       assert.equal(asset.exportable, false);
-      assert.equal(asset.format, "png");
-      assert.match(asset.url, /^\/story-themes\/prism_default\/[a-z0-9_]+\.png$/);
+      assert.equal(asset.format, "webp");
+      assert.match(asset.url, /^\/story-themes\/prism_default\/[a-z0-9_]+\.webp$/);
       assert.equal(ids.has(asset.id), false, `duplicate asset id: ${asset.id}`);
       assert.equal(urls.has(asset.url), false, `duplicate asset url: ${asset.url}`);
       assert.equal(isBuiltinStoryThemeAsset(asset), true);

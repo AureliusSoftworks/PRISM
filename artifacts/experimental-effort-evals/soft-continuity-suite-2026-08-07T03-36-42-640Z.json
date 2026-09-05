@@ -1,0 +1,172 @@
+{
+  "schema": "prism-experimental-effort-soft-continuity-suite-v1",
+  "createdAt": "2026-08-07T03:36:42.640Z",
+  "options": {
+    "suite": "soft-continuity",
+    "thinkingProvider": "openai",
+    "localModel": "llama3.2",
+    "thinkingModel": "gpt-5.6-sol",
+    "judgeModel": "gpt-5.5",
+    "effort": "high",
+    "outDir": "artifacts/experimental-effort-evals",
+    "temperature": 0.25,
+    "maxTokens": 3200,
+    "noJudge": false,
+    "includeScratchpad": true
+  },
+  "cases": [
+    {
+      "id": "pet-prefs-compact",
+      "title": "Pet + allergy + brevity from thread compact",
+      "reportPath": "/Users/jared/Developer/Web Apps/PRISM/artifacts/experimental-effort-evals/experimental-effort-2026-08-07T03-36-42-640Z-pet-prefs-compact.md",
+      "totals": {
+        "baseline": 1.5,
+        "reference": 9.75,
+        "simulated": 3.5,
+        "ranking": [
+          "B",
+          "C",
+          "A"
+        ]
+      },
+      "continuity": {
+        "baseline": {
+          "total": 0,
+          "max": 6,
+          "checks": {
+            "includes:Miso": false,
+            "includes:shellfish": false,
+            "includes:short": false,
+            "label:P1": false,
+            "label:P2": false,
+            "label:P3": false
+          }
+        },
+        "simulated": {
+          "total": 5,
+          "max": 6,
+          "checks": {
+            "includes:Miso": true,
+            "includes:shellfish": true,
+            "includes:short": false,
+            "label:P1": true,
+            "label:P2": true,
+            "label:P3": true
+          }
+        },
+        "reference": {
+          "total": 6,
+          "max": 6,
+          "checks": {
+            "includes:Miso": true,
+            "includes:shellfish": true,
+            "includes:short": true,
+            "label:P1": true,
+            "label:P2": true,
+            "label:P3": true
+          }
+        },
+        "digestOnSimulated": true
+      }
+    },
+    {
+      "id": "project-codename-compact",
+      "title": "Codename + ship date + LOCAL from thread compact",
+      "reportPath": "/Users/jared/Developer/Web Apps/PRISM/artifacts/experimental-effort-evals/experimental-effort-2026-08-07T03-36-42-640Z-project-codename-compact.md",
+      "totals": {
+        "baseline": 10,
+        "reference": 10,
+        "simulated": 8.5,
+        "ranking": [
+          "A",
+          "B",
+          "C"
+        ]
+      },
+      "continuity": {
+        "baseline": {
+          "total": 3,
+          "max": 3,
+          "checks": {
+            "includes:Lumen Gate": true,
+            "includes:2026-09-12": true,
+            "includes:LOCAL": true
+          }
+        },
+        "simulated": {
+          "total": 3,
+          "max": 3,
+          "checks": {
+            "includes:Lumen Gate": true,
+            "includes:2026-09-12": true,
+            "includes:LOCAL": true
+          }
+        },
+        "reference": {
+          "total": 3,
+          "max": 3,
+          "checks": {
+            "includes:Lumen Gate": true,
+            "includes:2026-09-12": true,
+            "includes:LOCAL": true
+          }
+        },
+        "digestOnSimulated": true
+      }
+    },
+    {
+      "id": "meeting-facts-compact",
+      "title": "Meeting day/room/bring from thread compact",
+      "reportPath": "/Users/jared/Developer/Web Apps/PRISM/artifacts/experimental-effort-evals/experimental-effort-2026-08-07T03-36-42-640Z-meeting-facts-compact.md",
+      "totals": {
+        "baseline": 1,
+        "reference": 10,
+        "simulated": 8,
+        "ranking": [
+          "B",
+          "C",
+          "A"
+        ]
+      },
+      "continuity": {
+        "baseline": {
+          "total": 0,
+          "max": 6,
+          "checks": {
+            "includes:Tuesday": false,
+            "includes:Cedar": false,
+            "includes:agenda": false,
+            "label:B1": false,
+            "label:B2": false,
+            "label:B3": false
+          }
+        },
+        "simulated": {
+          "total": 6,
+          "max": 6,
+          "checks": {
+            "includes:Tuesday": true,
+            "includes:Cedar": true,
+            "includes:agenda": true,
+            "label:B1": true,
+            "label:B2": true,
+            "label:B3": true
+          }
+        },
+        "reference": {
+          "total": 6,
+          "max": 6,
+          "checks": {
+            "includes:Tuesday": true,
+            "includes:Cedar": true,
+            "includes:agenda": true,
+            "label:B1": true,
+            "label:B2": true,
+            "label:B3": true
+          }
+        },
+        "digestOnSimulated": true
+      }
+    }
+  ]
+}

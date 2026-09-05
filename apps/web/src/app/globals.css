@@ -1,14 +1,149 @@
 :root {
   color-scheme: dark;
-  /* Baseline colors so the body doesn't flash before the themed shell paints. */
-  --baseline-bg: #0a0c12;
-  --baseline-fg: #e8ecf5;
+  /* One account-level reading scale. Standard (16px) is deliberately today's
+     browser baseline; the other presets move in conservative one-pixel steps
+     so dense instruments reflow without scaling authored art or canvas work. */
+  --prism-type-root: 16px;
+  --prism-type-caption: 0.6875rem;
+  --prism-type-label: 0.75rem;
+  --prism-type-body: 0.8125rem;
+  --prism-type-body-large: 1rem;
+  --prism-type-title: 1.0625rem;
+
+  /* Document-owned semantic palette. App-shell classes still own authored
+     in-tree presentation; these values give body portals, route failures, and
+     pre-shell paint the same contract instead of a fixed-Dark fallback. */
+  --prism-document-color-scheme: dark;
+  --prism-document-bg: #0b0a09;
+  --prism-document-bg-deep: #060504;
+  --prism-document-bg-surface: #151311;
+  --prism-document-bg-elevated: #1b1816;
+  --prism-document-bg-hover: #211e1b;
+  --prism-document-bg-active: #2b2723;
+  --prism-document-fg: #edf3f8;
+  --prism-document-fg-muted: #93a2af;
+  --prism-document-fg-subtle: #667684;
+  --prism-document-line: #25211e;
+  --prism-document-line-strong: #342f2a;
+  --prism-document-accent: #cbd8e3;
+  --prism-document-accent-text: #0c0a08;
+  --prism-document-danger: #f57a8b;
+  --prism-document-danger-soft: #3a1821;
+  --prism-document-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.35);
+  --prism-document-shadow-md: 0 6px 24px rgba(0, 0, 0, 0.4);
+  --prism-document-shadow-lg: 0 20px 48px rgba(0, 0, 0, 0.55);
+  --prism-document-selection-bg: rgba(110, 168, 255, 0.3);
+  --prism-document-selection-fg: inherit;
+  --prism-document-modal-backdrop: rgba(4, 5, 12, 0.72);
+  --prism-document-modal-backdrop-strong: rgba(5, 5, 10, 0.9);
+  --prism-document-focus-ring: #b8e6ff;
+  --prism-document-focus-halo: rgba(91, 193, 238, 0.24);
+  --prism-document-disabled-opacity: 0.52;
+  --prism-document-drag-ring: #8fdcff;
+  --prism-document-drop-fill: rgba(64, 174, 224, 0.12);
+  --prism-document-status-info: #78c9ee;
+  --prism-document-status-success: #68e6a6;
+  --prism-document-status-warning: #ffcc76;
+  --prism-document-status-error: #f57a8b;
+  --prism-safe-top: env(safe-area-inset-top, 0px);
+  --prism-safe-right: env(safe-area-inset-right, 0px);
+  --prism-safe-bottom: env(safe-area-inset-bottom, 0px);
+  --prism-safe-left: env(safe-area-inset-left, 0px);
+  --prism-z-first-run: 940;
+  --prism-z-cinematic: 2200;
+  --prism-z-blocking: 4900;
+  --prism-document-app-gradient:
+    radial-gradient(
+      ellipse at top left,
+      color-mix(in srgb, var(--prism-document-accent) 22%, transparent),
+      transparent 55%
+    ),
+    radial-gradient(
+      ellipse at bottom right,
+      color-mix(in srgb, var(--prism-document-accent) 10%, transparent),
+      transparent 55%
+    );
+
+  /* Baseline colors resolve through the document palette so the body does not
+     flash the opposite theme before the app shell paints. */
+  --baseline-bg: var(--prism-document-bg);
+  --baseline-fg: var(--prism-document-fg);
+  /* Shared applet navbar band; live sessions retain this reserved height. */
+  --app-navbar-height: 66px;
+
+  /* Title role was authored on .appLayout, so it resolved only inside the
+     shell subtree and silently fell back everywhere else. Same value, lifted
+     to :root; the .appLayout declaration still wins where it applies. */
+  --font-title:
+    var(--font-title-sans), var(--font-ui-sans), system-ui, sans-serif;
+  /* Composed roles. Applets ask for an intent; only this layer names a face. */
+  --font-serif: var(--font-chat-serif), Georgia, serif;
+  --font-mono:
+    var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
+  --font-ui-mono: var(--font-mono);
+
+  /* Radius and spacing share one step name -> pixel mapping, so `lg` means
+     12px in both. See docs/design-system.md — the odd values in the tree
+     (5/7/9/11/13px) are drift to snap onto these steps, not extra rungs. */
+  --prism-radius-2xs: 4px;
+  --prism-radius-xs: 6px;
+  --prism-radius-sm: 8px;
+  --prism-radius-md: 10px;
+  --prism-radius-lg: 12px;
+  --prism-radius-xl: 14px;
+  --prism-radius-2xl: 16px;
+  --prism-radius-3xl: 18px;
+  --prism-radius-4xl: 20px;
+  --prism-radius-pill: 999px;
+  --prism-radius-circle: 50%;
+
+  --prism-space-3xs: 2px;
+  --prism-space-2xs: 4px;
+  --prism-space-xs: 6px;
+  --prism-space-sm: 8px;
+  --prism-space-md: 10px;
+  --prism-space-lg: 12px;
+  --prism-space-xl: 14px;
+  --prism-space-2xl: 16px;
+  --prism-space-3xl: 18px;
+  --prism-space-4xl: 20px;
+  --prism-space-5xl: 24px;
+
+  /* Tooltip chrome lives here so portaled labels (bot names, model picker,
+     Prompt Center wildcards) still paint a solid card. Theme tokens such as
+     --bg-surface are authored on .themeDark/.themeLight and do not inherit
+     onto document.body. Values match the Color Filter info cards. */
+  --prism-tooltip-bg: #151311;
+  --prism-tooltip-fg: #edf3f8;
+  --prism-tooltip-border: #342f2a;
+  --prism-tooltip-shadow: 0 20px 48px rgba(0, 0, 0, 0.55);
 }
 
 html {
   height: 100%;
+  font-size: var(--prism-type-root);
   background: var(--baseline-bg);
   overscroll-behavior: none;
+}
+
+html[data-prism-typography-scale="compact"] {
+  --prism-type-root: 14px;
+}
+
+html[data-prism-typography-scale="small"] {
+  --prism-type-root: 15px;
+}
+
+html[data-prism-typography-scale="standard"] {
+  --prism-type-root: 16px;
+}
+
+html[data-prism-typography-scale="large"] {
+  --prism-type-root: 17px;
+}
+
+html[data-prism-typography-scale="extra-large"] {
+  --prism-type-root: 18px;
 }
 
 html,
@@ -20,7 +155,54 @@ body {
 }
 
 body {
+  color-scheme: var(--prism-document-color-scheme);
+  --bg: var(--prism-document-bg);
+  --bg-deep: var(--prism-document-bg-deep);
+  --bg-surface: var(--prism-document-bg-surface);
+  --bg-elevated: var(--prism-document-bg-elevated);
+  --bg-hover: var(--prism-document-bg-hover);
+  --bg-active: var(--prism-document-bg-active);
+  --fg: var(--prism-document-fg);
+  --fg-muted: var(--prism-document-fg-muted);
+  --fg-subtle: var(--prism-document-fg-subtle);
+  --line: var(--prism-document-line);
+  --line-strong: var(--prism-document-line-strong);
+  --border: var(--prism-document-line);
+  --surface: var(--prism-document-bg-surface);
+  --panel: var(--prism-document-bg-surface);
+  --muted: var(--prism-document-fg-muted);
+  --text-primary: var(--prism-document-fg);
+  --text-muted: var(--prism-document-fg-muted);
+  --accent: var(--prism-document-accent);
+  --accent-hover: color-mix(
+    in srgb,
+    var(--prism-document-accent) 88%,
+    #ffffff 12%
+  );
+  --accent-soft: color-mix(
+    in srgb,
+    var(--prism-document-accent) 18%,
+    var(--prism-document-bg) 82%
+  );
+  --accent-glow: color-mix(
+    in srgb,
+    var(--prism-document-accent) 22%,
+    transparent
+  );
+  --accent-text: var(--prism-document-accent-text);
+  --accent-ink: var(--prism-document-accent);
+  --danger: var(--prism-document-danger);
+  --danger-soft: var(--prism-document-danger-soft);
+  --shadow-sm: var(--prism-document-shadow-sm);
+  --shadow-md: var(--prism-document-shadow-md);
+  --shadow-lg: var(--prism-document-shadow-lg);
+  --app-gradient: var(--prism-document-app-gradient);
+  --provider-accent-openai: #57b9d9;
+  --provider-accent-anthropic: #d97757;
+  --provider-accent-local: #68e6a6;
+  --provider-accent-elevenlabs: #b8b2aa;
   height: 100vh;
+  height: 100dvh;
   overflow: hidden;
   min-height: 100%;
   display: flex;
@@ -36,6 +218,8 @@ body {
     sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
   -webkit-touch-callout: none;
   -webkit-user-select: none;
   user-select: none;
@@ -59,30 +243,214 @@ html[data-prism-visual-lifecycle="suspended"]
   animation-play-state: paused !important;
 }
 
-/* Player-selected graphics ceilings. High intentionally adds no overrides and
-   preserves today's adaptive rendering. Medium bounds expensive scene paint;
+/* Opening the global Prism conversation is a stronger, modal pause than an
+   ordinary background-tab suspension. Freeze every authored CSS timeline in
+   the app tree; the two companion portal layers opt out so Prism remains live. */
+html[data-prism-system-paused="true"]
+  body
+  > :not([data-prism-system-pause-exempt="true"]),
+html[data-prism-system-paused="true"]
+  body
+  > :not([data-prism-system-pause-exempt="true"])
+  *,
+html[data-prism-system-paused="true"]
+  body
+  > :not([data-prism-system-pause-exempt="true"])::before,
+html[data-prism-system-paused="true"]
+  body
+  > :not([data-prism-system-pause-exempt="true"])::after,
+html[data-prism-system-paused="true"]
+  body
+  > :not([data-prism-system-pause-exempt="true"])
+  *::before,
+html[data-prism-system-paused="true"]
+  body
+  > :not([data-prism-system-pause-exempt="true"])
+  *::after {
+  animation-play-state: paused !important;
+}
+
+/* The shared navbar is permanent. Session and authoring surfaces reserve this
+   band and lock only the controls that must not mutate an active session. */
+
+html[data-prism-companion-open="true"] [data-shared-app-navbar="true"],
+html[data-prism-companion-open="true"] [data-app-shell-header="true"] {
+  /* Above the companion backdrop (z-index 854) so summon never blurs/blocks chrome. */
+  z-index: 860 !important;
+  transform: none !important;
+  opacity: 1 !important;
+  pointer-events: auto !important;
+}
+
+[data-shared-app-navbar="true"],
+[data-app-shell-header="true"] {
+  transition:
+    transform 0.32s cubic-bezier(0.32, 0.72, 0, 1),
+    opacity 0.22s ease;
+}
+
+/* Navbar pickers portal to document.body, so their readability lift needs a
+   shared presentation hook instead of depending on any one menu system. The
+   cool bloom separates the surface from busy applet art without recoloring it. */
+[data-navbar-picker-surface="true"] {
+  box-shadow:
+    0 1px 0 color-mix(in srgb, #ffffff 11%, transparent) inset,
+    0 12px 28px rgba(0, 0, 0, 0.52),
+    0 30px 72px rgba(0, 0, 0, 0.56),
+    0 0 34px color-mix(in srgb, #64cfff 18%, transparent),
+    0 0 82px color-mix(in srgb, #7367ff 12%, transparent) !important;
+}
+
+body[data-prism-theme="light"] {
+  --prism-document-color-scheme: light;
+  --prism-document-bg: #edf5fc;
+  --prism-document-bg-deep: #dce8f2;
+  --prism-document-bg-surface: #f8fbff;
+  --prism-document-bg-elevated: #ffffff;
+  --prism-document-bg-hover: #e8f1f9;
+  --prism-document-bg-active: #d8e5ef;
+  --prism-document-fg: #172638;
+  --prism-document-fg-muted: #5c7186;
+  --prism-document-fg-subtle: #8496a6;
+  --prism-document-line: #cfdce7;
+  --prism-document-line-strong: #b7c9d8;
+  --prism-document-accent: #172638;
+  --prism-document-accent-text: #ffffff;
+  --prism-document-danger: #dc2626;
+  --prism-document-danger-soft: #fde7e3;
+  --prism-document-shadow-sm: 0 1px 2px rgba(23, 38, 56, 0.08);
+  --prism-document-shadow-md: 0 10px 30px rgba(31, 74, 112, 0.1);
+  --prism-document-shadow-lg: 0 26px 58px rgba(31, 74, 112, 0.14);
+  --prism-document-selection-bg: rgba(67, 111, 255, 0.24);
+  --prism-document-selection-fg: #102235;
+  --prism-document-modal-backdrop: rgba(41, 58, 79, 0.3);
+  --prism-document-modal-backdrop-strong: rgba(41, 58, 79, 0.4);
+  --prism-document-focus-ring: #12618b;
+  --prism-document-focus-halo: rgba(18, 97, 139, 0.16);
+  --prism-document-disabled-opacity: 0.5;
+  --prism-document-drag-ring: #176f9d;
+  --prism-document-drop-fill: rgba(32, 126, 177, 0.1);
+  --prism-document-status-info: #176f9d;
+  --prism-document-status-success: #147a4f;
+  --prism-document-status-warning: #8a5400;
+  --prism-document-status-error: #c92828;
+  --prism-document-app-gradient:
+    radial-gradient(
+      ellipse 68% 58% at top left,
+      color-mix(in srgb, var(--prism-document-accent) 11%, transparent),
+      transparent 56%
+    ),
+    radial-gradient(
+      ellipse 52% 42% at 92% 8%,
+      color-mix(in srgb, #2fd3e3 4%, transparent),
+      transparent 62%
+    ),
+    radial-gradient(
+      ellipse 58% 48% at 8% 92%,
+      color-mix(in srgb, #ff4d6d 3%, transparent),
+      transparent 62%
+    );
+  --accent-hover: color-mix(
+    in srgb,
+    var(--prism-document-accent) 85%,
+    #000000 15%
+  );
+  --accent-soft: color-mix(
+    in srgb,
+    var(--prism-document-accent) 9%,
+    var(--prism-document-bg) 91%
+  );
+  --accent-glow: color-mix(
+    in srgb,
+    var(--prism-document-accent) 11%,
+    transparent
+  );
+  --provider-accent-elevenlabs: #777169;
+  --prism-tooltip-bg: #ffffff;
+  --prism-tooltip-fg: #172638;
+  --prism-tooltip-border: #b7c9d8;
+  --prism-tooltip-shadow: 0 26px 58px rgba(31, 74, 112, 0.14);
+}
+
+body[data-prism-theme="light"] [data-navbar-picker-surface="true"] {
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.96) inset,
+    0 12px 28px rgba(29, 53, 78, 0.18),
+    0 28px 64px rgba(29, 53, 78, 0.22),
+    0 0 30px color-mix(in srgb, #269bd8 15%, transparent),
+    0 0 70px color-mix(in srgb, #5856d6 9%, transparent) !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-shared-app-navbar="true"],
+  [data-app-shell-header="true"] {
+    transition:
+      opacity 0.01s linear,
+      transform 0.01s linear;
+  }
+}
+
+/* Player-selected graphics ceilings. High intentionally adds no overrides.
+   Medium bounds expensive scene paint;
    Low also freezes explicitly decorative motion and drops authored GPU filters.
    Semantic arrivals, speech, clocks, and input feedback are never tagged as
    decorative, so quality settings cannot hide product state. */
-html[data-prism-graphics-quality="medium"]
+html[data-prism-graphics-quality="medium"] [data-prism-expensive-effect="true"],
+html[data-prism-graphics-quality="low"] [data-prism-expensive-effect="true"],
+html[data-prism-runtime-quality="balanced"]
   [data-prism-expensive-effect="true"],
-html[data-prism-graphics-quality="low"]
+html[data-prism-runtime-quality="minimal"]
   [data-prism-expensive-effect="true"] {
   contain: paint;
 }
 
 html[data-prism-graphics-quality="low"]
-  [data-prism-decorative-motion="true"],
+  [data-prism-decorative-motion="true"]:not(
+    [data-crt-phosphor="bot"] [data-prism-decorative-motion="true"]
+  ),
 html[data-prism-graphics-quality="low"]
-  [data-prism-decorative-motion="true"]::before,
+  [data-prism-decorative-motion="true"]:not(
+    [data-crt-phosphor="bot"] [data-prism-decorative-motion="true"]
+  )::before,
 html[data-prism-graphics-quality="low"]
-  [data-prism-decorative-motion="true"]::after {
+  [data-prism-decorative-motion="true"]:not(
+    [data-crt-phosphor="bot"] [data-prism-decorative-motion="true"]
+  )::after {
   animation: none !important;
+}
+
+/* Runtime pressure may freeze peripheral decorative motion, but the authored
+   CRT remains a priority semantic surface at every runtime tier. */
+html[data-prism-runtime-quality="minimal"]
+  [data-prism-decorative-motion="true"]:not(
+    [data-crt-phosphor="bot"] [data-prism-decorative-motion="true"]
+  ),
+html[data-prism-runtime-quality="minimal"]
+  [data-prism-decorative-motion="true"]:not(
+    [data-crt-phosphor="bot"] [data-prism-decorative-motion="true"]
+  )::before,
+html[data-prism-runtime-quality="minimal"]
+  [data-prism-decorative-motion="true"]:not(
+    [data-crt-phosphor="bot"] [data-prism-decorative-motion="true"]
+  )::after {
+  animation: none !important;
+  transition: none !important;
+  will-change: auto !important;
 }
 
 html[data-prism-graphics-quality="low"]
   [data-prism-expensive-effect="true"]::before,
 html[data-prism-graphics-quality="low"]
+  [data-prism-expensive-effect="true"]::after {
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+  filter: none !important;
+}
+
+html[data-prism-runtime-quality="minimal"] [data-prism-expensive-effect="true"],
+html[data-prism-runtime-quality="minimal"]
+  [data-prism-expensive-effect="true"]::before,
+html[data-prism-runtime-quality="minimal"]
   [data-prism-expensive-effect="true"]::after {
   -webkit-backdrop-filter: none !important;
   backdrop-filter: none !important;
@@ -107,9 +475,103 @@ select,
   user-select: text;
 }
 
+/* Shared native interaction floor. Component styles can keep richer authored
+   states, while unstyled or portaled controls still receive a theme-native
+   keyboard ring, disabled/busy affordance, and native form color contract. */
+:where(
+  button,
+  a[href],
+  input,
+  select,
+  textarea,
+  summary,
+  [role="button"],
+  [role="menuitem"],
+  [role="option"],
+  [role="tab"],
+  [role="switch"],
+  [tabindex]:not([tabindex="-1"])
+):focus-visible {
+  outline: 2px solid var(--prism-document-focus-ring);
+  outline-offset: 2px;
+}
+
+:where(button, input, select, textarea, optgroup, option):disabled,
+:where(
+  [role="button"],
+  [role="menuitem"],
+  [role="option"],
+  [role="tab"],
+  [role="switch"]
+)[aria-disabled="true"] {
+  cursor: not-allowed;
+  opacity: var(--prism-document-disabled-opacity);
+}
+
+:where([aria-busy="true"], [data-busy="true"]) {
+  cursor: progress;
+}
+
+/* Native resize handles stay useful inside authored dialogs without allowing a
+   field to grow beyond the viewport and strand the dialog controls. Component
+   limits retain precedence because this shared ceiling has zero specificity. */
+:where([role="dialog"], [role="alertdialog"], [aria-modal="true"]) {
+  overscroll-behavior: contain;
+}
+
+:where([role="dialog"], [role="alertdialog"], [aria-modal="true"])
+  :where(textarea) {
+  max-inline-size: 100%;
+  max-block-size: max(
+    8rem,
+    calc(100dvh - 10rem - var(--prism-safe-top) - var(--prism-safe-bottom))
+  );
+}
+
+:where(
+  input[type="checkbox"],
+  input[type="radio"],
+  input[type="range"],
+  progress
+) {
+  accent-color: var(--prism-document-accent);
+}
+
+input[type="file"] {
+  color: var(--prism-document-fg-muted);
+}
+
+input[type="file"]::file-selector-button {
+  margin-inline-end: 0.75rem;
+  padding: 0.5rem 0.75rem;
+  color: var(--prism-document-accent-text);
+  border: 1px solid var(--prism-document-line-strong);
+  border-radius: var(--prism-radius-pill);
+  background: var(--prism-document-accent);
+  cursor: pointer;
+}
+
+input[type="file"]::file-selector-button:hover {
+  background: var(--accent-hover);
+}
+
+input[type="file"]::file-selector-button:active {
+  transform: translateY(1px);
+}
+
+:where([aria-grabbed="true"], [data-dragging="true"]) {
+  cursor: grabbing;
+}
+
+:where([data-drag-over="true"], [data-drop-active="true"]) {
+  outline: 2px solid var(--prism-document-drag-ring);
+  outline-offset: 2px;
+  background-color: var(--prism-document-drop-fill);
+}
+
 ::selection {
-  background: rgba(110, 168, 255, 0.3);
-  color: inherit;
+  background: var(--prism-document-selection-bg);
+  color: var(--prism-document-selection-fg);
 }
 
 /* Keep scroll behavior but hide visual scrollbar rails/pills globally. */
@@ -120,6 +582,64 @@ select,
 *::-webkit-scrollbar {
   width: 0;
   height: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html:focus-within,
+  [data-prism-scroll-follow="true"] {
+    scroll-behavior: auto;
+  }
+
+  input[type="file"]::file-selector-button {
+    transition: none;
+  }
+
+  input[type="file"]::file-selector-button:active {
+    transform: none;
+  }
+}
+
+@media (forced-colors: active) {
+  :where(
+    button,
+    a[href],
+    input,
+    select,
+    textarea,
+    summary,
+    [role="button"],
+    [role="menuitem"],
+    [role="option"],
+    [role="tab"],
+    [role="switch"],
+    [tabindex]:not([tabindex="-1"])
+  ):focus-visible {
+    outline: 3px solid Highlight;
+    outline-offset: 2px;
+  }
+
+  :where(button, input, select, textarea):disabled,
+  :where(
+    [role="button"],
+    [role="menuitem"],
+    [role="option"],
+    [role="tab"],
+    [role="switch"]
+  )[aria-disabled="true"] {
+    color: GrayText;
+    opacity: 1;
+  }
+
+  :where([data-drag-over="true"], [data-drop-active="true"]) {
+    outline-color: Highlight;
+    background: Canvas;
+  }
+
+  input[type="file"]::file-selector-button {
+    color: ButtonText;
+    border-color: ButtonText;
+    background: ButtonFace;
+  }
 }
 
 /* Native View Transitions for relationship-depth navigation. Only the named
@@ -140,26 +660,71 @@ html[data-relationship-depth-motion]::view-transition-new(root) {
   animation-name: relationship-depth-atmosphere-in;
 }
 
-html[data-relationship-depth-motion="shared-anchor"][data-relationship-depth-direction="forward"]::view-transition-group(relationship-depth-anchor) {
+/* Let the completed startup refraction resolve before Home appears beneath it.
+   The root snapshots keep the handoff atomic while producing a true crossfade. */
+html[data-prism-startup-handoff]::view-transition-old(root),
+html[data-prism-startup-handoff]::view-transition-new(root) {
+  animation-duration: var(--prism-startup-handoff-duration, 800ms);
+  animation-fill-mode: both;
+  animation-timing-function: cubic-bezier(0.22, 0.7, 0.18, 1);
+}
+
+html[data-prism-startup-handoff]::view-transition-old(root) {
+  animation-name: prism-startup-handoff-out;
+}
+
+html[data-prism-startup-handoff]::view-transition-new(root) {
+  animation-name: prism-startup-handoff-in;
+}
+
+@keyframes prism-startup-handoff-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes prism-startup-handoff-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+html[data-relationship-depth-motion="shared-anchor"][data-relationship-depth-direction="forward"]::view-transition-group(
+    relationship-depth-anchor
+  ) {
   animation-duration: 360ms;
   animation-timing-function: cubic-bezier(0.22, 0.7, 0.18, 1);
 }
 
-html[data-relationship-depth-motion="shared-anchor"][data-relationship-depth-direction="reverse"]::view-transition-group(relationship-depth-anchor) {
+html[data-relationship-depth-motion="shared-anchor"][data-relationship-depth-direction="reverse"]::view-transition-group(
+    relationship-depth-anchor
+  ) {
   animation-duration: 300ms;
   animation-timing-function: cubic-bezier(0.3, 0.62, 0.2, 1);
 }
 
-html[data-relationship-depth-motion="pullback-swap"]::view-transition-group(relationship-depth-anchor) {
+html[data-relationship-depth-motion="pullback-swap"]::view-transition-group(
+    relationship-depth-anchor
+  ) {
   animation-duration: 280ms;
   animation-timing-function: cubic-bezier(0.3, 0.62, 0.2, 1);
 }
 
-html[data-relationship-depth-motion="pullback-swap"]::view-transition-old(relationship-depth-anchor) {
+html[data-relationship-depth-motion="pullback-swap"]::view-transition-old(
+    relationship-depth-anchor
+  ) {
   animation: relationship-depth-pull-away 140ms ease-in both;
 }
 
-html[data-relationship-depth-motion="pullback-swap"]::view-transition-new(relationship-depth-anchor) {
+html[data-relationship-depth-motion="pullback-swap"]::view-transition-new(
+    relationship-depth-anchor
+  ) {
   animation: relationship-depth-push-in 160ms 120ms ease-out both;
 }
 
@@ -204,11 +769,158 @@ html[data-relationship-depth-motion="pullback-swap"]::view-transition-new(relati
 }
 
 @media (prefers-reduced-motion: reduce) {
+  [data-prism-refract-wield-hover="true"] {
+    transition: none;
+    animation: none;
+  }
+
   html[data-relationship-depth-motion="crossfade"]::view-transition-group(root),
   html[data-relationship-depth-motion="crossfade"]::view-transition-old(root),
   html[data-relationship-depth-motion="crossfade"]::view-transition-new(root) {
     animation-duration: 140ms;
     animation-timing-function: ease;
     transform: none;
+  }
+
+  html[data-prism-startup-handoff]::view-transition-old(root),
+  html[data-prism-startup-handoff]::view-transition-new(root) {
+    animation-duration: 160ms;
+    animation-timing-function: ease;
+    transform: none;
+  }
+}
+
+[data-prism-refract-wield-hover="true"] {
+  outline: 1px solid color-mix(in srgb, var(--prism-i, #b7e63a) 68%, white);
+  outline-offset: 3px;
+  filter: drop-shadow(
+      0 0 5px color-mix(in srgb, var(--prism-i, #b7e63a) 58%, transparent)
+    )
+    drop-shadow(
+      0 0 13px color-mix(in srgb, var(--prism-s, #2fd3e3) 30%, transparent)
+    );
+}
+
+[data-prism-refract-state="queued"] {
+  outline: 1px solid color-mix(in srgb, var(--prism-s, #2fd3e3) 56%, white);
+  outline-offset: 3px;
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--prism-p, #ff4d6d) 24%, transparent),
+    0 0 18px -10px color-mix(in srgb, var(--prism-s, #2fd3e3) 58%, transparent),
+    0 0 26px -16px color-mix(in srgb, var(--prism-m, #7b5cff) 54%, transparent) !important;
+  caret-color: transparent !important;
+  cursor: progress !important;
+  user-select: none;
+}
+
+/* Every registered prose field and choice gets this same visible generation
+   contract. Surface styles may tune the resting field color through the custom
+   property, but must not layer a second competing rainbow over this sheen. */
+:root
+  body
+  [data-prism-refract-sheen="true"][data-prism-refract-state="generating"] {
+  --prism-refract-sheen-surface: color-mix(
+    in srgb,
+    var(--bg-surface, var(--baseline-bg)) 88%,
+    #11131c
+  );
+  --prism-refract-sheen-period: 52rem;
+  border-color: transparent !important;
+  outline: 2px solid color-mix(in srgb, var(--prism-s, #2fd3e3) 74%, white);
+  outline-offset: 3px;
+  background:
+    linear-gradient(
+        115deg,
+        color-mix(
+            in srgb,
+            var(--prism-p, #ff4d6d) 18%,
+            var(--prism-refract-sheen-surface)
+          )
+          0%,
+        color-mix(
+            in srgb,
+            var(--prism-r, #ff9f1c) 15%,
+            var(--prism-refract-sheen-surface)
+          )
+          15%,
+        color-mix(in srgb, #f4f86a 12%, var(--prism-refract-sheen-surface)) 30%,
+        color-mix(in srgb, #36f0b2 14%, var(--prism-refract-sheen-surface)) 45%,
+        color-mix(
+            in srgb,
+            var(--prism-i, #b7e63a) 17%,
+            var(--prism-refract-sheen-surface)
+          )
+          60%,
+        color-mix(
+            in srgb,
+            var(--prism-s, #2fd3e3) 17%,
+            var(--prism-refract-sheen-surface)
+          )
+          78%,
+        color-mix(
+            in srgb,
+            var(--prism-m, #7b5cff) 18%,
+            var(--prism-refract-sheen-surface)
+          )
+          100%
+      )
+      padding-box,
+    linear-gradient(
+        90deg,
+        var(--prism-p, #ff4d6d),
+        var(--prism-r, #ff9f1c),
+        #f4f86a,
+        #36f0b2,
+        var(--prism-i, #b7e63a),
+        var(--prism-s, #2fd3e3),
+        var(--prism-m, #7b5cff),
+        var(--prism-p, #ff4d6d)
+      )
+      border-box !important;
+  background-repeat: repeat-x !important;
+  background-size:
+    var(--prism-refract-sheen-period) 100%,
+    var(--prism-refract-sheen-period) 100% !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.2),
+    0 0 22px -13px color-mix(in srgb, var(--prism-i, #b7e63a) 76%, transparent),
+    0 0 34px -20px color-mix(in srgb, var(--prism-m, #7b5cff) 72%, transparent) !important;
+  filter: saturate(1.12) brightness(1.04);
+  will-change: background-position, filter;
+  animation:
+    prismRefractSheenFlow 1.7s linear infinite,
+    prismRefractSheenPulse 920ms ease-in-out infinite alternate !important;
+  caret-color: transparent !important;
+  cursor: pointer !important;
+  user-select: none;
+}
+
+@keyframes prismRefractSheenFlow {
+  from {
+    background-position:
+      0 0,
+      0 0;
+  }
+  to {
+    background-position:
+      var(--prism-refract-sheen-period) 0,
+      var(--prism-refract-sheen-period) 0;
+  }
+}
+
+@keyframes prismRefractSheenPulse {
+  from {
+    filter: saturate(1.06) brightness(1.01);
+  }
+  to {
+    filter: saturate(1.2) brightness(1.08);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root
+    body
+    [data-prism-refract-sheen="true"][data-prism-refract-state="generating"] {
+    animation: none !important;
   }
 }

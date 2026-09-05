@@ -11,7 +11,9 @@ This contract is normative for `PRISM-1ln0p` and its dependent Slate work.
 
 1. Human prose edits, explicit locks, non-negotiables, and accept/reject choices
    are authoritative.
-2. Continuity warns but never blocks drafting or silently edits prose.
+2. Continuity never blocks direct writing, autosave, opening, or export and
+   never silently edits prose. It may pause an AI writing operation before the
+   prose-provider call for one material high-confidence conflict.
 3. SQLite is the tenant-scoped source of truth. Qdrant may accelerate recall but
    is optional and completely rebuildable.
 4. LOCAL work never contacts an external model, embedding service, image
@@ -25,8 +27,9 @@ This contract is normative for `PRISM-1ln0p` and its dependent Slate work.
    safe to discard when stale.
 7. A failed or unavailable auxiliary model cannot prevent direct editing,
    autosave, project opening, or deterministic export.
-8. The writer sees at most one contextual decision at a time, not a ledger
-   maintenance interface.
+8. The writer sees at most one contextual decision at a time. Curated Story
+   Bible projections may expose Cast, Arcs, Threads, Timeline, and World, but
+   the raw ledger remains private.
 
 ## Hierarchy and manuscript authority
 
@@ -37,6 +40,9 @@ This contract is normative for `PRISM-1ln0p` and its dependent Slate work.
   or **imported** section records.
 - Each section has an integer revision. Saves, AI drafts, revision proposals,
   background extraction, and batch changes carry the revision they read.
+- Each section also owns a versioned rich document with stable block IDs. Its
+  deterministic plain-text projection remains the input to Continuity, prompts,
+  search, and clean export.
 - A write with a stale expected revision is rejected rather than merged over a
   newer human edit.
 - Full-book reading is assembled from ordered sections and may be paginated or
@@ -62,6 +68,7 @@ Source anchors include:
 - immutable source ID
 - section ID and section revision when applicable
 - exact character offsets
+- stable block-relative positions when the source document provides them
 - a hash of the quoted evidence
 - human, AI, or procedural authority
 - provider/model when an LLM contributed
@@ -82,10 +89,20 @@ The authoritative ledger stores:
 - unresolved, due, resolved, abandoned, and intentionally open threads
 - source-anchored concerns and their writer-directed resolution
 - background jobs and immutable processing provenance
+- character profile projections with field locks and explicit provenance
+- intended and observed character arcs with planned, seeded, landed, missed,
+  revised, or intentionally abandoned beats
+- typed narrative dependencies (`before`, `after`, `causes`, `requires`,
+  `prevents`, `reveals`, and `resolves`) and timeline branch identity
 
 Claims distinguish **fact**, **belief**, **rumor**, **mystery**, **deliberate
 ambiguity**, **intention**, and **superseded** material. Character belief never
 silently becomes world truth.
+
+The writer-facing Story Bible keeps four layers distinct: accepted manuscript
+evidence, writer-approved canon, future plans, and source-linked AI
+interpretations. Editing a projection creates a new human-authority source
+rather than mutating derived records in place.
 
 ## Deterministic and model responsibilities
 
@@ -123,6 +140,11 @@ account provider/model. In LOCAL mode, all auxiliary work stays local.
    changes yield one recommendation.
 8. Drafting continues against the last active generation while work catches up.
 
+Every derived row belongs to a generation. Active reads resolve through the
+series-level active generation, promotion swaps that pointer atomically, and
+the previous generation remains available for rollback. Project generation
+fields remain compatibility projections while existing archives migrate.
+
 ## Context compilation
 
 The default local context target is 8,192 tokens. A focused scene brief contains
@@ -159,14 +181,23 @@ The writer receives one contextual prompt and may:
 Ledger-only decisions may apply directly. Any prose change remains a normal
 preview that respects locks and requires acceptance.
 
+Before an AI draft or revision, the structured direction is preflighted against
+current locks, canon, character state, knowledge, chronology, and causal rules.
+A hard conflict returns a persisted in-canvas question with exactly three
+context-specific choices plus `Describe the vibe...`. The answer is
+fingerprinted, accepted once, recorded as writer authority, and resumes the
+same operation only when its section revision, Continuity generation, and
+Mirror version are still current. Soft or uncertain concerns never interrupt.
+
 ## Version and upgrade contract
 
 Continuity exposes one writer-facing `v0.x` capability version. Internal schema,
 extraction, reconciliation, context, recap, and Atmosphere versions are positive
 integers stored with every derived artifact.
 
-Each project stores its active and target versions, active and immediately
-previous ledger generations, upgrade state, and last successful processing time.
+Each series stores its active and immediately previous ledger generations.
+Projects retain their active and target capability versions plus compatibility
+generation projections, upgrade state, and last successful processing time.
 Upgrades build a shadow generation from immutable sources, compare conclusions
 and retrieval behavior, and promote atomically. A failed or deferred upgrade
 keeps the active generation unchanged. Upgrades never rewrite manuscript prose.
@@ -176,13 +207,31 @@ reject newer unsupported Continuity archives before any mutation.
 
 ## UX boundary
 
-Continuity appears as background status, a return synopsis, or one precise
-source-linked concern. There is no editable public wiki, arbitrary version
-picker, multi-field reconciliation form, or ribbon of continuity tools.
+Continuity appears as background status, a return synopsis, one precise
+source-linked concern, or a focused Cast, Arcs, Threads, Timeline, or World
+projection. There is no raw editable ledger, arbitrary version picker,
+multi-field reconciliation form, or ribbon of continuity tools.
 
 The priority for the single next card is: canon risk, narratively due thread,
 material Continuity upgrade, requested Review Circle result, drafting guidance,
 then an optional visual suggestion.
+
+## Developer transcript and Slate Review
+
+Continuity appends safe structured developer events for each synthesized
+section. Events identify their operation, section revision, stage,
+source/concern/clarification IDs, provider/model when applicable, active
+generation, timing, and a bounded explicit diagnostic summary. They may retain
+user-owned prose or visible model output required to reproduce a failure, but
+never credentials, transport secrets, hidden chain-of-thought, or unrelated
+tenant/project content.
+
+A writer may export one or more explicitly selected sections as
+`prism-slate-review-v1`. JSON is authoritative; Markdown presents the same
+accepted prose, operations, clarification decisions, event sequence, Story
+Bible projections, Mirror version, and momentum state. `$slate-review` uses
+successive exports and focused regressions to improve deterministic contracts,
+retrieval, validation, and orchestration without overfitting one story.
 
 ## Saga-scale acceptance
 

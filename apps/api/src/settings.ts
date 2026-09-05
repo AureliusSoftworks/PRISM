@@ -1,10 +1,15 @@
 import type {
+  BotAudioVoiceProfileV1,
   ComfyUiWorkflowRegistration,
   EnglishVoiceEngine,
   VoiceMode,
+  WhodunnitTextVoiceMode,
+  WhodunnitSpeechType,
+  WhodunnitInvestigationPerspective,
 } from "@localai/shared";
 import {
   DEFAULT_PRISM_MOOD_SENSITIVITY,
+  isDisabledModelChoice,
   isComfyUiRemoteWorkflowModelId,
   isComfyUiWorkflowModelId,
   MAX_PRISM_MOOD_SENSITIVITY,
@@ -12,17 +17,38 @@ import {
   normalizePrismMoodSensitivity,
   validateComfyUiWorkflowsPayload,
   normalizeBotVoiceVolume,
+  normalizeBotAudioVoiceProfileV1,
+  normalizeBotNamePronunciation,
   normalizeEnglishVoiceEngine,
-  normalizeVoiceMode,
+  normalizeSpeechTypeVoiceMode,
+  normalizeWhodunnitTextVoiceMode,
+  normalizeWhodunnitSpeechType,
+  normalizeWhodunnitInvestigationPerspective,
   parseStoredAutoFallbackChain,
+  parseStoredBotAudioVoiceProfileV1,
   normalizeAutoFallbackChain,
   serializeAutoFallbackChain,
+  clampOnlineAutoProviderBias,
+  normalizeOnlineAutoProviderWeights,
+  normalizeOnlineAutoQualityPosture,
+  type OnlineAutoProviderWeightsV1,
+  type OnlineAutoQualityPosture,
   type GraphicsQuality,
+  type PrismTypographyScale,
+  type HubAtmosphereStyle,
   type ImageProviderName,
   type EphemeralChatProviderPreferences,
+  normalizeTextModelDisplayNames,
+  parseStoredTextModelDisplayNames,
+  type TextModelDisplayNames,
   isImageProviderName,
   normalizeEphemeralChatProviderPreferences,
+  normalizeCrtFocus,
   normalizeGraphicsQuality,
+  normalizePrismTypographyScale,
+  normalizeHubAtmosphereStyle,
+  normalizePrismStartupPreference,
+  type PrismStartupPreference,
 } from "@localai/shared";
 import { sanitizeHiddenModelIds } from "./model-routing.ts";
 import { requirePrivateNetworkHttpUrl } from "./local-network-host.ts";
@@ -44,7 +70,7 @@ import { requirePrivateNetworkHttpUrl } from "./local-network-host.ts";
  * client) cannot happen again.
  */
 export type Theme = "light" | "dark" | "system";
-export type Provider = "local" | "openai" | "anthropic";
+export type Provider = "local" | "ollama_cloud" | "openai" | "anthropic";
 
 export interface ElevenLabsVoiceBank {
   [voiceId: string]: string | null;
@@ -162,6 +188,11 @@ export interface CurrentSettings {
   displayName: string;
   theme: Theme;
   graphicsQuality: GraphicsQuality | string | null;
+  crtFocus: number | string | null;
+  typographyScale: PrismTypographyScale | string | null;
+  atmosphereStyle: string | null;
+  hubAtmosphereEnabled: number | null;
+  startupPreference: string | null;
   preferredProvider: Provider;
   ephemeralChatProviderPreferences: string | null;
   preferredImageProvider: ImageProviderName;
@@ -171,14 +202,25 @@ export interface CurrentSettings {
   experimentalDualOllamaEnabled: number;
   experimentalAllModelEffortEnabled: number;
   coffeeExperimentalTableAngleEnabled: number;
+  debateWhodunnitReuseSynthesizedExhibits: number;
+  debateWhodunnitTextVoiceMode: string | null;
+  debateWhodunnitSpeechType: string | null;
+  debateWhodunnitPerspective: string | null;
   psychicModeEnabled: number;
-  /** Saved preference only. Auto is still gated per Zen/Coffee context. */
+  /** @deprecated Import/backup compatibility only; runtime routing ignores it. */
   autoSwitchModel: number;
   /** Versioned JSON stored in `users.auto_fallback_chain`. */
   autoFallbackChain: string | null;
+  /** Soft ONLINE Auto lean: -1 OpenAI … 0 balanced … +1 Anthropic. */
+  onlineAutoProviderBias: number;
+  onlineAutoProviderWeights?: string | OnlineAutoProviderWeightsV1 | null;
+  onlineAutoQualityPosture?: string | null;
   hiddenBotModelIds: string;
+  hiddenGlobalPickerModelIds?: string;
   hiddenComfyUiWorkflowIds: string;
+  /** @deprecated Import/backup compatibility only; runtime routing ignores it. */
   preferredLocalModel: string | null;
+  /** @deprecated Import/backup compatibility only; runtime routing ignores it. */
   preferredOnlineModel: string | null;
   lenientLocalImageFallbackModel: string | null;
   secondaryOllamaHost: string | null;
@@ -187,6 +229,9 @@ export interface CurrentSettings {
   preferredOpenAiImageModel: string | null;
   preferredZenWallpaperLocalImageModel: string | null;
   preferredZenWallpaperOpenAiImageModel: string | null;
+  preferredHomeAtmosphereImageModel: string | null;
+  /** `"local"` | `"openai"` when set; null/empty means unset (fall back to account image lane). */
+  preferredHomeAtmosphereImageProvider: string | null;
   zenWallpaperOpacity: number | null;
   zenWallpaperTextMaskEnabled: number | null;
   zenWallpaperGrayscaleEnabled: number | null;
@@ -208,8 +253,10 @@ export interface CurrentSettings {
   comfyUiWorkflows: ComfyUiWorkflowRegistration[];
   /** Null/empty → server `OLLAMA_AUXILIARY_MODEL` (default llama3.2). */
   prismDefaultLlmModel: string | null;
+  prismCloudLlmModel?: string | null;
   /** Null/empty → use normal hub chat model for turns that emit `sendGeneratedImage`. */
   prismImageToolLlmModel: string | null;
+  textModelDisplayNames: string | null;
   primaryOllamaHost: string;
   voiceMode: VoiceMode | string | null;
   voiceEffectsEnabled: number;
@@ -222,6 +269,9 @@ export interface CurrentSettings {
   elevenLabsVoiceBank: string | null;
   elevenLabsVoiceModel: string | null;
   elevenLabsVoiceCollectionId: string | null;
+  zenPlayerVoiceEnabled?: number;
+  playerAudioVoiceProfile?: string | null;
+  playerNamePronunciation?: string | null;
 }
 
 /** Shape of the next-settings result, with OpenAI key intent captured separately. */
@@ -229,6 +279,11 @@ export interface NextSettings {
   displayName: string;
   theme: Theme;
   graphicsQuality: GraphicsQuality;
+  crtFocus: number;
+  typographyScale: PrismTypographyScale;
+  atmosphereStyle: HubAtmosphereStyle;
+  hubAtmosphereEnabled: number;
+  startupPreference: PrismStartupPreference;
   preferredProvider: Provider;
   ephemeralChatProviderPreferences: EphemeralChatProviderPreferences;
   preferredImageProvider: ImageProviderName;
@@ -238,10 +293,18 @@ export interface NextSettings {
   experimentalDualOllamaEnabled: number;
   experimentalAllModelEffortEnabled: number;
   coffeeExperimentalTableAngleEnabled: number;
+  debateWhodunnitReuseSynthesizedExhibits: number;
+  debateWhodunnitTextVoiceMode: WhodunnitTextVoiceMode;
+  debateWhodunnitSpeechType: WhodunnitSpeechType;
+  debateWhodunnitPerspective: WhodunnitInvestigationPerspective;
   psychicModeEnabled: number;
   autoSwitchModel: number;
   autoFallbackChain: string | null;
+  onlineAutoProviderBias: number;
+  onlineAutoProviderWeights: OnlineAutoProviderWeightsV1;
+  onlineAutoQualityPosture: OnlineAutoQualityPosture;
   hiddenBotModelIds: string[];
+  hiddenGlobalPickerModelIds: string[];
   hiddenComfyUiWorkflowIds: string[];
   preferredLocalModel: string | null;
   preferredOnlineModel: string | null;
@@ -252,6 +315,9 @@ export interface NextSettings {
   preferredOpenAiImageModel: string | null;
   preferredZenWallpaperLocalImageModel: string | null;
   preferredZenWallpaperOpenAiImageModel: string | null;
+  preferredHomeAtmosphereImageModel: string | null;
+  /** `"local"` | `"openai"` when set; null/empty means unset (fall back to account image lane). */
+  preferredHomeAtmosphereImageProvider: string | null;
   zenWallpaperOpacity: number;
   zenWallpaperTextMaskEnabled: boolean;
   zenWallpaperGrayscaleEnabled: boolean;
@@ -271,7 +337,9 @@ export interface NextSettings {
   zenPersonaTransitionChoice: ZenPersonaTransitionChoice;
   comfyUiWorkflows: ComfyUiWorkflowRegistration[];
   prismDefaultLlmModel: string | null;
+  prismCloudLlmModel: string | null;
   prismImageToolLlmModel: string | null;
+  textModelDisplayNames: TextModelDisplayNames;
   voiceMode: VoiceMode;
   voiceEffectsEnabled: boolean;
   voiceVolume: number;
@@ -283,6 +351,9 @@ export interface NextSettings {
   elevenLabsVoiceBank: ElevenLabsVoiceBank;
   elevenLabsVoiceModel: string | null;
   elevenLabsVoiceCollectionId: string | null;
+  zenPlayerVoiceEnabled: boolean;
+  playerAudioVoiceProfile: BotAudioVoiceProfileV1;
+  playerNamePronunciation: string;
   /**
    * Intent for the OpenAI API key:
    *   - "replace": caller sent a non-empty string; encrypt it
@@ -292,6 +363,7 @@ export interface NextSettings {
    */
   openAiKeyIntent: { action: "replace"; plaintext: string } | { action: "clear" } | { action: "keep" };
   anthropicKeyIntent: { action: "replace"; plaintext: string } | { action: "clear" } | { action: "keep" };
+  ollamaCloudKeyIntent: { action: "replace"; plaintext: string } | { action: "clear" } | { action: "keep" };
   elevenLabsKeyIntent: { action: "replace"; plaintext: string } | { action: "clear" } | { action: "keep" };
   braveSearchKeyIntent: { action: "replace"; plaintext: string } | { action: "clear" } | { action: "keep" };
 }
@@ -301,7 +373,12 @@ function isTheme(value: unknown): value is Theme {
 }
 
 function isProvider(value: unknown): value is Provider {
-  return value === "local" || value === "openai" || value === "anthropic";
+  return (
+    value === "local" ||
+    value === "ollama_cloud" ||
+    value === "openai" ||
+    value === "anthropic"
+  );
 }
 
 function isZenPersonaTransitionChoice(
@@ -479,6 +556,26 @@ export function parseHiddenBotModelIds(raw: string | null | undefined): string[]
   }
 }
 
+export function parseHiddenGlobalPickerModelIds(
+  raw: string | null | undefined,
+): string[] {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return Array.from(
+      new Set(
+        parsed
+          .filter((value): value is string => typeof value === "string")
+          .map((value) => value.trim())
+          .filter(Boolean),
+      ),
+    );
+  } catch {
+    return [];
+  }
+}
+
 function sanitizeHiddenComfyUiWorkflowIds(ids: string[]): string[] {
   return sanitizeHiddenModelIds(ids).filter(
     (id) => isComfyUiRemoteWorkflowModelId(id) || isComfyUiWorkflowModelId(id)
@@ -503,7 +600,10 @@ export function parseHiddenComfyUiWorkflowIds(raw: string | null | undefined): s
   }
 }
 
-function readHiddenBotModelIds(value: unknown, fallback: string): string[] {
+function readHiddenBotModelIds(
+  value: unknown,
+  fallback: string | null | undefined,
+): string[] {
   if (!Array.isArray(value)) return parseHiddenBotModelIds(fallback);
   return sanitizeHiddenModelIds(Array.from(
     new Set(
@@ -513,6 +613,21 @@ function readHiddenBotModelIds(value: unknown, fallback: string): string[] {
         .filter(Boolean)
     )
   ));
+}
+
+function readHiddenGlobalPickerModelIds(
+  value: unknown,
+  fallback: string | null | undefined,
+): string[] {
+  if (!Array.isArray(value)) return parseHiddenGlobalPickerModelIds(fallback);
+  return Array.from(
+    new Set(
+      value
+        .filter((item): item is string => typeof item === "string")
+        .map((item) => item.trim())
+        .filter(Boolean),
+    ),
+  );
 }
 
 function readHiddenComfyUiWorkflowIds(value: unknown, fallback: string): string[] {
@@ -532,6 +647,14 @@ function readPreferredModel(value: unknown, fallback: string | null): string | n
   if (typeof value !== "string") return fallback;
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : null;
+}
+
+function readPreferredTextModel(
+  value: unknown,
+  fallback: string | null,
+): string | null {
+  const model = readPreferredModel(value, fallback);
+  return isDisabledModelChoice(model) ? null : model;
 }
 
 export function normalizeZenWallpaperOpacity(
@@ -827,6 +950,10 @@ export function sanitizeAnthropicKeyInput(input: string): string {
   return sanitizeOpenAiKeyInput(input);
 }
 
+export function sanitizeOllamaCloudKeyInput(input: string): string {
+  return sanitizeOpenAiKeyInput(input);
+}
+
 export function sanitizeElevenLabsKeyInput(input: string): string {
   return sanitizeOpenAiKeyInput(input);
 }
@@ -854,12 +981,40 @@ export function resolveNextSettings(
   current: CurrentSettings
 ): NextSettings {
   const displayName = readDisplayName(body.displayName, current.displayName);
+  const playerNamePronunciation = Object.prototype.hasOwnProperty.call(
+    body,
+    "playerNamePronunciation",
+  )
+    ? normalizeBotNamePronunciation(body.playerNamePronunciation)
+    : normalizeBotNamePronunciation(current.playerNamePronunciation);
   const theme: Theme = isTheme(body.theme) ? body.theme : current.theme;
   const graphicsQuality = normalizeGraphicsQuality(
     body.graphicsQuality,
     normalizeGraphicsQuality(current.graphicsQuality),
   );
-  const preferredProvider: Provider = isProvider(body.preferredProvider)
+  const crtFocus = normalizeCrtFocus(
+    body.crtFocus,
+    normalizeCrtFocus(current.crtFocus),
+  );
+  const typographyScale = normalizePrismTypographyScale(
+    body.typographyScale,
+    normalizePrismTypographyScale(current.typographyScale),
+  );
+  const atmosphereStyle = normalizeHubAtmosphereStyle(
+    body.atmosphereStyle,
+    normalizeHubAtmosphereStyle(current.atmosphereStyle),
+  );
+  const hubAtmosphereEnabled =
+    typeof body.hubAtmosphereEnabled === "boolean"
+      ? Number(body.hubAtmosphereEnabled)
+      : current.hubAtmosphereEnabled === 0
+        ? 0
+        : 1;
+  const startupPreference = normalizePrismStartupPreference(
+    body.startupPreference,
+    normalizePrismStartupPreference(current.startupPreference),
+  );
+  const preferredProvider = isProvider(body.preferredProvider)
     ? body.preferredProvider
     : current.preferredProvider;
   const ephemeralChatProviderPreferences =
@@ -899,14 +1054,26 @@ export function resolveNextSettings(
     typeof body.coffeeExperimentalTableAngleEnabled === "boolean"
       ? Number(body.coffeeExperimentalTableAngleEnabled)
       : current.coffeeExperimentalTableAngleEnabled;
+  const debateWhodunnitReuseSynthesizedExhibits =
+    typeof body.debateWhodunnitReuseSynthesizedExhibits === "boolean"
+      ? Number(body.debateWhodunnitReuseSynthesizedExhibits)
+      : current.debateWhodunnitReuseSynthesizedExhibits;
+  const debateWhodunnitTextVoiceMode = normalizeWhodunnitTextVoiceMode(
+    body.debateWhodunnitTextVoiceMode,
+    normalizeWhodunnitTextVoiceMode(current.debateWhodunnitTextVoiceMode),
+  );
+  const debateWhodunnitSpeechType = normalizeWhodunnitSpeechType(
+    body.debateWhodunnitSpeechType,
+    normalizeWhodunnitSpeechType(current.debateWhodunnitSpeechType),
+  );
+  const debateWhodunnitPerspective = normalizeWhodunnitInvestigationPerspective(
+    body.debateWhodunnitPerspective,
+    normalizeWhodunnitInvestigationPerspective(current.debateWhodunnitPerspective),
+  );
   const psychicModeEnabled =
     typeof body.psychicModeEnabled === "boolean"
       ? Number(body.psychicModeEnabled)
       : current.psychicModeEnabled;
-  const requestedAutoSwitchModel =
-    typeof body.autoModeEnabled === "boolean"
-      ? Number(body.autoModeEnabled)
-      : current.autoSwitchModel;
   const currentAutoFallbackChain = parseStoredAutoFallbackChain(
     current.autoFallbackChain
   );
@@ -923,22 +1090,51 @@ export function resolveNextSettings(
       : currentAutoFallbackChain
         ? serializeAutoFallbackChain(currentAutoFallbackChain)
         : null;
-  const autoSwitchModel = autoFallbackChain ? requestedAutoSwitchModel : 0;
+  const onlineAutoProviderBias =
+    body.onlineAutoProviderBias === undefined
+      ? clampOnlineAutoProviderBias(current.onlineAutoProviderBias)
+      : clampOnlineAutoProviderBias(body.onlineAutoProviderBias);
+  const currentProviderWeights =
+    typeof current.onlineAutoProviderWeights === "string"
+      ? (() => {
+          try {
+            return JSON.parse(current.onlineAutoProviderWeights);
+          } catch {
+            return null;
+          }
+        })()
+      : current.onlineAutoProviderWeights;
+  const onlineAutoProviderWeights = normalizeOnlineAutoProviderWeights(
+    body.onlineAutoProviderWeights === undefined
+      ? currentProviderWeights
+      : body.onlineAutoProviderWeights,
+    onlineAutoProviderBias,
+  );
+  const onlineAutoQualityPosture = normalizeOnlineAutoQualityPosture(
+    body.onlineAutoQualityPosture === undefined
+      ? current.onlineAutoQualityPosture
+      : body.onlineAutoQualityPosture,
+  );
+  const autoSwitchModel = current.autoSwitchModel;
   const hiddenBotModelIds = readHiddenBotModelIds(
     body.hiddenBotModelIds,
     current.hiddenBotModelIds
+  );
+  const hiddenGlobalPickerModelIds = readHiddenGlobalPickerModelIds(
+    body.hiddenGlobalPickerModelIds,
+    current.hiddenGlobalPickerModelIds
   );
   const hiddenComfyUiWorkflowIds = readHiddenComfyUiWorkflowIds(
     body.hiddenComfyUiWorkflowIds,
     current.hiddenComfyUiWorkflowIds
   );
-  const preferredLocalModel = readPreferredModel(
+  const preferredLocalModel = readPreferredTextModel(
     body.preferredLocalModel,
     current.preferredLocalModel
   );
-  const preferredOnlineModel = readPreferredModel(
+  const preferredOnlineModel = readPreferredTextModel(
     body.preferredOnlineModel,
-    current.preferredOnlineModel
+    current.preferredOnlineModel,
   );
   const lenientLocalImageFallbackModel = readPreferredModel(
     body.lenientLocalImageFallbackModel,
@@ -973,6 +1169,20 @@ export function resolveNextSettings(
     body.preferredZenWallpaperOpenAiImageModel,
     current.preferredZenWallpaperOpenAiImageModel
   );
+  const preferredHomeAtmosphereImageModel = readPreferredModel(
+    body.preferredHomeAtmosphereImageModel,
+    current.preferredHomeAtmosphereImageModel
+  );
+  const preferredHomeAtmosphereImageProvider =
+    body.preferredHomeAtmosphereImageProvider === undefined
+      ? current.preferredHomeAtmosphereImageProvider
+      : body.preferredHomeAtmosphereImageProvider === null ||
+          body.preferredHomeAtmosphereImageProvider === ""
+        ? null
+        : body.preferredHomeAtmosphereImageProvider === "local" ||
+            body.preferredHomeAtmosphereImageProvider === "openai"
+          ? body.preferredHomeAtmosphereImageProvider
+          : current.preferredHomeAtmosphereImageProvider;
   const currentZenWallpaperOpacity = normalizeZenWallpaperOpacity(
     current.zenWallpaperOpacity
   );
@@ -1153,11 +1363,22 @@ export function resolveNextSettings(
     body.prismDefaultLlmModel,
     current.prismDefaultLlmModel
   );
+  const prismCloudLlmModel = readPreferredModel(
+    body.prismCloudLlmModel,
+    current.prismCloudLlmModel ?? null,
+  );
   const prismImageToolLlmModel = readPreferredModel(
     body.prismImageToolLlmModel,
     current.prismImageToolLlmModel
   );
-  const voiceMode = normalizeVoiceMode(body.voiceMode, normalizeVoiceMode(current.voiceMode));
+  const textModelDisplayNames =
+    body.textModelDisplayNames === undefined
+      ? parseStoredTextModelDisplayNames(current.textModelDisplayNames)
+      : normalizeTextModelDisplayNames(body.textModelDisplayNames);
+  const voiceMode = normalizeSpeechTypeVoiceMode(
+    body.voiceMode,
+    normalizeSpeechTypeVoiceMode(current.voiceMode),
+  );
   const voiceEffectsEnabled = typeof body.voiceEffectsEnabled === "boolean"
     ? body.voiceEffectsEnabled
     : current.voiceEffectsEnabled !== 0;
@@ -1194,6 +1415,15 @@ export function resolveNextSettings(
     body.elevenLabsVoiceCollectionId,
     current.elevenLabsVoiceCollectionId
   );
+  const zenPlayerVoiceEnabled = normalizeBooleanLikeSetting(
+    body.zenPlayerVoiceEnabled,
+    current.zenPlayerVoiceEnabled === 1,
+  );
+  const playerAudioVoiceProfile =
+    body.playerAudioVoiceProfile === undefined
+      ? (parseStoredBotAudioVoiceProfileV1(current.playerAudioVoiceProfile) ??
+        normalizeBotAudioVoiceProfileV1(undefined))
+      : normalizeBotAudioVoiceProfileV1(body.playerAudioVoiceProfile);
   const comfyUiWorkflows =
     body.comfyUiWorkflows === undefined
       ? current.comfyUiWorkflows
@@ -1226,6 +1456,16 @@ export function resolveNextSettings(
     anthropicKeyIntent = { action: "clear" };
   }
 
+  let ollamaCloudKeyIntent: NextSettings["ollamaCloudKeyIntent"] = { action: "keep" };
+  if (typeof body.ollamaCloudApiKey === "string") {
+    const sanitized = sanitizeOllamaCloudKeyInput(body.ollamaCloudApiKey);
+    if (sanitized.length > 0) {
+      ollamaCloudKeyIntent = { action: "replace", plaintext: sanitized };
+    }
+  } else if (body.ollamaCloudApiKey === null) {
+    ollamaCloudKeyIntent = { action: "clear" };
+  }
+
   let elevenLabsKeyIntent: NextSettings["elevenLabsKeyIntent"] = { action: "keep" };
   if (typeof body.elevenLabsApiKey === "string") {
     const sanitized = sanitizeElevenLabsKeyInput(body.elevenLabsApiKey);
@@ -1248,8 +1488,14 @@ export function resolveNextSettings(
 
   return {
     displayName,
+    playerNamePronunciation,
     theme,
     graphicsQuality,
+    crtFocus,
+    typographyScale,
+    atmosphereStyle,
+    hubAtmosphereEnabled,
+    startupPreference,
     preferredProvider,
     ephemeralChatProviderPreferences,
     preferredImageProvider,
@@ -1259,10 +1505,18 @@ export function resolveNextSettings(
     experimentalDualOllamaEnabled,
     experimentalAllModelEffortEnabled,
     coffeeExperimentalTableAngleEnabled,
+    debateWhodunnitReuseSynthesizedExhibits,
+    debateWhodunnitTextVoiceMode,
+    debateWhodunnitSpeechType,
+    debateWhodunnitPerspective,
     psychicModeEnabled,
     autoSwitchModel,
     autoFallbackChain,
+    onlineAutoProviderBias,
+    onlineAutoProviderWeights,
+    onlineAutoQualityPosture,
     hiddenBotModelIds,
+    hiddenGlobalPickerModelIds,
     hiddenComfyUiWorkflowIds,
     preferredLocalModel,
     preferredOnlineModel,
@@ -1273,6 +1527,8 @@ export function resolveNextSettings(
     preferredOpenAiImageModel,
     preferredZenWallpaperLocalImageModel,
     preferredZenWallpaperOpenAiImageModel,
+    preferredHomeAtmosphereImageModel,
+    preferredHomeAtmosphereImageProvider,
     zenWallpaperOpacity,
     zenWallpaperTextMaskEnabled,
     zenWallpaperGrayscaleEnabled,
@@ -1292,7 +1548,9 @@ export function resolveNextSettings(
     zenPersonaTransitionChoice,
     comfyUiWorkflows,
     prismDefaultLlmModel,
+    prismCloudLlmModel,
     prismImageToolLlmModel,
+    textModelDisplayNames,
     voiceMode,
     voiceEffectsEnabled,
     voiceVolume,
@@ -1303,8 +1561,11 @@ export function resolveNextSettings(
     elevenLabsVoiceBank,
     elevenLabsVoiceModel,
     elevenLabsVoiceCollectionId,
+    zenPlayerVoiceEnabled,
+    playerAudioVoiceProfile,
     openAiKeyIntent,
     anthropicKeyIntent,
+    ollamaCloudKeyIntent,
     elevenLabsKeyIntent,
     braveSearchKeyIntent,
   };

@@ -1,0 +1,8472 @@
+"use client";
+
+import { WhodunnitCaseCheckActions, WhodunnitTranscriptCopyButton } from "./WhodunnitCaseCheckActions";
+
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type ReactNode,
+} from "react";
+import { createPortal } from "react-dom";
+import {
+  debateMysteryInterestNodeIdV2,
+  BOT_IDENTITY_PRESENTATION_TRANSITION_MS,
+  DEBATE_MYSTERY_MANSION_EXTERIOR_SUBJECT_ID_V1,
+  DEBATE_SCHEMA_VERSION,
+  MANSION_LAYOUT_V2_COLUMNS,
+  MANSION_LAYOUT_V2_ROWS,
+  botIdentityPresentationTransitionActiveV1,
+  debateMysteryMansionBundleEligibleV2,
+  debateMysteryClientSeatIdV2,
+  debateMysteryCounselSeatsV2,
+  debateMysteryTheoryAccusedSeatIdsV2,
+  debateMysteryTheoryWithAccusedSeatIdsV2,
+  type DebateMysteryVerdictClassificationV2,
+  normalizeAccentForTheme,
+  normalizeBotIdentityColor,
+  normalizeDebateMysteryV2ForgeProgressMessage,
+  mansionLayoutV2DoorPoint,
+  mansionLayoutV2EntityRect,
+  mansionLayoutV2TraversalRoute,
+  splitDebateMysteryStageActionTextV2,
+  type DebateMysteryActionRequestV2,
+  type DebateMysteryCompilationStageV2,
+  type DebateMysteryCompilationStatusV2,
+  type DebateMysteryProductionCategoryV1,
+  type DebateMysteryPublicDialogueEntryV2,
+  type DebateMysteryPublicRecordItemV2,
+  type DebateMysteryPublicTopicV2,
+  type DebateMysteryRecordReferenceV2,
+  type DebateMysteryRoomV2,
+  type DebateMysteryCaseFilePresentationOverridesV1,
+  MANSION_MAP_BOARD_V1,
+  MANSION_OVERHEAD_FRAME_V1,
+  MANSION_OVERHEAD_PLACEMENT_IDENTITY_V1,
+  type MansionOverheadPlacementV1,
+  type MansionRoomEffectV1,
+  type DebateMysterySceneRepairActionV1,
+  type DebateMysterySealedAssetRefV1,
+  type DebateMysteryTheoryV1,
+  type DebateBotSnapshotV1,
+  type DebateSessionV1,
+  type DebateWhodunnitFormatStateV2,
+  type BotAudioVoiceProfileV1,
+  type BotFaceStyle,
+  type MansionLayoutBlockV2,
+  type MansionDynamicLightV2,
+  type MansionLightBlendModeV1,
+  type MansionTraversalRouteV1,
+  type WhodunnitTextVoiceMode,
+  type WhodunnitInvestigationPerspective,
+} from "@localai/shared";
+import { SessionAtmosphereLayer } from "./SessionAtmosphereLayer";
+import {
+  PrismChromeNotice,
+  PrismChromeNoticeViewport,
+} from "./PrismChromeNotice";
+import IdentityPresentationBlackout from "./IdentityPresentationBlackout";
+import SceneMediaVignette from "./SceneMediaVignette";
+import { PrismBlockingLoader } from "./PrismBlockingLoader";
+import { usePrismRefractionRun } from "./usePrismRefractionRun.ts";
+import { registerPrismSoftSynthesisJobs } from "./prismSoftSynthesisUi.ts";
+import { PrismRefractTarget } from "./prismRefract";
+import { debateIdentityAppearanceBotV1 } from "./debateIdentityPresentation";
+import {
+  debateMysteryIdentityMirrorFaceV1,
+  debateMysteryIdentityMirrorPresentationsV1,
+  debateMysteryIdentityMirrorTargetBotSnapshotV1,
+  debateMysteryPublicIdentityNameV1,
+} from "./debateMysteryIdentityMirror";
+import {
+  WHODUNNIT_INVESTIGATION_MUSIC_FADE_MS,
+  WHODUNNIT_INVESTIGATION_MUSIC_TRANSITION_MS,
+  WHODUNNIT_INVESTIGATION_MUSIC_URL,
+  mysteryInvestigationMusicMix,
+} from "./debateMysteryMusic";
+import {
+  WHODUNNIT_MANSION_AMBIENCE_FADE_MS,
+  WHODUNNIT_MANSION_AMBIENCE_TRANSITION_MS,
+  mysteryMansionAmbienceAssetV1,
+  mysteryMansionAmbienceMixV1,
+} from "./debateMysteryMansionAmbience";
+import {
+  debateMysteryCaptionFallbackShouldStart,
+  debateMysteryDialoguePresentationDismissed,
+  debateMysteryPreparedAudioShouldStart,
+  debateMysteryRoomCompletionCueShouldStart,
+  debateMysteryTextVoiceModeForPresentation,
+  DEBATE_MYSTERY_VOCAL_LEAD_IN_MAX_WAIT_MS,
+  DEBATE_MYSTERY_VOCAL_LEAD_IN_VOLUME_RATIO,
+  DEBATE_MYSTERY_VOCAL_LISTENING_VOLUME_RATIO,
+  mysteryListeningReactionDelayMsV2,
+  pickMysteryVocalCueV2,
+  playDebateMysteryVocalCueV2,
+  type DebateMysteryVocalCueEntryV2,
+  debateMysteryTextVoiceShouldStart,
+  debateMysteryTextVoiceShouldStop,
+  playDebateMysterySfx,
+  playDebateMysteryTextVoice,
+  setDebateMysteryVenueSfxV1,
+  type DebateMysterySfxCue,
+} from "./debateMysterySfx";
+import { mysteryVenueSfxUrlsV1 } from "./debateMysteryVenueSfx";
+import { mysteryCourtPresentedRecordKeysV1, mysteryPresentedRecordKeysV1 } from "./debateMysteryPresented";
+import { teardownBottishVoiceImmediately } from "./bottishVoice";
+import { cancelWhodunnitDialogueAudioImmediately } from "./debateMysteryDialogueAudio";
+import { mysteryMapOccupantPosition } from "./debateMysteryRoomWalk";
+import { mysteryAmbientRooms } from "./debateMysteryAmbientRooms";
+import {
+  DEBATE_MYSTERY_V2_EXAMINE_GRID_COLUMNS,
+  DEBATE_MYSTERY_V2_EXAMINE_GRID_ROWS,
+  debateMysteryV2ExamineGridCellIndexes,
+  debateMysteryV2HotspotAccessiblePoint,
+  debateMysteryV2ImagePointFromClientPoint,
+  debateMysteryV2LensClickTarget,
+  debateMysteryV2RoomComplete,
+  resolveDebateMysteryV2Lens,
+  type MysteryLensState,
+} from "./debateMysteryV2Lens";
+import {
+  debateMysteryCaseFileObservationsV2,
+  debateMysteryNewCaseFileUpdateV2,
+  type DebateMysteryCaseFileUpdateV2,
+} from "./debateMysteryCaseFile";
+import {
+  routeAudioElementToPrismOutput,
+  type PrismAudioElementRouteCleanup,
+} from "./replayAudioMasterCapture";
+import { releaseAudibleAudioElement } from "./audibleAudioRelease";
+import {
+  nextWhodunnitInterrogationPhase,
+  startWhodunnitInterrogation,
+  whodunnitInterrogationEntrancePhaseForEntry,
+  whodunnitInterrogationFirstEntryState,
+  whodunnitActorDriftTiming,
+  whodunnitCaptionRevealIsPending,
+  whodunnitCaptionSpeechText,
+  whodunnitCourtCalloutPresentationVisible,
+  whodunnitCourtDialogueGestureCrossedPresentation,
+  whodunnitCourtDialogueFinishDecision,
+  whodunnitCourtPresentationVisible,
+  whodunnitCourtPresentedWitnessSeatId,
+  whodunnitDialogueGestureControlIsInteractive,
+  whodunnitDialogueGestureDecision,
+  whodunnitDialogueTypewriterDurationMs,
+  whodunnitInvestigationDialogueGraceMs,
+  whodunnitInvestigationDialogueShouldAutoAdvance,
+  whodunnitInterrogationAudioOwnsMouth,
+  whodunnitInterrogationBeatMs,
+  whodunnitInterrogationCompletionIsCurrent,
+  whodunnitInterrogationFinishDecision,
+  whodunnitInterrogationMayStartAudio,
+  whodunnitInterrogationTerminalWitnessShouldHold,
+  whodunnitPlayerCharacterStagingActive,
+  whodunnitStageWitnessExchange,
+  whodunnitPreparedVoicePending,
+  WHODUNNIT_PREPARED_VOICE_WAIT_MS,
+  type WhodunnitInterrogationPhase,
+} from "./debateMysteryInterrogation";
+import { SignalVoiceActionText } from "./SignalVoiceActionText";
+import { signalVoicePerformanceActionPresentationAtProgress } from "./signalVoicePerformance";
+import { debateVoiceCompletionFallbackDurationMs } from "./signalLiveCaptions";
+import { createWhodunnitSpeechTimingLoop } from "./debateMysterySpeechTimingLoop";
+import {
+  resolveWhodunnitCourtCamera,
+  whodunnitCourtCameraLabel,
+  whodunnitCourtArrivalProgress,
+  whodunnitCourtGallerySeats,
+} from "./debateMysteryCourtStage";
+import {
+  debateMysteryRoomCasekeeperNarrationTextV2,
+  debateMysteryRoomIntroductionGestureV2,
+  debateMysteryRoomIntroductionShouldAutoCompleteV2,
+} from "./debateMysteryRoomIntroduction";
+import type { VoicePlaybackCharacterAlignment } from "./voiceEffects";
+import type { RoomAcousticsSend } from "./roomAcoustics";
+import type { WhodunnitPremiumVoiceRequest } from "./debateMysteryPremiumVoice";
+import {
+  mysteryMansionCorridorAcousticsV1,
+  mysteryMansionRoomAcousticsV1,
+  type MysteryMansionRoomAcousticsV1,
+} from "./debateMysteryRoomAcoustics";
+import {
+  mysteryMansionTravelDurationMs,
+  mysteryMansionTravelPointAtProgress,
+  playMysteryMansionTravelFoleyV1,
+  type MysteryMansionTravelFoleyHandleV1,
+} from "./debateMysteryMansionTravel";
+import type { MysteryBotSummary } from "./DebateMysteryExperience";
+import { BotPickerTile, type BotPickerGlyphRenderer } from "./BotPicker";
+import { normalizeDebateEvidenceEmojiChoice, searchDebateEvidenceEmojis } from "./debateEvidenceExhibits";
+import { formatDebateMysteryV2ForgeErrorDetails } from "./debateMysteryV2ForgeFailureDetails";
+import {
+  debateMysteryForgeAuthoritativePercent,
+  debateMysteryForgeStageIsActive,
+  formatDebateMysteryForgeElapsed,
+  formatDebateMysteryForgeEta,
+} from "./debateMysteryV2ForgeProgress";
+import { debateMysteryForgeVisualState } from "./debateMysteryV2ForgeVisuals";
+import {
+  readEncryptedWhodunnitSceneRepairDismissal,
+  readEncryptedWhodunnitRoomUpgradeEnabled,
+  whodunnitSceneRepairUndoIsDismissed,
+  whodunnitBundledRoomArtPathForRoom,
+  whodunnitDiscoveredMansionRoomArtV1,
+  whodunnitIllustratedRoomSubjectId,
+  whodunnitInvestigationAvatarPresentation,
+  whodunnitMansionRoomArtUrl,
+  whodunnitRoomArtStyleForUpgrade,
+  whodunnitSealedRoomArtUrl,
+  whodunnitSavedRoomArtUrl,
+  writeEncryptedWhodunnitSceneRepairDismissal,
+  writeEncryptedWhodunnitRoomUpgradeEnabled,
+  type WhodunnitInvestigationArtStyle,
+} from "./debateMysteryInvestigationArt";
+import { DebateMysteryRoomCinematographyLayer } from "./debateMysteryRoomCinematographyLayer";
+import MapOverheadEditorDialog from "./MapOverheadEditorDialog";
+import RoomLightEditorDialog from "./RoomLightEditorDialog";
+import { mysteryRoomUsesTemplateLightGeometryV1 } from "./debateMysteryRoomCinematography";
+import {
+  debateMysteryExteriorEntryTargetFromClientPointV1,
+  debateMysteryMansionDoorTargetV1,
+  debateMysteryMansionExteriorFallbackV1,
+} from "./debateMysteryMansionExterior";
+import styles from "./debateMysteryV2.module.css";
+import { holdWhodunnitDialogueModal } from "./whodunnitDialogueModal";
+
+type WhodunnitPresentDragState = { active: boolean; overSuspect: boolean };
+
+/** How long the "..." entry beat lingers before the Casekeeper tableau reveals itself. */
+const WHODUNNIT_ROOM_ENTRY_BEAT_MS = 900;
+const WHODUNNIT_ROOM_ART_DEFAULT_ASPECT = 16 / 9;
+
+/** Present as a drawer of physical items: click one to read its blurb, or pick
+ * it up and drop it on the suspect to ask about it. A drop resolves to the
+ * same frozen present-to-suspect action as the button, so nothing new enters
+ * play; the drag is only how the player hands the item over. */
+function WhodunnitPresentDrawer(props: {
+  suspectName: string;
+  items: readonly DebateMysteryPublicRecordItemV2[];
+  /** Items this suspect has already been shown, as kind:id keys. */
+  presentedKeys: ReadonlySet<string>;
+  assetUrlFor: (item: DebateMysteryPublicRecordItemV2) => string | null;
+  disabled: boolean;
+  suspectTarget: React.RefObject<HTMLDivElement | null>;
+  onPresent: (reference: DebateMysteryRecordReferenceV2) => void;
+  onClose: () => void;
+  onDragStateChange: (state: WhodunnitPresentDragState) => void;
+  playSfx: (cue: "clip" | "paper" | "navigate") => void;
+  /** Court reuses the drawer to object; its verbs differ from the room's. */
+  copy?: { eyebrow: string; title: string; help: string; action: string; again: string; seen: string; drag: string };
+}): React.JSX.Element {
+  const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  const copy = props.copy ?? {
+    eyebrow: "Present",
+    title: `Show ${props.suspectName}`,
+    help: `Click an item to read it. Drag it onto ${props.suspectName} to ask about it.`,
+    action: `Ask ${props.suspectName} about this`,
+    again: `Ask ${props.suspectName} again`,
+    seen: `${props.suspectName} has already seen this. Drag it onto them again, or`,
+    drag: `Drag it onto ${props.suspectName}, or`,
+  };
+  const [drag, setDrag] = useState<{ key: string; x: number; y: number } | null>(null);
+  const pointerRef = useRef<{
+    key: string;
+    pointerId: number;
+    startX: number;
+    startY: number;
+    moved: boolean;
+  } | null>(null);
+  const itemKey = (item: DebateMysteryPublicRecordItemV2): string => `${item.reference.kind}:${item.reference.id}`;
+  const selected = props.items.find((item) => itemKey(item) === selectedKey) ?? null;
+  const dragged = drag ? props.items.find((item) => itemKey(item) === drag.key) ?? null : null;
+  const overSuspect = (x: number, y: number): boolean => {
+    const rect = props.suspectTarget.current?.getBoundingClientRect();
+    return Boolean(rect && x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom);
+  };
+  const endDrag = (): void => {
+    pointerRef.current = null;
+    setDrag(null);
+    props.onDragStateChange({ active: false, overSuspect: false });
+  };
+  return (
+    <div className={`${styles.choiceTray} ${styles.itemDrawer}`} data-dragging={drag ? "true" : undefined}>
+      <header><div><p className={styles.eyebrow}>{copy.eyebrow}</p><h2>{copy.title}</h2></div><button type="button" onClick={props.onClose}>Close</button></header>
+      <p className={styles.itemDrawerHelp}>{copy.help}</p>
+      <div className={styles.itemShelf}>
+        {props.items.map((item) => {
+          const key = itemKey(item);
+          const assetUrl = props.assetUrlFor(item);
+          const presented = props.presentedKeys.has(key);
+          return (
+            <button
+              key={key}
+              type="button"
+              className={styles.itemTile}
+              disabled={props.disabled}
+              data-selected={selectedKey === key ? "true" : undefined}
+              data-dragging={drag?.key === key ? "true" : undefined}
+              data-presented={presented ? "true" : undefined}
+              title={presented ? `Already shown to ${props.suspectName}` : undefined}
+              aria-pressed={selectedKey === key}
+              onPointerDown={(event) => {
+                if (props.disabled || event.button !== 0) return;
+                event.currentTarget.setPointerCapture(event.pointerId);
+                pointerRef.current = { key, pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, moved: false };
+              }}
+              onPointerMove={(event) => {
+                const pointer = pointerRef.current;
+                if (!pointer || pointer.pointerId !== event.pointerId) return;
+                if (!pointer.moved) {
+                  if (Math.hypot(event.clientX - pointer.startX, event.clientY - pointer.startY) < 6) return;
+                  pointer.moved = true;
+                  props.playSfx("clip");
+                }
+                setDrag({ key, x: event.clientX, y: event.clientY });
+                props.onDragStateChange({ active: true, overSuspect: overSuspect(event.clientX, event.clientY) });
+              }}
+              onPointerUp={(event) => {
+                const pointer = pointerRef.current;
+                if (!pointer || pointer.pointerId !== event.pointerId) return;
+                if (!pointer.moved) {
+                  pointerRef.current = null;
+                  setSelectedKey((current) => (current === key ? null : key));
+                  return;
+                }
+                const dropped = overSuspect(event.clientX, event.clientY);
+                endDrag();
+                if (dropped) {
+                  props.playSfx("paper");
+                  props.onPresent(item.reference);
+                }
+              }}
+              onPointerCancel={endDrag}
+              onClick={(event) => {
+                // Keyboard activation only; pointer gestures are resolved above.
+                if (event.detail === 0) setSelectedKey((current) => (current === key ? null : key));
+              }}
+            >
+              {assetUrl
+                ? <>
+                    {/* Direct delivery preserves the sealed route's no-store boundary. */}
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img className={styles.recordAssetImage} src={assetUrl} alt="" draggable={false} />
+                  </>
+                : <span aria-hidden="true">{item.emoji}</span>}
+              <strong>{item.title}</strong>
+              <small>{presented ? "Shown · " : ""}{item.reference.kind === "testimony" ? "Testimony" : "Evidence"}</small>
+              {presented ? <i className={styles.itemTileShown} aria-hidden="true">✓</i> : null}
+            </button>
+          );
+        })}
+        {props.items.length === 0 ? <p>No admitted record items yet.</p> : null}
+      </div>
+      {selected ? (
+        <div className={styles.itemBlurb} role="region" aria-live="polite">
+          <h3>{selected.title}</h3>
+          <p>{selected.description}</p>
+          <small>{props.presentedKeys.has(itemKey(selected)) ? copy.seen : copy.drag}</small>
+          <button type="button" disabled={props.disabled} onClick={() => props.onPresent(selected.reference)}>{props.presentedKeys.has(itemKey(selected)) ? copy.again : copy.action}</button>
+        </div>
+      ) : null}
+      {drag && dragged && typeof document !== "undefined"
+        ? createPortal(
+            <div className={styles.itemDragGhost} style={{ left: drag.x, top: drag.y }} aria-hidden="true">
+              {props.assetUrlFor(dragged)
+                ? <>
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={props.assetUrlFor(dragged) ?? undefined} alt="" draggable={false} />
+                  </>
+                : <span aria-hidden="true">{dragged.emoji}</span>}
+              <strong>{dragged.title}</strong>
+            </div>,
+            document.body,
+          )
+        : null}
+    </div>
+  );
+}
+
+function WhodunnitInvestigationDialogue(props: {
+  children: React.ReactNode;
+  onGesture: (clickCount: number) => void;
+}): React.JSX.Element {
+  const dialogRef = useRef<HTMLDialogElement | null>(null);
+  const gestureRef = useRef(props.onGesture);
+  useLayoutEffect(() => { gestureRef.current = props.onGesture; }, [props.onGesture]);
+  useLayoutEffect(() => {
+    const dialog = dialogRef.current;
+    if (!dialog) return;
+    return holdWhodunnitDialogueModal(dialog, (count) => gestureRef.current(count));
+  }, []);
+  return (
+    <dialog
+      ref={dialogRef}
+      className={styles.investigationDialogueModal}
+      aria-label="Investigation dialogue"
+      aria-modal="true"
+      tabIndex={-1}
+      onCancel={(event) => event.preventDefault()}
+      onPointerDown={(event) => event.stopPropagation()}
+      onPointerUp={(event) => event.stopPropagation()}
+      onTouchStart={(event) => event.stopPropagation()}
+      onTouchEnd={(event) => event.stopPropagation()}
+      onWheel={(event) => event.stopPropagation()}
+      onClick={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        props.onGesture(event.detail);
+      }}
+      onKeyDownCapture={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        if (!event.repeat && (event.key === "Enter" || event.key === " " || event.key === "Escape")) props.onGesture(1);
+      }}
+      onKeyUpCapture={(event) => { event.preventDefault(); event.stopPropagation(); }}
+    >{props.children}</dialog>
+  );
+}
+
+function WhodunnitRoomLoadingOverlay(props: {
+  theme: "light" | "dark";
+}): React.JSX.Element {
+  const dialogRef = useRef<HTMLDialogElement | null>(null);
+  useLayoutEffect(() => {
+    const dialog = dialogRef.current;
+    if (!dialog) return;
+    // The browser's top layer covers portalled navigation and the companion too.
+    dialog.showModal();
+    return () => dialog.close();
+  }, []);
+  return (
+    <dialog
+      ref={dialogRef}
+      className={styles.roomLoadingOverlay}
+      data-theme={props.theme}
+      aria-label="Loading room"
+      aria-busy="true"
+      onCancel={(event) => event.preventDefault()}
+    >
+      <span className={styles.roomLoadingSpinner} aria-hidden="true" />
+    </dialog>
+  );
+}
+
+/** The case's cover shown while a resumed scene loads underneath. It replaces the
+ * bare spinner: the player reads the case, and Start crossfades the cover away
+ * through the theme's own color into the room or map they left. */
+function WhodunnitArrivalCard(props: {
+  theme: "light" | "dark";
+  coverUrl: string;
+  title: string;
+  fictionLabel: string;
+  chargeTitle: string | null;
+  description: string;
+  resumeLabel: string;
+  witnessCount: number;
+  ready: boolean;
+  leaving: boolean;
+  onStart: () => void;
+}): React.JSX.Element {
+  const dialogRef = useRef<HTMLDialogElement | null>(null);
+  const startRef = useRef<HTMLButtonElement | null>(null);
+  useLayoutEffect(() => {
+    const dialog = dialogRef.current;
+    if (!dialog) return;
+    // Top layer, like the room loading overlay: it must cover portalled navigation too.
+    dialog.showModal();
+    return () => dialog.close();
+  }, []);
+  useEffect(() => {
+    if (props.ready && !props.leaving) startRef.current?.focus();
+  }, [props.ready, props.leaving]);
+  return (
+    <dialog
+      ref={dialogRef}
+      className={styles.arrivalCard}
+      data-theme={props.theme}
+      data-leaving={props.leaving ? "true" : undefined}
+      aria-labelledby="whodunnit-arrival-title"
+      aria-busy={!props.ready}
+      onCancel={(event) => event.preventDefault()}
+      style={{ "--mansion-exterior-image": `url("${props.coverUrl}")` } as CSSProperties}
+    >
+      <span className={styles.titleCoverMedia} aria-hidden="true" />
+      <div className={styles.arrivalCardContent}>
+        <div className={styles.titlePrism} aria-hidden="true">◇</div>
+        <p className={styles.eyebrow}>PRISM presents</p>
+        <h1 id="whodunnit-arrival-title">{props.title}</h1>
+        <p className={styles.arrivalCardDescription}>{props.description}</p>
+        <div className={styles.titleMetadata}>
+          {props.chargeTitle ? <span>{props.chargeTitle}</span> : null}
+          <span>{props.witnessCount} witnesses</span>
+          <span>{props.fictionLabel}</span>
+        </div>
+        <p className={styles.arrivalCardResume}>{props.resumeLabel}</p>
+        <button
+          ref={startRef}
+          type="button"
+          className={styles.primaryAction}
+          disabled={!props.ready || props.leaving}
+          onClick={props.onStart}
+        >{props.ready ? "Start" : "Preparing the scene…"}</button>
+      </div>
+    </dialog>
+  );
+}
+
+function WhodunnitChromeErrorNotice(props: {
+  message: string;
+  onDismiss: () => void;
+}): React.JSX.Element {
+  return (
+    <PrismChromeNoticeViewport ariaLabel="Whodunnit notifications">
+      <PrismChromeNotice
+        label="Whodunnit"
+        message={props.message}
+        tone="error"
+        title={props.message}
+        onDismiss={props.onDismiss}
+        dismissLabel="Dismiss Whodunnit error"
+      />
+    </PrismChromeNoticeViewport>
+  );
+}
+
+interface V2SharedProps {
+  /** Current routing applies to subsequent requests, never the sealed Forge. */
+  responseMode?: "local" | "online" | "auto";
+  preferredProvider?: "local" | "ollama_cloud" | "openai" | "anthropic";
+  modelOverride?: { provider: "local" | "ollama_cloud" | "openai" | "anthropic"; model: string } | null;
+  reasoningEffort?: import("@localai/shared").ProviderReasoningEffort;
+  turbo?: boolean;
+  ownerId: string;
+  bots: MysteryBotSummary[];
+  playerName: string;
+  playerColor?: string | null;
+  playerGlyph?: string | null;
+  theme: "light" | "dark";
+  audioEnabled: boolean;
+  audioVolume: number;
+  /** Dev-only fixture seam: called only after the room-complete ident starts. */
+  onRoomCompleteCueStarted?: () => void;
+  /** Durable performance already heard before this Archive return. */
+  restoredAudioPerformanceKey?: string | null;
+  /** Exterior-only mansion cover used by the library, package, and title card. */
+  mansionExteriorUrl?: string | null;
+  whodunnitTextVoiceMode?: WhodunnitTextVoiceMode;
+  /** Prism's default voice: the player's audible stand-in when the chosen
+   * investigator carries no voice of its own. */
+  playerVoiceProfile?: BotAudioVoiceProfileV1 | null;
+  /** First person (default) keeps the investigator off stage while
+   * investigating; embodied stages them beside each witness. */
+  investigationPerspective?: WhodunnitInvestigationPerspective;
+  playMysteryTextVoice?: (args: {
+    instant?: boolean;
+    mode: Exclude<WhodunnitTextVoiceMode, "off">;
+    voiceProfile: BotAudioVoiceProfileV1 | null;
+    seed: string;
+    signal?: AbortSignal;
+    text: string;
+    volume: number;
+    roomAcoustics?: RoomAcousticsSend;
+  }) => Promise<boolean>;
+  request: <T>(path: string, options?: RequestInit) => Promise<T>;
+  renderBotGlyph: BotPickerGlyphRenderer;
+  stageAlignmentStyle?: CSSProperties;
+  renderMysteryBotAvatar: (
+    bot: MysteryBotSummary,
+    presentation: "full" | "mini",
+    performance?: {
+      demeanor: "suspect" | "partner";
+      talking?: boolean;
+      thinking?: boolean;
+      speechTiming?: V2SpeechTiming | null;
+      blinkEnabled?: boolean;
+      facing?: "left" | "right";
+      speechInkVisible?: boolean;
+    },
+  ) => ReactNode;
+}
+
+interface V2SpeechTiming {
+  text: string;
+  elapsedMs: number;
+  durationMs: number;
+  alignment: VoicePlaybackCharacterAlignment | null;
+  /** This becomes true only from the local audio element's play event. */
+  audible: boolean;
+}
+
+interface DebateMysteryRoomArtUpgradeStatusV1 {
+  version: 1;
+  status: "unavailable" | "ready" | "available" | "preparing" | "failed";
+  requiresUpgradeRoomIds: string[];
+  readyRoomIds: string[];
+  failedRoomIds: string[];
+  canUpgrade: boolean;
+  reason: string | null;
+}
+
+interface MysteryDialogueSfxPresentation {
+  audible: boolean;
+  delivery: NonNullable<DebateMysteryPublicDialogueEntryV2["delivery"]>;
+  fullText: string;
+  key: string;
+  speakerBotId: string | null;
+  speakerKind: DebateMysteryPublicDialogueEntryV2["speakerKind"];
+  speakerSeatId: string | null;
+  streaming: boolean;
+  visibleText: string;
+}
+
+type MysteryActionDialogue = Pick<
+  DebateMysteryPublicDialogueEntryV2,
+  "visibleText" | "stageActionText"
+>;
+
+const MYSTERY_TALK_CATEGORY_ORDER = ["person", "motive", "alibi", "room", "general"] as const;
+
+const WHODUNNIT_COURT_ATMOSPHERE_MIX = {
+  background: 0.14,
+  grain: 0,
+  foley: 0,
+} as const;
+
+const MYSTERY_TALK_CATEGORY_LABELS: Record<
+  DebateMysteryPublicTopicV2["subject"]["category"],
+  string
+> = {
+  person: "People",
+  motive: "Motives",
+  alibi: "Alibis",
+  room: "Rooms",
+  general: "General",
+};
+
+export function debateMysteryTalkTopicDisplayLabelV2(
+  topic: DebateMysteryPublicTopicV2,
+  rooms: readonly Pick<DebateMysteryRoomV2, "id" | "name">[],
+): string {
+  const subject = topic.subject;
+  if (subject.category !== "room") return topic.label;
+  const roomName = rooms.find((room) => room.id === subject.roomId)?.name;
+  if (!roomName || topic.label.toLocaleLowerCase().includes(roomName.toLocaleLowerCase())) {
+    return topic.label;
+  }
+  return `${roomName} · ${topic.label}`;
+}
+
+export function groupDebateMysteryTalkTopicsV2(
+  topics: readonly DebateMysteryPublicTopicV2[],
+): Array<{
+  category: DebateMysteryPublicTopicV2["subject"]["category"];
+  label: string;
+  topics: DebateMysteryPublicTopicV2[];
+}> {
+  return MYSTERY_TALK_CATEGORY_ORDER.flatMap((category) => {
+    const categoryTopics = topics.filter((topic) => topic.subject.category === category);
+    return categoryTopics.length > 0
+      ? [{ category, label: MYSTERY_TALK_CATEGORY_LABELS[category], topics: categoryTopics }]
+      : [];
+  });
+}
+
+function mysterySignalActionPresentation(
+  dialogue: MysteryActionDialogue | null,
+  speakerName: string | null,
+  speechTiming: V2SpeechTiming | null,
+) {
+  if (!dialogue || !speechTiming) return null;
+  const delivery = splitDebateMysteryStageActionTextV2(dialogue.visibleText, speakerName);
+  const stageActionText = dialogue.stageActionText ?? delivery.stageActionText;
+  if (!stageActionText) return null;
+  return signalVoicePerformanceActionPresentationAtProgress({
+    content: delivery.spokenText,
+    stageActionText,
+    voicePerformanceText: null,
+  }, speechTiming.elapsedMs / Math.max(1, speechTiming.durationMs));
+}
+
+function mysteryRoomActorDriftStyle(seed: string): CSSProperties {
+  const timing = whodunnitActorDriftTiming(seed);
+  return {
+    "--room-actor-drift-duration": `${timing.durationMs}ms`,
+    "--room-actor-drift-delay": `${timing.delayMs}ms`,
+  } as CSSProperties;
+}
+
+interface V2ExperienceProps extends V2SharedProps {
+  session: DebateSessionV1;
+  onSessionChange: (session: DebateSessionV1) => void;
+  onExit: () => void;
+}
+
+type V2ReviewCopyState = "idle" | "copying" | "copied" | "failed";
+
+type V2ForgeErrorCopyState = "idle" | "copying" | "copied" | "failed";
+
+interface V2PlayProps extends V2ExperienceProps {
+  playMysteryPremiumVoice?: (args: WhodunnitPremiumVoiceRequest) => Promise<boolean>;
+  exteriorIntroStarted: boolean;
+  transcriptCopyState: V2ReviewCopyState;
+  reviewCopyState: V2ReviewCopyState;
+  onExteriorIntroStart: () => void;
+  onCopyVerboseTranscript: () => Promise<void>;
+  onCopyAllReviewData: () => Promise<void>;
+  onSaveMansion: () => Promise<void>;
+  onExportCase: () => Promise<void>;
+}
+
+type V2ClientAction<T = DebateMysteryActionRequestV2> = T extends unknown
+  ? Omit<T, "version" | "expectedRevision" | "idempotencyKey">
+  : never;
+
+interface DeferredMysteryActionResultV1 {
+  action: V2ClientAction;
+  session: DebateSessionV1;
+  previousDialogueCount: number;
+}
+
+interface MysteryMansionTravelPresentationV1 {
+  deferred: DeferredMysteryActionResultV1;
+  route: MansionTraversalRouteV1;
+  fromRoom: DebateMysteryRoomV2;
+  toRoom: DebateMysteryRoomV2;
+  durationMs: number;
+  startedAtMs: number;
+  returningFromExterior?: boolean;
+  openingArrival?: boolean;
+}
+
+const MYSTERY_MANSION_OUTSIDE_SELECTION_ID = "mansion:outside";
+
+const FORGE_STAGES: Array<{
+  id: DebateMysteryCompilationStageV2 | "begin_case";
+  label: string;
+}> = [
+  { id: "writing_case", label: "Writing the Case" },
+  { id: "testing_contradictions", label: "Testing Contradictions" },
+  { id: "directing_performances", label: "Directing Performances" },
+  { id: "preparing_local_voices", label: "Preparing Local Voices" },
+  { id: "verifying_case_audio", label: "Verifying Case Audio" },
+  { id: "begin_case", label: "Begin Case" },
+];
+
+const SPECTATOR_FORGE_STAGES = [
+  { id: "writing_trial", label: "Writing the trial" },
+  { id: "checking_case", label: "Checking the case" },
+  { id: "recording_cast", label: "Recording the cast" },
+] as const;
+
+const FORGE_TIPS = [
+  "Every checkpoint saves safely, so you can return to Archive whenever you need to.",
+  "The Forge is preparing a finite case pack; nothing during play will call a model.",
+  "Case Forge prepares local recordings only. Premium is available during play.",
+  "A good case is fair before it is surprising: the Forge checks every proof route before opening court.",
+  "Pressing a statement is free. Listen for the detail the witness is trying hardest to avoid.",
+  "Present evidence against the exact statement it contradicts—not merely the witness who said it.",
+  "Testimony revisions stay in the Case File, so an earlier sworn account can become evidence later.",
+  "Every suspect takes the stand. A minor witness now may become the key contradiction later.",
+] as const;
+
+/** Upper bound on the arrival-line loader before the door opens without a line. */
+const WHODUNNIT_ARRIVAL_LINE_WAIT_MS = 45_000;
+
+/** Defense stance adds the one tip that changes what the player is looking for. */
+const WHODUNNIT_DEFENSE_FORGE_TIPS = [
+  ...FORGE_TIPS,
+  "Your client is innocent. The case against them is the frame you must break.",
+] as const;
+
+const CALLOUT_COPY = {
+  hold_it: "HOLD IT!",
+  objection: "OBJECTION!",
+  order: "ORDER!",
+  sustained: "SUSTAINED!",
+  overruled: "OVERRULED!",
+  testimony_revised: "TESTIMONY REVISED",
+  guilty: "GUILTY",
+  not_guilty: "NOT GUILTY",
+} as const;
+
+function mutationBody(value: Record<string, unknown>): RequestInit {
+  return {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(value),
+  };
+}
+
+function usePrefersReducedMotion(): boolean {
+  const [reducedMotion, setReducedMotion] = useState(false);
+  useEffect(() => {
+    const media = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const update = (): void => setReducedMotion(media.matches);
+    update();
+    media.addEventListener("change", update);
+    return () => media.removeEventListener("change", update);
+  }, []);
+  return reducedMotion;
+}
+
+interface LiveSessionHeaderPortalTargets {
+  title: HTMLElement;
+  actions: HTMLElement;
+}
+
+function useLiveSessionHeaderPortalTargets(): LiveSessionHeaderPortalTargets | null {
+  const [targets, setTargets] = useState<LiveSessionHeaderPortalTargets | null>(null);
+  useEffect(() => {
+    let observer: MutationObserver | null = null;
+    const resolveTargets = (): boolean => {
+      const title = document.querySelector<HTMLElement>(
+        '[data-live-session-context-title-slot="true"]',
+      );
+      const actions = document.querySelector<HTMLElement>(
+        '[data-live-session-context-actions-slot="true"]',
+      );
+      if (!title || !actions) return false;
+      setTargets({ title, actions });
+      observer?.disconnect();
+      return true;
+    };
+    if (!resolveTargets()) {
+      observer = new MutationObserver(() => resolveTargets());
+      observer.observe(document.body, { childList: true, subtree: true });
+    }
+    return () => observer?.disconnect();
+  }, []);
+  return targets;
+}
+
+async function writeForgeErrorDetailsClipboard(text: string): Promise<void> {
+  if (!navigator.clipboard?.writeText) throw new Error("Clipboard access is unavailable.");
+  await navigator.clipboard.writeText(text);
+}
+
+function botForSeat(
+  props: Pick<V2SharedProps, "bots">,
+  state: DebateWhodunnitFormatStateV2,
+  seatId: string | null | undefined,
+): MysteryBotSummary | null {
+  const suspect = state.suspects.find((entry) => entry.seatId === seatId);
+  return props.bots.find((entry) => entry.id === suspect?.botId) ?? null;
+}
+
+function botForDialogue(
+  props: Pick<V2SharedProps, "bots">,
+  state: DebateWhodunnitFormatStateV2,
+  entry: DebateMysteryPublicDialogueEntryV2 | null | undefined,
+): MysteryBotSummary | null {
+  if (entry?.speakerBotId) {
+    const exact = props.bots.find((bot) => bot.id === entry.speakerBotId);
+    if (exact) return exact;
+  }
+  return botForSeat(props, state, entry?.speakerSeatId);
+}
+
+function mysteryBotSnapshot(bot: MysteryBotSummary): DebateBotSnapshotV1 {
+  return {
+    version: DEBATE_SCHEMA_VERSION,
+    id: bot.id,
+    name: bot.name,
+    systemPrompt: bot.systemPrompt ?? `You are ${bot.name}.`,
+    role: "advocate",
+    sideId: null,
+    color: bot.color,
+    glyph: bot.glyph,
+    avatarDetails: bot.avatarDetails ?? null,
+    voiceProfile: bot.voiceProfile ?? null,
+    replayVisualSnapshot: bot.replayVisualSnapshot ?? null,
+    powers: bot.powers ?? [],
+    provider: "local",
+    model: "frozen-whodunnit",
+    revision: "frozen-whodunnit",
+  };
+}
+
+function mysteryIdentityMirrorAppearance(
+  holder: MysteryBotSummary | null,
+  target: DebateBotSnapshotV1 | null,
+  copiedName: string,
+  faceStyleOverride: BotFaceStyle | null,
+): MysteryBotSummary | null {
+  if (!holder || !target) return holder;
+  const appearance = debateIdentityAppearanceBotV1({
+    holder: mysteryBotSnapshot(holder),
+    target,
+    effect: "identity_mirror",
+  });
+  return {
+    ...holder,
+    name: debateMysteryPublicIdentityNameV1(copiedName),
+    glyph: appearance.glyph,
+    avatarDetails: appearance.avatarDetails,
+    voiceProfile: appearance.voiceProfile,
+    replayVisualSnapshot: appearance.replayVisualSnapshot,
+    faceStyleOverride:
+      faceStyleOverride ?? appearance.replayVisualSnapshot?.faceStyle ?? null,
+    powers: appearance.powers,
+    systemPrompt: appearance.systemPrompt,
+  };
+}
+
+function recordKey(reference: DebateMysteryRecordReferenceV2): string {
+  return `${reference.kind}:${reference.id}`;
+}
+
+function sealedMysteryAssetKey(
+  kind: "evidence" | "room",
+  subjectId: string,
+): string {
+  return `${kind}:${subjectId}`;
+}
+
+function sealedMysteryAssetApiUrl(
+  sessionId: string,
+  kind: "evidence" | "room",
+  subjectId: string,
+  style?: WhodunnitInvestigationArtStyle,
+): string {
+  if (kind === "room" && style) {
+    return whodunnitSealedRoomArtUrl({ sessionId, subjectId, style });
+  }
+  return `/api/debates/${encodeURIComponent(sessionId)}/mystery-assets/${kind}/${encodeURIComponent(subjectId)}/file`;
+}
+
+function sealedMysteryAssetObjectUrl(
+  objectUrls: Readonly<Record<string, string>>,
+  kind: "evidence" | "room",
+  subjectId: string,
+  asset: DebateMysterySealedAssetRefV1 | null | undefined,
+): string | null {
+  if (!asset?.revealed || asset.status !== "ready") return null;
+  return objectUrls[sealedMysteryAssetKey(kind, subjectId)] ?? null;
+}
+
+const MYSTERY_SCENE_REPAIR_COPY: Record<
+  DebateMysterySceneRepairActionV1,
+  { issue: string; action: string; loader: string; detail: string }
+> = {
+  regenerate_exterior: {
+    issue: "The exterior looks wrong",
+    action: "Regenerate thumbnail and exterior",
+    loader: "Refracting a new exterior",
+    detail: "PRISM is rebuilding the venue's establishing image from its original frozen direction.",
+  },
+  align_exterior_door: {
+    issue: "The door is misplaced",
+    action: "Place the entrance yourself",
+    loader: "Marking the threshold",
+    detail: "PRISM is saving the exact entrance point you marked on the exterior.",
+  },
+  regenerate_room_mosaic: {
+    issue: "The room looks wrong",
+    action: "Regenerate room Mosaic",
+    loader: "Refracting the room again",
+    detail: "PRISM is reusing the room's original prompt and frozen geometry. Any old Upgraded derivative is removed.",
+  },
+  regenerate_room_upgrade: {
+    issue: "The Upgraded room looks wrong",
+    action: "Regenerate Upgraded room",
+    loader: "Refracting the Upgraded room again",
+    detail: "PRISM is rebuilding only the high-resolution presentation from the unchanged Mosaic composition.",
+  },
+  generate_room_upgrade: {
+    issue: "I want a high-resolution image",
+    action: "Generate an Upgraded room",
+    loader: "Upgrading this room",
+    detail: "PRISM is creating a high-resolution presentation while preserving the accepted Mosaic composition.",
+  },
+  refresh_room_anchors: {
+    issue: "The items are placed in a weird spot",
+    action: "Refresh anchors without moving the room objects",
+    loader: "Realigning room anchors",
+    detail: "PRISM is observing where the existing objects already are and moving only their interaction anchors.",
+  },
+  refresh_room_lights: {
+    issue: "Lights or FX are not aligned",
+    action: "Place, adjust, and preview the room's lights",
+    loader: "Placing lights and FX",
+    detail: "PRISM is reading the current room image for lit fireplaces, lamps, windows with light coming in, and neon, then placing dynamic lights on them.",
+  },
+  regenerate_evidence_asset: {
+    issue: "I want to generate an asset for this item",
+    action: "Generate or regenerate the item's asset",
+    loader: "Refracting the found item",
+    detail: "PRISM is rebuilding only this discovered item's presentation from its frozen public description.",
+  },
+  repair_evidence_name: {
+    issue: "The item name is wrong",
+    action: "Repair the found item's name",
+    loader: "Repairing the item name",
+    detail: "PRISM is checking the name against the physical object already in your Case File.",
+  },
+  repair_evidence_description: {
+    issue: "The description needs repair",
+    action: "Clean up the found item's description",
+    loader: "Repairing the item description",
+    detail: "PRISM is removing repeated wording and fallback text while preserving every distinct observation.",
+  },
+  reduce_evidence_magenta: {
+    issue: "There is some excess magenta in the asset",
+    action: "Run a magenta-removal pass",
+    loader: "Cleaning the item asset",
+    detail: "PRISM is applying one local color-key cleanup pass without changing the item's identity or case facts.",
+  },
+  regenerate_music: {
+    issue: "I don't like the music, or I can't hear it",
+    action: "Regenerate music",
+    loader: "Composing new investigation music",
+    detail: "PRISM is creating a new speech-safe instrumental theme for this mansion without revealing any case content.",
+  },
+  regenerate_ambience: {
+    issue: "I don't like the ambience, or I can't hear it",
+    action: "Regenerate ambience",
+    loader: "Rebuilding the mansion ambience",
+    detail: "PRISM is creating a new environmental room-tone bed for this mansion without changing its rooms or clues.",
+  },
+  set_evidence_emoji: {
+    issue: "An item's emoji isn't accurate",
+    action: "Pick a new emoji for a found item",
+    loader: "Updating the item's emoji",
+    detail: "PRISM is swapping only the symbol shown for this item. Its name, description, and case facts stay frozen.",
+  },
+  reroll_evidence_description: {
+    issue: "An item's description isn't accurate",
+    action: "Rewrite a found item's description",
+    loader: "Rewriting the item description",
+    detail: "PRISM is rewriting the description from the item's own authored text: repeated wording goes, every distinct observation stays, nothing new is added.",
+  },
+  rename_evidence_from_description: {
+    issue: "An item is not named properly",
+    action: "Rename a found item after its description",
+    loader: "Renaming the item",
+    detail: "The description is the source of truth. PRISM names the physical object it actually describes, using only words already in it. Regenerate the item's asset afterwards if the picture no longer fits.",
+  },
+  generate_map_plan: {
+    issue: "I want to see the venue from above",
+    action: "Draw the structure's roof or top deck and its surroundings onto the footprint",
+    loader: "Drafting the overhead view",
+    detail: "PRISM is painting the venue's exterior from directly above, its roof or top deck and the water or grounds around it, onto a footprint just larger than the rooms. Never the rooms inside.",
+  },
+  place_map_plan: {
+    issue: "The overhead view sits wrong on the board",
+    action: "Rotate, zoom, and pan the overhead view, then lock it in place",
+    loader: "Locking the overhead in place",
+    detail: "PRISM is saving where you placed the overhead view with the venue. Nothing is regenerated, and Undo returns the plate to where it was.",
+  },
+  clean_case_file: {
+    issue: "The Case File is hard to read",
+    action: "Clean up and organize the whole Case File",
+    loader: "Cleaning up the Case File",
+    detail: "PRISM is tidying every found item, Case Kit item, and observation into concise, scannable entries. Facts stay frozen and Undo keeps the previous file.",
+  },
+};
+
+const CASE_FILE_ITEM_REPAIR_ACTIONS = [
+  "set_evidence_emoji",
+  "reroll_evidence_description",
+  "rename_evidence_from_description",
+  "regenerate_evidence_asset",
+] as const satisfies readonly DebateMysterySceneRepairActionV1[];
+type CaseFileItemRepairAction = (typeof CASE_FILE_ITEM_REPAIR_ACTIONS)[number];
+type CaseFileItemRepairMenu = "categories" | "information";
+interface SceneRepairItemPick {
+  action: CaseFileItemRepairAction;
+  subjectId: string | null;
+  backTo: CaseFileItemRepairMenu;
+}
+
+const CASE_FILE_REPAIR_ACTIONS: readonly DebateMysterySceneRepairActionV1[] = [
+  ...CASE_FILE_ITEM_REPAIR_ACTIONS,
+  "clean_case_file",
+];
+const CASE_FILE_ROOT_REPAIR_ACTIONS: readonly DebateMysterySceneRepairActionV1[] = [
+  "clean_case_file",
+];
+const LOCAL_TEXT_REPAIR_ACTIONS: readonly DebateMysterySceneRepairActionV1[] = [
+  "repair_evidence_name", "repair_evidence_description", "set_evidence_emoji", "reroll_evidence_description",
+  "rename_evidence_from_description", "clean_case_file",
+];
+const PROVIDER_FREE_SCENE_REPAIR_ACTIONS: readonly DebateMysterySceneRepairActionV1[] = [
+  "align_exterior_door",
+  "reduce_evidence_magenta",
+];
+
+interface MansionRoomPlacement {
+  room: DebateMysteryRoomV2;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  neighborIds: string[];
+}
+
+const LEGACY_MANSION_ROOM_SLOTS = [
+  { x: 4, y: 4, width: 3, height: 2 },
+  { x: 0, y: 4, width: 4, height: 2 },
+  { x: 0, y: 2, width: 4, height: 2 },
+  { x: 7, y: 3, width: 4, height: 3 },
+  { x: 9, y: 1, width: 2, height: 2 },
+  { x: 4, y: 1, width: 3, height: 3 },
+  { x: 0, y: 6, width: 4, height: 3 },
+  { x: 7, y: 6, width: 4, height: 3 },
+] as const;
+
+function mansionRoomPlacements(rooms: DebateMysteryRoomV2[]): MansionRoomPlacement[] {
+  const hasFrozenGeometry = rooms.every((room) =>
+    Number.isFinite(room.x) &&
+    Number.isFinite(room.y) &&
+    Number.isFinite(room.width) &&
+    Number.isFinite(room.height) &&
+    (room.width ?? 0) > 0 &&
+    (room.height ?? 0) > 0,
+  );
+  if (hasFrozenGeometry) {
+    return rooms.map((room) => ({
+      room,
+      x: room.x!,
+      y: room.y!,
+      width: room.width!,
+      height: room.height!,
+      neighborIds: room.neighborIds ?? [],
+    }));
+  }
+
+  return rooms.map((room, index) => {
+    const slot = LEGACY_MANSION_ROOM_SLOTS[index] ?? {
+      x: (index % 4) * 4,
+      y: 9 + Math.floor(index / 4) * 3,
+      width: 4,
+      height: 3,
+    };
+    return { room, ...slot, neighborIds: [] };
+  });
+}
+
+function legacyMansionTraversalRoute(
+  fromRoom: DebateMysteryRoomV2,
+  toRoom: DebateMysteryRoomV2,
+): MansionTraversalRouteV1 {
+  const center = (room: DebateMysteryRoomV2): { x: number; y: number } => ({
+    x: (room.x ?? 0) + (room.width ?? 3) / 2,
+    y: (room.y ?? 0) + (room.height ?? 2) / 2,
+  });
+  const from = center(fromRoom);
+  const to = center(toRoom);
+  const midpoint = { x: (from.x + to.x) / 2, y: (from.y + to.y) / 2 };
+  const floorDistance = fromRoom.floor === toRoom.floor
+    ? 0
+    : 4 + Math.abs(fromRoom.floor - toRoom.floor) * 2;
+  return {
+    version: 1,
+    fromRoomId: fromRoom.id,
+    toRoomId: toRoom.id,
+    entityIds: [fromRoom.id, toRoom.id],
+    doorIds: ["legacy-threshold"],
+    connectorIds: [],
+    waypoints: [
+      { kind: "entity_center", floor: fromRoom.floor, ...from, entityId: fromRoom.id, edgeId: null, connectorKind: null },
+      { kind: "door", floor: fromRoom.floor, ...midpoint, entityId: fromRoom.id, edgeId: "legacy-threshold", connectorKind: null },
+      { kind: "entity_center", floor: toRoom.floor, ...to, entityId: toRoom.id, edgeId: "legacy-threshold", connectorKind: null },
+    ],
+    distanceUnits: Math.round((Math.hypot(to.x - from.x, to.y - from.y) + floorDistance) * 1_000) / 1_000,
+  };
+}
+
+function MysteryPlayerOrb(props: {
+  className?: string;
+  color?: string | null;
+  glyph?: string | null;
+  label: string;
+  renderBotGlyph: BotPickerGlyphRenderer;
+  style?: CSSProperties;
+}): React.JSX.Element {
+  const color = props.color?.trim() || "#ae8cff";
+  return (
+    <i
+      className={`${styles.mysteryPlayerOrb}${props.className ? ` ${props.className}` : ""}`}
+      role="img"
+      aria-label={props.label}
+      style={{ ...props.style, "--player-orb-color": color } as CSSProperties}
+    >
+      {props.renderBotGlyph(props.glyph?.trim() || "lucideTriangle", {
+        size: 22,
+        strokeWidth: 1.55,
+        className: styles.mysteryPlayerOrbGlyph,
+      })}
+    </i>
+  );
+}
+
+function touchingMansionRooms(
+  left: MansionRoomPlacement,
+  right: MansionRoomPlacement,
+): boolean {
+  const horizontalOverlap = Math.min(left.x + left.width, right.x + right.width) - Math.max(left.x, right.x);
+  const verticalOverlap = Math.min(left.y + left.height, right.y + right.height) - Math.max(left.y, right.y);
+  const sharesVerticalWall = (left.x + left.width === right.x || right.x + right.width === left.x) && verticalOverlap > 0;
+  const sharesHorizontalWall = (left.y + left.height === right.y || right.y + right.height === left.y) && horizontalOverlap > 0;
+  return sharesVerticalWall || sharesHorizontalWall;
+}
+
+function hotspotSpotStyle(
+  polygon: DebateMysteryRoomV2["hotspots"][number]["polygon"],
+): CSSProperties {
+  return {
+    clipPath: `polygon(${polygon.map((point) => `${point.x}% ${point.y}%`).join(", ")})`,
+  };
+}
+
+function revealedSpeechText(text: string, timing: V2SpeechTiming | null): string {
+  if (!timing) return text;
+  const timingMatchesPresentation =
+    timing.text === text || whodunnitCaptionSpeechText(timing.text) === text;
+  if (!timingMatchesPresentation) return text;
+  const ratio = timing.durationMs > 0 ? Math.max(0, Math.min(1, timing.elapsedMs / timing.durationMs)) : 1;
+  return text.slice(0, Math.ceil(text.length * ratio));
+}
+
+function settledSpeechTiming(text: string): V2SpeechTiming {
+  return {
+    text,
+    elapsedMs: 1,
+    durationMs: 1,
+    alignment: null,
+    audible: false,
+  };
+}
+
+function pendingSpeechTiming(text: string): V2SpeechTiming {
+  return {
+    text,
+    elapsedMs: 0,
+    durationMs: 1,
+    alignment: null,
+    audible: false,
+  };
+}
+
+function mysteryProsecutorOpeningText(text: string): string {
+  return text.replace(
+    /\bYou are (the lead investigator|counsel for the defense)\b/giu,
+    "I am $1",
+  );
+}
+
+/** Player-facing names for every verdict outcome; the raw enum never reaches the screen. */
+const WHODUNNIT_VERDICT_CLASSIFICATION_COPY: Record<
+  DebateMysteryVerdictClassificationV2,
+  { title: string; detail: string }
+> = {
+  just_conviction: {
+    title: "Just conviction",
+    detail: "The accused was responsible, and the admitted record proved it safely.",
+  },
+  unsafe_conviction: {
+    title: "Unsafe conviction",
+    detail: "The accused was responsible, but the record did not prove it safely.",
+  },
+  wrongful_conviction: {
+    title: "Wrongful conviction",
+    detail: "The court convicted someone who was not responsible.",
+  },
+  acquittal_despite_proof: {
+    title: "Acquittal despite proof",
+    detail: "The record proved the case, but the court did not convict.",
+  },
+  failed_prosecution: {
+    title: "Failed prosecution",
+    detail: "The prosecution did not carry its case.",
+  },
+  just_acquittal: {
+    title: "Just acquittal",
+    detail: "Your client walks free, and your theory named who was really responsible.",
+  },
+  acquittal_without_truth: {
+    title: "Acquittal without the truth",
+    detail: "Your client walks free, but your theory did not name who was really responsible.",
+  },
+};
+
+function whodunnitVerdictClassificationCopy(
+  classification: DebateMysteryVerdictClassificationV2,
+  stance: "prosecution" | "defense",
+): { title: string; detail: string } {
+  const copy = WHODUNNIT_VERDICT_CLASSIFICATION_COPY[classification] ?? {
+    title: classification.replaceAll("_", " "),
+    detail: "",
+  };
+  if (stance === "defense" && classification === "wrongful_conviction") {
+    return { ...copy, detail: "Your client was convicted of something they did not do." };
+  }
+  return copy;
+}
+
+function mysteryExteriorInvestigationThought(
+  publicOpening: string,
+  venuePlaceNoun: string,
+): string {
+  const opening = mysteryProsecutorOpeningText(publicOpening).trim();
+  if (!opening) {
+    return `The case will not explain itself from out here. I need to get inside the ${venuePlaceNoun} and investigate.`;
+  }
+  return /\b(?:inside|enter|board)\b/iu.test(opening)
+    ? opening
+    : `${opening} I need to get inside the ${venuePlaceNoun} and investigate.`;
+}
+
+function mysteryDialogueSfxPresentation(args: {
+  delivery: NonNullable<DebateMysteryPublicDialogueEntryV2["delivery"]>;
+  key: string;
+  speakerBotId: string | null;
+  speakerKind: DebateMysteryPublicDialogueEntryV2["speakerKind"];
+  speakerSeatId: string | null;
+  text: string;
+  timing: V2SpeechTiming | null;
+}): MysteryDialogueSfxPresentation {
+  const captionText = whodunnitCaptionSpeechText(args.text);
+  const timingMatchesPresentation = Boolean(
+    args.timing && (
+      args.timing.text === captionText ||
+      whodunnitCaptionSpeechText(args.timing.text) === captionText
+    ),
+  );
+  return {
+    audible: args.timing?.audible === true,
+    delivery: args.delivery,
+    fullText: captionText,
+    key: args.key,
+    speakerBotId: args.speakerBotId,
+    speakerKind: args.speakerKind,
+    speakerSeatId: args.speakerSeatId,
+    streaming: Boolean(
+      timingMatchesPresentation &&
+      args.timing &&
+      args.timing.elapsedMs < args.timing.durationMs
+    ),
+    visibleText: revealedSpeechText(captionText, args.timing),
+  };
+}
+
+function mysteryDialogueGestureOriginIsInteractive(target: EventTarget | null): boolean {
+  if (!(target instanceof Element)) return false;
+  const control = target.closest(
+    'input, textarea, select, button, a, label, [contenteditable]:not([contenteditable="false"])',
+  );
+  if (!control) return false;
+  return whodunnitDialogueGestureControlIsInteractive({
+    contentEditable: control instanceof HTMLElement && control.isContentEditable,
+    tagName: control.tagName,
+  });
+}
+
+function emptyTheory(
+  state: Pick<DebateWhodunnitFormatStateV2, "theory" | "suspects" | "caseCharge" | "config">,
+): DebateMysteryTheoryV1 {
+  // Defense stance pins the client, so the board seeds with the first
+  // suspect the player may actually accuse.
+  const clientSeatId = debateMysteryClientSeatIdV2(state);
+  const firstAccusable =
+    state.suspects.find((suspect) => suspect.seatId !== clientSeatId)?.seatId ?? null;
+  return state.theory ?? {
+    accusedSeatIds: firstAccusable ? [firstAccusable] : [],
+    incidentId: state.caseCharge?.incidentId,
+    claim: state.caseCharge?.accusationPrompt,
+    culpritSeatId: firstAccusable,
+    method: "",
+    motive: "",
+    opportunity: "",
+    accompliceSeatId: null,
+    evidenceIds: [],
+    testimonyIds: [],
+  };
+}
+
+export function DebateMysteryV2CompilationResume(
+  props: V2ExperienceProps,
+): React.JSX.Element {
+  const state = props.session.formatState as DebateWhodunnitFormatStateV2;
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [resumeNonce, setResumeNonce] = useState(0);
+  const [errorDetailsCopyState, setErrorDetailsCopyState] = useState<V2ForgeErrorCopyState>("idle");
+  const [clockNowMs, setClockNowMs] = useState(() => Date.now());
+  const [liveCompilation, setLiveCompilation] = useState(state.compilation);
+  const liveCompilationRef = useRef(liveCompilation);
+  const [forgeTipIndex, setForgeTipIndex] = useState(0);
+  const [preparedMansionExteriorUrl, setPreparedMansionExteriorUrl] = useState<string | null>(null);
+  const sessionId = props.session.id;
+  const request = props.request;
+  const onSessionChange = props.onSessionChange;
+  const onSessionChangeRef = useRef(onSessionChange);
+  const reducedMotion = usePrefersReducedMotion();
+  const mansionExteriorRevealed = state.mansionExterior?.revealed === true;
+  const mansionExteriorStatus = state.mansionExterior?.status ?? null;
+
+  useEffect(() => {
+    // Archive and setup are both long pages. Entering the fullscreen Forge at
+    // their retained scroll offset can crop the case title and current stage.
+    window.scrollTo({ top: 0, left: 0, behavior: "auto" });
+  }, [sessionId]);
+
+  useEffect(() => {
+    onSessionChangeRef.current = onSessionChange;
+  }, [onSessionChange]);
+
+  useEffect(() => {
+    setLiveCompilation(state.compilation);
+  }, [state.compilation]);
+
+  useEffect(() => {
+    liveCompilationRef.current = liveCompilation;
+  }, [liveCompilation]);
+
+  useEffect(() => {
+    if (!mansionExteriorRevealed || mansionExteriorStatus !== "ready") {
+      setPreparedMansionExteriorUrl(null);
+      return;
+    }
+    const controller = new AbortController();
+    let objectUrl: string | null = null;
+    void fetch(
+      sealedMysteryAssetApiUrl(
+        sessionId,
+        "room",
+        DEBATE_MYSTERY_MANSION_EXTERIOR_SUBJECT_ID_V1,
+      ),
+      {
+        credentials: "same-origin",
+        cache: "no-store",
+        signal: controller.signal,
+      },
+    ).then(async (response) => {
+      if (!response.ok) return;
+      objectUrl = URL.createObjectURL(await response.blob());
+      setPreparedMansionExteriorUrl(objectUrl);
+    }).catch(() => {
+      // The size-matched bundled exterior remains visible if retrieval races.
+    });
+    return () => {
+      controller.abort();
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [mansionExteriorRevealed, mansionExteriorStatus, sessionId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    let timer: number | null = null;
+    let lastResumeAttemptMs = 0;
+    const resumeCompilation = async (): Promise<void> => {
+      const now = Date.now();
+      if (now - lastResumeAttemptMs < 5_000) return;
+      lastResumeAttemptMs = now;
+      try {
+        const result = await request<{ session: DebateSessionV1 }>(
+          `/api/debates/${encodeURIComponent(sessionId)}/mystery-resume-compilation`,
+          mutationBody({}),
+        );
+        const resumedState = result.session.formatState;
+        const shouldApplyResumeResponse =
+          resumedState.format !== "whodunnit" ||
+          resumedState.version !== 2 ||
+          !debateMysteryForgeStageIsActive(resumedState.compilation.stage);
+        // An active resume returns the session's last durable public snapshot.
+        // The status poll owns live recording counts, so accepting that stale
+        // snapshot would erase the counter that just arrived from the job.
+        if (!cancelled && shouldApplyResumeResponse) {
+          onSessionChangeRef.current(result.session);
+        }
+      } catch (caught) {
+        if (!cancelled) {
+          setError(caught instanceof Error ? caught.message : "Case Forge could not resume.");
+        }
+      }
+    };
+    const refresh = async (): Promise<void> => {
+      try {
+        const compilationResult = await request<{ compilation: DebateMysteryCompilationStatusV2 }>(
+          `/api/debates/${encodeURIComponent(sessionId)}/mystery-compilation`,
+        );
+        if (cancelled) return;
+        const result = await request<{ session: DebateSessionV1 }>(
+          `/api/debates/${encodeURIComponent(sessionId)}?perspective=live`,
+        );
+        if (cancelled) return;
+        const next = result.session.formatState;
+        const nextCompilation = next.format === "whodunnit" && next.version === 2
+          ? compilationResult.compilation
+          : null;
+        if (nextCompilation && next.format === "whodunnit" && next.version === 2) {
+          setLiveCompilation(nextCompilation);
+          onSessionChangeRef.current({
+            ...result.session,
+            formatState: { ...next, compilation: nextCompilation },
+          });
+        } else {
+          onSessionChangeRef.current(result.session);
+        }
+        if (
+          next.format === "whodunnit" &&
+          next.version === 2 &&
+          nextCompilation !== null &&
+          debateMysteryForgeStageIsActive(nextCompilation.stage)
+        ) {
+          void resumeCompilation();
+          timer = window.setTimeout(() => void refresh(), 900);
+        }
+      } catch (caught) {
+        if (!cancelled) {
+          setError(caught instanceof Error ? caught.message : "Case Forge status is unavailable.");
+          timer = window.setTimeout(() => void refresh(), 1800);
+        }
+      }
+    };
+    void refresh();
+    if (debateMysteryForgeStageIsActive(liveCompilationRef.current.stage)) {
+      void resumeCompilation();
+    }
+    return () => {
+      cancelled = true;
+      if (timer !== null) window.clearTimeout(timer);
+    };
+  // A nonce deliberately restarts the durable resume loop after a player retry.
+  }, [request, resumeNonce, sessionId]);
+
+  const compilation = liveCompilation;
+  const spoilerSafeProgressMessage = normalizeDebateMysteryV2ForgeProgressMessage(
+    compilation.spoilerSafeMessage,
+  );
+  const needsAttention = compilation.stage === "needs_attention";
+  const compilationActive = debateMysteryForgeStageIsActive(compilation.stage);
+  const spectatorForge = state.config.playerRole === "spectator";
+  const forgeTips: readonly string[] =
+    debateMysteryCounselSeatsV2(state.config).stance === "defense"
+      ? WHODUNNIT_DEFENSE_FORGE_TIPS
+      : FORGE_TIPS;
+  useEffect(() => {
+    if (!compilationActive) return;
+    setClockNowMs(Date.now());
+    const timer = window.setInterval(() => setClockNowMs(Date.now()), 1_000);
+    return () => window.clearInterval(timer);
+  }, [compilationActive]);
+  useEffect(() => {
+    if (!compilationActive || reducedMotion) return;
+    const timer = window.setInterval(() => {
+      setForgeTipIndex((current) => (current + 1) % forgeTips.length);
+    }, 9_000);
+    return () => window.clearInterval(timer);
+  }, [compilationActive, forgeTips.length, reducedMotion]);
+  const updatedAtMs = Date.parse(compilation.updatedAt);
+  const liveClockDeltaMs = compilationActive && Number.isFinite(updatedAtMs)
+    ? Math.max(0, clockNowMs - updatedAtMs)
+    : 0;
+  const elapsedMs = compilation.elapsedMs + liveClockDeltaMs;
+  const attemptElapsedMs = (compilation.attemptElapsedMs ?? compilation.elapsedMs) + liveClockDeltaMs;
+  const cumulativeElapsedMs = (compilation.cumulativeElapsedMs ?? compilation.elapsedMs) + liveClockDeltaMs;
+  const completedPasses = Math.min(
+    compilation.totalPasses,
+    Math.max(0, compilation.completedPasses),
+  );
+  const forgeStages = spectatorForge ? SPECTATOR_FORGE_STAGES : FORGE_STAGES;
+  const currentIndex = spectatorForge
+    ? compilation.stage === "complete"
+      ? SPECTATOR_FORGE_STAGES.length
+      : completedPasses <= 0
+        ? 0
+        : completedPasses <= 2
+          ? 1
+          : 2
+    : compilation.stage === "complete"
+      ? FORGE_STAGES.length - 1
+      : Math.min(completedPasses, FORGE_STAGES.length - 1);
+  const percent = debateMysteryForgeAuthoritativePercent(
+    completedPasses,
+    compilation.totalPasses,
+  );
+  const forgeVisual = debateMysteryForgeVisualState(
+    completedPasses,
+    compilation.totalPasses,
+    compilation.stage,
+  );
+  const etaLabel =
+    compilation.etaBasisPasses >= 2 &&
+    compilation.approximateRemainingMs !== null &&
+    compilation.approximateRemainingMs > 0 &&
+    compilationActive
+      ? formatDebateMysteryForgeEta(compilation.approximateRemainingMs)
+      : null;
+  const forgeVenueProfile = state.config.mansionSnapshot?.layoutV2?.venueProfile ?? null;
+  const forgeVenueLabel = forgeVenueProfile?.kindLabel ?? forgeVenueProfile?.placeNoun ?? "Mystery Venue";
+  const forgeExteriorUrl = props.mansionExteriorUrl ?? preparedMansionExteriorUrl ??
+    debateMysteryMansionExteriorFallbackV1(
+      state.config.houseStyle,
+      state.config.scaleClass,
+      forgeVenueProfile,
+    );
+
+  const retry = async (): Promise<void> => {
+    setBusy(true);
+    setError(null);
+    try {
+      const result = await request<{ session: DebateSessionV1 }>(
+        `/api/debates/${encodeURIComponent(sessionId)}/mystery-compilation/retry`,
+        mutationBody({}),
+      );
+      onSessionChange(result.session);
+      if (result.session.formatState.format === "whodunnit" && result.session.formatState.version === 2) {
+        setLiveCompilation(result.session.formatState.compilation);
+      }
+      setResumeNonce((value) => value + 1);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Case Forge could not retry.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const continueSilently = async (): Promise<void> => {
+    setBusy(true);
+    setError(null);
+    try {
+      const result = await request<{ session: DebateSessionV1 }>(
+        `/api/debates/${encodeURIComponent(sessionId)}/mystery-compilation/continue-without-voices`,
+        mutationBody({}),
+      );
+      onSessionChange(result.session);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "The text case is not ready for silent play.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const copyErrorDetails = async (): Promise<void> => {
+    setErrorDetailsCopyState("copying");
+    try {
+      await writeForgeErrorDetailsClipboard(
+        formatDebateMysteryV2ForgeErrorDetails(sessionId, compilation),
+      );
+      setErrorDetailsCopyState("copied");
+    } catch {
+      setErrorDetailsCopyState("failed");
+    }
+  };
+
+  return (
+    <main className={styles.forge} data-theme={props.theme} data-tutorial-target="mystery-v2-case-forge">
+      <button type="button" className={styles.archiveButton} data-session-local-back="true" onClick={props.onExit}>← Continue in background</button>
+      <section
+        className={styles.forgeCard}
+        data-exterior-hero="true"
+        data-forge-complete={compilation.stage === "complete" ? "true" : undefined}
+        style={{
+          "--forge-exterior-image": `url("${forgeExteriorUrl}")`,
+          "--forge-exterior-brightness": String(forgeVisual.brightness),
+          "--forge-exterior-contrast": String(forgeVisual.contrast),
+          "--forge-exterior-grayscale": String(forgeVisual.grayscale),
+          "--forge-exterior-saturation": String(forgeVisual.saturation),
+          "--forge-exterior-opacity": String(forgeVisual.opacity),
+          "--forge-exterior-blur": `${forgeVisual.blurPx}px`,
+        } as CSSProperties}
+      >
+        <SceneMediaVignette
+          theme={props.theme}
+          className={styles.forgeSceneVignette}
+          style={{ "--scene-vignette-z": 0 } as CSSProperties}
+        />
+        <div className={styles.forgePrism} aria-hidden="true"><i /><i /><i /></div>
+        <header
+          className={styles.forgeCaseIdentity}
+          data-title-ready={state.caseTitle ? "true" : "false"}
+        >
+          <p className={styles.eyebrow}>{state.caseTitle ? "PRISM presents" : "PRISM / Case Forge"}</p>
+          <h1 key={state.caseTitle ?? "pending-case-title"}>
+            {state.caseTitle ?? "A mystery is taking shape"}
+          </h1>
+        </header>
+        <div className={styles.forgePanel}>
+        <p className={styles.forgeExteriorStatus}>
+          <span aria-hidden="true">◇</span>
+          {forgeVenueLabel} exterior · {forgeVenueProfile?.physicalScaleClass ?? state.config.scaleClass}
+        </p>
+        <p className={styles.eyebrow}>Case Forge</p>
+        <h2 className={styles.forgeStatusHeading}>{needsAttention ? "Case preparation stopped" : spectatorForge ? "Preparing your mystery to watch." : debateMysteryCounselSeatsV2(state.config).stance === "defense" ? "Preparing a defense turnabout" : "Preparing a prosecution turnabout"}</h2>
+        {!spectatorForge ? <p className={styles.forgeMessage}>{spoilerSafeProgressMessage}</p> : null}
+        {compilationActive ? (
+          <p className={styles.forgeBackgroundNote}>
+            Safe to leave. Case Forge keeps working while you use other parts of PRISM. Only one Whodunnit can cook at a time.
+          </p>
+        ) : null}
+        {needsAttention ? (
+          <p className={styles.forgeRecovery}>
+            The Forge is not still running. Your setup and every completed draft section are safe. Retry will resume from the last durable checkpoint.
+          </p>
+        ) : null}
+        <div
+          className={styles.progressTrack}
+          role="progressbar"
+          aria-label="Case preparation"
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={percent}
+          aria-valuetext={`${completedPasses} of ${compilation.totalPasses} durable passes complete`}
+        >
+          <span style={{ width: `${percent}%` }} />
+        </div>
+        <div className={styles.forgeTiming} aria-label="Case Forge timing">
+          <span>This attempt {formatDebateMysteryForgeElapsed(attemptElapsedMs)}</span>
+          <span>Total {formatDebateMysteryForgeElapsed(cumulativeElapsedMs || elapsedMs)}</span>
+          {etaLabel ? <span>{etaLabel}</span> : <span>ETA appears after two durable passes</span>}
+        </div>
+        <ol className={styles.forgeStages}>
+          {forgeStages.map((entry, index) => (
+            <li key={entry.id} data-state={index < currentIndex ? "complete" : index === currentIndex ? (needsAttention ? "error" : "active") : "waiting"}>
+              <span aria-hidden="true">{index < currentIndex ? "✓" : index === currentIndex && needsAttention ? "!" : index + 1}</span>
+              <strong>{entry.label}</strong>
+            </li>
+          ))}
+        </ol>
+        {spectatorForge ? (
+          <details className={styles.forgeDetails} open={needsAttention || undefined}>
+            <summary>Preparation details</summary>
+            <div>
+              <p className={styles.forgeMessage}>{spoilerSafeProgressMessage}</p>
+              <section className={styles.forgeSubsteps} aria-label="Current Case Forge work">
+                <p>Current work</p>
+                <ol>
+                  {(compilation.substeps ?? []).map((substep) => (
+                    <li key={substep.id} data-state={substep.state}>
+                      <span aria-hidden="true">
+                        {substep.state === "complete" ? "✓" : substep.state === "attention" ? "!" : "·"}
+                      </span>
+                      {substep.label}
+                    </li>
+                  ))}
+                </ol>
+              </section>
+              <div className={styles.localVoiceNotice}>
+                <span aria-hidden="true">◈</span>
+                <div><strong>Local English performance</strong><small>Case Forge uses local voices only. Select Premium for spoken dialogue during ONLINE play.</small></div>
+              </div>
+              <small>{compilation.preparedAudioCount} / {compilation.requiredAudioCount} unique recordings verified</small>
+              <small>Preparation attempt {compilation.attempt}{needsAttention ? " · stopped safely" : ""}</small>
+            </div>
+          </details>
+        ) : (
+          <section className={styles.forgeSubsteps} aria-label="Current Case Forge work">
+            <p>Current work</p>
+            <ol>
+              {(compilation.substeps ?? []).map((substep) => (
+                <li key={substep.id} data-state={substep.state}>
+                  <span aria-hidden="true">
+                    {substep.state === "complete" ? "✓" : substep.state === "attention" ? "!" : "·"}
+                  </span>
+                  {substep.label}
+                </li>
+              ))}
+            </ol>
+          </section>
+        )}
+        {!spectatorForge && compilationActive ? (
+          <aside className={styles.forgeTip} aria-label="Case Forge tip">
+            <span aria-hidden="true">Forge note</span>
+            <p key={forgeTipIndex}>{forgeTips[forgeTipIndex % forgeTips.length]}</p>
+          </aside>
+        ) : null}
+        {!spectatorForge ? <div className={styles.localVoiceNotice}>
+          <span aria-hidden="true">◈</span>
+          <div><strong>Local English performance</strong><small>Case Forge uses local voices only. Select Premium for spoken dialogue during ONLINE play.</small></div>
+        </div> : null}
+        {!spectatorForge && compilation.requiredAudioCount > 0 ? (
+          <small>{compilation.preparedAudioCount} / {compilation.requiredAudioCount} unique recordings verified</small>
+        ) : null}
+        {needsAttention ? (
+          <div className={styles.forgeActions}>
+            <button type="button" onClick={() => void retry()} disabled={busy || !compilation.retryable}>Retry preparation</button>
+            {state.localAudioFailure ? <button type="button" onClick={() => void continueSilently()} disabled={busy}>Continue without voices</button> : null}
+            <button type="button" onClick={() => void copyErrorDetails()} disabled={errorDetailsCopyState === "copying"}>
+              {errorDetailsCopyState === "copying"
+                ? "Copying error details…"
+                : errorDetailsCopyState === "copied"
+                  ? "Error details copied"
+                  : errorDetailsCopyState === "failed"
+                    ? "Copy failed — try again"
+                    : "Copy error details"}
+            </button>
+            <button type="button" data-session-local-back="true" onClick={props.onExit}>Return to setup</button>
+          </div>
+        ) : null}
+        {needsAttention && errorDetailsCopyState !== "idle" ? (
+          <p role="status">{errorDetailsCopyState === "copied" ? "Error details copied to clipboard." : errorDetailsCopyState === "failed" ? "Could not copy error details. Try again." : "Copying error details…"}</p>
+        ) : null}
+        {!spectatorForge && needsAttention ? <small>Preparation attempt {compilation.attempt} · stopped safely</small> : null}
+        {error ? <p className={styles.error}>{error}</p> : null}
+        </div>
+      </section>
+    </main>
+  );
+}
+
+const PRODUCTION_CATEGORY_LABELS: Record<DebateMysteryProductionCategoryV1, string> = {
+  exterior: "Exterior",
+  clue_props: "Clue props",
+  mosaic_rooms: "Mosaic rooms",
+  realistic_rooms: "Upgraded rooms",
+  music: "Music",
+  ambience: "Ambience",
+  voices: "Performance voices",
+};
+
+const ROOM_ART_CROSSFADE_MS = 180;
+
+type WhodunnitRoomVisualReadiness = "fallback" | "default" | "upgraded";
+
+type WhodunnitItemSynthesisJobStatus =
+  | "queued"
+  | "generating"
+  | "ready"
+  | "failed";
+
+interface WhodunnitItemSynthesisJob {
+  id: string;
+  subjectId: string;
+  title: string;
+  emoji: string;
+  status: WhodunnitItemSynthesisJobStatus;
+  queuedAt: string;
+  startedAt: string | null;
+  error: string | null;
+}
+
+interface WhodunnitRoomUpgradeSynthesisJob {
+  id: string;
+  roomId: string;
+  title: string;
+  status: "refracting" | "ready" | "failed";
+  startedAt: string;
+  error: string | null;
+}
+
+function whodunnitRoomVisualReadiness(
+  room: DebateMysteryRoomV2,
+  upgradeStatus: DebateMysteryRoomArtUpgradeStatusV1 | null,
+): WhodunnitRoomVisualReadiness {
+  if (room.sealedAsset?.status !== "ready") return "fallback";
+  return upgradeStatus?.readyRoomIds.includes(room.id) ? "upgraded" : "default";
+}
+
+export function DebateMysteryV2ProductionReadiness(
+  props: V2ExperienceProps,
+): React.JSX.Element {
+  const state = props.session.formatState as DebateWhodunnitFormatStateV2;
+  const readiness = state.productionReadiness;
+  const [busyCategory, setBusyCategory] =
+    useState<DebateMysteryProductionCategoryV1 | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const retryPollsRef = useRef(0);
+  const request = props.request;
+  const sessionId = props.session.id;
+  const onSessionChange = props.onSessionChange;
+
+  const refresh = useCallback(async (): Promise<DebateSessionV1> => {
+    const result = await request<{ session: DebateSessionV1 }>(
+      `/api/debates/${encodeURIComponent(sessionId)}/mystery-production/refresh`,
+      mutationBody({}),
+    );
+    onSessionChange(result.session);
+    return result.session;
+  }, [onSessionChange, request, sessionId]);
+
+  useEffect(() => {
+    if (!busyCategory) return;
+    const timer = window.setTimeout(() => {
+      void refresh().then((session) => {
+        const next = session.formatState;
+        if (
+          next.format !== "whodunnit" ||
+          next.version !== 2 ||
+          next.playPhase !== "production_review"
+        ) {
+          setBusyCategory(null);
+          return;
+        }
+        const category = next.productionReadiness?.categories[busyCategory];
+        retryPollsRef.current += 1;
+        if (
+          !category ||
+          category.unavailableCount === 0 ||
+          retryPollsRef.current >= 40
+        ) {
+          setBusyCategory(null);
+          if (retryPollsRef.current >= 40 && category?.unavailableCount) {
+            setError("That category did not settle before the bounded readiness check ended. Its durable state is safe; retry or return to Production.");
+          }
+        }
+      }).catch((caught) => {
+        setBusyCategory(null);
+        setError(caught instanceof Error ? caught.message : "Production readiness could not refresh.");
+      });
+    }, 1_500);
+    return () => window.clearTimeout(timer);
+  }, [busyCategory, refresh, state.productionReadiness]);
+
+  const retryCategory = async (
+    category: DebateMysteryProductionCategoryV1,
+  ): Promise<void> => {
+    setError(null);
+    retryPollsRef.current = 0;
+    if (category === "music" || category === "ambience" || category === "voices") {
+      setError(`${PRODUCTION_CATEGORY_LABELS[category]} cannot be regenerated after sealed case compilation yet. Return to Production to change this request, or continue with the disclosed fallback.`);
+      return;
+    }
+    setBusyCategory(category);
+    try {
+      if (category === "realistic_rooms") {
+        await request(
+          `/api/debates/${encodeURIComponent(sessionId)}/mystery-room-art/upgrade`,
+          mutationBody({}),
+        );
+        return;
+      }
+      const result = await request<{ requeued: number; session: DebateSessionV1 }>(
+        `/api/debates/${encodeURIComponent(sessionId)}/mystery-assets/retry`,
+        mutationBody({ category }),
+      );
+      onSessionChange(result.session);
+      if (result.requeued === 0) {
+        setBusyCategory(null);
+        setError("That category has already used its bounded presentation retry.");
+      }
+    } catch (caught) {
+      setBusyCategory(null);
+      setError(caught instanceof Error ? caught.message : "That production category could not be retried.");
+    }
+  };
+
+  const continueWithFallbacks = async (): Promise<void> => {
+    setBusy(true);
+    setError(null);
+    try {
+      const result = await request<{ session: DebateSessionV1 }>(
+        `/api/debates/${encodeURIComponent(sessionId)}/mystery-production/continue-with-fallbacks`,
+        mutationBody({}),
+      );
+      onSessionChange(result.session);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "The fallback acknowledgment could not be saved.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const categories = readiness
+    ? (Object.keys(PRODUCTION_CATEGORY_LABELS) as DebateMysteryProductionCategoryV1[])
+        .map((category) => ({ category, readiness: readiness.categories[category] }))
+        .filter((entry) => entry.readiness.requestedCount > 0)
+    : [];
+
+  return (
+    <main className={styles.forge} data-theme={props.theme} data-tutorial-target="mystery-v2-production-readiness">
+      <button type="button" className={styles.archiveButton} data-session-local-back="true" onClick={props.onExit}>← Return to Production</button>
+      <section className={`${styles.forgeCard} ${styles.productionReadinessCard}`} aria-live="polite">
+        <div className={styles.forgePrism} aria-hidden="true"><i /><i /><i /></div>
+        <p className={styles.eyebrow}>Production Readiness</p>
+        <h1>Review the presentation pack</h1>
+        <p className={styles.forgeMessage}>The case logic and sealed truth are complete. One or more requested presentation categories used a compatible source, fallback, or unavailable result.</p>
+        <div className={styles.productionReadinessList}>
+          {categories.map(({ category, readiness: categoryState }) => {
+            const retryable = category === "exterior" || category === "clue_props" || category === "mosaic_rooms" || category === "realistic_rooms";
+            return (
+              <article key={category} data-complete={categoryState.generatedCount === categoryState.requestedCount ? "true" : undefined}>
+                <div><strong>{PRODUCTION_CATEGORY_LABELS[category]}</strong><small>{categoryState.publicReason}</small></div>
+                <dl>
+                  <div><dt>Requested</dt><dd>{categoryState.requestedCount}</dd></div>
+                  <div><dt>Generated</dt><dd>{categoryState.generatedCount}</dd></div>
+                  <div><dt>Reused</dt><dd>{categoryState.reusedCount}</dd></div>
+                  <div><dt>Fallback</dt><dd>{categoryState.fallbackCount}</dd></div>
+                  <div><dt>Unavailable</dt><dd>{categoryState.unavailableCount}</dd></div>
+                </dl>
+                {categoryState.generatedCount < categoryState.requestedCount ? (
+                  <button type="button" disabled={!retryable || busy || busyCategory !== null} onClick={() => void retryCategory(category)}>
+                    {busyCategory === category ? `Retrying ${PRODUCTION_CATEGORY_LABELS[category]}…` : retryable ? `Retry ${PRODUCTION_CATEGORY_LABELS[category]}` : "Retry unavailable after compilation"}
+                  </button>
+                ) : null}
+              </article>
+            );
+          })}
+        </div>
+        <div className={styles.forgeActions}>
+          <button type="button" disabled={busy || busyCategory !== null} onClick={() => void refresh()}>Refresh counts</button>
+          <button type="button" disabled={busy || busyCategory !== null} onClick={() => void continueWithFallbacks()}>Continue with fallbacks</button>
+          <button type="button" data-session-local-back="true" disabled={busy} onClick={props.onExit}>Return to Production</button>
+        </div>
+        <small>Your acknowledgment is saved with the case and appears in Archive. Retrying here changes presentation only.</small>
+        {error ? <p className={styles.error}>{error}</p> : null}
+      </section>
+    </main>
+  );
+}
+
+export function DebateMysteryV2Readiness(
+  props: V2ExperienceProps,
+): React.JSX.Element {
+  const state = props.session.formatState as DebateWhodunnitFormatStateV2;
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [retryNonce, setRetryNonce] = useState(0);
+  const attemptedKeyRef = useRef<string | null>(null);
+  const sessionId = props.session.id;
+  const request = props.request;
+  const onSessionChange = props.onSessionChange;
+
+  useEffect(() => {
+    if (state.playPhase === "verdict" || state.readiness.status === "ready") return;
+    if (state.readiness.status === "failed" && retryNonce === 0) return;
+    const key = `${sessionId}:${state.readiness.status}:${retryNonce}`;
+    if (attemptedKeyRef.current === key) return;
+    attemptedKeyRef.current = key;
+    let cancelled = false;
+    setBusy(true);
+    setError(null);
+    void request<{ session: DebateSessionV1 }>(
+      `/api/debates/${encodeURIComponent(sessionId)}/mystery-readiness`,
+      mutationBody({}),
+    ).then((result) => {
+      if (!cancelled) onSessionChange(result.session);
+    }).catch((caught) => {
+      if (!cancelled) {
+        setError(caught instanceof Error ? caught.message : "The local case check could not finish.");
+      }
+    }).finally(() => {
+      if (!cancelled) setBusy(false);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [onSessionChange, request, retryNonce, sessionId, state.playPhase, state.readiness.status]);
+
+  return (
+    <main className={styles.forge} data-theme={props.theme} data-tutorial-target="mystery-v2-readiness">
+      <button type="button" className={styles.archiveButton} data-session-local-back="true" onClick={props.onExit}>← Archive</button>
+      <section className={styles.forgeCard} aria-live="polite">
+        <div className={styles.forgePrism} aria-hidden="true"><i /><i /><i /></div>
+        <p className={styles.eyebrow}>Local case check</p>
+        <h1>{state.readiness.status === "failed" ? "Case pack needs attention" : "Preparing this case to resume"}</h1>
+        <p className={styles.forgeMessage}>{state.readiness.spoilerSafeMessage}</p>
+        <div className={styles.localVoiceNotice}>
+          <span aria-hidden="true">◇</span>
+          <div><strong>Finite and local</strong><small>This check preserves case progress and never calls an LLM, ElevenLabs, or another network voice provider.</small></div>
+        </div>
+        {state.readiness.status === "failed" || error ? (
+          <div className={styles.forgeActions}>
+            <button type="button" disabled={busy} onClick={() => setRetryNonce((value) => value + 1)}>Retry local check</button>
+            <button type="button" data-session-local-back="true" onClick={props.onExit}>Return to Archive</button>
+          </div>
+        ) : <small>{busy ? "Checking authored dialogue and local clips…" : "Starting local check…"}</small>}
+        {state.localAudioFailure ? <p className={styles.error}>{state.localAudioFailure}</p> : null}
+        {error ? <p className={styles.error}>{error}</p> : null}
+      </section>
+    </main>
+  );
+}
+
+export function DebateMysteryV2Play(props: V2PlayProps): React.JSX.Element {
+  const liveResponseMode = props.responseMode ?? props.session.responseMode;
+  const liveRouting = useMemo(() => ({
+    responseMode: liveResponseMode,
+    preferredProvider: props.modelOverride?.provider ?? props.preferredProvider,
+    modelOverride: props.modelOverride?.model ?? null,
+    reasoningEffort: props.reasoningEffort,
+    turbo: props.turbo,
+  }), [liveResponseMode, props.modelOverride, props.preferredProvider, props.reasoningEffort, props.turbo]);
+  const state = props.session.formatState as DebateWhodunnitFormatStateV2;
+  // Move opens the map at once; the server's own view catches up on its reply, and a
+  // refused move drops the player back into the room.
+  const [mapOpeningAhead, setMapOpeningAhead] = useState(false);
+  const roomView: "mansion" | "room" = mapOpeningAhead && state.roomView === "room" ? "mansion" : state.roomView;
+  const liveSessionHeaderPortalTargets = useLiveSessionHeaderPortalTargets();
+  const pendingRoomKey = [
+    ...state.rooms
+      .filter((room) => room.sealedAsset?.status === "pending")
+      .map((room) => `room:${room.id}`),
+    ...state.record
+      .filter((item) => item.sealedAsset?.status === "pending")
+      .map((item) => `evidence:${item.reference.id}`),
+  ]
+    .sort()
+    .join("|");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [command, setCommand] = useState<"move" | "examine" | "talk" | "present" | null>(null);
+  const suspectActorRef = useRef<HTMLDivElement | null>(null);
+  const roomArtFrameRef = useRef<HTMLDivElement | null>(null);
+  const [presentDrag, setPresentDrag] = useState<WhodunnitPresentDragState>({ active: false, overSuspect: false });
+  // The Court assembles before anyone speaks: the gallery walks in on the wide
+  // shot, the judge calls order, then the stand goes live. Presentation only.
+  const [courtArrival, setCourtArrival] = useState<{ chapterId: string; startedAt: number; nowMs: number } | null>(null);
+  // Who is thinking while a Court action runs: the witness after Press or an
+  // objection, the Prosecutor after Think.
+  const [courtBusyAction, setCourtBusyAction] = useState<"press" | "object" | "think" | null>(null);
+  const courtWitnessStandRef = useRef<HTMLDivElement | null>(null);
+  // The occupant's opening exchange is prepared while the player reads the
+  // Casekeeper tableau and adopted only by the gesture that dismisses it.
+  const [pendingRoomIntroduction, setPendingRoomIntroduction] = useState<{
+    roomId: string;
+    deferred: DeferredMysteryActionResultV1 | null;
+    adoptOnArrival: boolean;
+    failed: boolean;
+  } | null>(null);
+  const [caseFileOpen, setCaseFileOpen] = useState(false);
+  const [caseFileUpdate, setCaseFileUpdate] = useState<DebateMysteryCaseFileUpdateV2 | null>(null);
+  const [theoryOpen, setTheoryOpen] = useState(state.playPhase === "theory");
+  const [theory, setTheory] = useState<DebateMysteryTheoryV1>(() => emptyTheory(state));
+  const [dialoguePlaybackQueue, setDialoguePlaybackQueue] = useState<DebateMysteryPublicDialogueEntryV2[]>([]);
+  const [dialoguePlaybackIndex, setDialoguePlaybackIndex] = useState(0);
+  const [speechTiming, setSpeechTiming] = useState<V2SpeechTiming | null>(null);
+  const [preparedAudioStatus, setPreparedAudioStatus] = useState<{
+    key: string | null;
+    status: "idle" | "pending" | "started" | "unavailable";
+  }>({ key: null, status: "idle" });
+  const [interrogationPhase, setInterrogationPhase] = useState<WhodunnitInterrogationPhase | null>(null);
+  const [courtEstablishedWitnessSeatId, setCourtEstablishedWitnessSeatId] = useState<string | null>(null);
+  const [presentedCourtRecord, setPresentedCourtRecord] = useState<DebateMysteryRecordReferenceV2 | null>(null);
+  const [heldDialogue, setHeldDialogue] = useState<DebateMysteryPublicDialogueEntryV2 | null>(null);
+  const [examiningHotspotId, setExaminingHotspotId] = useState<string | null>(null);
+  const [investigationLens, setInvestigationLens] = useState<MysteryLensState>({
+    x: 50,
+    y: 50,
+    proximity: 0,
+    hotspotId: null,
+  });
+  const [examinationPointerInside, setExaminationPointerInside] = useState(false);
+  const [examinationKeyboardFocusActive, setExaminationKeyboardFocusActive] = useState(false);
+  const [completionCueRoomId, setCompletionCueRoomId] = useState<string | null>(null);
+  const completionCuePlaybackRoomIdRef = useRef<string | null>(null);
+  const [mansionSaveState, setMansionSaveState] = useState<
+    "idle" | "saving" | "saved" | "failed"
+  >("idle");
+  const [keepVenueUpdates, setKeepVenueUpdates] = useState(false);
+  const [caseExportState, setCaseExportState] = useState<
+    "idle" | "exporting" | "exported" | "failed"
+  >("idle");
+  const [roomVisualsMode, setRoomVisualsMode] = useState(false);
+  const [roomVisualDialogId, setRoomVisualDialogId] = useState<string | null>(null);
+  const [roomVisualRun, roomVisualRunOwner] = usePrismRefractionRun();
+  const [sceneRepairRun, sceneRepairRunOwner] = usePrismRefractionRun();
+  const [roomVisualJob, setRoomVisualJob] = useState<{
+    kind: "generate" | "upgrade";
+    roomId: string;
+    startedAt: string;
+  } | null>(null);
+  const [roomVisualResult, setRoomVisualResult] = useState<
+    "idle" | "generated" | "upgraded" | "failed"
+  >("idle");
+  const [roomUpgradeConfirmationRoomId, setRoomUpgradeConfirmationRoomId] =
+    useState<string | null>(null);
+  const [roomUpgradeSynthesisJob, setRoomUpgradeSynthesisJob] = useState<
+    WhodunnitRoomUpgradeSynthesisJob | null
+  >(null);
+  const roomUpgradeSynthesisJobIdRef = useRef<string | null>(null);
+  const [sceneRepairOpen, setSceneRepairOpen] = useState<"exterior" | string | null>(null);
+  const [exteriorEntryPlacementOpen, setExteriorEntryPlacementOpen] = useState(false);
+  const titleCoverPlaneRef = useRef<HTMLDivElement | null>(null);
+  const [sceneRepairItemMenu, setSceneRepairItemMenu] = useState<CaseFileItemRepairMenu | null>(null);
+  const [sceneRepairItemPick, setSceneRepairItemPick] = useState<SceneRepairItemPick | null>(null);
+  const [sceneRepairEmojiQuery, setSceneRepairEmojiQuery] = useState("");
+  const [lightEditorRoomId, setLightEditorRoomId] = useState<string | null>(null);
+  const [dismissedSceneRepairUndoId, setDismissedSceneRepairUndoId] = useState<string | null>(null);
+  const sceneRepairDismissalRevisionRef = useRef(0);
+  const [sceneRepairJob, setSceneRepairJob] = useState<{
+    action: DebateMysterySceneRepairActionV1 | "undo";
+    roomId: string | null;
+    subjectId: string | null;
+    startedAt: string;
+  } | null>(null);
+  const [itemSynthesisJobs, setItemSynthesisJobs] = useState<
+    WhodunnitItemSynthesisJob[]
+  >([]);
+  const itemSynthesisRunningRef = useRef(false);
+  const [sealedAssetObjectUrls, setSealedAssetObjectUrls] = useState<Record<string, string>>({});
+  const sealedAssetObjectUrlRef = useRef(new Map<string, string>());
+  const [sceneAssetRefreshNonce, setSceneAssetRefreshNonce] = useState(0);
+  const [audioAssetRefreshNonce, setAudioAssetRefreshNonce] = useState(0);
+  const [roomUpgradeEnabled, setRoomUpgradeEnabled] = useState(
+    state.config.assetSynthesis.illustratedRooms,
+  );
+  const [roomArtCrossfading, setRoomArtCrossfading] = useState(false);
+  const roomArtCrossfadeTimerRef = useRef<number | null>(null);
+  const [failedUpgradeRoomIds, setFailedUpgradeRoomIds] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
+  const [loadedUpgradeRoomIds, setLoadedUpgradeRoomIds] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
+  const [roomArtUpgradeStatus, setRoomArtUpgradeStatus] =
+    useState<DebateMysteryRoomArtUpgradeStatusV1 | null>(null);
+  const [openingMapReveal, setOpeningMapReveal] = useState(false);
+  const [reducedMotion, setReducedMotion] = useState(false);
+  const [roomParallax, setRoomParallax] = useState({ x: 0, y: 0 });
+  const [travelPresentation, setTravelPresentation] =
+    useState<MysteryMansionTravelPresentationV1 | null>(null);
+  const [exteriorEntryPresentation, setExteriorEntryPresentation] =
+    useState<MysteryMansionTravelPresentationV1 | null>(null);
+  const [visitingExterior, setVisitingExterior] = useState(false);
+  // Every entry begins outside. Start and Resume both lead to the venue door
+  // by way of a loading screen, where the investigator speaks an arrival line
+  // in their own voice before the exterior clears to the entrance.
+  const returningToVenue =
+    state.playPhase === "investigation" &&
+    state.config.investigationMode === "full" &&
+    state.config.playerRole !== "spectator";
+  const [entryStage, setEntryStage] = useState<"idle" | "loading" | "speaking" | "door">("idle");
+  const [arrivalLine, setArrivalLine] = useState<{
+    text: string;
+    audioUrl: string | null;
+    revealed: number;
+    playing: boolean;
+  } | null>(null);
+  const arrivalAudioRef = useRef<HTMLAudioElement | null>(null);
+  // Every cast voice's short vocalisations, recorded once at case load: a
+  // lead-in before the investigator's Bottish observation, and a listening
+  // reaction from whoever is on stage while another line types out.
+  const [vocalBank, setVocalBank] = useState<Record<string, DebateMysteryVocalCueEntryV2[]>>({});
+  const vocalBankRequestedRef = useRef(false);
+  const [vocalReactingBotId, setVocalReactingBotId] = useState<string | null>(null);
+  const vocalReactionPlayedRef = useRef<string | null>(null);
+  const [exteriorRoomReveal, setExteriorRoomReveal] = useState(false);
+  // Resuming a case shows its cover while the scene loads underneath; Start
+  // fades the cover away, and the fade's end unmounts it. A full
+  // investigation's Start goes outside to the venue door instead.
+  const [arrivalGate, setArrivalGate] = useState<"card" | "leaving" | "done">(() =>
+    state.playPhase === "investigation" || state.playPhase === "theory" ? "card" : "done");
+  useEffect(() => {
+    if (arrivalGate !== "leaving") return;
+    const timer = window.setTimeout(() => setArrivalGate("done"), reducedMotion ? 0 : 760);
+    return () => window.clearTimeout(timer);
+  }, [arrivalGate, reducedMotion]);
+  const [exteriorThoughtKey, setExteriorThoughtKey] = useState(0);
+  const [exteriorOpeningAcknowledged, setExteriorOpeningAcknowledged] = useState(false);
+  const [travelProgress, setTravelProgress] = useState(0);
+  const travelFoleyRef = useRef<MysteryMansionTravelFoleyHandleV1 | null>(null);
+  const travelFrameRef = useRef<number | null>(null);
+  const exteriorEntryTimerRef = useRef<number | null>(null);
+  const activeAudioRef = useRef<HTMLAudioElement | null>(null);
+  const premiumVoiceControllerRef = useRef<AbortController | null>(null);
+  const premiumVoicePlaybackRef = useRef(props.playMysteryPremiumVoice);
+  useEffect(() => {
+    premiumVoicePlaybackRef.current = props.playMysteryPremiumVoice;
+  }, [props.playMysteryPremiumVoice]);
+  const activeAudioOutputCleanupRef = useRef<PrismAudioElementRouteCleanup | null>(null);
+  const audioGenerationRef = useRef(0);
+  const captionRevealGenerationRef = useRef(0);
+  const roomContextKey = roomView === "room" ? state.currentRoomId : null;
+  const [roomDialogueBaseline, setRoomDialogueBaseline] = useState(() => ({
+    contextKey: roomContextKey,
+    historyCount: state.dialogueHistory.length,
+  }));
+  const [completedSpectatorBeat, setCompletedSpectatorBeat] = useState<string | null>(null);
+  const mutationIndexRef = useRef(0);
+  const lastPlayedPerformanceKeyRef = useRef<string | null>(null);
+  const lastCalloutIdRef = useRef<string | null>(null);
+  const dialogueSfxPresentationRef = useRef<{
+    key: string | null;
+    visibleText: string;
+  }>({ key: null, visibleText: "" });
+  const dialogueTextVoiceRef = useRef<{
+    controller: AbortController;
+    key: string;
+    mode: Exclude<WhodunnitTextVoiceMode, "off">;
+  } | null>(null);
+  const dialogueGestureFillRef = useRef<{
+    bot: boolean;
+    key: string | null;
+  }>({ bot: false, key: null });
+  const dialogueGestureAdvanceRef = useRef<string | null>(null);
+  useEffect(() => {
+    let disposed = false;
+    void readEncryptedWhodunnitRoomUpgradeEnabled({
+      ownerId: props.ownerId,
+      scopeId: props.session.id,
+      legacyStorage: window.localStorage,
+      initialEnabled: state.config.assetSynthesis.illustratedRooms,
+    }).then((enabled) => {
+      if (!disposed) setRoomUpgradeEnabled(enabled);
+    });
+    setFailedUpgradeRoomIds(new Set());
+    setLoadedUpgradeRoomIds(new Set());
+    roomUpgradeSynthesisJobIdRef.current = null;
+    setRoomUpgradeConfirmationRoomId(null);
+    setRoomUpgradeSynthesisJob(null);
+    return () => {
+      disposed = true;
+    };
+  }, [props.ownerId, props.session.id, state.config.assetSynthesis.illustratedRooms]);
+  useEffect(() => {
+    let disposed = false;
+    setDismissedSceneRepairUndoId(null);
+    const revision = ++sceneRepairDismissalRevisionRef.current;
+    void readEncryptedWhodunnitSceneRepairDismissal({
+      ownerId: props.ownerId,
+      scopeId: props.session.id,
+    }).then((repairId) => {
+      if (!disposed && revision === sceneRepairDismissalRevisionRef.current) setDismissedSceneRepairUndoId(repairId);
+    }).catch(() => {
+      // A private browser-state failure must leave Field repair usable.
+    });
+    return () => {
+      disposed = true;
+    };
+  }, [props.ownerId, props.session.id]);
+  useEffect(() => () => {
+    if (roomArtCrossfadeTimerRef.current !== null) {
+      window.clearTimeout(roomArtCrossfadeTimerRef.current);
+    }
+  }, []);
+  const selectRoomUpgradeEnabled = useCallback((enabled: boolean): void => {
+    if (roomArtCrossfadeTimerRef.current !== null) {
+      window.clearTimeout(roomArtCrossfadeTimerRef.current);
+    }
+    setRoomArtCrossfading(true);
+    roomArtCrossfadeTimerRef.current = window.setTimeout(() => {
+      roomArtCrossfadeTimerRef.current = null;
+      setRoomArtCrossfading(false);
+    }, ROOM_ART_CROSSFADE_MS);
+    setRoomUpgradeEnabled(enabled);
+    void writeEncryptedWhodunnitRoomUpgradeEnabled({
+      ownerId: props.ownerId,
+      scopeId: props.session.id,
+      enabled,
+    });
+  }, [props.ownerId, props.session.id]);
+  const playControlSfx = useCallback((cue: DebateMysterySfxCue): void => {
+    void playDebateMysterySfx({
+      cue,
+      enabled: props.audioEnabled,
+      volume: props.audioVolume,
+    });
+  }, [props.audioEnabled, props.audioVolume]);
+  useEffect(() => {
+    let cancelled = false;
+    const refresh = async (): Promise<void> => {
+      try {
+        const status = await props.request<DebateMysteryRoomArtUpgradeStatusV1>(
+          `/api/debates/${encodeURIComponent(props.session.id)}/mystery-room-art/upgrade`,
+        );
+        if (cancelled) return;
+        setRoomArtUpgradeStatus(status);
+      } catch {
+        if (!cancelled) setRoomArtUpgradeStatus(null);
+      }
+    };
+    void refresh();
+    return () => {
+      cancelled = true;
+    };
+  }, [props.request, props.session.id]);
+  useEffect(() => {
+    if (roomArtUpgradeStatus?.status !== "preparing") return;
+    let cancelled = false;
+    const refresh = (): void => {
+      void props.request<DebateMysteryRoomArtUpgradeStatusV1>(
+        `/api/debates/${encodeURIComponent(props.session.id)}/mystery-room-art/upgrade`,
+      ).then((status) => {
+        if (!cancelled) setRoomArtUpgradeStatus(status);
+      }).catch(() => {
+        // Keep the last known state; the bounded status interval retries.
+      });
+    };
+    const timer = window.setInterval(refresh, 1_500);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [props.request, props.session.id, roomArtUpgradeStatus?.status, roomArtUpgradeStatus?.readyRoomIds.length]);
+  const releaseActiveDialogueAudio = useCallback((): void => {
+    premiumVoiceControllerRef.current?.abort();
+    premiumVoiceControllerRef.current = null;
+    const audio = activeAudioRef.current;
+    const outputCleanup = activeAudioOutputCleanupRef.current;
+    activeAudioRef.current = null;
+    activeAudioOutputCleanupRef.current = null;
+    if (!audio) {
+      outputCleanup?.();
+      return;
+    }
+    void releaseAudibleAudioElement(audio, {
+      onReleased: outputCleanup ?? undefined,
+    });
+  }, []);
+  const cancelActiveDialogueAudio = useCallback((): void => {
+    premiumVoiceControllerRef.current?.abort();
+    premiumVoiceControllerRef.current = null;
+    const audio = activeAudioRef.current;
+    const outputCleanup = activeAudioOutputCleanupRef.current;
+    const ownsSyntheticVoice = dialogueTextVoiceRef.current !== null;
+    dialogueTextVoiceRef.current?.controller.abort();
+    activeAudioRef.current = null;
+    activeAudioOutputCleanupRef.current = null;
+    dialogueTextVoiceRef.current = null;
+    audioGenerationRef.current += 1;
+    captionRevealGenerationRef.current += 1;
+    cancelWhodunnitDialogueAudioImmediately({
+      media: audio,
+      outputCleanup,
+      cancelSyntheticVoice: ownsSyntheticVoice
+        ? () => teardownBottishVoiceImmediately({ preservePreparedMedia: true })
+        : null,
+    });
+  }, []);
+  useEffect(() => {
+    if (!pendingRoomKey) return;
+    let cancelled = false;
+    let timer: number | null = null;
+    let inFlight = false;
+    const refreshSecuredRooms = async (): Promise<void> => {
+      if (cancelled || inFlight) return;
+      inFlight = true;
+      try {
+        const result = await props.request<{ session: DebateSessionV1 }>(
+          `/api/debates/${encodeURIComponent(props.session.id)}?perspective=live`,
+        );
+        if (!cancelled && result.session.revision > props.session.revision) {
+          props.onSessionChange(result.session);
+        }
+      } catch {
+        // This is a soft doorway poll; the next interval retries.
+      } finally {
+        inFlight = false;
+        if (!cancelled) timer = window.setTimeout(() => void refreshSecuredRooms(), 1_500);
+      }
+    };
+    void refreshSecuredRooms();
+    return () => {
+      cancelled = true;
+      if (timer !== null) window.clearTimeout(timer);
+    };
+  }, [pendingRoomKey, props.onSessionChange, props.request, props.session.id, props.session.revision]);
+  const botById = useMemo(() => new Map(props.bots.map((bot) => [bot.id, bot])), [props.bots]);
+  const revealedAssetRequests = useMemo(() => {
+    const requests = new Map<string, {
+      kind: "evidence" | "room";
+      subjectId: string;
+      style?: WhodunnitInvestigationArtStyle;
+    }>();
+    if (state.mansionExterior?.revealed && state.mansionExterior.status === "ready") {
+      requests.set(
+        sealedMysteryAssetKey("room", DEBATE_MYSTERY_MANSION_EXTERIOR_SUBJECT_ID_V1),
+        {
+          kind: "room",
+          subjectId: DEBATE_MYSTERY_MANSION_EXTERIOR_SUBJECT_ID_V1,
+        },
+      );
+    }
+    for (const item of state.record) {
+      if (
+        item.reference.kind === "evidence" &&
+        item.sealedAsset?.revealed &&
+        item.sealedAsset.status === "ready"
+      ) {
+        requests.set(sealedMysteryAssetKey("evidence", item.reference.id), {
+          kind: "evidence",
+          subjectId: item.reference.id,
+        });
+      }
+    }
+    return Array.from(requests.entries()).sort(([left], [right]) => left.localeCompare(right));
+  }, [state.mansionExterior, state.record]);
+  const revealedAssetRequestKey = revealedAssetRequests.map(([key]) => key).join("|");
+
+  useEffect(() => {
+    const desired = new Map(revealedAssetRequests);
+    const controller = new AbortController();
+    let cancelled = false;
+    for (const [key, objectUrl] of sealedAssetObjectUrlRef.current) {
+      if (desired.has(key)) continue;
+      URL.revokeObjectURL(objectUrl);
+      sealedAssetObjectUrlRef.current.delete(key);
+    }
+    setSealedAssetObjectUrls(Object.fromEntries(sealedAssetObjectUrlRef.current));
+    for (const [key, request] of desired) {
+      if (sealedAssetObjectUrlRef.current.has(key)) continue;
+      void fetch(
+        sealedMysteryAssetApiUrl(
+          props.session.id,
+          request.kind,
+          request.subjectId,
+          request.style,
+        ),
+        {
+          credentials: "same-origin",
+          cache: "no-store",
+          signal: controller.signal,
+        },
+      ).then(async (response) => {
+        if (!response.ok) return;
+        const objectUrl = URL.createObjectURL(await response.blob());
+        if (cancelled || !desired.has(key)) {
+          URL.revokeObjectURL(objectUrl);
+          return;
+        }
+        sealedAssetObjectUrlRef.current.set(key, objectUrl);
+        setSealedAssetObjectUrls(Object.fromEntries(sealedAssetObjectUrlRef.current));
+      }).catch(() => {
+        // A reveal may race a session refresh; the next public-state change retries it.
+      });
+    }
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
+    // The compact key prevents re-fetches for unrelated session revisions.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [props.session.id, revealedAssetRequestKey, sceneAssetRefreshNonce]);
+
+  useEffect(() => () => {
+    for (const objectUrl of sealedAssetObjectUrlRef.current.values()) {
+      URL.revokeObjectURL(objectUrl);
+    }
+    sealedAssetObjectUrlRef.current.clear();
+  }, []);
+  const botNamesById = useMemo(() => new Map([
+    ...props.bots.map((bot) => [bot.id, bot.name] as const),
+    ...state.suspects.map((suspect) => [suspect.botId, suspect.name] as const),
+  ]), [props.bots, state.suspects]);
+  const identityMirrors = useMemo(
+    () => debateMysteryIdentityMirrorPresentationsV1({
+      session: props.session,
+      state,
+      botNamesById,
+    }),
+    [botNamesById, props.session, state],
+  );
+  const activeIdentityPresentation = useMemo(
+    () => [...identityMirrors.values()].reduce<ReturnType<typeof identityMirrors.get> | null>(
+      (latest, presentation) => !latest || presentation.occurredAt > latest.occurredAt
+        ? presentation
+        : latest,
+      null,
+    ),
+    [identityMirrors],
+  );
+  const [identityPresentationNowMs, setIdentityPresentationNowMs] = useState(() => Date.now());
+  useEffect(() => {
+    const now = Date.now();
+    setIdentityPresentationNowMs(now);
+    const occurredAtMs = activeIdentityPresentation
+      ? Date.parse(activeIdentityPresentation.occurredAt)
+      : Number.NaN;
+    if (!Number.isFinite(occurredAtMs)) return;
+    const remainingMs = Math.max(0, occurredAtMs + BOT_IDENTITY_PRESENTATION_TRANSITION_MS - now);
+    if (!remainingMs) return;
+    const timer = window.setTimeout(() => setIdentityPresentationNowMs(Date.now()), remainingMs);
+    return () => window.clearTimeout(timer);
+  }, [activeIdentityPresentation]);
+  const presentMysteryBot = useCallback((bot: MysteryBotSummary | null): MysteryBotSummary | null => {
+    if (!bot) return null;
+    const mirror = identityMirrors.get(bot.id);
+    if (!mirror) return bot;
+    const frozenTarget = state.identityMirrorTargetSnapshots[mirror.targetBotId];
+    const frozenHolder = state.identityMirrorTargetSnapshots[bot.id];
+    const target = frozenTarget
+      ? debateMysteryIdentityMirrorTargetBotSnapshotV1(frozenTarget)
+      : (() => {
+          const liveTarget = botById.get(mirror.targetBotId) ?? null;
+          return liveTarget ? mysteryBotSnapshot(liveTarget) : null;
+        })();
+    const faceStyleOverride = frozenHolder && frozenTarget
+      ? debateMysteryIdentityMirrorFaceV1(frozenHolder, frozenTarget)
+      : null;
+    return mysteryIdentityMirrorAppearance(
+      bot,
+      target,
+      mirror.targetName,
+      faceStyleOverride,
+    );
+  }, [botById, identityMirrors, state.identityMirrorTargetSnapshots]);
+  const identityPresentationBlackout = (
+    <IdentityPresentationBlackout
+      active={botIdentityPresentationTransitionActiveV1(
+        activeIdentityPresentation,
+        identityPresentationNowMs,
+      )}
+      occurredAt={activeIdentityPresentation?.occurredAt}
+      nowMs={identityPresentationNowMs}
+    />
+  );
+  const currentRoom = state.rooms.find((room) => room.id === state.currentRoomId) ?? null;
+  const mansionLayout = state.config.mansionSnapshot?.layoutV2 ?? null;
+  const venueProfile = mansionLayout?.venueProfile ?? null;
+  const venuePlaceNoun = venueProfile?.placeNoun?.trim() || "venue";
+  const venueEntryAction = venueProfile?.presentation?.entryAction?.trim() ||
+    `Enter the ${venuePlaceNoun}`;
+  const venueEntryRoom = venueProfile
+    ? state.rooms.find((room) => room.id === venueProfile.entryRoomId) ?? null
+    : state.rooms.find((room) => room.templateId?.toLocaleLowerCase() === "foyer") ??
+      state.rooms.find((room) => /foyer/u.test(room.name.toLocaleLowerCase())) ??
+      null;
+  const currentRoomAcoustics = useMemo(
+    () => currentRoom
+      ? mysteryMansionRoomAcousticsV1({
+        room: currentRoom,
+        houseStyle: state.config.houseStyle,
+        venueProfile,
+      })
+      : null,
+    [currentRoom, state.config.houseStyle, venueProfile],
+  );
+  const mansionFloors = useMemo(
+    () => [...new Set(state.rooms.map((room) => room.floor))].sort((left, right) => right - left),
+    [state.rooms],
+  );
+  const [mansionFloor, setMansionFloor] = useState(() => currentRoom?.floor ?? mansionFloors.at(-1) ?? 1);
+  const [mapPlanVisible, setMapPlanVisible] = useState(true);
+  const [mapPlanOpacity, setMapPlanOpacity] = useState(0.75);
+  // The overhead editor: draw the plate and place it by hand, the way Lights & FX edits a room.
+  const [overheadEditorOpen, setOverheadEditorOpen] = useState(false);
+  const [selectedMansionRoomId, setSelectedMansionRoomId] = useState(() => currentRoom?.id ?? state.rooms[0]?.id ?? "");
+  const [revealedCasekeeperNarrationKey, setRevealedCasekeeperNarrationKey] = useState<string | null>(null);
+  // `prosecutorBot` is the player's counsel seat in every stance; only its
+  // role words follow the chosen chair.
+  const prosecutorBot = presentMysteryBot(botById.get(state.config.prosecutorBotId) ?? null);
+  const counsel = debateMysteryCounselSeatsV2(state.config);
+  const clientSeatId = debateMysteryClientSeatIdV2(state);
+  const client = clientSeatId
+    ? state.suspects.find((suspect) => suspect.seatId === clientSeatId) ?? null
+    : null;
+  // First person keeps the investigator off stage until Court; embodied
+  // stages them beside each witness while the witness answers. Neither
+  // performs the investigator's question.
+  const firstPersonInvestigation = (props.investigationPerspective ?? "first_person") === "first_person";
+  // Start and Resume prepare the arrival line and its take behind a loading
+  // screen; the investigator then speaks it over the blurred exterior.
+  const beginVenueArrival = useCallback((): void => {
+    setEntryStage("loading");
+    setArrivalLine(null);
+    // The arrival request records the line, its take, and every cast voice's
+    // cues. A slow local engine must never strand the player behind the
+    // loader: past the bound the door opens without a line, and the vocal
+    // bank is fetched again once the investigation begins.
+    let timer: number | null = null;
+    const bounded = new Promise<never>((_resolve, reject) => {
+      timer = window.setTimeout(
+        () => reject(new Error("The arrival line took too long to prepare.")),
+        WHODUNNIT_ARRIVAL_LINE_WAIT_MS,
+      );
+    });
+    void Promise.race([
+      props.request<{
+        line: { text: string; audio: { url: string; contentType: string; durationMs: number } | null } | null;
+        vocalBank?: Record<string, DebateMysteryVocalCueEntryV2[]>;
+      }>(
+        `/api/debates/${encodeURIComponent(props.session.id)}/mystery-arrival-line`,
+        mutationBody({ version: 2 }),
+      ),
+      bounded,
+    ]).finally(() => {
+      if (timer !== null) window.clearTimeout(timer);
+    }).then((result) => {
+      if (result.vocalBank) {
+        vocalBankRequestedRef.current = true;
+        setVocalBank(result.vocalBank);
+      }
+      const text = result.line?.text?.replace(/\s+/gu, " ").trim();
+      if (!text) {
+        setEntryStage("door");
+        return;
+      }
+      setArrivalLine({ text, audioUrl: result.line?.audio?.url ?? null, revealed: 0, playing: false });
+      setEntryStage("speaking");
+    }).catch(() => setEntryStage("door"));
+  }, [props.request, props.session.id]);
+  useEffect(() => {
+    // A case opened straight into a room still gets its bank; the cues are
+    // already recorded, so this is a read unless a voice changed.
+    if (state.playPhase !== "investigation" || vocalBankRequestedRef.current) return;
+    vocalBankRequestedRef.current = true;
+    void props.request<{ vocalBank: Record<string, DebateMysteryVocalCueEntryV2[]> }>(
+      `/api/debates/${encodeURIComponent(props.session.id)}/mystery-vocal-bank`,
+    ).then((result) => {
+      if (result.vocalBank) setVocalBank(result.vocalBank);
+    }).catch(() => undefined);
+  }, [props.request, props.session.id, state.playPhase]);
+  const arrivalAudioUrl = arrivalLine?.audioUrl ?? null;
+  const arrivalAudible = Boolean(arrivalAudioUrl) && props.audioEnabled && props.audioVolume > 0;
+  useEffect(() => {
+    // The take drives the caption: the words reveal as they are spoken.
+    if (entryStage !== "speaking" || !arrivalAudioUrl || !arrivalAudible) return;
+    const audio = new Audio(arrivalAudioUrl);
+    audio.volume = Math.min(1, Math.max(0, props.audioVolume));
+    arrivalAudioRef.current = audio;
+    let frame: number | null = null;
+    const settle = (): void => {
+      if (frame !== null) window.cancelAnimationFrame(frame);
+      frame = null;
+      setArrivalLine((current) => current ? { ...current, revealed: current.text.length, playing: false } : current);
+    };
+    const follow = (): void => {
+      if (audio.paused || !Number.isFinite(audio.duration) || audio.duration <= 0) {
+        frame = window.requestAnimationFrame(follow);
+        return;
+      }
+      const progress = Math.min(1, audio.currentTime / audio.duration);
+      setArrivalLine((current) => current
+        ? { ...current, revealed: Math.max(current.revealed, Math.min(current.text.length, Math.round(current.text.length * progress))) }
+        : current);
+      frame = window.requestAnimationFrame(follow);
+    };
+    audio.addEventListener("ended", settle);
+    audio.addEventListener("error", settle);
+    setArrivalLine((current) => current ? { ...current, playing: true } : current);
+    void audio.play().then(() => { frame = window.requestAnimationFrame(follow); }).catch(settle);
+    return () => {
+      if (frame !== null) window.cancelAnimationFrame(frame);
+      audio.removeEventListener("ended", settle);
+      audio.removeEventListener("error", settle);
+      audio.pause();
+      if (arrivalAudioRef.current === audio) arrivalAudioRef.current = null;
+    };
+  }, [arrivalAudible, arrivalAudioUrl, entryStage, props.audioVolume]);
+  useEffect(() => {
+    // Without a take, or with sound off, the line types out on its own clock.
+    if (entryStage !== "speaking" || !arrivalLine || arrivalLine.playing || arrivalAudible) return;
+    if (arrivalLine.revealed >= arrivalLine.text.length) return;
+    const timer = window.setTimeout(() => {
+      setArrivalLine((current) => current && current.revealed < current.text.length
+        ? { ...current, revealed: current.revealed + 1 }
+        : current);
+    }, reducedMotion ? 0 : 34);
+    return () => window.clearTimeout(timer);
+  }, [arrivalAudible, arrivalLine, entryStage, reducedMotion]);
+  const playerCharacterName = prosecutorBot?.name ?? props.playerName ?? "Investigator";
+  const playerCharacterColor = normalizeAccentForTheme(
+    normalizeBotIdentityColor(prosecutorBot?.color) ??
+      normalizeBotIdentityColor(props.playerColor) ??
+      "#ae8cff",
+    props.theme,
+  );
+  const playerCharacterGlyph = prosecutorBot?.glyph ?? props.playerGlyph;
+  const currentSuspect = state.suspects.find((suspect) => suspect.roomId === currentRoom?.id) ?? null;
+  const currentBot = presentMysteryBot(botForSeat(props, state, currentSuspect?.seatId));
+  const roomIntroductionPhase = currentRoom
+    ? state.roomIntroductions[currentRoom.id] ?? "complete"
+    : "complete";
+  const roomIntroductionActive = roomIntroductionPhase !== "complete";
+  const roomIntroductionPersonaActive = roomIntroductionPhase === "persona";
+  const roomIntroductionDialogueNodeId = currentRoom
+    ? `room-introduction-${currentRoom.id}-${roomIntroductionPhase}`
+    : null;
+  const roomIntroductionDialogue = roomIntroductionDialogueNodeId
+    ? state.dialogueHistory.findLast((entry) => entry.nodeId === roomIntroductionDialogueNodeId) ?? null
+    : null;
+  const roomCasekeeperNarrationKey = currentRoom
+    ? `${props.session.id}:${currentRoom.id}`
+    : null;
+  const roomCasekeeperNarrationVisible = Boolean(
+    roomIntroductionPhase === "casekeeper" &&
+      (
+        roomIntroductionDialogue?.delivery === "persona_babble" ||
+        (
+          roomCasekeeperNarrationKey &&
+          revealedCasekeeperNarrationKey === roomCasekeeperNarrationKey
+        )
+      ),
+  );
+  useEffect(() => {
+    if (
+      roomIntroductionPhase !== "casekeeper" &&
+      roomCasekeeperNarrationKey &&
+      revealedCasekeeperNarrationKey === roomCasekeeperNarrationKey
+    ) {
+      setRevealedCasekeeperNarrationKey(null);
+    }
+  }, [revealedCasekeeperNarrationKey, roomCasekeeperNarrationKey, roomIntroductionPhase]);
+  const lastDialogue = state.dialogueHistory.at(-1) ?? null;
+  const queuedDialogue = dialoguePlaybackQueue[dialoguePlaybackIndex] ?? null;
+  const displayedDialogue = queuedDialogue ?? heldDialogue ?? (
+    state.playPhase === "trial" ? null : lastDialogue
+  );
+  const interrogationFirstEntryState = whodunnitInterrogationFirstEntryState({
+    entries: dialoguePlaybackQueue,
+    index: dialoguePlaybackIndex,
+    prosecutorBotId: state.config.prosecutorBotId,
+    suspectSeatId: currentSuspect?.seatId ?? "",
+  });
+  const dialogueBot = presentMysteryBot(botForDialogue(props, state, displayedDialogue));
+  const roomDisplayedDialogue = queuedDialogue ?? heldDialogue ?? roomIntroductionDialogue ?? (
+    roomDialogueBaseline.contextKey === roomContextKey &&
+    state.dialogueHistory.length > roomDialogueBaseline.historyCount
+      ? lastDialogue
+      : null
+  );
+  const terminalWitnessHold = whodunnitInterrogationTerminalWitnessShouldHold({
+    phase: interrogationPhase,
+    hasQueuedResponse: dialoguePlaybackIndex + 1 < dialoguePlaybackQueue.length,
+  });
+  const roomDialogueBot = presentMysteryBot(botForDialogue(props, state, roomDisplayedDialogue));
+  const roomProsecutorActive = roomDisplayedDialogue?.speakerBotId === state.config.prosecutorBotId;
+  // First contact belongs to the suspect alone. The player's investigator
+  // joins the two-shot only after Talk or Present deliberately begins.
+  const interrogationStagingActive = whodunnitPlayerCharacterStagingActive({
+    command,
+    hasPlayerCharacter: prosecutorBot !== null && !firstPersonInvestigation,
+    hasSuspect: currentSuspect !== null,
+    interrogationPhase,
+    roomIntroductionActive,
+  });
+  const roomActorEligible = Boolean(
+    currentBot &&
+      command !== "examine" &&
+      (!roomProsecutorActive || interrogationStagingActive) &&
+      (!roomIntroductionActive || roomIntroductionPersonaActive),
+  );
+  const dialogueIsTextOnly = displayedDialogue?.delivery === "text_only"
+    // Frozen cases recorded before the explicit delivery contract used these
+    // stable node IDs. Keep their old local clips unreachable.
+    || displayedDialogue?.nodeId.startsWith("examine-") === true;
+  const roomDialogueIsTextOnly = roomDisplayedDialogue?.delivery === "text_only"
+    || roomDisplayedDialogue?.nodeId.startsWith("examine-") === true;
+  const roomPlayerObservationActive = Boolean(
+    roomDisplayedDialogue &&
+      roomDialogueIsTextOnly &&
+      roomDisplayedDialogue.nodeId.startsWith("examine-"),
+  );
+  const roomIntroductionAwaitingContinue = roomIntroductionPhase === "casekeeper";
+  const roomIntroductionBringingForward = Boolean(
+    roomIntroductionAwaitingContinue && roomCasekeeperNarrationVisible && (
+      pendingRoomIntroduction && pendingRoomIntroduction.roomId === currentRoom?.id
+        ? pendingRoomIntroduction.adoptOnArrival && !pendingRoomIntroduction.deferred
+        : busy
+    ),
+  );
+  const roomCasekeeperNarrationText = currentRoom
+    ? debateMysteryRoomCasekeeperNarrationTextV2({
+        appearance: currentBot?.roomNarrationAppearance,
+        fixtureLabels: currentRoom.hotspots.map((hotspot) => hotspot.label),
+        personaName: currentBot?.name ?? currentSuspect?.name ?? null,
+        persistedNarration: roomIntroductionDialogue?.visibleText,
+      })
+    : "";
+  const roomDialoguePresentationText = roomIntroductionAwaitingContinue
+    ? roomCasekeeperNarrationVisible
+      ? roomCasekeeperNarrationText
+      : "..."
+    : roomDisplayedDialogue?.visibleText ?? "";
+  const roomDialogueDelivery = roomDisplayedDialogue
+    ? splitDebateMysteryStageActionTextV2(
+        roomDialoguePresentationText,
+        roomDialogueBot?.name ?? currentSuspect?.name ?? null,
+      )
+    : { stageActionText: null, spokenText: "" };
+  // The visible line has finished streaming (typed out, filled by a click, or
+  // its audio ended) and now waits for the dismissing gesture.
+  const roomDialogueSettled = Boolean(
+    roomDisplayedDialogue &&
+      speechTiming &&
+      whodunnitCaptionSpeechText(speechTiming.text) ===
+        whodunnitCaptionSpeechText(roomDialogueDelivery.spokenText) &&
+      speechTiming.elapsedMs >= speechTiming.durationMs,
+  );
+  const roomObservationAwaitingContinue = Boolean(
+    roomPlayerObservationActive && roomDialogueSettled,
+  );
+  const roomStageActionText = roomDisplayedDialogue?.stageActionText ?? roomDialogueDelivery.stageActionText;
+  const roomSuspectStageActionText = roomDisplayedDialogue?.speakerSeatId === currentSuspect?.seatId
+    ? roomStageActionText
+    : null;
+  const roomProsecutorStageActionText = roomProsecutorActive ? roomStageActionText : null;
+  const roomPersonaDialogueActive = Boolean(
+    roomDisplayedDialogue &&
+      !roomIntroductionAwaitingContinue &&
+      !roomDialogueIsTextOnly &&
+      !roomProsecutorActive &&
+      roomDisplayedDialogue.speakerSeatId === currentSuspect?.seatId,
+  );
+  const roomDialoguePersonaName = roomDialogueBot?.name ?? currentSuspect?.name ?? null;
+  const roomDialoguePersonaGlyph = roomDialogueBot?.glyph ?? currentSuspect?.glyph ?? null;
+  const roomDialoguePersonaColor = normalizeAccentForTheme(
+    normalizeBotIdentityColor(roomDialogueBot?.color ?? currentSuspect?.color) ?? "#a98cff",
+    props.theme,
+  );
+  const roomDialogueSpeakerKind = roomIntroductionAwaitingContinue
+    ? "player-thought"
+    : roomPlayerObservationActive
+      ? "player-observation"
+      : roomProsecutorActive
+        ? "prosecutor"
+        : roomPersonaDialogueActive
+          ? "persona"
+          : "observation";
+  const roomDialoguePresentationKey = roomDisplayedDialogue
+    ? `${roomDisplayedDialogue.nodeId}:${roomDisplayedDialogue.occurredAt}:${
+        roomIntroductionAwaitingContinue
+          ? roomCasekeeperNarrationVisible ? "casekeeper-narration" : "casekeeper-beat"
+          : roomDisplayedDialogue.lineId ?? "text-only"
+      }`
+    : null;
+  const roomDialogueAccentStyle = roomPlayerObservationActive
+    ? { "--dialogue-accent": playerCharacterColor } as CSSProperties
+    : roomDialogueBot
+      ? { "--dialogue-accent": roomDialoguePersonaColor } as CSSProperties
+      : undefined;
+  const dialoguePerformanceActive = queuedDialogue !== null;
+  // The seat count alone paces the assembling Court; nothing speaks until it is seated.
+  const courtGallerySeatCount = state.config.jurorBotIds.length + Math.max(0, state.suspects.length - 1);
+  const courtArrivalProgress = courtArrival
+    ? whodunnitCourtArrivalProgress({
+        seatCount: courtGallerySeatCount,
+        elapsedMs: courtArrival.nowMs - courtArrival.startedAt,
+        reducedMotion,
+      })
+    : null;
+  const courtArrivalActive = courtArrivalProgress !== null && !courtArrivalProgress.complete;
+  const interrogationAudioMayStart = whodunnitInterrogationMayStartAudio(interrogationPhase) && !courtArrivalActive;
+  const audioMouthActive = whodunnitInterrogationAudioOwnsMouth({
+    phase: interrogationPhase,
+    audible: speechTiming?.audible === true,
+  });
+  const roomSpeechInkVisible = !dialoguePerformanceActive || interrogationPhase === "handoff";
+  const admittedRecord = state.record.filter((item) => item.admitted);
+  const foundEvidenceItems = admittedRecord.filter(
+    (item): item is DebateMysteryPublicRecordItemV2 & {
+      reference: { kind: "evidence"; id: string };
+    } => item.reference.kind === "evidence",
+  );
+  const activeFoundEvidence = caseFileUpdate?.kind === "record" &&
+      caseFileUpdate.item.reference.kind === "evidence"
+    ? caseFileUpdate.item
+    : null;
+  const caseFileEntryCount = admittedRecord.length +
+    (state.caseKit?.length ?? 0) +
+    debateMysteryCaseFileObservationsV2({
+      dialogueHistory: state.dialogueHistory,
+      rooms: state.rooms,
+    }).length;
+  const theoryAccusedSeatIds = debateMysteryTheoryAccusedSeatIdsV2(theory);
+  const mansionCanBeSaved = debateMysteryMansionBundleEligibleV2(state);
+  const canKeepVenueUpdates = mansionCanBeSaved
+    && state.config.playerRole !== "spectator"
+    && state.config.investigationMode !== "court_only";
+  const keepVenueUpdatesOverwritesOriginal = Boolean(
+    state.config.mansionSnapshot?.sourceBundleId?.trim(),
+  );
+  const roomVisualDialogRoom = roomVisualDialogId
+    ? state.rooms.find((room) => room.id === roomVisualDialogId) ?? null
+    : null;
+  const roomUpgradeConfirmationRoom = roomUpgradeConfirmationRoomId
+    ? state.rooms.find((room) => room.id === roomUpgradeConfirmationRoomId) ?? null
+    : null;
+  const roomVisualDialogReadiness = roomVisualDialogRoom
+    ? roomVisualResult === "upgraded"
+      ? "upgraded"
+      : roomVisualResult === "generated"
+        ? "default"
+        : whodunnitRoomVisualReadiness(roomVisualDialogRoom, roomArtUpgradeStatus)
+    : null;
+
+  const saveMansion = async (): Promise<boolean> => {
+    if (!mansionCanBeSaved || mansionSaveState === "saving") return false;
+    setMansionSaveState("saving");
+    setError(null);
+    try {
+      await props.onSaveMansion();
+      setMansionSaveState("saved");
+      return true;
+    } catch (caught) {
+      setMansionSaveState("failed");
+      setError(
+        caught instanceof Error
+          ? caught.message
+          : "This Mystery Venue could not be saved.",
+      );
+      return false;
+    }
+  };
+  const concludeInvestigation = async (
+    action: "file_theory" | "check_case",
+  ): Promise<boolean> => {
+    if (keepVenueUpdates && canKeepVenueUpdates) {
+      const saved = await saveMansion();
+      if (!saved) return false;
+    }
+    return sendAction({ action, theory });
+  };
+  const generateRoomVisual = async (room: DebateMysteryRoomV2): Promise<void> => {
+    if (roomVisualJob || liveResponseMode === "local") return;
+    const run = roomVisualRunOwner.begin();
+    let success = false;
+    setRoomVisualJob({
+      kind: "generate",
+      roomId: room.id,
+      startedAt: new Date().toISOString(),
+    });
+    setRoomVisualResult("idle");
+    setError(null);
+    try {
+      const result = await run.wait(() => props.request<{
+        requeued: number;
+        session: DebateSessionV1;
+      }>(
+        `/api/debates/${encodeURIComponent(props.session.id)}/mystery-assets/retry`,
+        { ...mutationBody({ category: "mosaic_rooms", roomId: room.id }), signal: run.signal },
+      ));
+      const next = result.session.formatState;
+      const prepared = next.format === "whodunnit" && next.version === 2
+        ? next.rooms.find((candidate) => candidate.id === room.id)
+        : null;
+      if (prepared?.sealedAsset?.status === "ready") {
+        const status = await run.wait(() => props.request<DebateMysteryRoomArtUpgradeStatusV1>(
+          `/api/debates/${encodeURIComponent(props.session.id)}/mystery-room-art/upgrade`,
+          { signal: run.signal },
+        ));
+        setRoomArtUpgradeStatus(status);
+        setRoomVisualResult("generated");
+        success = true;
+      } else {
+        setRoomVisualResult("failed");
+        setError("This room could not replace its fallback within the bounded visual retry.");
+      }
+      props.onSessionChange(result.session);
+    } catch (caught) {
+      if (!run.isCurrent()) return;
+      setRoomVisualResult("failed");
+      setError(caught instanceof Error ? caught.message : "This room could not be generated.");
+    } finally {
+      if (run.finish(success)) setRoomVisualJob(null);
+    }
+  };
+  const upgradeRoomVisual = async (room: DebateMysteryRoomV2): Promise<void> => {
+    if (roomVisualJob || liveResponseMode === "local") return;
+    const run = roomVisualRunOwner.begin();
+    let success = false;
+    setRoomVisualJob({
+      kind: "upgrade",
+      roomId: room.id,
+      startedAt: new Date().toISOString(),
+    });
+    setRoomVisualResult("idle");
+    setError(null);
+    try {
+      const status = await run.wait(() => props.request<DebateMysteryRoomArtUpgradeStatusV1>(
+        `/api/debates/${encodeURIComponent(props.session.id)}/mystery-room-art/upgrade`,
+        { ...mutationBody({ roomId: room.id }), signal: run.signal },
+      ));
+      setRoomArtUpgradeStatus(status);
+      if (status.readyRoomIds.includes(room.id)) {
+        setRoomVisualResult("upgraded");
+        success = true;
+      } else {
+        setRoomVisualResult("failed");
+        setError("The Upgraded room could not pass its composition checks. Its default Mosaic is unchanged.");
+      }
+    } catch (caught) {
+      if (!run.isCurrent()) return;
+      setRoomVisualResult("failed");
+      setError(caught instanceof Error ? caught.message : "This room could not be upgraded.");
+    } finally {
+      if (run.finish(success)) setRoomVisualJob(null);
+    }
+  };
+  const startRoomUpgradeSoftSynthesis = useCallback((room: DebateMysteryRoomV2): void => {
+    if (
+      liveResponseMode === "local" ||
+      roomUpgradeSynthesisJob?.status === "refracting"
+    ) return;
+    const jobId = `${props.session.id}:${room.id}:${crypto.randomUUID()}`;
+    roomUpgradeSynthesisJobIdRef.current = jobId;
+    setFailedUpgradeRoomIds((current) => {
+      const next = new Set(current);
+      next.delete(room.id);
+      return next;
+    });
+    setLoadedUpgradeRoomIds((current) => {
+      const next = new Set(current);
+      next.delete(room.id);
+      return next;
+    });
+    setRoomUpgradeConfirmationRoomId(null);
+    setRoomUpgradeSynthesisJob({
+      id: jobId,
+      roomId: room.id,
+      title: room.name,
+      status: "refracting",
+      startedAt: new Date().toISOString(),
+      error: null,
+    });
+    setError(null);
+    void props.request<DebateMysteryRoomArtUpgradeStatusV1>(
+      `/api/debates/${encodeURIComponent(props.session.id)}/mystery-room-art/upgrade`,
+      mutationBody({ roomId: room.id }),
+    ).then((status) => {
+      if (roomUpgradeSynthesisJobIdRef.current !== jobId) return;
+      setRoomArtUpgradeStatus(status);
+    }).catch((caught) => {
+      if (roomUpgradeSynthesisJobIdRef.current !== jobId) return;
+      const message = caught instanceof Error
+        ? caught.message
+        : "This room could not be upgraded. Its Mosaic is unchanged.";
+      setRoomUpgradeSynthesisJob((current) => current?.id === jobId
+        ? { ...current, status: "failed", error: message }
+        : current);
+    });
+  }, [
+    props.request,
+    props.session.id,
+    liveResponseMode,
+    roomUpgradeSynthesisJob?.status,
+  ]);
+  const evictExteriorObjectUrl = (): void => {
+    const key = sealedMysteryAssetKey(
+      "room",
+      DEBATE_MYSTERY_MANSION_EXTERIOR_SUBJECT_ID_V1,
+    );
+    const objectUrl = sealedAssetObjectUrlRef.current.get(key);
+    if (objectUrl) URL.revokeObjectURL(objectUrl);
+    sealedAssetObjectUrlRef.current.delete(key);
+    setSealedAssetObjectUrls(Object.fromEntries(sealedAssetObjectUrlRef.current));
+    setSceneAssetRefreshNonce((current) => current + 1);
+  };
+  const evictEvidenceObjectUrl = useCallback((subjectId: string): void => {
+    const key = sealedMysteryAssetKey("evidence", subjectId);
+    const objectUrl = sealedAssetObjectUrlRef.current.get(key);
+    if (objectUrl) URL.revokeObjectURL(objectUrl);
+    sealedAssetObjectUrlRef.current.delete(key);
+    setSealedAssetObjectUrls(Object.fromEntries(sealedAssetObjectUrlRef.current));
+    setSceneAssetRefreshNonce((current) => current + 1);
+  }, []);
+  const queueItemSynthesisRequest = useCallback((input: {
+    subjectId: string;
+    title: string;
+    emoji: string;
+  }): void => {
+    if (liveResponseMode === "local") return;
+    setItemSynthesisJobs((current) => {
+      if (current.some((job) =>
+        job.subjectId === input.subjectId && job.status === "queued")) {
+        return current;
+      }
+      const withoutEarlierResult = current.filter((job) =>
+        job.subjectId !== input.subjectId ||
+        (job.status !== "ready" && job.status !== "failed"));
+      const queuedAt = new Date().toISOString();
+      return [
+        ...withoutEarlierResult,
+        {
+          id: `${input.subjectId}:${crypto.randomUUID()}`,
+          subjectId: input.subjectId,
+          title: input.title,
+          emoji: input.emoji,
+          status: "queued",
+          queuedAt,
+          startedAt: null,
+          error: null,
+        },
+      ];
+    });
+    setSceneRepairOpen(null);
+    setError(null);
+  }, [liveResponseMode]);
+  const enqueueItemSynthesis = useCallback((
+    item: DebateMysteryPublicRecordItemV2,
+  ): void => {
+    if (item.reference.kind !== "evidence" || !item.admitted) return;
+    queueItemSynthesisRequest({
+      subjectId: item.reference.id,
+      title: item.title,
+      emoji: item.emoji,
+    });
+  }, [queueItemSynthesisRequest]);
+  const retryItemSynthesis = useCallback((jobId: string): void => {
+    setItemSynthesisJobs((current) => {
+      const failed = current.find((job) =>
+        job.id === jobId && job.status === "failed");
+      if (!failed || current.some((job) =>
+        job.id !== jobId &&
+        job.subjectId === failed.subjectId &&
+        job.status === "queued")) {
+        return current;
+      }
+      return current.map((job) => job.id === jobId
+        ? {
+            ...job,
+            status: "queued",
+            queuedAt: new Date().toISOString(),
+            startedAt: null,
+            error: null,
+          }
+        : job);
+    });
+  }, []);
+  const dismissItemSynthesis = useCallback((jobId: string): void => {
+    setItemSynthesisJobs((current) => current.filter((job) =>
+      job.id !== jobId || (job.status !== "ready" && job.status !== "failed")));
+  }, []);
+  const itemSynthesisSourceId = `whodunnit-items:${props.session.id}`;
+  const roomUpgradeSynthesisSourceId = `whodunnit-room-upgrade:${props.session.id}`;
+
+  useEffect(() => {
+    registerPrismSoftSynthesisJobs(
+      itemSynthesisSourceId,
+      itemSynthesisJobs.length,
+      { orbOpensProgress: true },
+    );
+  }, [itemSynthesisJobs.length, itemSynthesisSourceId]);
+
+  useEffect(() => () => {
+    registerPrismSoftSynthesisJobs(itemSynthesisSourceId, 0);
+  }, [itemSynthesisSourceId]);
+
+  useEffect(() => {
+    registerPrismSoftSynthesisJobs(
+      roomUpgradeSynthesisSourceId,
+      roomUpgradeSynthesisJob ? 1 : 0,
+      { orbOpensProgress: true },
+    );
+  }, [roomUpgradeSynthesisJob, roomUpgradeSynthesisSourceId]);
+
+  useEffect(() => () => {
+    registerPrismSoftSynthesisJobs(roomUpgradeSynthesisSourceId, 0);
+  }, [roomUpgradeSynthesisSourceId]);
+
+  useEffect(() => {
+    if (itemSynthesisRunningRef.current) return;
+    const queued = itemSynthesisJobs.find((job) => job.status === "queued");
+    if (!queued) return;
+    itemSynthesisRunningRef.current = true;
+    const startedAt = new Date().toISOString();
+    setItemSynthesisJobs((current) => current.map((job) =>
+      job.id === queued.id
+        ? { ...job, status: "generating", startedAt, error: null }
+        : job));
+
+    void (async (): Promise<void> => {
+      try {
+        const result = await props.request<{
+          session: DebateSessionV1;
+          roomArtUpgrade: DebateMysteryRoomArtUpgradeStatusV1;
+        }>(
+          `/api/debates/${encodeURIComponent(props.session.id)}/mystery-scene-repair`,
+          mutationBody({
+            action: "regenerate_evidence_asset",
+            subjectId: queued.subjectId,
+          }),
+        );
+        evictEvidenceObjectUrl(queued.subjectId);
+        setItemSynthesisJobs((current) => current
+          .filter((job) =>
+            job.id === queued.id ||
+            job.subjectId !== queued.subjectId ||
+            (job.status !== "ready" && job.status !== "failed"))
+          .map((job) => job.id === queued.id
+            ? { ...job, status: "ready", error: null }
+            : job));
+        setRoomArtUpgradeStatus(result.roomArtUpgrade);
+        props.onSessionChange(result.session);
+      } catch (caught) {
+        const message = caught instanceof Error
+          ? caught.message
+          : "This found item could not be refracted.";
+        setItemSynthesisJobs((current) => current.map((job) =>
+          job.id === queued.id
+            ? { ...job, status: "failed", error: message }
+            : job));
+      } finally {
+        itemSynthesisRunningRef.current = false;
+      }
+    })();
+  }, [
+    evictEvidenceObjectUrl,
+    itemSynthesisJobs,
+    props.onSessionChange,
+    props.request,
+    props.session.id,
+  ]);
+
+  const repairScene = async (
+    action: DebateMysterySceneRepairActionV1,
+    room: DebateMysteryRoomV2 | null = null,
+    item: DebateMysteryPublicRecordItemV2 | null = null,
+    extra: {
+      emoji?: string;
+      entryTarget?: { x: number; y: number };
+      onSuccess?: () => void;
+    } = {},
+  ): Promise<void> => {
+    if (sceneRepairJob) return;
+    if (action === "regenerate_evidence_asset") {
+      if (item) enqueueItemSynthesis(item);
+      return;
+    }
+    const textRepair = LOCAL_TEXT_REPAIR_ACTIONS.includes(action);
+    const providerFreeRepair = PROVIDER_FREE_SCENE_REPAIR_ACTIONS.includes(action);
+    if (liveResponseMode === "local" && !textRepair && !providerFreeRepair) return;
+    const run = sceneRepairRunOwner.begin();
+    let success = false;
+    setSceneRepairJob({
+      action,
+      roomId: room?.id ?? null,
+      subjectId: item?.reference.kind === "evidence" ? item.reference.id : null,
+      startedAt: new Date().toISOString(),
+    });
+    setSceneRepairOpen(null);
+    setError(null);
+    try {
+      const result = await run.wait(() => props.request<{
+        session: DebateSessionV1;
+        roomArtUpgrade: DebateMysteryRoomArtUpgradeStatusV1;
+      }>(
+        `/api/debates/${encodeURIComponent(props.session.id)}/mystery-scene-repair`,
+        { ...mutationBody({
+          action,
+          ...liveRouting,
+          expectedRevision: props.session.revision,
+          ...(room ? { roomId: room.id, artStyle: currentRoomArtStyle } : {}),
+          ...(item?.reference.kind === "evidence" ? { subjectId: item.reference.id } : {}),
+          ...(extra.emoji ? { emoji: extra.emoji } : {}),
+          ...(extra.entryTarget ? { entryTarget: extra.entryTarget } : {}),
+          ...(action === "generate_map_plan" ? { floor: mansionFloor, board: mansionVisibleBoard } : {}),
+        }), signal: run.signal },
+      ));
+      if (action === "regenerate_exterior") {
+        evictExteriorObjectUrl();
+      }
+      if (room && (action === "regenerate_room_mosaic" ||
+        action === "regenerate_room_upgrade" || action === "generate_room_upgrade")) {
+        setSceneAssetRefreshNonce((current) => current + 1);
+        setLoadedUpgradeRoomIds((current) => {
+          const next = new Set(current);
+          next.delete(room.id);
+          return next;
+        });
+        setFailedUpgradeRoomIds((current) => {
+          const next = new Set(current);
+          next.delete(room.id);
+          return next;
+        });
+      }
+      if (!textRepair && item?.reference.kind === "evidence") {
+        evictEvidenceObjectUrl(item.reference.id);
+      }
+      if (action === "regenerate_music" || action === "regenerate_ambience") {
+        setAudioAssetRefreshNonce((current) => current + 1);
+      }
+      setRoomArtUpgradeStatus(result.roomArtUpgrade);
+      props.onSessionChange(result.session);
+      success = true;
+      extra.onSuccess?.();
+    } catch (caught) {
+      if (!run.isCurrent()) return;
+      setError(caught instanceof Error ? caught.message : "PRISM could not repair this scene.");
+    } finally {
+      if (run.finish(success)) setSceneRepairJob(null);
+    }
+  };
+  const [voicesEnabling, setVoicesEnabling] = useState(false);
+  const enableCaseVoices = async (): Promise<void> => {
+    if (voicesEnabling) return;
+    setVoicesEnabling(true);
+    setError(null);
+    try {
+      const result = await props.request<{ session: DebateSessionV1 }>(
+        `/api/debates/${encodeURIComponent(props.session.id)}/mystery-voices/enable`,
+        mutationBody({}),
+      );
+      props.onSessionChange(result.session);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Voices could not be enabled for this case.");
+    } finally {
+      setVoicesEnabling(false);
+    }
+  };
+  const undoSceneRepair = async (): Promise<void> => {
+    if (sceneRepairJob || !state.sceneRepairUndo) return;
+    setSceneRepairJob({
+      action: "undo",
+      roomId: state.sceneRepairUndo.roomId,
+      subjectId: state.sceneRepairUndo.subjectId ?? null,
+      startedAt: new Date().toISOString(),
+    });
+    setError(null);
+    try {
+      const previousAction = state.sceneRepairUndo.action;
+      const result = await props.request<{
+        session: DebateSessionV1;
+        roomArtUpgrade: DebateMysteryRoomArtUpgradeStatusV1;
+      }>(
+        `/api/debates/${encodeURIComponent(props.session.id)}/mystery-scene-repair/undo`,
+        mutationBody({}),
+      );
+      if (previousAction === "regenerate_exterior") {
+        evictExteriorObjectUrl();
+      } else if (previousAction === "regenerate_evidence_asset" ||
+        previousAction === "reduce_evidence_magenta") {
+        const subjectId = state.sceneRepairUndo?.subjectId;
+        if (subjectId) {
+          evictEvidenceObjectUrl(subjectId);
+        }
+      } else if (previousAction === "regenerate_music" || previousAction === "regenerate_ambience") {
+        setAudioAssetRefreshNonce((current) => current + 1);
+      } else if (state.sceneRepairUndo.roomId) {
+        setSceneAssetRefreshNonce((current) => current + 1);
+      }
+      setLoadedUpgradeRoomIds((current) => {
+        const next = new Set(current);
+        if (state.sceneRepairUndo?.roomId) next.delete(state.sceneRepairUndo.roomId);
+        return next;
+      });
+      setFailedUpgradeRoomIds((current) => {
+        const next = new Set(current);
+        if (state.sceneRepairUndo?.roomId) next.delete(state.sceneRepairUndo.roomId);
+        return next;
+      });
+      setRoomArtUpgradeStatus(result.roomArtUpgrade);
+      props.onSessionChange(result.session);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "That repair could not be undone.");
+    } finally {
+      setSceneRepairJob(null);
+    }
+  };
+  const activeStatement = state.court?.statements.find(
+    (statement) => statement.statementId === state.court?.activeStatementId,
+  ) ?? state.court?.statements[0] ?? null;
+  const activeStatementIndex = activeStatement
+    ? state.court?.statements.findIndex((entry) => entry.statementId === activeStatement.statementId) ?? -1
+    : -1;
+  const witnessSeatId = activeStatement?.witnessSeatId ?? null;
+  const witness = state.suspects.find((entry) => entry.seatId === witnessSeatId) ?? null;
+  const witnessBot = presentMysteryBot(botForSeat(props, state, witnessSeatId));
+  const courtPresentationActive = whodunnitCourtPresentationVisible({
+    hasQueuedDialogue: queuedDialogue !== null,
+    playPhase: state.playPhase,
+  });
+  const callout = whodunnitCourtCalloutPresentationVisible({
+    courtPresentationActive,
+    playPhase: state.playPhase,
+  })
+    ? state.pendingCallout
+    : null;
+  const courtPresentedWitnessSeatId = whodunnitCourtPresentedWitnessSeatId({
+    activeWitnessSeatId: witnessSeatId,
+    dialogueIndex: dialoguePlaybackIndex,
+    dialogueQueue: dialoguePlaybackQueue,
+    suspectSeatIds: new Set(state.suspects.map((suspect) => suspect.seatId)),
+  });
+  const courtPresentedWitness = state.suspects.find(
+    (entry) => entry.seatId === courtPresentedWitnessSeatId,
+  ) ?? witness;
+  const courtPresentedWitnessBot = presentMysteryBot(
+    botForSeat(props, state, courtPresentedWitnessSeatId),
+  ) ?? witnessBot;
+  const displayedDialogueDelivery = displayedDialogue
+    ? splitDebateMysteryStageActionTextV2(displayedDialogue.visibleText, dialogueBot?.name ?? null)
+    : { stageActionText: null, spokenText: "" };
+  const activeStatementDelivery = activeStatement
+    ? splitDebateMysteryStageActionTextV2(activeStatement.visibleText, witness?.name ?? null)
+    : { stageActionText: null, spokenText: "" };
+  const activeStatementStageActionText = activeStatement?.stageActionText ?? activeStatementDelivery.stageActionText;
+  const defenseBot = presentMysteryBot(botById.get(state.config.rivalDefenseBotId) ?? null);
+  const judgeBot = presentMysteryBot(botById.get(state.config.judgeBotId) ?? null);
+  const defendant = state.suspects.find((entry) => entry.seatId === state.court?.defendantSeatId) ?? null;
+  const defendantBot = presentMysteryBot(defendant ? botById.get(defendant.botId) ?? null : null);
+  // The public gallery: the jury and every suspect neither on the stand nor in the dock.
+  const courtGallerySeats = whodunnitCourtGallerySeats({
+    jurors: state.config.jurorBotIds.flatMap((botId) => {
+      const bot = presentMysteryBot(botById.get(botId) ?? null);
+      return bot ? [bot] : [];
+    }),
+    suspects: state.suspects.flatMap((suspect) => {
+      const bot = presentMysteryBot(botById.get(suspect.botId) ?? null);
+      return bot ? [bot] : [];
+    }),
+    excludeBotIds: new Set([courtPresentedWitnessBot?.id, defendantBot?.id].filter((id): id is string => Boolean(id))),
+  });
+  const prosecutorDialogueActive = displayedDialogue?.speakerBotId === state.config.prosecutorBotId;
+  const defenseDialogueActive = displayedDialogue?.speakerBotId === state.config.rivalDefenseBotId;
+  const judgeDialogueActive = displayedDialogue?.speakerKind === "judge" ||
+    displayedDialogue?.speakerBotId === state.config.judgeBotId;
+  const defendantDialogueActive = Boolean(
+    defendant && displayedDialogue?.speakerSeatId === defendant.seatId,
+  );
+  const courtCamera = resolveWhodunnitCourtCamera({
+    arrival: courtArrivalActive,
+    defenseDialogueActive,
+    defendantDialogueActive,
+    establishingWitness: Boolean(
+      courtPresentationActive &&
+      courtPresentedWitnessSeatId &&
+      courtPresentedWitnessSeatId !== courtEstablishedWitnessSeatId
+    ),
+    interrogationPhase,
+    judgeDialogueActive,
+    prosecutionDialogueActive: prosecutorDialogueActive,
+  });
+  useEffect(() => {
+    if (!courtPresentationActive || !courtPresentedWitnessSeatId) {
+      setCourtEstablishedWitnessSeatId(null);
+      return;
+    }
+    if (courtPresentedWitnessSeatId === courtEstablishedWitnessSeatId) return;
+    const timer = window.setTimeout(
+      () => setCourtEstablishedWitnessSeatId(courtPresentedWitnessSeatId),
+      reducedMotion ? 450 : 1_050,
+    );
+    return () => window.clearTimeout(timer);
+  }, [courtEstablishedWitnessSeatId, courtPresentationActive, courtPresentedWitnessSeatId, reducedMotion]);
+  const courtChapterId = state.court?.activeChapterId ?? null;
+  useEffect(() => {
+    if (!courtPresentationActive || courtChapterId === null) {
+      setCourtArrival(null);
+      return;
+    }
+    // A new witness chapter assembles the Court again: the next witness is called.
+    setCourtArrival((current) => current?.chapterId === courtChapterId
+      ? current
+      : { chapterId: courtChapterId, startedAt: Date.now(), nowMs: Date.now() });
+  }, [courtChapterId, courtPresentationActive]);
+  useEffect(() => {
+    if (!courtArrivalActive) return;
+    const timer = window.setInterval(
+      () => setCourtArrival((current) => current ? { ...current, nowMs: Date.now() } : current),
+      120,
+    );
+    return () => window.clearInterval(timer);
+  }, [courtArrivalActive]);
+  useEffect(() => {
+    if (!busy) setCourtBusyAction(null);
+  }, [busy]);
+  const defenseFocusBot = defendantDialogueActive && defendantBot ? defendantBot : defenseBot;
+  const defenseFocusRole = defendantDialogueActive ? "Defendant" : counsel.opposingRoleLabel;
+  const presentedCourtRecordItem = presentedCourtRecord
+    ? state.record.find((item) => recordKey(item.reference) === recordKey(presentedCourtRecord)) ?? null
+    : null;
+  const presentedCourtRecordKindLabel = presentedCourtRecordItem?.reference.kind === "testimony"
+    ? "Sworn testimony"
+    : "Physical evidence";
+  const presentedCourtRecordAssetUrl = presentedCourtRecordItem?.reference.kind === "evidence"
+    ? sealedMysteryAssetObjectUrl(
+        sealedAssetObjectUrls,
+        "evidence",
+        presentedCourtRecordItem.reference.id,
+        presentedCourtRecordItem.sealedAsset,
+      )
+    : null;
+  // Derive directly from the active entry so an action from a prior line
+  // unmounts in the same render when the dialogue changes.
+  const roomActionPresentation = mysterySignalActionPresentation(
+    roomDisplayedDialogue,
+    roomDialogueBot?.name ?? null,
+    speechTiming,
+  );
+  const dialogueActionPresentation = mysterySignalActionPresentation(
+    displayedDialogue,
+    dialogueBot?.name ?? null,
+    speechTiming,
+  );
+  const activeStatementActionPresentation = mysterySignalActionPresentation(
+    activeStatement
+      ? { ...activeStatement, stageActionText: activeStatementStageActionText }
+      : null,
+    witness?.name ?? null,
+    speechTiming,
+  );
+  const courtPresentedWitnessDialogueActive = displayedDialogue
+    ? displayedDialogue.speakerSeatId === courtPresentedWitnessSeatId
+    : courtPresentedWitnessSeatId === witnessSeatId;
+  const courtWitnessActionPresentation = displayedDialogue?.speakerSeatId === courtPresentedWitnessSeatId
+    ? dialogueActionPresentation
+    : courtPresentedWitnessSeatId !== witnessSeatId || (
+        displayedDialogue && displayedDialogue.lineId !== activeStatement?.lineId
+      )
+      ? null
+      : activeStatementActionPresentation;
+  const spectator = state.config.playerRole === "spectator";
+  const spectatorTheory = spectator && state.playPhase === "theory";
+  const openingOrMapPlaybackSuppressed = state.playPhase === "title_card" ||
+    (state.playPhase === "verdict" && !courtPresentationActive) || (
+      state.playPhase === "investigation" &&
+      roomView === "mansion" &&
+      state.activeDialogueNodeId === null
+    );
+  const playbackLineId = openingOrMapPlaybackSuppressed || dialogueIsTextOnly ? null : displayedDialogue?.lineId ?? (
+    state.playPhase === "trial" ? activeStatement?.lineId ?? null : null
+  );
+  const rawPlaybackText = displayedDialogue
+    ? displayedDialogueDelivery.spokenText
+    : activeStatementDelivery.spokenText;
+  const premiumPlaybackEligible = displayedDialogue
+    ? (displayedDialogue.delivery ?? "spoken") === "spoken" &&
+      displayedDialogue.speakerKind !== "narrator" && Boolean(displayedDialogue.speakerBotId)
+    : Boolean(activeStatement && witnessBot);
+  const playbackText = displayedDialogue?.nodeId === "briefing-opening"
+    ? mysteryProsecutorOpeningText(rawPlaybackText)
+    : rawPlaybackText;
+  const captionSpeechTiming = heldDialogue && displayedDialogue === heldDialogue
+    ? settledSpeechTiming(playbackText)
+    : whodunnitCaptionRevealIsPending({
+        queued: Boolean(playbackText),
+        revealExpected: !roomIntroductionAwaitingContinue || roomCasekeeperNarrationVisible,
+        presentationText: whodunnitCaptionSpeechText(playbackText),
+        timingText: speechTiming?.text,
+      })
+      ? pendingSpeechTiming(playbackText)
+      : speechTiming;
+  const caseOpeningDialogue = state.playPhase === "case_opening"
+    ? state.dialogueHistory.findLast((entry) => entry.nodeId === "briefing-opening") ?? lastDialogue
+    : null;
+  const dialogueSfxPresentation = (() => {
+    if (caseOpeningDialogue) {
+      return mysteryDialogueSfxPresentation({
+        delivery: caseOpeningDialogue.delivery ?? "spoken",
+        key: `${caseOpeningDialogue.nodeId}:${caseOpeningDialogue.occurredAt}:${caseOpeningDialogue.lineId ?? "text-only"}`,
+        speakerBotId: caseOpeningDialogue.speakerBotId,
+        speakerKind: caseOpeningDialogue.speakerKind,
+        speakerSeatId: caseOpeningDialogue.speakerSeatId,
+        text: mysteryProsecutorOpeningText(
+          splitDebateMysteryStageActionTextV2(caseOpeningDialogue.visibleText, null).spokenText,
+        ),
+        timing: captionSpeechTiming,
+      });
+    }
+    if (state.playPhase === "investigation" && roomView === "room" && roomDisplayedDialogue) {
+      return mysteryDialogueSfxPresentation({
+        delivery: roomDialogueIsTextOnly ? "text_only" : roomDisplayedDialogue.delivery ?? "spoken",
+        key: roomDialoguePresentationKey ?? `${roomDisplayedDialogue.nodeId}:${roomDisplayedDialogue.occurredAt}`,
+        speakerBotId: roomDisplayedDialogue.speakerBotId,
+        speakerKind: roomDisplayedDialogue.speakerKind,
+        speakerSeatId: roomDisplayedDialogue.speakerSeatId,
+        text: roomDialogueDelivery.spokenText,
+        timing: captionSpeechTiming,
+      });
+    }
+    if (!courtPresentationActive || !activeStatement) return null;
+    if (displayedDialogue && displayedDialogue.lineId !== activeStatement.lineId) {
+      return mysteryDialogueSfxPresentation({
+        delivery: dialogueIsTextOnly ? "text_only" : displayedDialogue.delivery ?? "spoken",
+        key: `${displayedDialogue.nodeId}:${displayedDialogue.occurredAt}:${displayedDialogue.lineId ?? "text-only"}`,
+        speakerBotId: displayedDialogue.speakerBotId,
+        speakerKind: displayedDialogue.speakerKind,
+        speakerSeatId: displayedDialogue.speakerSeatId,
+        text: displayedDialogueDelivery.spokenText,
+        timing: captionSpeechTiming,
+      });
+    }
+    return mysteryDialogueSfxPresentation({
+      delivery: "spoken",
+      key: `statement:${activeStatement.statementId}:${activeStatement.version}:${activeStatement.lineId}`,
+      speakerBotId: witnessBot?.id ?? null,
+      speakerKind: "bot",
+      speakerSeatId: activeStatement.witnessSeatId,
+      text: activeStatementDelivery.spokenText,
+      timing: captionSpeechTiming,
+    });
+  })();
+  const operateVisibleDialogueGesture = (
+    clickCount: number,
+    onAdvance: () => void,
+  ): boolean => {
+    const presentation = dialogueSfxPresentation;
+    if (!presentation) return false;
+    const filledByGesture = dialogueGestureFillRef.current.key === presentation.key;
+    const automatedBotPlayback = presentation.speakerKind === "bot" && (
+      presentation.streaming || activeAudioRef.current !== null
+    );
+    const decision = whodunnitDialogueGestureDecision({
+      advanceArmed: dialogueGestureAdvanceRef.current === presentation.key,
+      automatedBotPlayback,
+      botFillArmed: filledByGesture && dialogueGestureFillRef.current.bot,
+      clickCount,
+      filledByGesture,
+      streaming: presentation.streaming,
+      voicePending: roomDialogueVoicePending,
+    });
+    if (decision === "ignore") return true;
+    if (decision === "advance") {
+      dialogueGestureAdvanceRef.current = presentation.key;
+      dialogueGestureFillRef.current = { bot: false, key: null };
+      onAdvance();
+      return true;
+    }
+    dialogueGestureFillRef.current = {
+      // A fill that cut a still-streaming line short arms double-click
+      // protection, so the second half of one fast click cannot also dismiss.
+      bot: automatedBotPlayback || presentation.streaming,
+      key: presentation.key,
+    };
+    dialogueGestureAdvanceRef.current = null;
+    cancelActiveDialogueAudio();
+    setSpeechTiming(settledSpeechTiming(presentation.fullText));
+    return true;
+  };
+  const activeStatementOwnsPlayback = Boolean(
+    courtPresentationActive &&
+    activeStatement &&
+    (!displayedDialogue || displayedDialogue.lineId === activeStatement.lineId),
+  );
+  const playbackPerformanceKey = activeStatementOwnsPlayback && activeStatement
+    ? `statement:${activeStatement.statementId}:${activeStatement.version}:${activeStatement.lineId}`
+    : displayedDialogue
+      ? `${displayedDialogue.nodeId}:${displayedDialogue.occurredAt}:${displayedDialogue.lineId ?? "text-only"}`
+      : `${props.session.revision}:${playbackLineId ?? "text-only"}`;
+  const preparedAudioExpected = Boolean(
+    playbackLineId &&
+    interrogationAudioMayStart &&
+    state.voicesEnabled &&
+    props.audioEnabled &&
+    props.audioVolume > 0 &&
+    props.restoredAudioPerformanceKey !== playbackPerformanceKey
+  );
+  const preparedAudioStatusForPlayback = preparedAudioStatus.key === playbackPerformanceKey
+    ? preparedAudioStatus.status
+    : "idle";
+  // A queued spoken line waits for its voice: the entrance beat, then the
+  // Premium take or the prepared local clip loading. Its speaker keeps
+  // thinking through that wait, and a gesture cannot cut it into silent text.
+  const roomDialogueVoicePending = whodunnitPreparedVoicePending({
+    queued: queuedDialogue !== null && !dialogueIsTextOnly,
+    preparedAudioExpected,
+    preparedAudioStatus: preparedAudioStatusForPlayback,
+    phase: interrogationPhase,
+  });
+  // Court thinking: the counsel forms a press or a thought while the request
+  // runs and until their voice sounds; the witness thinks after an objection
+  // and while their answer's voice loads.
+  const courtProsecutorThinking = Boolean(
+    (busy && (courtBusyAction === "press" || courtBusyAction === "think")) ||
+    (queuedDialogue && prosecutorDialogueActive && roomDialogueVoicePending),
+  );
+  const courtWitnessThinking = Boolean(
+    (busy && courtBusyAction === "object") ||
+    (queuedDialogue && courtPresentedWitnessDialogueActive && roomDialogueVoicePending),
+  );
+  const spectatorBeat = spectator && state.playPhase === "trial"
+    ? `${props.session.revision}:${playbackLineId ?? "text-only"}`
+    : null;
+
+  const mansionPlacements = useMemo(() => {
+    const rooms = state.rooms.filter((room) => room.floor === mansionFloor);
+    if (!mansionLayout) return mansionRoomPlacements(rooms);
+    const layoutRooms = new Map(
+      mansionLayout.entities
+        .filter((entity) => entity.kind === "room" && entity.floor === mansionFloor)
+        .map((entity) => [entity.id, entity]),
+    );
+    return mansionRoomPlacements(rooms).map((placement) => {
+      const entity = layoutRooms.get(placement.room.id);
+      if (!entity) return placement;
+      const rect = mansionLayoutV2EntityRect(entity);
+      return { ...placement, ...rect };
+    });
+  }, [mansionFloor, mansionLayout, state.rooms]);
+  const mansionCorridors = useMemo(
+    () => mansionLayout?.entities
+      .filter((entity): entity is MansionLayoutBlockV2 =>
+        entity.kind === "corridor" && entity.floor === mansionFloor)
+      .map((corridor) => ({ corridor, ...mansionLayoutV2EntityRect(corridor) })) ?? [],
+    [mansionFloor, mansionLayout],
+  );
+  // Side rooms: authored infill blocks, drawn as inert room tiles with their names and doors.
+  const mansionSideRooms = useMemo(
+    () => mansionLayout?.entities
+      .filter((entity): entity is MansionLayoutBlockV2 => entity.kind === "infill" && entity.floor === mansionFloor)
+      .map((block) => ({ block, ...mansionLayoutV2EntityRect(block) })) ?? [],
+    [mansionFloor, mansionLayout],
+  );
+  const mansionAmbientSpaces = useMemo(
+    () => mysteryAmbientRooms({
+      floor: mansionFloor,
+      // Side rooms render on their own, so authored infill never becomes massing; a legacy
+      // estate that authored infill and has no projection gets no massing at all.
+      spaces: state.spatialProjection?.ambientSpaces.filter(
+        (space) => space.floor === mansionFloor,
+      ) ?? (mansionLayout?.venueProfile || mansionLayout?.entities.some((entity) => entity.kind === "infill") ? [] : null),
+      authoredInfill: [],
+      occupied: mansionLayout
+        ? mansionLayout.entities.filter((entity) => entity.floor === mansionFloor).map(mansionLayoutV2EntityRect)
+        : [...mansionPlacements, ...mansionCorridors],
+      roomFootprints: mansionPlacements,
+    }),
+    [mansionFloor, mansionLayout, mansionPlacements, mansionCorridors, state.spatialProjection],
+  );
+  const mansionOutsideSelected = selectedMansionRoomId === MYSTERY_MANSION_OUTSIDE_SELECTION_ID;
+  const mansionSelectedRoom = mansionOutsideSelected
+    ? null
+    : state.rooms.find((room) => room.id === selectedMansionRoomId && room.floor === mansionFloor)
+      ?? mansionPlacements[0]?.room
+      ?? null;
+  const mansionSelectedSuspect = state.suspects.find((suspect) => suspect.roomId === mansionSelectedRoom?.id) ?? null;
+  const mansionSelectedRoomPending = mansionSelectedRoom?.sealedAsset?.status === "pending";
+  const mansionSelectedRoomAdjacent = Boolean(
+    mansionSelectedRoom &&
+      (!currentRoom ||
+        mansionSelectedRoom.id === currentRoom.id ||
+        (currentRoom.neighborIds ?? []).includes(mansionSelectedRoom.id) ||
+        (mansionSelectedRoom.neighborIds ?? []).includes(currentRoom.id)),
+  );
+  const mansionSelectedRoomReachable = Boolean(
+    mansionSelectedRoom && (mansionSelectedRoom.visited || mansionSelectedRoomAdjacent),
+  );
+  const venueTierOutline = mansionLayout?.venuePresentation?.tierOutlines.find(
+    (outline) => outline.floor === mansionFloor,
+  ) ?? null;
+  const maritimeDeckMap = venueProfile?.presentation?.mapStyle === "hull-deck-v1";
+  const mansionGeometry = [
+    ...mansionPlacements.map(({ x, y, width, height }) => ({ x, y, width, height })),
+    ...mansionCorridors.map(({ x, y, width, height }) => ({ x, y, width, height })),
+    ...mansionAmbientSpaces.map(({ x, y, width, height }) => ({ x, y, width, height })),
+    ...(venueTierOutline?.points.map((point) => ({
+      x: point.x * MANSION_LAYOUT_V2_COLUMNS,
+      y: point.y * MANSION_LAYOUT_V2_ROWS,
+      width: 0,
+      height: 0,
+    })) ?? []),
+  ];
+  const mansionMinX = mansionGeometry.length ? Math.min(...mansionGeometry.map((placement) => placement.x)) : 0;
+  const mansionMinY = mansionGeometry.length ? Math.min(...mansionGeometry.map((placement) => placement.y)) : 0;
+  const mansionMaxX = Math.max(1, ...mansionGeometry.map((placement) => placement.x + placement.width));
+  const mansionMaxY = Math.max(1, ...mansionGeometry.map((placement) => placement.y + placement.height));
+  const mansionContentWidth = Math.max(1, mansionMaxX - mansionMinX);
+  const mansionContentHeight = Math.max(1, mansionMaxY - mansionMinY);
+  const mansionDrawingWidth = MANSION_MAP_BOARD_V1.width;
+  const mansionDrawingHeight = MANSION_MAP_BOARD_V1.height;
+  const mansionPadding = MANSION_MAP_BOARD_V1.padding;
+  const mansionScale = Math.min(
+    (mansionDrawingWidth - mansionPadding * 2) / mansionContentWidth,
+    (mansionDrawingHeight - mansionPadding * 2) / mansionContentHeight,
+  );
+  const mansionOffsetX = (mansionDrawingWidth - mansionContentWidth * mansionScale) / 2;
+  const mansionOffsetY = (mansionDrawingHeight - mansionContentHeight * mansionScale) / 2;
+  const mansionX = (value: number): number => mansionOffsetX + (value - mansionMinX) * mansionScale;
+  const mansionY = (value: number): number => ((mansionOffsetY + (value - mansionMinY) * mansionScale) / mansionDrawingHeight) * 100;
+  const mansionWidth = (value: number): number => value * mansionScale;
+  const mansionHeight = (value: number): number => ((value * mansionScale) / mansionDrawingHeight) * 100;
+  // The envelope cells the board shows on this floor; the overhead warp fills exactly these.
+  const mansionVisibleBoard = {
+    left: mansionMinX - mansionOffsetX / mansionScale,
+    top: mansionMinY - mansionOffsetY / mansionScale,
+    columns: mansionDrawingWidth / mansionScale,
+    rows: mansionDrawingHeight / mansionScale,
+  };
+  const savedOverheadPlacement = mansionLayout?.overheadPlacement ?? null;
+  const overheadPlacement = savedOverheadPlacement ?? MANSION_OVERHEAD_PLACEMENT_IDENTITY_V1;
+  /** Writes the editor's placement into the venue; the editor shows any failure itself. */
+  const saveOverheadPlacement = async (placement: MansionOverheadPlacementV1 | null): Promise<void> => {
+    const result = await props.request<{ session: DebateSessionV1 }>(
+      `/api/debates/${encodeURIComponent(props.session.id)}/mystery-map-overhead`,
+      mutationBody({ placement, expectedRevision: props.session.revision }),
+    );
+    props.onSessionChange(result.session);
+  };
+  const mansionGroundFloor = venueEntryRoom?.floor
+    ?? Math.min(...mansionFloors);
+  const venueTierLabel = (floor: number): string =>
+    venueProfile?.tierLabels[floor - 1] ?? (
+      floor === mansionGroundFloor
+        ? "Ground floor"
+        : floor < mansionGroundFloor
+          ? "Lower floor"
+          : "Upper floor"
+    );
+  const mansionFloorDisplayName = venueTierLabel(mansionFloor);
+  const deckOrdinal = [...mansionFloors]
+    .sort((left, right) => left - right)
+    .findIndex((floor) => floor === mansionFloor) + 1;
+  const deckOrdinalForFloor = (floor: number): number =>
+    [...mansionFloors]
+      .sort((left, right) => left - right)
+      .findIndex((candidate) => candidate === floor) + 1;
+  const connectorLandings = mansionLayout?.verticalConnectors.flatMap((connector) => {
+    const lowerEntity = mansionLayout.entities.find(
+      (entity) => entity.id === connector.lowerEntityId,
+    );
+    const upperEntity = mansionLayout.entities.find(
+      (entity) => entity.id === connector.upperEntityId,
+    );
+    const point = lowerEntity?.floor === mansionFloor
+      ? connector.lowerPoint
+      : upperEntity?.floor === mansionFloor
+        ? connector.upperPoint
+        : null;
+    return point ? [{ connector, point }] : [];
+  }) ?? [];
+  const venueTierOutlinePoints = venueTierOutline?.points
+    .map((point) => `${mansionX(point.x * MANSION_LAYOUT_V2_COLUMNS)},${mansionY(point.y * MANSION_LAYOUT_V2_ROWS)}`)
+    .join(" ") ?? "";
+  // The venue's overhead exterior, if one has been drawn: one image for every floor.
+  // It covers the whole envelope, so it lands under the tiles with the same percent
+  // mapping the rooms use.
+  const mapPlanAsset = state.config.mansionSnapshot?.presentation.assets.find((asset) =>
+    asset.role === "map" && asset.logicalId === "overhead") ?? null;
+  const mapPlanUrl = mapPlanAsset && state.config.mansionSnapshot?.sourceBundleId
+    ? `/api/debates/mystery-mansions/${encodeURIComponent(state.config.mansionSnapshot.sourceBundleId)}/assets/${encodeURIComponent(mapPlanAsset.id)}/file`
+    : null;
+  const mansionDoors: Array<{ key: string; orientation: "vertical" | "horizontal"; x: number; y: number }> = [];
+  if (mansionLayout) {
+    for (const door of mansionLayout.doors.filter((entry) => entry.floor === mansionFloor)) {
+      const point = mansionLayoutV2DoorPoint(mansionLayout, door);
+      if (!point) continue;
+      mansionDoors.push({
+        key: door.id,
+        orientation: door.aWall === "east" || door.aWall === "west" ? "vertical" : "horizontal",
+        ...point,
+      });
+    }
+  } else {
+    for (let leftIndex = 0; leftIndex < mansionPlacements.length; leftIndex += 1) {
+      const left = mansionPlacements[leftIndex]!;
+      for (let rightIndex = leftIndex + 1; rightIndex < mansionPlacements.length; rightIndex += 1) {
+        const right = mansionPlacements[rightIndex]!;
+        const explicitlyConnected = left.neighborIds.includes(right.room.id) || right.neighborIds.includes(left.room.id);
+        if (!explicitlyConnected && !touchingMansionRooms(left, right)) continue;
+        const verticalOverlap = Math.min(left.y + left.height, right.y + right.height) - Math.max(left.y, right.y);
+        const horizontalOverlap = Math.min(left.x + left.width, right.x + right.width) - Math.max(left.x, right.x);
+        const sharesVerticalWall = (left.x + left.width === right.x || right.x + right.width === left.x) && verticalOverlap > 0;
+        if (sharesVerticalWall) {
+          mansionDoors.push({
+            key: `${left.room.id}-${right.room.id}`,
+            orientation: "vertical",
+            x: left.x + left.width === right.x ? right.x : left.x,
+            y: Math.max(left.y, right.y) + verticalOverlap / 2,
+          });
+        } else if (horizontalOverlap > 0) {
+          mansionDoors.push({
+            key: `${left.room.id}-${right.room.id}`,
+            orientation: "horizontal",
+            x: Math.max(left.x, right.x) + horizontalOverlap / 2,
+            y: left.y + left.height === right.y ? right.y : left.y,
+          });
+        }
+      }
+    }
+  }
+  const travelPoint = travelPresentation
+    ? mysteryMansionTravelPointAtProgress(travelPresentation.route, travelProgress)
+    : null;
+  const stationaryPlayerPlacement = currentRoom?.floor === mansionFloor
+    ? mansionPlacements.find((placement) => placement.room.id === currentRoom.id) ?? null
+    : null;
+  const mansionPlayerPoint = travelPoint?.floor === mansionFloor
+    ? travelPoint
+    : stationaryPlayerPlacement
+      ? {
+        floor: mansionFloor,
+        x: stationaryPlayerPlacement.x + stationaryPlayerPlacement.width / 2,
+        y: stationaryPlayerPlacement.y + stationaryPlayerPlacement.height / 2,
+        waypointIndex: 0,
+      }
+      : null;
+
+  const advanceDialoguePlayback = useCallback((): void => {
+    if (dialoguePlaybackIndex + 1 < dialoguePlaybackQueue.length) {
+      setDialoguePlaybackIndex(dialoguePlaybackIndex + 1);
+      return;
+    }
+    setDialoguePlaybackQueue([]);
+    setDialoguePlaybackIndex(0);
+  }, [dialoguePlaybackIndex, dialoguePlaybackQueue.length]);
+
+  const dialogueSfxAudible = dialogueSfxPresentation?.audible;
+  const dialogueSfxDelivery = dialogueSfxPresentation?.delivery;
+  const dialogueSfxFullText = dialogueSfxPresentation?.fullText ?? "";
+  const dialogueSfxKey = dialogueSfxPresentation?.key ?? null;
+  const dialogueSfxStreaming = dialogueSfxPresentation?.streaming;
+  const dialogueSfxVisibleText = dialogueSfxPresentation?.visibleText ?? "";
+  // Player observations are deliberately Babble rather than readable spoken
+  // dialogue, so acquire their full line on the first typewriter frame.
+  const textVoiceVisibleText = roomPlayerObservationActive
+    ? dialogueSfxFullText
+    : dialogueSfxVisibleText;
+  // Written accompaniment (Babble or Bottish) ducks the room bed exactly as a
+  // spoken line does, so a player observation is heard over music and ambience.
+  const dialogueTextVoiceExpected = props.audioEnabled && props.audioVolume > 0 &&
+    (props.whodunnitTextVoiceMode ?? "bottish") !== "off" &&
+    dialogueSfxDelivery === "text_only" && dialogueSfxStreaming === true && dialogueSfxAudible !== true;
+  // The venue's own effects pack, frozen with the case: cues the venue owns
+  // replace the bundled palette while this case is on screen.
+  const venueSfxUrls = useMemo(
+    () => mysteryVenueSfxUrlsV1(state.config.mansionSnapshot),
+    [state.config.mansionSnapshot],
+  );
+  useEffect(() => {
+    setDebateMysteryVenueSfxV1(venueSfxUrls);
+    return () => setDebateMysteryVenueSfxV1(null);
+  }, [venueSfxUrls]);
+  const mansionAmbienceAsset = mysteryMansionAmbienceAssetV1(
+    state.config.houseStyle,
+    state.config.mansionBundleId,
+  );
+  const mansionAmbienceMix = mysteryMansionAmbienceMixV1({
+    houseStyle: state.config.houseStyle,
+    room: currentRoom,
+    maxFloor: mansionFloors.at(-1) ?? 1,
+    roomView: roomView,
+    speechActive: (dialogueSfxPresentation?.audible === true && speechTiming !== null) || dialogueTextVoiceExpected,
+    theoryBoardOpen: theoryOpen,
+  });
+  useEffect(() => {
+    const previous = dialogueSfxPresentationRef.current;
+    const nextKey = dialogueSfxKey;
+    if (debateMysteryDialoguePresentationDismissed(previous.key, nextKey)) {
+      void playDebateMysterySfx({
+        cue: "dialogue-dismiss",
+        enabled: props.audioEnabled,
+        volume: props.audioVolume,
+      });
+    }
+    dialogueSfxPresentationRef.current = {
+      key: nextKey,
+      visibleText: dialogueSfxVisibleText,
+    };
+  }, [
+    dialogueSfxKey,
+    dialogueSfxVisibleText,
+    props.audioEnabled,
+    props.audioVolume,
+  ]);
+
+  useEffect(() => {
+    const textVoiceMode = debateMysteryTextVoiceModeForPresentation({
+      configuredMode: props.whodunnitTextVoiceMode ?? "bottish",
+      playerObservation: roomPlayerObservationActive,
+    });
+    const started = dialogueTextVoiceRef.current;
+    if (debateMysteryTextVoiceShouldStop({
+      audible: dialogueSfxAudible === true,
+      delivery: dialogueSfxDelivery,
+      key: dialogueSfxKey,
+      mode: textVoiceMode,
+      playerObservation: roomPlayerObservationActive,
+      startedKey: started?.key ?? null,
+      startedMode: started?.mode ?? null,
+      streaming: dialogueSfxStreaming === true,
+    })) {
+      dialogueTextVoiceRef.current?.controller.abort();
+      teardownBottishVoiceImmediately({ preservePreparedMedia: true });
+      dialogueTextVoiceRef.current = null;
+    }
+    if (!props.audioEnabled || props.audioVolume <= 0) {
+      if (dialogueTextVoiceRef.current) {
+        dialogueTextVoiceRef.current.controller.abort();
+        teardownBottishVoiceImmediately({ preservePreparedMedia: true });
+        dialogueTextVoiceRef.current = null;
+      }
+      return;
+    }
+    const active = dialogueTextVoiceRef.current;
+    if (!debateMysteryTextVoiceShouldStart({
+      audible: dialogueSfxAudible === true,
+      delivery: dialogueSfxDelivery,
+      key: dialogueSfxKey,
+      mode: textVoiceMode,
+      playerObservation: roomPlayerObservationActive,
+      startedKey: active?.key ?? null,
+      startedMode: active?.mode ?? null,
+      streaming: dialogueSfxStreaming === true,
+      visibleText: textVoiceVisibleText,
+    }) || !dialogueSfxKey || textVoiceMode === "off") return;
+    const controller = new AbortController();
+    dialogueTextVoiceRef.current = {
+      controller,
+      key: dialogueSfxKey,
+      mode: textVoiceMode,
+    };
+    const startTextVoice = (): Promise<unknown> => playDebateMysteryTextVoice({
+      enabled: true,
+      instant: roomPlayerObservationActive,
+      mode: textVoiceMode,
+      voiceProfile: roomPlayerObservationActive
+        ? prosecutorBot?.voiceProfile ?? props.playerVoiceProfile ?? null
+        : null,
+      seed: `${props.session.id}:${dialogueSfxKey}`,
+      signal: controller.signal,
+      text: dialogueSfxFullText,
+      volume: props.audioVolume,
+      roomAcoustics: state.playPhase === "investigation" && roomView === "room"
+        ? currentRoomAcoustics?.voice
+        : undefined,
+      play: props.playMysteryTextVoice,
+    });
+    // The investigator's own short voice leads their Bottish observation, as
+    // a villager's grunt leads the speech bubble; the line follows at once
+    // when the voice recorded no cues.
+    const leadIn = roomPlayerObservationActive
+      ? pickMysteryVocalCueV2(vocalBank[state.config.prosecutorBotId] ?? [], "lead_in", `${props.session.id}:${dialogueSfxKey}`)
+      : null;
+    if (leadIn) {
+      void playDebateMysteryVocalCueV2({
+        url: leadIn.url,
+        volume: props.audioVolume * DEBATE_MYSTERY_VOCAL_LEAD_IN_VOLUME_RATIO,
+        signal: controller.signal,
+        maxWaitMs: DEBATE_MYSTERY_VOCAL_LEAD_IN_MAX_WAIT_MS,
+      }).then(() => (controller.signal.aborted ? undefined : startTextVoice()));
+    } else {
+      void startTextVoice();
+    }
+  }, [
+    dialogueSfxAudible,
+    dialogueSfxDelivery,
+    dialogueSfxFullText,
+    dialogueSfxKey,
+    dialogueSfxStreaming,
+    dialogueSfxVisibleText,
+    textVoiceVisibleText,
+    props.audioEnabled,
+    props.audioVolume,
+    props.playMysteryTextVoice,
+    props.session.id,
+    props.whodunnitTextVoiceMode,
+    props.playerVoiceProfile,
+    prosecutorBot?.voiceProfile,
+    currentRoomAcoustics?.voice,
+    roomPlayerObservationActive,
+    state.config.prosecutorBotId,
+    state.playPhase,
+    roomView,
+    vocalBank,
+  ]);
+
+  useEffect(() => () => {
+    if (!dialogueTextVoiceRef.current) return;
+    dialogueTextVoiceRef.current.controller.abort();
+    dialogueTextVoiceRef.current = null;
+    teardownBottishVoiceImmediately();
+  }, []);
+
+  useEffect(() => {
+    const beatMs = reducedMotion ? 0 : whodunnitInterrogationBeatMs(interrogationPhase);
+    if (interrogationPhase === null || beatMs === null || !queuedDialogue) return;
+    const timer = window.setTimeout(() => {
+      const next = nextWhodunnitInterrogationPhase(interrogationPhase);
+      if (next === "advance_queue") {
+        if (dialoguePlaybackIndex + 1 >= dialoguePlaybackQueue.length) {
+          setDialoguePlaybackQueue([]);
+          setDialoguePlaybackIndex(0);
+          setInterrogationPhase((current) => current === interrogationPhase ? null : current);
+          return;
+        }
+        const nextEntry = dialoguePlaybackQueue[dialoguePlaybackIndex + 1] ?? null;
+        setDialoguePlaybackIndex((index) => index + 1);
+        setInterrogationPhase((current) => current === interrogationPhase
+          ? whodunnitInterrogationEntrancePhaseForEntry(
+              nextEntry,
+              state.config.prosecutorBotId,
+              currentSuspect?.seatId ?? "",
+              dialoguePlaybackQueue.slice(0, dialoguePlaybackIndex + 1),
+            )
+          : current);
+        return;
+      }
+      setInterrogationPhase((current) => current === interrogationPhase ? (next === "complete" ? null : next) : current);
+    }, beatMs);
+    return () => window.clearTimeout(timer);
+  }, [currentSuspect?.seatId, dialoguePlaybackIndex, dialoguePlaybackQueue, interrogationPhase, queuedDialogue, reducedMotion, state.config.prosecutorBotId]);
+
+  const currentRoomUnexaminedHotspots = currentRoom?.hotspots.filter(
+    (hotspot) => hotspot.unlocked && !hotspot.examined,
+  ) ?? [];
+  const currentRoomInterests = currentRoom?.pointsOfInterest ?? [];
+  // Interest regions join the lens as ordinary targets. A smaller case hotspot
+  // inside one still wins the point, so evidence never hides behind flavour.
+  const currentRoomLensRegions = useMemo(() => [
+    ...(currentRoom?.hotspots ?? []),
+    ...(currentRoom?.pointsOfInterest ?? []).map((interest) => ({
+      id: `interest:${interest.id}`,
+      label: interest.label,
+      polygon: interest.polygon,
+      unlocked: true,
+      examined: false,
+    })),
+  ], [currentRoom]);
+  const currentRoomHotspotFocusPoints = useMemo(() => new Map(
+    currentRoomLensRegions.map((region) => [region.id, debateMysteryV2HotspotAccessiblePoint(region, currentRoomLensRegions)]),
+  ), [currentRoomLensRegions]);
+  const currentRoomHotspotStateKey = currentRoom?.hotspots
+    .map((hotspot) => `${hotspot.id}:${hotspot.unlocked ? 1 : 0}:${hotspot.examined ? 1 : 0}`)
+    .join("|") ?? "";
+  // The server clears a room once every clue-bearing point is examined; a case
+  // compiled before that flag existed still needs every point.
+  const roomComplete = currentRoom !== null &&
+    (currentRoom.cleared ?? debateMysteryV2RoomComplete(currentRoom.hotspots));
+  // Leftover points and points of interest stay examinable after a room
+  // clears: optional colour, never a requirement.
+  const examineTargetsRemain = currentRoomUnexaminedHotspots.length > 0 || currentRoomInterests.length > 0;
+  const roomClearedRef = useRef<{ roomId: string | null; cleared: boolean }>({ roomId: null, cleared: false });
+  useEffect(() => {
+    // The completion cue fires on the examination that cleared the room.
+    const previous = roomClearedRef.current;
+    roomClearedRef.current = { roomId: currentRoom?.id ?? null, cleared: roomComplete };
+    if (!currentRoom || previous.roomId !== currentRoom.id || previous.cleared || !roomComplete) return;
+    if (command === "examine") setCompletionCueRoomId(currentRoom.id);
+  }, [command, currentRoom, roomComplete]);
+  // The region being analysed: from the click until its observation has
+  // finished streaming, so the scan can resolve into the dialogue box.
+  const examiningHotspot = examiningHotspotId && currentRoom
+    ? currentRoomLensRegions.find((region) => region.id === examiningHotspotId) ?? null
+    : null;
+  const examinationStreaming = Boolean(
+    dialoguePerformanceActive && roomDialogueIsTextOnly && roomDisplayedDialogue,
+  );
+
+  useEffect(() => {
+    if (examiningHotspotId && !busy && !examinationStreaming) setExaminingHotspotId(null);
+  }, [busy, examinationStreaming, examiningHotspotId]);
+
+  useEffect(() => {
+    if (!currentRoom) return;
+    setInvestigationLens((lens) => resolveDebateMysteryV2Lens(
+      lens.x,
+      lens.y,
+      currentRoomLensRegions,
+    ));
+  }, [currentRoom, currentRoomHotspotStateKey]);
+
+  useEffect(() => {
+    const query = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const update = (): void => setReducedMotion(query.matches);
+    update();
+    query.addEventListener("change", update);
+    return () => query.removeEventListener("change", update);
+  }, []);
+
+  const finishCurrentDialogue = useCallback((automatic = false): void => {
+    if (!queuedDialogue) {
+      if (dialogueSfxPresentation) {
+        cancelActiveDialogueAudio();
+        setSpeechTiming(settledSpeechTiming(dialogueSfxPresentation.fullText));
+      }
+      if (roomDisplayedDialogue) {
+        setHeldDialogue(null);
+        setSpeechTiming(null);
+        setRoomDialogueBaseline({
+          contextKey: roomContextKey,
+          historyCount: state.dialogueHistory.length,
+        });
+      }
+      return;
+    }
+    const hasQueuedResponse = dialoguePlaybackIndex + 1 < dialoguePlaybackQueue.length;
+    const terminalWitnessHold = whodunnitInterrogationTerminalWitnessShouldHold({
+      phase: interrogationPhase,
+      hasQueuedResponse,
+    });
+    if (automatic && terminalWitnessHold) return;
+    const courtDialogue = courtPresentationActive;
+    const decision = courtDialogue
+      ? whodunnitCourtDialogueFinishDecision({ hasQueuedResponse })
+      : whodunnitInterrogationFinishDecision({
+          phase: interrogationPhase,
+          hasQueuedResponse,
+    });
+    if (decision === "ignore") return;
+    cancelActiveDialogueAudio();
+    if (decision === "clear") {
+      setHeldDialogue(null);
+      setSpeechTiming(null);
+      setInterrogationPhase(null);
+      setDialoguePlaybackQueue([]);
+      setDialoguePlaybackIndex(0);
+      return;
+    }
+    setSpeechTiming({
+      text: splitDebateMysteryStageActionTextV2(queuedDialogue.visibleText, botForDialogue(props, state, queuedDialogue)?.name ?? null).spokenText,
+      elapsedMs: 1,
+      durationMs: 1,
+      alignment: null,
+      audible: false,
+    });
+    if (decision === "handoff") {
+      setInterrogationPhase("handoff");
+      return;
+    }
+    if (decision === "advance_queue") {
+      const nextEntry = dialoguePlaybackQueue[dialoguePlaybackIndex + 1] ?? null;
+      setDialoguePlaybackIndex((index) => index + 1);
+      setInterrogationPhase(courtDialogue ? null : whodunnitInterrogationEntrancePhaseForEntry(
+        nextEntry,
+        state.config.prosecutorBotId,
+        currentSuspect?.seatId ?? "",
+        dialoguePlaybackQueue.slice(0, dialoguePlaybackIndex + 1),
+      ));
+      return;
+    }
+    if (terminalWitnessHold) {
+      setHeldDialogue(null);
+      setSpeechTiming(null);
+      setRoomDialogueBaseline({
+        contextKey: roomContextKey,
+        historyCount: state.dialogueHistory.length,
+      });
+      setInterrogationPhase(null);
+      setDialoguePlaybackQueue([]);
+      setDialoguePlaybackIndex(0);
+      return;
+    }
+    // A player observation is one typed box: any gesture dismisses it outright
+    // instead of settling the text first and asking for a second click.
+    if (automatic || roomIntroductionPhase === "persona" || roomPlayerObservationActive) {
+      setHeldDialogue(null);
+      setSpeechTiming(null);
+      setRoomDialogueBaseline({
+        contextKey: roomContextKey,
+        historyCount: state.dialogueHistory.length,
+      });
+      setInterrogationPhase(null);
+      setDialoguePlaybackQueue([]);
+      setDialoguePlaybackIndex(0);
+      return;
+    }
+    setHeldDialogue(queuedDialogue);
+    setInterrogationPhase(null);
+    setDialoguePlaybackQueue([]);
+    setDialoguePlaybackIndex(0);
+  }, [cancelActiveDialogueAudio, courtPresentationActive, currentSuspect?.seatId, dialoguePlaybackIndex, dialoguePlaybackQueue, dialogueSfxPresentation, interrogationPhase, props, queuedDialogue, roomContextKey, roomDisplayedDialogue, roomIntroductionPhase, roomPlayerObservationActive, state]);
+
+  const adoptDeferredActionResult = useCallback((
+    deferred: DeferredMysteryActionResultV1,
+  ): void => {
+    const { action, session, previousDialogueCount } = deferred;
+    const nextState = session.formatState as DebateWhodunnitFormatStateV2;
+    if (action.action === "talk" || action.action === "present_to_suspect") setCommand(null);
+    if (action.action === "move" && action.roomId) setCommand(null);
+    if (action.action === "retry_witness_checkpoint") {
+      setCommand(null);
+      setHeldDialogue(null);
+      setSpeechTiming(null);
+      setDialoguePlaybackQueue([]);
+      setDialoguePlaybackIndex(0);
+      setInterrogationPhase(null);
+      setPresentedCourtRecord(null);
+    }
+    // The investigator's question is never performed: the chosen button is
+    // the player's line, and the witness alone takes the stage in either
+    // perspective.
+    const exchange = whodunnitStageWitnessExchange(
+      nextState.dialogueHistory.slice(previousDialogueCount),
+      nextState.config.prosecutorBotId,
+    );
+    if (exchange.length) {
+      setHeldDialogue(null);
+      setSpeechTiming(null);
+      setDialoguePlaybackQueue(exchange);
+      setDialoguePlaybackIndex(0);
+      const suspectSeatId = action.action === "talk" || action.action === "present_to_suspect"
+        ? action.suspectSeatId
+        : action.action === "advance_room_introduction"
+          ? nextState.suspects.find((suspect) => suspect.roomId === action.roomId)?.seatId ?? null
+          : null;
+      setInterrogationPhase(
+        suspectSeatId
+          ? startWhodunnitInterrogation(exchange, nextState.config.prosecutorBotId, suspectSeatId)
+          : null,
+      );
+    } else if (action.action === "complete_room_introduction") {
+      setInterrogationPhase(null);
+    }
+    const nextCaseFileUpdate = debateMysteryNewCaseFileUpdateV2({
+      previousDialogueHistory: state.dialogueHistory,
+      previousCaseKit: state.caseKit,
+      previousRecord: state.record,
+      nextDialogueHistory: nextState.dialogueHistory,
+      nextCaseKit: nextState.caseKit,
+      nextRecord: nextState.record,
+      rooms: nextState.rooms,
+    });
+    if (nextCaseFileUpdate) {
+      setCaseFileUpdate(nextCaseFileUpdate);
+      playControlSfx("evidence");
+    }
+    props.onSessionChange(session);
+  }, [playControlSfx, props.onSessionChange, state.caseKit, state.dialogueHistory, state.record]);
+
+  const requestDeferredAction = useCallback(async (
+    action: V2ClientAction,
+  ): Promise<DeferredMysteryActionResultV1 | null> => {
+    const introductionAction = action.action === "advance_room_introduction" || action.action === "complete_room_introduction";
+    const dialogueInterruptingAction = introductionAction || action.action === "retry_witness_checkpoint";
+    if (busy || (dialoguePerformanceActive && !dialogueInterruptingAction)) return null;
+    cancelActiveDialogueAudio();
+    setBusy(true);
+    setError(null);
+    try {
+      const previousDialogueCount = state.dialogueHistory.length;
+      mutationIndexRef.current += 1;
+      const result = await props.request<{ session: DebateSessionV1 }>(
+        `/api/debates/${encodeURIComponent(props.session.id)}/mystery-action`,
+        mutationBody({
+          ...action,
+          ...liveRouting,
+          version: 2,
+          expectedRevision: props.session.revision,
+          idempotencyKey: action.action === "check_case"
+            ? `mystery-v2:${props.session.id}:${props.session.revision}:check_case`
+            : `mystery-v2:${props.session.id}:${props.session.revision}:${mutationIndexRef.current}:${action.action}`,
+        }),
+      );
+      return { action, session: result.session, previousDialogueCount };
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "That action could not be completed.");
+      setBusy(false);
+      return null;
+    }
+  }, [busy, cancelActiveDialogueAudio, dialoguePerformanceActive, liveRouting, props.request, props.session.id, props.session.revision, state.dialogueHistory.length]);
+
+  const finishDeferredAction = useCallback((
+    deferred: DeferredMysteryActionResultV1,
+  ): void => {
+    adoptDeferredActionResult(deferred);
+    setBusy(false);
+  }, [adoptDeferredActionResult]);
+
+  const sendAction = useCallback(async (action: V2ClientAction): Promise<boolean> => {
+    const deferred = await requestDeferredAction(action);
+    if (!deferred) return false;
+    finishDeferredAction(deferred);
+    return true;
+  }, [finishDeferredAction, requestDeferredAction]);
+
+  const travelAcousticsForRoute = useCallback((
+    route: MansionTraversalRouteV1,
+    fromRoom: DebateMysteryRoomV2,
+    toRoom: DebateMysteryRoomV2,
+  ): {
+    outgoing: MysteryMansionRoomAcousticsV1;
+    corridor: MysteryMansionRoomAcousticsV1;
+    destination: MysteryMansionRoomAcousticsV1;
+    mechanicalDoors: boolean;
+  } => {
+    const outgoing = mysteryMansionRoomAcousticsV1({
+      room: fromRoom,
+      houseStyle: state.config.houseStyle,
+      venueProfile,
+    });
+    const destination = mysteryMansionRoomAcousticsV1({
+      room: toRoom,
+      houseStyle: state.config.houseStyle,
+      venueProfile,
+    });
+    const authoredCorridor = mansionLayout?.entities.find(
+      (entity): entity is MansionLayoutBlockV2 =>
+        entity.kind === "corridor" && route.entityIds.includes(entity.id),
+    );
+    const corridor = mysteryMansionCorridorAcousticsV1({
+      corridor: authoredCorridor ?? {
+        kind: "corridor",
+        id: `route:${fromRoom.id}:${toRoom.id}`,
+        floor: fromRoom.floor,
+        x: 0,
+        y: 0,
+        width: Math.max(1, Math.min(8, Math.round(route.distanceUnits))),
+        height: 1,
+      },
+      houseStyle: state.config.houseStyle,
+      venueProfile,
+    });
+    const mechanicalDoors =
+      venueProfile?.presentation?.compatibleAcousticFamilies.includes("maritime-passenger-v1") === true ||
+      state.config.houseStyle.acousticThemePaletteId === "spacecraft-industrial-v1" ||
+      route.waypoints.some((point) => point.connectorKind === "lift" || point.connectorKind === "portal");
+    return { outgoing, corridor, destination, mechanicalDoors };
+  }, [mansionLayout, state.config.houseStyle, venueProfile]);
+
+  const playCompactTravelBridge = useCallback((
+    route: MansionTraversalRouteV1,
+    fromRoom: DebateMysteryRoomV2,
+    toRoom: DebateMysteryRoomV2,
+    seed: string,
+    includeFootsteps = true,
+  ): void => {
+    const acoustics = travelAcousticsForRoute(route, fromRoom, toRoom);
+    playMysteryMansionTravelFoleyV1({
+      route,
+      seed,
+      volume: props.audioVolume,
+      enabled: props.audioEnabled,
+      compact: true,
+      includeFootsteps,
+      ...acoustics,
+    });
+  }, [props.audioEnabled, props.audioVolume, travelAcousticsForRoute]);
+
+  const finishExteriorEntry = useCallback((collapseToCompact: boolean): void => {
+    if (!exteriorEntryPresentation) return;
+    if (exteriorEntryTimerRef.current !== null) {
+      window.clearTimeout(exteriorEntryTimerRef.current);
+      exteriorEntryTimerRef.current = null;
+    }
+    if (collapseToCompact) {
+      travelFoleyRef.current?.cancel();
+      playCompactTravelBridge(
+        exteriorEntryPresentation.route,
+        exteriorEntryPresentation.fromRoom,
+        exteriorEntryPresentation.toRoom,
+        `${props.session.id}:${props.session.revision}:exterior:skip`,
+        exteriorEntryPresentation.returningFromExterior,
+      );
+    }
+    travelFoleyRef.current = null;
+    if (exteriorEntryPresentation.returningFromExterior) {
+      setVisitingExterior(false);
+      setExteriorRoomReveal(true);
+    }
+    setExteriorEntryPresentation(null);
+    finishDeferredAction(exteriorEntryPresentation.deferred);
+  }, [exteriorEntryPresentation, finishDeferredAction, playCompactTravelBridge, props.session.id, props.session.revision]);
+
+  const beginExteriorEntry = useCallback(async (
+    returningFromExterior = false,
+  ): Promise<void> => {
+    if (exteriorEntryPresentation) {
+      finishExteriorEntry(true);
+      return;
+    }
+    const entryRoom = venueEntryRoom ?? currentRoom ?? state.rooms[0];
+    if (!entryRoom) {
+      if (returningFromExterior) {
+        setError("The venue entry is unavailable.");
+      } else {
+        void sendAction({ action: "enter_mansion" });
+      }
+      return;
+    }
+    const grounds: DebateMysteryRoomV2 = {
+      id: "mansion-grounds",
+      name: "Venue Exterior",
+      floor: entryRoom.floor,
+      x: entryRoom.x,
+      y: (entryRoom.y ?? 0) + (entryRoom.height ?? 2) + 3,
+      width: 3,
+      height: 2,
+      emoji: "◇",
+      imageId: null,
+      bundledAssetPath: null,
+      unlocked: true,
+      visited: true,
+      hotspots: [],
+    };
+    const route = legacyMansionTraversalRoute(grounds, entryRoom);
+    const deferred = await requestDeferredAction(returningFromExterior
+      ? { action: "move", roomId: entryRoom.id }
+      : { action: "enter_mansion" });
+    if (!deferred) return;
+    if (reducedMotion) {
+      playCompactTravelBridge(
+        route,
+        grounds,
+        entryRoom,
+        `${props.session.id}:${props.session.revision}:exterior:reduced-motion`,
+        returningFromExterior,
+      );
+      if (returningFromExterior) {
+        setVisitingExterior(false);
+        setExteriorRoomReveal(true);
+      }
+      finishDeferredAction(deferred);
+      return;
+    }
+    const durationMs = 1_200;
+    travelFoleyRef.current?.cancel();
+    travelFoleyRef.current = playMysteryMansionTravelFoleyV1({
+      route,
+      seed: `${props.session.id}:${props.session.revision}:exterior`,
+      volume: props.audioVolume,
+      enabled: props.audioEnabled,
+      durationMs,
+      outgoing: mysteryMansionRoomAcousticsV1({ room: grounds, houseStyle: state.config.houseStyle, venueProfile }),
+      corridor: mysteryMansionCorridorAcousticsV1({
+        corridor: { kind: "corridor", id: "front-walk", floor: entryRoom.floor, x: 0, y: 0, width: 3, height: 1 },
+        houseStyle: state.config.houseStyle,
+        venueProfile,
+      }),
+      destination: mysteryMansionRoomAcousticsV1({ room: entryRoom, houseStyle: state.config.houseStyle, venueProfile }),
+      mechanicalDoors:
+        venueProfile?.presentation?.compatibleAcousticFamilies.includes("maritime-passenger-v1") === true ||
+        state.config.houseStyle.acousticThemePaletteId === "spacecraft-industrial-v1",
+      includeFootsteps: returningFromExterior,
+    });
+    setExteriorEntryPresentation({
+      deferred,
+      route,
+      fromRoom: grounds,
+      toRoom: entryRoom,
+      durationMs,
+      startedAtMs: performance.now(),
+      returningFromExterior,
+    });
+  }, [currentRoom, exteriorEntryPresentation, finishDeferredAction, finishExteriorEntry, playCompactTravelBridge, props.audioEnabled, props.audioVolume, props.session.id, props.session.revision, reducedMotion, requestDeferredAction, sendAction, state.config.houseStyle, state.rooms, venueEntryRoom, venueProfile]);
+
+  useEffect(() => {
+    if (!exteriorEntryPresentation) return;
+    exteriorEntryTimerRef.current = window.setTimeout(
+      () => finishExteriorEntry(false),
+      exteriorEntryPresentation.durationMs,
+    );
+    return () => {
+      if (exteriorEntryTimerRef.current !== null) {
+        window.clearTimeout(exteriorEntryTimerRef.current);
+        exteriorEntryTimerRef.current = null;
+      }
+    };
+  }, [exteriorEntryPresentation, finishExteriorEntry]);
+
+  useEffect(() => {
+    if (!exteriorRoomReveal) return;
+    const timer = window.setTimeout(() => setExteriorRoomReveal(false), 1_900);
+    return () => window.clearTimeout(timer);
+  }, [exteriorRoomReveal]);
+
+  const finishMansionTravel = useCallback((collapseToCompact: boolean): void => {
+    if (!travelPresentation) return;
+    if (travelFrameRef.current !== null) {
+      window.cancelAnimationFrame(travelFrameRef.current);
+      travelFrameRef.current = null;
+    }
+    if (collapseToCompact) {
+      travelFoleyRef.current?.cancel();
+      playCompactTravelBridge(
+        travelPresentation.route,
+        travelPresentation.fromRoom,
+        travelPresentation.toRoom,
+        `${props.session.id}:${props.session.revision}:${travelPresentation.fromRoom.id}:${travelPresentation.toRoom.id}:skip`,
+      );
+    }
+    travelFoleyRef.current = null;
+    setTravelProgress(1);
+    setMansionFloor(travelPresentation.toRoom.floor);
+    if (travelPresentation.openingArrival) setOpeningMapReveal(true);
+    setTravelPresentation(null);
+    finishDeferredAction(travelPresentation.deferred);
+  }, [finishDeferredAction, playCompactTravelBridge, props.session.id, props.session.revision, travelPresentation]);
+
+  const beginMansionTravel = useCallback(async (
+    toRoom: DebateMysteryRoomV2,
+  ): Promise<void> => {
+    if (!currentRoom) {
+      void sendAction({ action: "move", roomId: toRoom.id });
+      return;
+    }
+    if (currentRoom.id === toRoom.id) {
+      void sendAction({ action: "move", roomId: toRoom.id });
+      return;
+    }
+    const route = mansionLayout
+      ? mansionLayoutV2TraversalRoute(mansionLayout, currentRoom.id, toRoom.id) ??
+        legacyMansionTraversalRoute(currentRoom, toRoom)
+      : legacyMansionTraversalRoute(currentRoom, toRoom);
+    const deferred = await requestDeferredAction({ action: "move", roomId: toRoom.id });
+    if (!deferred) return;
+    const seed = `${props.session.id}:${props.session.revision}:${currentRoom.id}:${toRoom.id}`;
+    if (reducedMotion) {
+      playCompactTravelBridge(route, currentRoom, toRoom, seed);
+      setMansionFloor(toRoom.floor);
+      finishDeferredAction(deferred);
+      return;
+    }
+    const durationMs = mysteryMansionTravelDurationMs(route);
+    travelFoleyRef.current?.cancel();
+    travelFoleyRef.current = playMysteryMansionTravelFoleyV1({
+      route,
+      seed,
+      volume: props.audioVolume,
+      enabled: props.audioEnabled,
+      durationMs,
+      ...travelAcousticsForRoute(route, currentRoom, toRoom),
+    });
+    setTravelProgress(0);
+    setTravelPresentation({
+      deferred,
+      route,
+      fromRoom: currentRoom,
+      toRoom,
+      durationMs,
+      startedAtMs: performance.now(),
+    });
+  }, [currentRoom, finishDeferredAction, mansionLayout, playCompactTravelBridge, props.audioEnabled, props.audioVolume, props.session.id, props.session.revision, reducedMotion, requestDeferredAction, sendAction, travelAcousticsForRoute]);
+
+  const beginCaseOpeningJourney = useCallback(async (): Promise<void> => {
+    if (travelPresentation?.openingArrival) {
+      finishMansionTravel(true);
+      return;
+    }
+    const incidentScene = currentRoom;
+    const entryRoom = venueEntryRoom;
+    if (!incidentScene || !entryRoom) {
+      setOpeningMapReveal(true);
+      void sendAction({ action: "dismiss_case_opening" });
+      return;
+    }
+    const route = mansionLayout
+      ? mansionLayoutV2TraversalRoute(mansionLayout, entryRoom.id, incidentScene.id) ??
+        legacyMansionTraversalRoute(entryRoom, incidentScene)
+      : legacyMansionTraversalRoute(entryRoom, incidentScene);
+    const deferred = await requestDeferredAction({ action: "dismiss_case_opening" });
+    if (!deferred) return;
+    const seed = `${props.session.id}:${props.session.revision}:opening:${entryRoom.id}:${incidentScene.id}`;
+    if (reducedMotion || entryRoom.id === incidentScene.id) {
+      playCompactTravelBridge(route, entryRoom, incidentScene, seed);
+      setOpeningMapReveal(true);
+      finishDeferredAction(deferred);
+      return;
+    }
+    const durationMs = mysteryMansionTravelDurationMs(route);
+    travelFoleyRef.current?.cancel();
+    travelFoleyRef.current = playMysteryMansionTravelFoleyV1({
+      route,
+      seed,
+      volume: props.audioVolume,
+      enabled: props.audioEnabled,
+      durationMs,
+      ...travelAcousticsForRoute(route, entryRoom, incidentScene),
+    });
+    setMansionFloor(entryRoom.floor);
+    setTravelProgress(0);
+    setTravelPresentation({
+      deferred,
+      route,
+      fromRoom: entryRoom,
+      toRoom: incidentScene,
+      durationMs,
+      startedAtMs: performance.now(),
+      openingArrival: true,
+    });
+  }, [currentRoom, finishDeferredAction, finishMansionTravel, mansionLayout, playCompactTravelBridge, props.audioEnabled, props.audioVolume, props.session.id, props.session.revision, reducedMotion, requestDeferredAction, sendAction, travelAcousticsForRoute, travelPresentation, venueEntryRoom]);
+
+  useEffect(() => {
+    if (
+      !exteriorOpeningAcknowledged ||
+      state.playPhase !== "case_opening" ||
+      busy ||
+      travelPresentation?.openingArrival
+    ) return;
+    setExteriorOpeningAcknowledged(false);
+    void beginCaseOpeningJourney();
+  }, [beginCaseOpeningJourney, busy, exteriorOpeningAcknowledged, state.playPhase, travelPresentation?.openingArrival]);
+
+  useEffect(() => {
+    if (!travelPresentation) return;
+    const animate = (now: number): void => {
+      const progress = Math.max(0, Math.min(
+        1,
+        (now - travelPresentation.startedAtMs) / travelPresentation.durationMs,
+      ));
+      setTravelProgress(progress);
+      const point = mysteryMansionTravelPointAtProgress(travelPresentation.route, progress);
+      setMansionFloor((floor) => floor === point.floor ? floor : point.floor);
+      if (progress >= 1) {
+        travelFrameRef.current = null;
+        finishMansionTravel(false);
+        return;
+      }
+      travelFrameRef.current = window.requestAnimationFrame(animate);
+    };
+    travelFrameRef.current = window.requestAnimationFrame(animate);
+    return () => {
+      if (travelFrameRef.current !== null) {
+        window.cancelAnimationFrame(travelFrameRef.current);
+        travelFrameRef.current = null;
+      }
+    };
+  }, [finishMansionTravel, travelPresentation]);
+
+  useEffect(() => () => {
+    if (travelFrameRef.current !== null) window.cancelAnimationFrame(travelFrameRef.current);
+    if (exteriorEntryTimerRef.current !== null) window.clearTimeout(exteriorEntryTimerRef.current);
+    travelFoleyRef.current?.cancel();
+  }, []);
+
+  useEffect(() => {
+    if (!currentRoom || !debateMysteryRoomIntroductionShouldAutoCompleteV2({
+      busy,
+      hasActiveAudio: activeAudioRef.current !== null,
+      hasHeldDialogue: heldDialogue !== null,
+      hasQueuedDialogue: queuedDialogue !== null,
+      phase: roomIntroductionPhase,
+    })) return;
+    const timer = window.setTimeout(() => {
+      setSpeechTiming(null);
+      void sendAction({ action: "complete_room_introduction", roomId: currentRoom.id });
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [busy, currentRoom, heldDialogue, queuedDialogue, roomIntroductionPhase, sendAction, speechTiming]);
+
+  useEffect(() => {
+    const lineId = playbackLineId;
+    const restoredPlayback =
+      props.restoredAudioPerformanceKey === playbackPerformanceKey;
+    if (!debateMysteryPreparedAudioShouldStart({
+      audioEnabled: props.audioEnabled,
+      audioVolume: props.audioVolume,
+      interrogationAudioMayStart,
+      lastPlayedPerformanceKey: lastPlayedPerformanceKeyRef.current,
+      lineId,
+      playbackPerformanceKey,
+      restoredPerformanceKey: props.restoredAudioPerformanceKey ?? null,
+      voicesEnabled: state.voicesEnabled,
+    })) {
+      if (restoredPlayback) {
+        lastPlayedPerformanceKeyRef.current = playbackPerformanceKey;
+        return;
+      }
+      if (lastPlayedPerformanceKeyRef.current !== playbackPerformanceKey) return;
+      if (spectatorBeat) setCompletedSpectatorBeat(spectatorBeat);
+      return;
+    }
+    if (lineId === null) return;
+    lastPlayedPerformanceKeyRef.current = playbackPerformanceKey;
+    setPreparedAudioStatus({ key: playbackPerformanceKey, status: "pending" });
+    const audioGeneration = audioGenerationRef.current + 1;
+    audioGenerationRef.current = audioGeneration;
+    const audio = new Audio(
+      `/api/debates/${encodeURIComponent(props.session.id)}/mystery-audio/${encodeURIComponent(lineId)}`,
+    );
+    activeAudioRef.current = audio;
+    audio.volume = Math.max(0, Math.min(1, props.audioVolume));
+    const releaseOutput = routeAudioElementToPrismOutput(audio, {
+      roomAcoustics: state.playPhase === "investigation" && roomView === "room"
+        ? currentRoomAcoustics?.voice
+        : null,
+    });
+    activeAudioOutputCleanupRef.current = releaseOutput;
+    let completed = false;
+    let audioStarted = false;
+    const speechTimingLoop = createWhodunnitSpeechTimingLoop({
+      requestFrame: (callback) => window.requestAnimationFrame(callback),
+      cancelFrame: (frameId) => window.cancelAnimationFrame(frameId),
+      onFrame: (_now, publish) => {
+        if (
+          completed ||
+          !whodunnitInterrogationCompletionIsCurrent(audioGeneration, audioGenerationRef.current)
+        ) return false;
+        if (publish) {
+          const durationMs = Number.isFinite(audio.duration) && audio.duration > 0
+            ? audio.duration * 1_000
+            // `playing` can precede WebKit's duration metadata for cached local
+            // case WAVs. A one-millisecond placeholder immediately turns every
+            // viseme into its resting mouth, so retain a natural spoken estimate
+            // until the decoded duration arrives.
+            : debateVoiceCompletionFallbackDurationMs(playbackText);
+          setSpeechTiming({
+            text: playbackText,
+            elapsedMs: Math.min(durationMs, Math.max(0, audio.currentTime * 1_000)),
+            durationMs,
+            alignment: null,
+            audible: true,
+          });
+        }
+        return !audio.paused && !audio.ended;
+      },
+    });
+    const startSpeechTimingLoop = (): void => {
+      audioStarted = true;
+      setPreparedAudioStatus({ key: playbackPerformanceKey, status: "started" });
+      captionRevealGenerationRef.current += 1;
+      speechTimingLoop.start();
+    };
+    const refreshSpeechTimingLoop = (): void => {
+      if (!audio.paused) speechTimingLoop.start();
+    };
+    const completeBeat = (): void => {
+      if (completed || !whodunnitInterrogationCompletionIsCurrent(audioGeneration, audioGenerationRef.current)) return;
+      completed = true;
+      if (!audioStarted) {
+        setPreparedAudioStatus({ key: playbackPerformanceKey, status: "unavailable" });
+      }
+      speechTimingLoop.stop();
+      setSpeechTiming(settledSpeechTiming(playbackText));
+      if (activeAudioRef.current === audio) activeAudioRef.current = null;
+      if (queuedDialogue) {
+        if (state.playPhase === "investigation") return;
+        if (interrogationPhase === "prosecutor_speaking") setInterrogationPhase("handoff");
+        else if (interrogationPhase === "suspect_speaking") advanceDialoguePlayback();
+        else advanceDialoguePlayback();
+      }
+      if (spectatorBeat) setCompletedSpectatorBeat(spectatorBeat);
+    };
+    const completeBeatNaturally = (): void => {
+      releaseOutput?.release();
+      completeBeat();
+    };
+    // `playing`, unlike `play`, means this local element has begun audible playback.
+    audio.addEventListener("playing", startSpeechTimingLoop, { once: true });
+    audio.addEventListener("loadedmetadata", refreshSpeechTimingLoop);
+    audio.addEventListener("durationchange", refreshSpeechTimingLoop);
+    audio.addEventListener("ended", completeBeatNaturally, { once: true });
+    audio.addEventListener("error", completeBeat, { once: true });
+    audio.addEventListener("pause", completeBeat, { once: true });
+    const premiumController = new AbortController();
+    premiumVoiceControllerRef.current = premiumController;
+    let premiumStarted = false;
+    let premiumAlignment: VoicePlaybackCharacterAlignment | null = null;
+    const premiumIsCurrent = (): boolean => !completed && !premiumController.signal.aborted &&
+      whodunnitInterrogationCompletionIsCurrent(audioGeneration, audioGenerationRef.current);
+    const premiumPlayback = premiumPlaybackEligible && premiumVoicePlaybackRef.current
+      ? premiumVoicePlaybackRef.current({
+          sessionId: props.session.id,
+          lineId,
+          localOnly: props.session.responseMode === "local",
+          signal: premiumController.signal,
+          roomAcoustics: state.playPhase === "investigation" && roomView === "room"
+            ? currentRoomAcoustics?.voice
+            : undefined,
+          lifecycle: {
+            onStart: (durationMs, alignment) => {
+              if (!premiumIsCurrent()) return;
+              premiumStarted = true;
+              audioStarted = true;
+              premiumAlignment = alignment ?? null;
+              captionRevealGenerationRef.current += 1;
+              setPreparedAudioStatus({ key: playbackPerformanceKey, status: "started" });
+              setSpeechTiming({ text: playbackText, elapsedMs: 0,
+                durationMs: durationMs ?? debateVoiceCompletionFallbackDurationMs(playbackText),
+                alignment: premiumAlignment, audible: true });
+            },
+            onProgress: (elapsedMs, durationMs) => {
+              if (!premiumIsCurrent()) return;
+              setSpeechTiming({ text: playbackText, elapsedMs, durationMs,
+                alignment: premiumAlignment, audible: true });
+            },
+          },
+        })
+      : Promise.resolve(false);
+    void premiumPlayback.catch(() => false).then((played) => {
+      if (!premiumIsCurrent()) return;
+      if (played || premiumStarted) completeBeatNaturally();
+      else void audio.play().catch(completeBeat);
+    });
+    return () => {
+      completed = true;
+      premiumController.abort();
+      if (premiumVoiceControllerRef.current === premiumController) premiumVoiceControllerRef.current = null;
+      speechTimingLoop.stop();
+      if (audioGenerationRef.current === audioGeneration) audioGenerationRef.current += 1;
+      setSpeechTiming((current) => {
+        if (!current) return null;
+        const belongsToReleasedLine = current.text === playbackText ||
+          whodunnitCaptionSpeechText(current.text) === whodunnitCaptionSpeechText(playbackText);
+        if (!belongsToReleasedLine) return current;
+        return current.elapsedMs >= current.durationMs ? current : null;
+      });
+      audio.removeEventListener("playing", startSpeechTimingLoop);
+      audio.removeEventListener("loadedmetadata", refreshSpeechTimingLoop);
+      audio.removeEventListener("durationchange", refreshSpeechTimingLoop);
+      audio.removeEventListener("ended", completeBeatNaturally);
+      audio.removeEventListener("error", completeBeat);
+      audio.removeEventListener("pause", completeBeat);
+      if (activeAudioRef.current === audio) activeAudioRef.current = null;
+      if (activeAudioOutputCleanupRef.current === releaseOutput) {
+        activeAudioOutputCleanupRef.current = null;
+      }
+      void releaseAudibleAudioElement(audio, { onReleased: releaseOutput ?? undefined });
+    };
+  }, [
+    advanceDialoguePlayback,
+    playbackLineId,
+    playbackPerformanceKey,
+    playbackText,
+    premiumPlaybackEligible,
+    props.audioEnabled,
+    props.audioVolume,
+    props.restoredAudioPerformanceKey,
+    props.session.id,
+    props.session.responseMode,
+    queuedDialogue,
+    interrogationAudioMayStart,
+    interrogationPhase,
+    spectatorBeat,
+    state.playPhase,
+    roomView,
+    state.voicesEnabled,
+    currentRoomAcoustics?.voice,
+  ]);
+
+  useEffect(() => {
+    if (!dialogueSfxKey || !dialogueSfxFullText || !interrogationAudioMayStart) return;
+    if (!debateMysteryCaptionFallbackShouldStart({
+      preparedAudioExpected,
+      preparedAudioStatus: preparedAudioStatusForPlayback,
+    })) return;
+    const revealGeneration = captionRevealGenerationRef.current + 1;
+    captionRevealGenerationRef.current = revealGeneration;
+    const durationMs = whodunnitDialogueTypewriterDurationMs(dialogueSfxFullText);
+    let startedAt: number | null = null;
+    let startTimer: number | null = null;
+    let frame: number | null = null;
+    const reveal = (): void => {
+      if (!whodunnitInterrogationCompletionIsCurrent(
+        revealGeneration,
+        captionRevealGenerationRef.current,
+      )) return;
+      if (startedAt === null) startedAt = performance.now();
+      const elapsedMs = Math.min(durationMs, performance.now() - startedAt);
+      setSpeechTiming({
+        text: dialogueSfxFullText,
+        elapsedMs,
+        durationMs,
+        alignment: null,
+        audible: false,
+      });
+      if (elapsedMs >= durationMs) {
+        setSpeechTiming(settledSpeechTiming(dialogueSfxFullText));
+        if (queuedDialogue && state.playPhase !== "investigation") {
+          if (interrogationPhase === "prosecutor_speaking") setInterrogationPhase("handoff");
+          else advanceDialoguePlayback();
+        }
+        if (spectatorBeat) setCompletedSpectatorBeat(spectatorBeat);
+        return;
+      }
+      frame = window.requestAnimationFrame(reveal);
+    };
+    // Give prepared local speech one brief chance to establish its real clock.
+    // If playback is suppressed, unavailable, or stalled, the caption still
+    // begins on its own instead of flashing complete or remaining blank.
+    startTimer = window.setTimeout(reveal, roomPlayerObservationActive ? 0 : 180);
+    return () => {
+      if (startTimer !== null) window.clearTimeout(startTimer);
+      if (frame !== null) window.cancelAnimationFrame(frame);
+    };
+  }, [
+    advanceDialoguePlayback,
+    dialogueSfxFullText,
+    dialogueSfxKey,
+    preparedAudioExpected,
+    preparedAudioStatusForPlayback,
+    queuedDialogue,
+    interrogationAudioMayStart,
+    interrogationPhase,
+    spectatorBeat,
+    state.playPhase,
+    roomPlayerObservationActive,
+  ]);
+
+  // A prepared voice that has not sounded within the wait releases the line
+  // to its caption clock, so a take that never starts cannot hold the
+  // exchange; a take that arrives later still takes the caption over.
+  useEffect(() => {
+    if (!roomDialogueVoicePending || !preparedAudioExpected) return;
+    const key = playbackPerformanceKey;
+    const timer = window.setTimeout(() => {
+      setPreparedAudioStatus((current) =>
+        current.key === key && current.status === "started"
+          ? current
+          : { key, status: "unavailable" });
+    }, WHODUNNIT_PREPARED_VOICE_WAIT_MS);
+    return () => window.clearTimeout(timer);
+  }, [playbackPerformanceKey, preparedAudioExpected, roomDialogueVoicePending]);
+
+  useEffect(() => {
+    if (!spectatorBeat || completedSpectatorBeat !== spectatorBeat || busy) return;
+    const timer = window.setTimeout(
+      () => void sendAction({ action: "advance_spectator_trial" }),
+      500,
+    );
+    return () => window.clearTimeout(timer);
+  }, [busy, completedSpectatorBeat, sendAction, spectatorBeat]);
+
+  useEffect(() => {
+    if (!callout || callout.id === lastCalloutIdRef.current) return;
+    lastCalloutIdRef.current = callout.id;
+    void playDebateMysterySfx({
+      cue: callout.callout === "order" ? "paper-place" : "theory",
+      enabled: props.audioEnabled,
+      volume: props.audioVolume,
+    });
+  }, [callout, props.audioEnabled, props.audioVolume]);
+
+  useEffect(() => {
+    setTheory(emptyTheory({
+      theory: state.theory,
+      suspects: state.suspects,
+      caseCharge: state.caseCharge,
+      config: state.config,
+    }));
+    if (state.playPhase === "theory") setTheoryOpen(true);
+  }, [state.caseCharge, state.config, state.playPhase, state.theory, state.suspects]);
+
+  useEffect(() => {
+    if (roomView !== "mansion") return;
+    const room = currentRoom ?? state.rooms[0] ?? null;
+    if (!room) return;
+    setMansionFloor(room.floor);
+    setSelectedMansionRoomId(room.id);
+  }, [currentRoom, roomView, state.rooms]);
+
+  useEffect(() => {
+    if (roomDialogueBaseline.contextKey === roomContextKey) return;
+    setRoomDialogueBaseline({
+      contextKey: roomContextKey,
+      historyCount: state.dialogueHistory.length,
+    });
+    setDialoguePlaybackQueue([]);
+    setDialoguePlaybackIndex(0);
+    setHeldDialogue(null);
+    setSpeechTiming(null);
+    setPresentedCourtRecord(null);
+    setInterrogationPhase(null);
+    audioGenerationRef.current += 1;
+    releaseActiveDialogueAudio();
+  }, [releaseActiveDialogueAudio, roomContextKey, roomDialogueBaseline.contextKey, state.dialogueHistory.length]);
+
+  useEffect(() => () => {
+    audioGenerationRef.current += 1;
+    releaseActiveDialogueAudio();
+  }, [releaseActiveDialogueAudio]);
+
+  const focusStatement = (offset: number): void => {
+    if (!state.court || !activeStatement || activeStatementIndex < 0) return;
+    const nextIndex = (activeStatementIndex + offset + state.court.statements.length) % state.court.statements.length;
+    const next = state.court.statements[nextIndex];
+    if (!next || next.statementId === activeStatement.statementId) return;
+    cancelActiveDialogueAudio();
+    setHeldDialogue(null);
+    setSpeechTiming(null);
+    setPresentedCourtRecord(null);
+    dialogueGestureFillRef.current = { bot: false, key: null };
+    dialogueGestureAdvanceRef.current = null;
+    void sendAction({ action: "focus_statement", statementId: next.statementId });
+  };
+
+  const handleCourtDialogueClick = (event: React.MouseEvent<HTMLElement>): void => {
+    if (whodunnitCourtDialogueGestureCrossedPresentation({
+      armedPresentationKey: dialogueGestureAdvanceRef.current,
+      clickCount: event.detail,
+      presentationKey: dialogueSfxPresentation?.key ?? null,
+    })) {
+      event.preventDefault();
+      event.stopPropagation();
+      return;
+    }
+    if (!operateVisibleDialogueGesture(event.detail, finishCurrentDialogue)) return;
+    event.preventDefault();
+    event.stopPropagation();
+  };
+
+  const handleCourtDialogueKeyDown = (event: React.KeyboardEvent<HTMLElement>): void => {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    if (!operateVisibleDialogueGesture(1, finishCurrentDialogue)) return;
+    event.preventDefault();
+    event.stopPropagation();
+  };
+
+  const calloutStyle = callout?.actorColor
+    ? ({ "--mystery-callout-color": callout.actorColor } as CSSProperties)
+    : undefined;
+  const roomParallaxEnabled = Boolean(
+    currentRoom &&
+      command === "examine" &&
+      currentRoomUnexaminedHotspots.length > 0 &&
+      !busy &&
+      !dialoguePerformanceActive &&
+      !heldDialogue &&
+      !roomObservationAwaitingContinue &&
+      !reducedMotion &&
+      !caseFileOpen &&
+      !theoryOpen,
+  );
+  const currentRoomHasIllustratedUpgrade = Boolean(
+    currentRoom &&
+      roomArtUpgradeStatus?.readyRoomIds.includes(currentRoom.id) &&
+      !failedUpgradeRoomIds.has(currentRoom.id),
+  );
+  const currentRoomIllustratedUpgradeLoaded = Boolean(
+    currentRoom && loadedUpgradeRoomIds.has(currentRoom.id),
+  );
+  /** The server counts this derivative ready, but this session could not load its image. */
+  const currentRoomUpgradeLoadFailed = Boolean(
+    currentRoom &&
+      roomArtUpgradeStatus?.readyRoomIds.includes(currentRoom.id) &&
+      failedUpgradeRoomIds.has(currentRoom.id),
+  );
+  /** Clears a load failure and asks the browser for the image again. Nothing is regenerated. */
+  const retryRoomUpgradeArt = (roomId: string): void => {
+    setFailedUpgradeRoomIds((current) => {
+      if (!current.has(roomId)) return current;
+      const next = new Set(current);
+      next.delete(roomId);
+      return next;
+    });
+    setLoadedUpgradeRoomIds((current) => {
+      if (!current.has(roomId)) return current;
+      const next = new Set(current);
+      next.delete(roomId);
+      return next;
+    });
+    setSceneAssetRefreshNonce((current) => current + 1);
+  };
+  const currentRoomArtStyle = whodunnitRoomArtStyleForUpgrade(
+    roomUpgradeEnabled,
+    currentRoomHasIllustratedUpgrade && currentRoomIllustratedUpgradeLoaded,
+  );
+  const currentRoomMosaicGrid = "visible";
+  const currentRoomMosaicAssetUrl = currentRoom?.sealedAsset?.revealed &&
+      currentRoom.sealedAsset.status === "ready"
+    ? whodunnitSealedRoomArtUrl({
+        sessionId: props.session.id,
+        subjectId: currentRoom.id,
+        style: "mosaic",
+        mosaicGrid: currentRoomMosaicGrid,
+      })
+    : null;
+  const currentRoomUpgradeAssetUrl = currentRoom && currentRoomHasIllustratedUpgrade
+    ? whodunnitSealedRoomArtUrl({
+        sessionId: props.session.id,
+        subjectId: whodunnitIllustratedRoomSubjectId(currentRoom.id),
+        style: "illustrated",
+      })
+    : null;
+  const currentRoomBundledMosaicUrl = currentRoom
+    ? whodunnitBundledRoomArtPathForRoom(
+        currentRoom,
+        "mosaic",
+        currentRoomMosaicGrid,
+      )
+    : null;
+  const currentRoomLayoutEntity = currentRoom && mansionLayout
+    ? mansionLayout.entities.find((entity) => entity.kind === "room" && entity.id === currentRoom.id) ?? null
+    : null;
+  const currentRoomIllustratedAssetId = currentRoom
+    ? state.config.mansionSnapshot?.presentation.assets.find(
+        (asset) =>
+          asset.role === "room" &&
+          asset.logicalId === whodunnitIllustratedRoomSubjectId(currentRoom.id),
+      )?.id ?? null
+    : null;
+  const currentRoomMosaicMansionAssetId = currentRoomLayoutEntity?.kind === "room"
+    ? currentRoomLayoutEntity.acceptedRoomAssetId
+    : null;
+  const currentRoomAcceptedMosaicUrl = currentRoomMosaicMansionAssetId &&
+      state.config.mansionSnapshot?.sourceBundleId
+    ? whodunnitMansionRoomArtUrl(
+        state.config.mansionSnapshot.sourceBundleId,
+        currentRoomMosaicMansionAssetId,
+        "mosaic",
+        currentRoomMosaicGrid,
+      )
+    : null;
+  const currentRoomAcceptedUpgradeUrl = currentRoomIllustratedAssetId &&
+      state.config.mansionSnapshot?.sourceBundleId &&
+      currentRoomHasIllustratedUpgrade
+    ? whodunnitMansionRoomArtUrl(
+        state.config.mansionSnapshot.sourceBundleId,
+        currentRoomIllustratedAssetId,
+        "illustrated",
+      )
+    : null;
+  const [failedMosaicUrls, setFailedMosaicUrls] = useState<ReadonlySet<string>>(() => new Set());
+  useEffect(() => {
+    setFailedMosaicUrls(new Set());
+  }, [props.session.id, sceneAssetRefreshNonce]);
+  const currentRoomMosaicUrl = [
+    currentRoomMosaicAssetUrl,
+    currentRoomAcceptedMosaicUrl,
+    currentRoom?.imageId
+      ? whodunnitSavedRoomArtUrl(currentRoom.imageId, "mosaic", currentRoomMosaicGrid)
+      : null,
+    currentRoomBundledMosaicUrl,
+    currentRoom ? whodunnitBundledRoomArtPathForRoom(
+      { templateId: currentRoom.templateId }, "mosaic", currentRoomMosaicGrid,
+    ) : null,
+  ].find((url): url is string => Boolean(url && !failedMosaicUrls.has(url))) ?? null;
+  const currentRoomImageUrl = currentRoomArtStyle === "illustrated"
+    ? currentRoomUpgradeAssetUrl ?? currentRoomAcceptedUpgradeUrl ?? currentRoomMosaicUrl
+    : currentRoomMosaicUrl;
+  useEffect(() => {
+    if (!travelPresentation) return;
+    const room = travelPresentation.toRoom;
+    const snapshot = state.config.mansionSnapshot;
+    const bundleId = snapshot?.sourceBundleId ?? null;
+    const illustratedSubjectId = whodunnitIllustratedRoomSubjectId(room.id);
+    const hasUpgrade = Boolean(
+      roomArtUpgradeStatus?.readyRoomIds.includes(room.id) && !failedUpgradeRoomIds.has(room.id),
+    );
+    const layoutEntity = mansionLayout?.entities.find(
+      (entity) => entity.kind === "room" && entity.id === room.id,
+    ) ?? null;
+    const acceptedMosaicAssetId = layoutEntity?.kind === "room" ? layoutEntity.acceptedRoomAssetId : null;
+    const illustratedAssetId = snapshot?.presentation.assets.find(
+      (asset) => asset.role === "room" && asset.logicalId === illustratedSubjectId,
+    )?.id ?? null;
+    // The same candidates the room itself will try on arrival, best first.
+    const candidates = [
+      hasUpgrade ? whodunnitSealedRoomArtUrl({ sessionId: props.session.id, subjectId: illustratedSubjectId, style: "illustrated" }) : null,
+      hasUpgrade && illustratedAssetId && bundleId ? whodunnitMansionRoomArtUrl(bundleId, illustratedAssetId, "illustrated") : null,
+      room.sealedAsset?.revealed && room.sealedAsset.status === "ready"
+        ? whodunnitSealedRoomArtUrl({ sessionId: props.session.id, subjectId: room.id, style: "mosaic", mosaicGrid: "visible" })
+        : null,
+      acceptedMosaicAssetId && bundleId ? whodunnitMansionRoomArtUrl(bundleId, acceptedMosaicAssetId, "mosaic", "visible") : null,
+      room.imageId ? whodunnitSavedRoomArtUrl(room.imageId, "mosaic", "visible") : null,
+      whodunnitBundledRoomArtPathForRoom(room, "mosaic", "visible"),
+    ].filter((url): url is string => Boolean(url) && !failedMosaicUrls.has(url as string));
+    // Deliberately uncancelled: the fetches are the point, and the walk is short.
+    for (const url of new Set(candidates)) {
+      const image = new Image();
+      image.decoding = "async";
+      image.src = url;
+    }
+  }, [failedMosaicUrls, failedUpgradeRoomIds, mansionLayout, props.session.id, roomArtUpgradeStatus, state.config.mansionSnapshot, travelPresentation]);
+
+  const currentRoomEntryKey = currentRoom && roomView === "room" &&
+      (state.playPhase === "investigation" || state.playPhase === "theory") &&
+      !visitingExterior && !spectatorTheory && !courtPresentationActive
+    ? `${props.session.id}:${currentRoom.id}`
+    : null;
+  const currentRoomBackdropKey = currentRoomEntryKey
+    ? `${currentRoomEntryKey}:${currentRoomArtStyle}:${currentRoomImageUrl ?? "fallback"}:${sceneAssetRefreshNonce}`
+    : null;
+  const mosaicBackdropRef = useRef<HTMLImageElement | null>(null);
+  const upgradeBackdropRef = useRef<HTMLImageElement | null>(null);
+  const [readyRoomBackdropKey, setReadyRoomBackdropKey] = useState<string | null>(null);
+  // The intrinsic frame of the accepted plate. Live art, lights, effects, and
+  // examination geometry share this fitted frame; Lights & FX uses the same aspect.
+  const [roomBackdropAspect, setRoomBackdropAspect] = useState<{ key: string; aspect: number } | null>(null);
+  const currentRoomBackdropReady = Boolean(
+    currentRoomBackdropKey && readyRoomBackdropKey === currentRoomBackdropKey,
+  );
+  useEffect(() => {
+    if (!currentRoomBackdropKey || !currentRoomImageUrl) {
+      setReadyRoomBackdropKey(currentRoomBackdropKey);
+      return;
+    }
+    const image = currentRoomArtStyle === "illustrated"
+      ? upgradeBackdropRef.current
+      : mosaicBackdropRef.current;
+    if (!image) return;
+    let cancelled = false;
+    const settle = (): void => {
+      if (cancelled) return;
+      setReadyRoomBackdropKey(currentRoomBackdropKey);
+      if (image.naturalWidth > 0 && image.naturalHeight > 0) {
+        setRoomBackdropAspect({ key: currentRoomBackdropKey, aspect: image.naturalWidth / image.naturalHeight });
+      }
+    };
+    const onLoad = (): void => {
+      // Wait for the image actually painted by the room, including cached loads.
+      const decoded = typeof image.decode === "function"
+        ? image.decode().catch(() => undefined)
+        : Promise.resolve();
+      void decoded.then(settle);
+    };
+    image.addEventListener("load", onLoad);
+    if (image.complete && image.naturalWidth > 0) onLoad();
+    return () => {
+      cancelled = true;
+      image.removeEventListener("load", onLoad);
+    };
+  }, [currentRoomBackdropKey, currentRoomImageUrl, currentRoomArtStyle]);
+  const currentRoomArtAspect = roomBackdropAspect && roomBackdropAspect.key === currentRoomBackdropKey
+    ? roomBackdropAspect.aspect
+    : undefined;
+  // Latch the reveal per visit, rather than per art variant: changing a ready
+  // room's presentation should crossfade without another entrance blackout.
+  const [revealedRoomEntryKey, setRevealedRoomEntryKey] = useState<string | null>(null);
+  const [roomActorEntryKey, setRoomActorEntryKey] = useState<string | null>(null);
+  const roomEntryRevealed = Boolean(
+    currentRoomEntryKey && revealedRoomEntryKey === currentRoomEntryKey,
+  );
+  const roomEntryAwaitingUpgrade = roomUpgradeEnabled &&
+    currentRoomHasIllustratedUpgrade && !currentRoomIllustratedUpgradeLoaded;
+  useEffect(() => {
+    if (!currentRoomEntryKey) {
+      setRevealedRoomEntryKey(null);
+    } else if (currentRoomBackdropReady && !roomEntryAwaitingUpgrade) {
+      setRevealedRoomEntryKey(currentRoomEntryKey);
+    }
+  }, [currentRoomEntryKey, currentRoomBackdropReady, roomEntryAwaitingUpgrade]);
+  useEffect(() => {
+    if (!roomEntryRevealed || exteriorRoomReveal) {
+      setRoomActorEntryKey(null);
+      return;
+    }
+    // Give the decoded room a painted frame of its own, even in Reduced Motion.
+    let frame = window.requestAnimationFrame(() => {
+      frame = window.requestAnimationFrame(() => {
+        timer = window.setTimeout(
+          () => setRoomActorEntryKey(currentRoomEntryKey),
+          reducedMotion ? 0 : 240,
+        );
+      });
+    });
+    let timer: number | undefined;
+    return () => {
+      window.cancelAnimationFrame(frame);
+      window.clearTimeout(timer);
+    };
+  }, [currentRoomEntryKey, roomEntryRevealed, exteriorRoomReveal, reducedMotion]);
+  const roomEntryLoading = currentRoomEntryKey !== null && !roomEntryRevealed;
+  const roomActorsReady = roomEntryRevealed && roomActorEntryKey === currentRoomEntryKey && currentRoomImageUrl !== null;
+  const roomActorVisible = roomActorEligible && roomActorsReady;
+  const roomProsecutorVisible = interrogationStagingActive && roomActorsReady;
+  // After a Talk or Present choice the investigator forms the question while
+  // the request runs, then keeps thinking until their voice actually sounds;
+  // the suspect thinks through the handoff beat and their own voice's wait.
+  const playerThinking = interrogationStagingActive && (
+    (busy && !dialoguePerformanceActive) ||
+    (roomProsecutorActive && roomDialogueVoicePending)
+  );
+  const suspectThinking = (interrogationStagingActive && (
+    interrogationPhase === "handoff" ||
+    (roomPersonaDialogueActive && roomDialogueVoicePending)
+  )) || (
+    // First person has no investigator on stage: the witness alone carries
+    // the beat from the player's choice until the answer sounds.
+    firstPersonInvestigation && currentSuspect !== null && (
+      ((command === "talk" || command === "present") && busy && !dialoguePerformanceActive) ||
+      (roomPersonaDialogueActive && roomDialogueVoicePending)
+    )
+  );
+  const roomBackdropBlurred = roomIntroductionActive || roomActorVisible || roomProsecutorVisible;
+  useEffect(() => {
+    // Whoever listens on stage answers a typed line with a short vocalisation
+    // of their own: the witness while the investigator's observation types
+    // out, the embodied investigator while the witness answers. Once per line.
+    if (!props.audioEnabled || props.audioVolume <= 0 || !roomDisplayedDialogue || roomDialogueSettled) return;
+    const listenerBotId = roomPlayerObservationActive && roomActorVisible && currentBot
+      ? currentBot.id
+      : roomPersonaDialogueActive && roomProsecutorVisible && prosecutorBot
+        ? prosecutorBot.id
+        : null;
+    if (!listenerBotId) return;
+    const seed = `${props.session.id}:${roomDisplayedDialogue.nodeId}:${roomDisplayedDialogue.occurredAt}:${listenerBotId}`;
+    if (vocalReactionPlayedRef.current === seed) return;
+    const cue = pickMysteryVocalCueV2(vocalBank[listenerBotId] ?? [], "listening", seed);
+    if (!cue) return;
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => {
+      vocalReactionPlayedRef.current = seed;
+      setVocalReactingBotId(listenerBotId);
+      void playDebateMysteryVocalCueV2({
+        url: cue.url,
+        volume: props.audioVolume * DEBATE_MYSTERY_VOCAL_LISTENING_VOLUME_RATIO,
+        signal: controller.signal,
+      }).finally(() => setVocalReactingBotId((current) => (current === listenerBotId ? null : current)));
+    }, mysteryListeningReactionDelayMsV2(seed, roomDisplayedDialogue.visibleText.length));
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [
+    currentBot,
+    props.audioEnabled,
+    props.audioVolume,
+    props.session.id,
+    prosecutorBot,
+    roomActorVisible,
+    roomDialogueSettled,
+    roomDisplayedDialogue,
+    roomPersonaDialogueActive,
+    roomPlayerObservationActive,
+    roomProsecutorVisible,
+    vocalBank,
+  ]);
+  // While the Case File is open nothing behind its blur runs: lights and
+  // effects are withdrawn so the treatment draws nothing and stops its clock.
+  const currentRoomLights = useMemo<readonly MansionDynamicLightV2[]>(
+    () => currentRoom && mansionLayout && !caseFileOpen
+      ? mansionLayout.lights.filter((light) => light.roomId === currentRoom.id)
+      : [],
+    [caseFileOpen, currentRoom, mansionLayout],
+  );
+  const currentRoomEffects = useMemo<readonly MansionRoomEffectV1[]>(
+    () => currentRoom && mansionLayout?.effects && !caseFileOpen
+      ? mansionLayout.effects.filter((effect) => effect.roomId === currentRoom.id)
+      : [],
+    [caseFileOpen, currentRoom, mansionLayout],
+  );
+  const currentRoomUsesTemplateLightGeometry = currentRoom
+    ? mysteryRoomUsesTemplateLightGeometryV1({
+        imageId: currentRoom.imageId,
+        acceptedRoomAssetId: currentRoomLayoutEntity?.kind === "room"
+          ? currentRoomLayoutEntity.acceptedRoomAssetId
+          : null,
+        sealedAsset: currentRoom.sealedAsset,
+      })
+    : false;
+  const investigationAvatarPresentation = whodunnitInvestigationAvatarPresentation(
+    currentRoomArtStyle,
+  );
+  const currentRoomFittedAspect =
+    currentRoomArtAspect ?? WHODUNNIT_ROOM_ART_DEFAULT_ASPECT;
+  const roomSceneStyle = {
+    "--room-image": currentRoomImageUrl ? `url(${currentRoomImageUrl})` : "none",
+    "--room-art-aspect": currentRoomFittedAspect,
+    "--room-art-inverse-aspect": 1 / currentRoomFittedAspect,
+    "--room-parallax-x": `${roomParallax.x}px`,
+    "--room-parallax-y": `${roomParallax.y}px`,
+    "--room-parallax-scale": roomParallax.x || roomParallax.y ? "1.012" : "1",
+  } as CSSProperties;
+  const lensActive = Boolean(
+    command === "examine" &&
+      (currentRoomUnexaminedHotspots.length > 0 || currentRoomInterests.length > 0) &&
+      !busy &&
+      !examinationStreaming &&
+      !roomDisplayedDialogue &&
+      !examiningHotspotId &&
+      !roomObservationAwaitingContinue &&
+      !caseFileOpen &&
+      !theoryOpen,
+  );
+  const investigationCommandsDismissed = roomView !== "room" ||
+    command === "move" ||
+    command === "examine";
+  // Visuals mode edits assets on the map; movement waits until it is closed.
+  const backToRoomDisabled = busy || dialoguePerformanceActive || travelPresentation !== null || roomVisualsMode;
+  const examinationGridTrackingActive = examinationPointerInside || examinationKeyboardFocusActive;
+  const examinationIlluminatedCells = lensActive && currentRoom && examinationGridTrackingActive
+    ? new Set(debateMysteryV2ExamineGridCellIndexes(investigationLens, currentRoomLensRegions))
+    : new Set<number>();
+  const examinationGridStyle = {
+    "--examine-grid-cell-width": `${100 / DEBATE_MYSTERY_V2_EXAMINE_GRID_COLUMNS}%`,
+    "--examine-grid-cell-height": `${100 / DEBATE_MYSTERY_V2_EXAMINE_GRID_ROWS}%`,
+  } as CSSProperties;
+  const handleCurrentRoomArtLoadError = (): void => {
+    if (!currentRoom || !currentRoomHasIllustratedUpgrade) return;
+    setFailedUpgradeRoomIds((current) => {
+      if (current.has(currentRoom.id)) return current;
+      return new Set([...current, currentRoom.id]);
+    });
+    setRoomUpgradeSynthesisJob((current) => current?.roomId === currentRoom.id &&
+        current.status === "ready"
+      ? {
+          ...current,
+          status: "failed",
+          error: "The Upgraded image could not load. This room's Mosaic is unchanged.",
+        }
+      : current);
+  };
+  const handleCurrentRoomUpgradeArtLoad = (): void => {
+    if (!currentRoom || !currentRoomHasIllustratedUpgrade) return;
+    setLoadedUpgradeRoomIds((current) => {
+      if (current.has(currentRoom.id)) return current;
+      return new Set([...current, currentRoom.id]);
+    });
+  };
+  useEffect(() => {
+    if (roomUpgradeSynthesisJob?.status !== "refracting" || !roomArtUpgradeStatus) return;
+    const jobId = roomUpgradeSynthesisJob.id;
+    if (roomArtUpgradeStatus.readyRoomIds.includes(roomUpgradeSynthesisJob.roomId)) {
+      setRoomUpgradeSynthesisJob((current) => current?.id === jobId
+        ? { ...current, status: "ready", error: null }
+        : current);
+      selectRoomUpgradeEnabled(true);
+      return;
+    }
+    if (
+      roomArtUpgradeStatus.failedRoomIds.includes(roomUpgradeSynthesisJob.roomId) ||
+      roomArtUpgradeStatus.status === "unavailable"
+    ) {
+      setRoomUpgradeSynthesisJob((current) => current?.id === jobId
+        ? {
+            ...current,
+            status: "failed",
+            error: roomArtUpgradeStatus.reason ??
+              "This room could not be upgraded. Its Mosaic is unchanged.",
+          }
+        : current);
+    }
+  }, [roomArtUpgradeStatus, roomUpgradeSynthesisJob, selectRoomUpgradeEnabled]);
+  useEffect(() => {
+    if (roomUpgradeSynthesisJob?.status !== "refracting") return;
+    const jobId = roomUpgradeSynthesisJob.id;
+    let cancelled = false;
+    const refresh = (): void => {
+      void props.request<DebateMysteryRoomArtUpgradeStatusV1>(
+        `/api/debates/${encodeURIComponent(props.session.id)}/mystery-room-art/upgrade`,
+      ).then((status) => {
+        if (cancelled || roomUpgradeSynthesisJobIdRef.current !== jobId) return;
+        setRoomArtUpgradeStatus(status);
+      }).catch(() => {
+        // The original POST owns failure reporting; polling is progress-only.
+      });
+    };
+    refresh();
+    const timer = window.setInterval(refresh, 1_500);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [
+    props.request,
+    props.session.id,
+    roomUpgradeSynthesisJob?.id,
+    roomUpgradeSynthesisJob?.status,
+  ]);
+  const completionCueVisible = Boolean(
+    completionCueRoomId &&
+      completionCueRoomId === currentRoom?.id &&
+      command === "examine" &&
+      roomComplete &&
+      !busy &&
+      !examinationStreaming &&
+      !roomObservationAwaitingContinue &&
+      !roomDisplayedDialogue,
+  );
+  const examineHotspot = async (hotspotId: string): Promise<void> => {
+    if (!currentRoom || !lensActive) return;
+    setExaminingHotspotId(hotspotId);
+    await sendAction({ action: "examine", roomId: currentRoom.id, hotspotId });
+  };
+  // The "..." beat is presentation: reveal the tableau on its own after a
+  // moment (a gesture still skips ahead) instead of asking for a click.
+  useEffect(() => {
+    if (roomIntroductionPhase !== "casekeeper" || roomCasekeeperNarrationVisible || !roomCasekeeperNarrationKey) return;
+    const key = roomCasekeeperNarrationKey;
+    const timer = window.setTimeout(
+      () => setRevealedCasekeeperNarrationKey(key),
+      reducedMotion ? 0 : WHODUNNIT_ROOM_ENTRY_BEAT_MS,
+    );
+    return () => window.clearTimeout(timer);
+  }, [reducedMotion, roomCasekeeperNarrationKey, roomCasekeeperNarrationVisible, roomIntroductionPhase]);
+  // Prepare the occupant's opening exchange while the tableau is being read.
+  // The result is held, not shown: the tableau stays until the player
+  // dismisses it, and that gesture plays the exchange the moment it exists.
+  useEffect(() => {
+    if (roomIntroductionPhase !== "casekeeper" || !roomCasekeeperNarrationVisible || !currentRoom) return;
+    if (busy || pendingRoomIntroduction?.roomId === currentRoom.id) return;
+    const roomId = currentRoom.id;
+    setPendingRoomIntroduction({ roomId, deferred: null, adoptOnArrival: false, failed: false });
+    void requestDeferredAction({ action: "advance_room_introduction", roomId }).then((deferred) => {
+      setPendingRoomIntroduction((current) => current?.roomId === roomId
+        ? deferred ? { ...current, deferred } : { ...current, failed: true }
+        : current);
+    });
+  }, [busy, currentRoom, pendingRoomIntroduction, requestDeferredAction, roomCasekeeperNarrationVisible, roomIntroductionPhase]);
+  useEffect(() => {
+    const pending = pendingRoomIntroduction;
+    if (!pending) return;
+    if (roomIntroductionPhase !== "casekeeper" || pending.roomId !== currentRoom?.id) {
+      setPendingRoomIntroduction(null);
+      return;
+    }
+    if (pending.adoptOnArrival && pending.deferred) {
+      setPendingRoomIntroduction(null);
+      finishDeferredAction(pending.deferred);
+    }
+  }, [currentRoom?.id, finishDeferredAction, pendingRoomIntroduction, roomIntroductionPhase]);
+  /** A point of interest is flavour: the first look asks the investigator for
+   * an aside, later looks replay the stored one without a request. */
+  const observeInterest = async (interestId: string): Promise<void> => {
+    if (!currentRoom || !lensActive) return;
+    const interest = currentRoomInterests.find((entry) => entry.id === interestId);
+    if (!interest) return;
+    const nodeId = debateMysteryInterestNodeIdV2(currentRoom.id, interest.id);
+    const noted = state.dialogueHistory.findLast((entry) => entry.nodeId === nodeId) ?? null;
+    if (noted) {
+      cancelActiveDialogueAudio();
+      setHeldDialogue(null);
+      setSpeechTiming(null);
+      setInterrogationPhase(null);
+      setDialoguePlaybackQueue([noted]);
+      setDialoguePlaybackIndex(0);
+      return;
+    }
+    setExaminingHotspotId(`interest:${interest.id}`);
+    await sendAction({ action: "observe_interest", roomId: currentRoom.id, interestId: interest.id });
+  };
+  const advanceVisibleRoomDialogue = (): void => {
+    const roomIntroductionGesture = debateMysteryRoomIntroductionGestureV2({
+      casekeeperNarrationVisible: roomCasekeeperNarrationVisible,
+      phase: roomIntroductionPhase,
+    });
+    if (
+      roomIntroductionGesture === "reveal_casekeeper_narration" &&
+      roomCasekeeperNarrationKey
+    ) {
+      setRevealedCasekeeperNarrationKey(roomCasekeeperNarrationKey);
+      return;
+    }
+    if (roomIntroductionGesture === "advance_to_persona" && currentRoom) {
+      const pending = pendingRoomIntroduction?.roomId === currentRoom.id ? pendingRoomIntroduction : null;
+      if (pending?.deferred) {
+        setPendingRoomIntroduction(null);
+        finishDeferredAction(pending.deferred);
+        return;
+      }
+      if (pending && !pending.failed) {
+        // Still preparing: play it the moment it lands.
+        setPendingRoomIntroduction({ ...pending, adoptOnArrival: true });
+        return;
+      }
+      void sendAction({ action: "advance_room_introduction", roomId: currentRoom.id });
+      return;
+    }
+    finishCurrentDialogue();
+  };
+  useEffect(() => {
+    if (roomIntroductionActive || !dialogueSfxPresentation) return;
+    const requiresPlayerInput = caseFileOpen || theoryOpen;
+    if (!whodunnitInvestigationDialogueShouldAutoAdvance({
+      busy,
+      hasActiveAudio: activeAudioRef.current !== null,
+      hasDialogue: roomDisplayedDialogue !== null,
+      hasQueuedDialogue: queuedDialogue !== null,
+      isPlayerObservation: roomPlayerObservationActive,
+      playPhase: state.playPhase,
+      requiresPlayerInput,
+      roomView: roomView,
+      streaming: dialogueSfxPresentation.streaming,
+      terminalWitnessHold,
+    })) return;
+    const presentationKey = dialogueSfxPresentation.key;
+    const timer = window.setTimeout(() => {
+      if (dialogueSfxPresentationRef.current.key !== presentationKey) return;
+      finishCurrentDialogue(true);
+    }, whodunnitInvestigationDialogueGraceMs({
+      delivery: dialogueSfxPresentation.delivery,
+      reducedMotion,
+      text: dialogueSfxPresentation.fullText,
+    }));
+    return () => window.clearTimeout(timer);
+  }, [
+    busy,
+    queuedDialogue,
+    caseFileOpen,
+    dialogueSfxPresentation,
+    finishCurrentDialogue,
+    reducedMotion,
+    roomDisplayedDialogue,
+    roomIntroductionActive,
+    roomIntroductionAwaitingContinue,
+    roomPlayerObservationActive,
+    state.playPhase,
+    roomView,
+    terminalWitnessHold,
+    theoryOpen,
+  ]);
+  const handleInvestigationDialogueClickCapture = (event: React.MouseEvent<HTMLElement>): void => {
+    if (event.target instanceof Element && event.target.closest("dialog")) return;
+    if (roomEntryLoading) {
+      event.stopPropagation();
+      return;
+    }
+    if (mysteryDialogueGestureOriginIsInteractive(event.target)) return;
+    if (!operateVisibleDialogueGesture(event.detail, advanceVisibleRoomDialogue)) return;
+    event.preventDefault();
+    event.stopPropagation();
+  };
+  const handleRoomInvestigationClick = (event: React.MouseEvent<HTMLElement>): void => {
+    if (!currentRoom) return;
+    if (roomObservationAwaitingContinue) {
+      finishCurrentDialogue();
+      return;
+    }
+    if (roomIntroductionAwaitingContinue) {
+      advanceVisibleRoomDialogue();
+      return;
+    }
+    if (!lensActive) return;
+    const bounds = roomArtFrameRef.current?.getBoundingClientRect();
+    if (!bounds) return;
+    const point = debateMysteryV2ImagePointFromClientPoint(event, bounds);
+    if (!point) return;
+    const lens = resolveDebateMysteryV2Lens(
+      point.x,
+      point.y,
+      currentRoomLensRegions,
+    );
+    setInvestigationLens(lens);
+    const hotspotId = debateMysteryV2LensClickTarget(lens);
+    if (hotspotId?.startsWith("interest:")) void observeInterest(hotspotId.slice("interest:".length));
+    else if (hotspotId) void examineHotspot(hotspotId);
+  };
+  const handleRoomPointerMove = (event: React.PointerEvent<HTMLElement>): void => {
+    const bounds = roomArtFrameRef.current?.getBoundingClientRect();
+    const point = bounds
+      ? debateMysteryV2ImagePointFromClientPoint(event, bounds)
+      : null;
+    if (!point) {
+      setExaminationPointerInside(false);
+      if (roomParallaxEnabled) setRoomParallax({ x: 0, y: 0 });
+      return;
+    }
+    if (lensActive && currentRoom) {
+      setExaminationPointerInside(true);
+      setInvestigationLens(resolveDebateMysteryV2Lens(
+        point.x,
+        point.y,
+        currentRoomLensRegions,
+      ));
+    }
+    if (roomParallaxEnabled && !(event.target instanceof Element && event.target.closest("button"))) {
+      setRoomParallax({
+        x: (point.x / 100 - 0.5) * 8,
+        y: (point.y / 100 - 0.5) * 6,
+      });
+    }
+  };
+  const handleRoomPointerLeave = (): void => {
+    setExaminationPointerInside(false);
+    setRoomParallax({ x: 0, y: 0 });
+  };
+
+  useEffect(() => {
+    if (!completionCueRoomId) return;
+    if (completionCueRoomId !== currentRoom?.id || command !== "examine") {
+      setCompletionCueRoomId(null);
+      return;
+    }
+    if (!completionCueVisible) return;
+    const timer = window.setTimeout(() => setCompletionCueRoomId(null), 3_400);
+    return () => window.clearTimeout(timer);
+  }, [command, completionCueRoomId, completionCueVisible, currentRoom?.id]);
+
+  useEffect(() => {
+    if (!debateMysteryRoomCompletionCueShouldStart({
+      completionCueRoomId,
+      currentRoomId: currentRoom?.id ?? null,
+      presentationVisible: completionCueVisible,
+      roomDialogueVisible: roomDisplayedDialogue !== null,
+      startedRoomId: completionCuePlaybackRoomIdRef.current,
+    })) return;
+    // Latch before asking the browser to play: unmuting, rerenders, or a
+    // rejected autoplay promise must not turn one room transition into a cue.
+    completionCuePlaybackRoomIdRef.current = completionCueRoomId;
+    void playDebateMysterySfx({
+      cue: "room-complete",
+      enabled: props.audioEnabled,
+      volume: props.audioVolume,
+    }).then((started) => {
+      if (started) props.onRoomCompleteCueStarted?.();
+    });
+  }, [
+    completionCueRoomId,
+    completionCueVisible,
+    currentRoom?.id,
+    props.audioEnabled,
+    props.audioVolume,
+    props.onRoomCompleteCueStarted,
+    roomDisplayedDialogue,
+  ]);
+
+  useEffect(() => {
+    if (!roomParallaxEnabled) setRoomParallax({ x: 0, y: 0 });
+  }, [roomParallaxEnabled]);
+
+  const defendantVerdicts = state.verdict?.defendantVerdicts ?? [];
+  const verdictIsMixed = new Set(defendantVerdicts.map((entry) => entry.legalResult)).size > 1;
+  const exportReusableCase = async (): Promise<void> => {
+    if (caseExportState === "exporting") return;
+    setCaseExportState("exporting");
+    try {
+      await props.onExportCase();
+      setCaseExportState("exported");
+    } catch (caught) {
+      setCaseExportState("failed");
+      setError(caught instanceof Error ? caught.message : "The reusable case could not be exported.");
+    }
+  };
+  const renderInvestigationHeaderIdentity = (
+    sharedSessionHeader = false,
+  ): React.JSX.Element => (
+    <div
+      className={styles.investigationHeaderIdentity}
+      data-shared-session-header={sharedSessionHeader ? "true" : undefined}
+      data-theme={props.theme}
+    >
+      <p className={styles.eyebrow}>{state.caseTitle}</p>
+      <strong>{spectatorTheory ? `${counsel.playerRoleLabel} Findings` : "Investigation"}</strong>
+    </div>
+  );
+  const renderInvestigationHeaderActions = (
+    sharedSessionHeader = false,
+  ): React.JSX.Element => (
+    <div
+      className={styles.investigationHeaderActions}
+      data-shared-session-header={sharedSessionHeader ? "true" : undefined}
+      data-theme={props.theme}
+    >
+      <div className={styles.roomArtStyleToggle} role="group" aria-label="Upgraded room art" data-tutorial-target="mystery-v2-room-art-upgrade">
+        <button
+          type="button"
+          aria-pressed={roomUpgradeEnabled && currentRoomHasIllustratedUpgrade}
+          disabled={
+            roomView === "mansion" ||
+            roomUpgradeSynthesisJob?.status === "refracting"
+          }
+          title={currentRoomUpgradeLoadFailed
+            ? "Retry loading this room's Upgraded presentation."
+            : !currentRoomHasIllustratedUpgrade
+              ? "Create this room's Upgraded presentation with Soft Refract."
+              : roomUpgradeEnabled
+                ? "Show this room's original Mosaic."
+                : "Show this room's saved Upgraded presentation."}
+          onClick={() => {
+            if (currentRoom && currentRoomUpgradeLoadFailed) {
+              retryRoomUpgradeArt(currentRoom.id);
+              selectRoomUpgradeEnabled(true);
+              return;
+            }
+            if (currentRoom && !currentRoomHasIllustratedUpgrade) {
+              setRoomUpgradeConfirmationRoomId(currentRoom.id);
+              return;
+            }
+            selectRoomUpgradeEnabled(!roomUpgradeEnabled);
+          }}
+        >Upgraded</button>
+      </div>
+      <button type="button" onClick={() => { setCaseFileOpen(true); setCaseFileUpdate(null); }} data-tutorial-target="mystery-v2-case-file">Case File <span>{caseFileEntryCount}</span></button>
+    </div>
+  );
+  const renderSceneRepairControl = (
+    context: "exterior" | "room" | "map" | "item" | "casefile",
+    room: DebateMysteryRoomV2 | null = null,
+    item: DebateMysteryPublicRecordItemV2 | null = null,
+  ): React.JSX.Element | null => {
+    if (context === "room" && !room?.visited) return null;
+    if (context === "item" && (!item || item.reference.kind !== "evidence" || !item.admitted)) return null;
+    const contextKey = context === "exterior" || context === "map" || context === "casefile"
+      ? context
+      : context === "item"
+        ? `item:${item!.reference.id}`
+        : room!.id;
+    const foundItems = context === "casefile" ? state.record.filter((entry) => entry.admitted && entry.reference.kind === "evidence") : [];
+    const undoAction = state.sceneRepairUndo?.action;
+    const audioUndo = undoAction === "regenerate_music" || undoAction === "regenerate_ambience";
+    const undoApplies = Boolean(
+      state.sceneRepairUndo &&
+      (context === "exterior"
+        ? audioUndo || (state.sceneRepairUndo.roomId === null && !state.sceneRepairUndo.subjectId)
+        : context === "item"
+          ? audioUndo || state.sceneRepairUndo.subjectId === item!.reference.id
+          : context === "casefile"
+            ? CASE_FILE_REPAIR_ACTIONS.includes(state.sceneRepairUndo.action)
+          : context === "map"
+            ? audioUndo || Boolean(state.sceneRepairUndo.subjectId)
+            : state.sceneRepairUndo.roomId === room!.id || audioUndo),
+    ) && !whodunnitSceneRepairUndoIsDismissed(
+      dismissedSceneRepairUndoId,
+      state.sceneRepairUndo?.id,
+    );
+    const hasUpgrade = Boolean(
+      room && roomArtUpgradeStatus?.readyRoomIds.includes(room.id),
+    );
+    const actions: DebateMysterySceneRepairActionV1[] = context === "exterior"
+      ? ["regenerate_exterior", "align_exterior_door", "regenerate_music", "regenerate_ambience"]
+      : context === "casefile"
+        ? [...CASE_FILE_ROOT_REPAIR_ACTIONS]
+      : context === "item"
+        ? [
+            "repair_evidence_name",
+            "repair_evidence_description",
+            "rename_evidence_from_description",
+            "regenerate_evidence_asset",
+            ...(item?.sealedAsset?.status === "ready" && item.sealedAsset.revealed
+              ? ["reduce_evidence_magenta" as const]
+              : []),
+            "regenerate_music",
+            "regenerate_ambience",
+          ]
+        : context === "map"
+          ? ["generate_map_plan", "regenerate_music", "regenerate_ambience"]
+          : hasUpgrade
+        ? [
+            "regenerate_room_mosaic",
+            "regenerate_room_upgrade",
+            "refresh_room_anchors",
+            "refresh_room_lights",
+            "regenerate_music",
+            "regenerate_ambience",
+          ]
+        : [
+            "regenerate_room_mosaic",
+            "refresh_room_anchors",
+            "refresh_room_lights",
+            "generate_room_upgrade",
+            "regenerate_music",
+            "regenerate_ambience",
+          ];
+    const contextLabel = context === "exterior"
+      ? "exterior"
+      : context === "item"
+        ? "found item"
+        : context === "casefile"
+          ? "Case File"
+        : context === "map"
+          ? "venue map"
+          : "room";
+    const pickedItem = sceneRepairItemPick?.subjectId
+      ? foundItems.find((entry) => entry.reference.id === sceneRepairItemPick.subjectId) ?? null
+      : null;
+    const emojiResults = pickedItem && sceneRepairItemPick?.action === "set_evidence_emoji"
+      ? searchDebateEvidenceEmojis(sceneRepairEmojiQuery || pickedItem.title, 12)
+      : [];
+    const resetSceneRepairItemFlow = (): void => {
+      setSceneRepairItemMenu(null);
+      setSceneRepairItemPick(null);
+      setSceneRepairEmojiQuery("");
+    };
+    const closeSceneRepairDialog = (): void => {
+      resetSceneRepairItemFlow();
+      setSceneRepairOpen(null);
+    };
+    const openSceneRepairItemPicker = (
+      action: CaseFileItemRepairAction,
+      backTo: CaseFileItemRepairMenu,
+    ): void => {
+      setSceneRepairItemMenu(null);
+      setSceneRepairItemPick({ action, subjectId: null, backTo });
+      setSceneRepairEmojiQuery("");
+    };
+    return (
+      <>
+        <div className={styles.sceneRepairControl} data-undo={undoApplies ? "true" : undefined}>
+          <button
+            type="button"
+            className={styles.sceneRepairButton}
+            data-tutorial-target="mystery-v2-scene-repair"
+            disabled={Boolean(sceneRepairJob)}
+            aria-label={undoApplies ? "Undo the last field repair" : `Repair this ${contextLabel}`}
+            title={undoApplies ? "Undo the last field repair" : `Repair this ${contextLabel}`}
+            onClick={(event) => {
+              event.stopPropagation();
+              if (undoApplies) {
+                void undoSceneRepair();
+                return;
+              }
+              resetSceneRepairItemFlow();
+              setSceneRepairOpen(contextKey);
+            }}
+          >
+            <span aria-hidden="true">{undoApplies ? "↶" : "?"}</span>
+            {undoApplies ? <strong>Undo</strong> : null}
+          </button>
+          {undoApplies && state.sceneRepairUndo ? (
+            <button
+              type="button"
+              className={styles.sceneRepairDismissButton}
+              disabled={Boolean(sceneRepairJob)}
+              onClick={(event) => {
+                event.stopPropagation();
+                const repairId = state.sceneRepairUndo!.id;
+                sceneRepairDismissalRevisionRef.current += 1;
+                setDismissedSceneRepairUndoId(repairId);
+                void writeEncryptedWhodunnitSceneRepairDismissal({
+                  ownerId: props.ownerId,
+                  scopeId: props.session.id,
+                  repairId,
+                });
+              }}
+            >
+              Keep changes
+            </button>
+          ) : null}
+        </div>
+        {sceneRepairOpen === contextKey ? (
+          <>
+            <button
+              type="button"
+              className={styles.sceneRepairBackdrop}
+              aria-label="Close scene repair"
+              onClick={(event) => { event.stopPropagation(); closeSceneRepairDialog(); }}
+            />
+            <section
+              className={styles.sceneRepairDialog}
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="mystery-scene-repair-title"
+              onClick={(event) => event.stopPropagation()}
+            >
+              <header>
+                <div>
+                  <p className={styles.eyebrow}>Field repair</p>
+                  <h2 id="mystery-scene-repair-title">
+                    Repair this {contextLabel}
+                  </h2>
+                </div>
+                <button type="button" onClick={closeSceneRepairDialog}>Close</button>
+              </header>
+              <p>
+                Choose what looks wrong. PRISM changes presentation only—case facts,
+                discoveries, doors, and action costs stay frozen.
+              </p>
+              {sceneRepairItemMenu === "categories" ? (
+                <div className={styles.sceneRepairItemList} role="group" aria-label="Choose what to repair about an item">
+                  <small>What about the item needs repair?</small>
+                  <div className={styles.sceneRepairOptions} data-layout="three">
+                    <button
+                      type="button"
+                      disabled={foundItems.length === 0}
+                      onClick={() => openSceneRepairItemPicker("set_evidence_emoji", "categories")}
+                    >
+                      <strong>Emoji</strong>
+                      <span>Choose a more accurate symbol for a found item.</span>
+                    </button>
+                    <button
+                      type="button"
+                      disabled={foundItems.length === 0}
+                      onClick={() => setSceneRepairItemMenu("information")}
+                    >
+                      <strong>Item information</strong>
+                      <span>Repair a found item&apos;s name or description.</span>
+                    </button>
+                    <button
+                      type="button"
+                      disabled={foundItems.length === 0 || liveResponseMode === "local"}
+                      title={liveResponseMode === "local" ? "Item asset synthesis requires ONLINE." : undefined}
+                      onClick={() => openSceneRepairItemPicker("regenerate_evidence_asset", "categories")}
+                    >
+                      <strong>Asset</strong>
+                      <span>Synthesize or resynthesize a found item&apos;s visual asset.</span>
+                    </button>
+                  </div>
+                  <button type="button" onClick={() => setSceneRepairItemMenu(null)}>Back</button>
+                </div>
+              ) : sceneRepairItemMenu === "information" ? (
+                <div className={styles.sceneRepairItemList} role="group" aria-label="Choose item information to repair">
+                  <small>Which information needs repair?</small>
+                  <div className={styles.sceneRepairOptions}>
+                    <button
+                      type="button"
+                      onClick={() => openSceneRepairItemPicker("rename_evidence_from_description", "information")}
+                    >
+                      <strong>Name</strong>
+                      <span>Rename the item from its existing description.</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => openSceneRepairItemPicker("reroll_evidence_description", "information")}
+                    >
+                      <strong>Description</strong>
+                      <span>Rewrite its description without adding new observations.</span>
+                    </button>
+                  </div>
+                  <button type="button" onClick={() => setSceneRepairItemMenu("categories")}>Back</button>
+                </div>
+              ) : sceneRepairItemPick && !pickedItem ? (
+                <div className={styles.sceneRepairItemList} role="group" aria-label="Choose a found item">
+                  <small>{MYSTERY_SCENE_REPAIR_COPY[sceneRepairItemPick.action].action}. Which item?</small>
+                  {foundItems.map((entry) => {
+                    const assetAlreadyQueued = sceneRepairItemPick.action === "regenerate_evidence_asset" &&
+                      itemSynthesisJobs.some((job) =>
+                        job.subjectId === entry.reference.id &&
+                        (job.status === "queued" || job.status === "generating"));
+                    return (
+                      <button key={entry.reference.id} type="button" disabled={Boolean(sceneRepairJob) || assetAlreadyQueued} onClick={() => {
+                        if (sceneRepairItemPick.action !== "set_evidence_emoji") {
+                          const action = sceneRepairItemPick.action;
+                          resetSceneRepairItemFlow();
+                          void repairScene(action, null, entry);
+                          return;
+                        }
+                        setSceneRepairEmojiQuery("");
+                        setSceneRepairItemPick({ ...sceneRepairItemPick, subjectId: entry.reference.id });
+                      }}>
+                        <span aria-hidden="true">{entry.emoji}</span><strong>{entry.title}</strong>
+                      </button>
+                    );
+                  })}
+                  <button type="button" onClick={() => {
+                    const backTo = sceneRepairItemPick.backTo;
+                    setSceneRepairItemPick(null);
+                    setSceneRepairItemMenu(backTo);
+                  }}>Back</button>
+                </div>
+              ) : pickedItem && sceneRepairItemPick?.action === "set_evidence_emoji" ? (
+                <div className={styles.sceneRepairEmojiPicker} role="group" aria-label={`Choose an emoji for ${pickedItem.title}`}>
+                  <small>Current: <span aria-hidden="true">{pickedItem.emoji}</span> {pickedItem.title}</small>
+                  <label>Search<input autoFocus type="search" value={sceneRepairEmojiQuery} placeholder={pickedItem.title}
+                    onChange={(event) => setSceneRepairEmojiQuery(event.currentTarget.value)}
+                    onKeyDown={(event) => {
+                      // Typing or pasting an emoji directly also works: the last symbol wins.
+                      if (event.key !== "Enter") return;
+                      const custom = normalizeDebateEvidenceEmojiChoice(event.currentTarget.value, "");
+                      if (custom && !/[\p{L}\p{N}]/u.test(custom)) {
+                        event.preventDefault();
+                        resetSceneRepairItemFlow();
+                        void repairScene("set_evidence_emoji", null, pickedItem, { emoji: custom });
+                      }
+                    }} /></label>
+                  <div className={styles.sceneRepairEmojiResults} aria-live="polite">
+                    {emojiResults.map((result) => (
+                      <button key={result.emoji} type="button" disabled={Boolean(sceneRepairJob)} aria-label={`Use ${result.label} emoji ${result.emoji}`}
+                        onClick={() => { resetSceneRepairItemFlow(); void repairScene("set_evidence_emoji", null, pickedItem, { emoji: result.emoji }); }}>
+                        <span aria-hidden="true">{result.emoji}</span><small>{result.label}</small>
+                      </button>
+                    ))}
+                  </div>
+                  <button type="button" onClick={() => setSceneRepairItemPick((current) =>
+                    current ? { ...current, subjectId: null } : current
+                  )}>Back</button>
+                </div>
+              ) : null}
+              <div
+                className={styles.sceneRepairOptions}
+                data-hidden={sceneRepairItemMenu || sceneRepairItemPick ? "true" : undefined}
+              >
+                {context === "casefile" ? (
+                  <button
+                    type="button"
+                    disabled={foundItems.length === 0}
+                    onClick={() => setSceneRepairItemMenu("categories")}
+                  >
+                    <strong>An item isn&apos;t accurate</strong>
+                    <span>Repair its emoji, information, or visual asset.</span>
+                  </button>
+                ) : null}
+                {actions.map((action) => {
+                  const copy = MYSTERY_SCENE_REPAIR_COPY[action];
+                  const issue = action === "regenerate_room_mosaic" && hasUpgrade
+                    ? "The original room looks wrong"
+                    : action === "generate_map_plan" && mapPlanAsset
+                      ? "The overhead view looks wrong"
+                      : copy.issue;
+                  const itemGenerationAlreadyQueued = action === "regenerate_evidence_asset" &&
+                    item?.reference.kind === "evidence" &&
+                    itemSynthesisJobs.some((job) =>
+                      job.subjectId === item.reference.id && job.status === "queued");
+                  return (
+                    <button
+                      key={action}
+                      type="button"
+                      disabled={
+                        Boolean(sceneRepairJob) ||
+                        itemGenerationAlreadyQueued ||
+                        (context === "casefile" && action !== "clean_case_file" && foundItems.length === 0) ||
+                        (liveResponseMode === "local" &&
+                          !LOCAL_TEXT_REPAIR_ACTIONS.includes(action) &&
+                          !PROVIDER_FREE_SCENE_REPAIR_ACTIONS.includes(action) &&
+                          action !== "refresh_room_lights")
+                      }
+                      onClick={() => {
+                        if (action === "align_exterior_door") {
+                          setSceneRepairOpen(null);
+                          setError(null);
+                          setExteriorEntryPlacementOpen(true);
+                        } else if (action === "refresh_room_lights" && room) {
+                          setSceneRepairOpen(null);
+                          setLightEditorRoomId(room.id);
+                        } else if (action === "generate_map_plan") {
+                          setSceneRepairOpen(null);
+                          setOverheadEditorOpen(true);
+                        } else void repairScene(action, room, item);
+                      }}
+                    >
+                      <strong>{issue}</strong>
+                      <span>{copy.action}</span>
+                    </button>
+                  );
+                })}
+              </div>
+              {liveResponseMode === "local" &&
+                actions.some((action) => action !== "reduce_evidence_magenta") ? (
+                <p className={styles.roomVisualOnlineNotice}>
+                  {actions.includes("align_exterior_door")
+                    ? "Entrance placement works in LOCAL. Exterior generation, music, and ambience require ONLINE."
+                    : actions.includes("reduce_evidence_magenta")
+                    ? "Image generation and image-aware repair require ONLINE. Text repair and magenta cleanup work in LOCAL."
+                    : context === "casefile"
+                      ? "Emoji and item information repairs work in LOCAL. Item asset synthesis requires ONLINE."
+                    : "Image generation, image-aware repair, music, and ambience require ONLINE. Item text repair works in LOCAL."}
+                </p>
+              ) : null}
+              <footer>
+                <small>
+                  No undiscovered room or item is previewed here. After a successful repair,
+                  this question mark becomes Undo. Venue updates can be kept when you file charges.
+                </small>
+              </footer>
+            </section>
+          </>
+        ) : null}
+      </>
+    );
+  };
+  const renderSceneRepairLoader = (): React.JSX.Element => {
+    const copy = sceneRepairJob?.action === "undo"
+      ? {
+          loader: "Restoring the previous scene",
+          detail: "PRISM is restoring the exact protected image and calibration from before the last repair.",
+        }
+      : sceneRepairJob
+        ? MYSTERY_SCENE_REPAIR_COPY[sceneRepairJob.action]
+        : null;
+    return (
+      <PrismBlockingLoader
+        open={Boolean(sceneRepairJob)}
+        {...(sceneRepairJob?.action === "undo"
+          ? { operation: "preparation" as const }
+          : { operation: "refraction" as const, onCancel: () => sceneRepairRunOwner.cancel() })}
+        operationId={sceneRepairRun?.id}
+        estimatedDurationMs={sceneRepairRun?.estimatedDurationMs}
+        cancelLabel="Cancel scene refraction"
+        placement="fullscreen"
+        theme={props.theme}
+        eyebrow="PRISM / Field Repair"
+        title={copy?.loader ?? "Repairing the scene"}
+        detail={copy?.detail ?? "PRISM is restoring the accepted scene presentation."}
+        stepLabel={sceneRepairJob?.action === "undo" ? "Restoring protected snapshot" : "Preparing and validating the replacement"}
+        startedAt={sceneRepairJob?.startedAt ?? null}
+        footer="No undiscovered room, item, or case information is shown during repair."
+      />
+    );
+  };
+  const renderItemSynthesisLoader = (): React.JSX.Element => {
+    const activeJobs = itemSynthesisJobs.filter((job) => job.status === "generating");
+    const queuedJobs = itemSynthesisJobs.filter((job) => job.status === "queued");
+    const failedJobs = itemSynthesisJobs.filter((job) => job.status === "failed");
+    const readyJobs = itemSynthesisJobs.filter((job) => job.status === "ready");
+    const focusJob = activeJobs[0] ?? queuedJobs[0] ?? failedJobs[0] ?? readyJobs[0] ?? null;
+    const queueHasSubject = (subjectId: string): boolean => queuedJobs.some((job) =>
+      job.subjectId === subjectId);
+    const renderJobs = (
+      jobs: WhodunnitItemSynthesisJob[],
+      status: "active" | "queued" | "failed" | "ready",
+    ): React.JSX.Element | null => jobs.length > 0 ? (
+      <section className={styles.itemSynthesisGroup} data-status={status}>
+        <strong>{status === "active"
+          ? "Refracting"
+          : status === "queued"
+            ? "Queued"
+            : status === "failed"
+              ? "Needs attention"
+              : "Ready"}</strong>
+        <ul className={styles.itemSynthesisJobs}>
+          {jobs.map((job) => (
+            <li key={job.id}>
+              <span aria-hidden="true">{job.emoji}</span>
+              <div>
+                <b>{job.title}</b>
+                <small>{status === "active"
+                  ? "Generating without revealing the asset"
+                  : status === "queued"
+                    ? "Waiting for the current item"
+                    : status === "failed"
+                      ? job.error ?? "Generation failed"
+                      : "Saved to this mansion for discovery"}</small>
+              </div>
+              <div className={styles.itemSynthesisActions}>
+                {status === "active" ? (
+                  <button
+                    type="button"
+                    disabled={queueHasSubject(job.subjectId)}
+                    onClick={() => queueItemSynthesisRequest(job)}
+                  >{queueHasSubject(job.subjectId) ? "Queued" : "Queue regeneration"}</button>
+                ) : status === "failed" ? (
+                  <button type="button" onClick={() => retryItemSynthesis(job.id)}>Retry</button>
+                ) : status === "ready" ? (
+                  <button type="button" onClick={() => queueItemSynthesisRequest(job)}>Regenerate</button>
+                ) : null}
+                {(status === "failed" || status === "ready") ? (
+                  <button type="button" onClick={() => dismissItemSynthesis(job.id)}>Dismiss</button>
+                ) : null}
+              </div>
+            </li>
+          ))}
+        </ul>
+      </section>
+    ) : null;
+    return (
+      <PrismBlockingLoader
+        open={itemSynthesisJobs.length > 0}
+        placement="docked"
+        theme={props.theme}
+        eyebrow="Whodunnit · Found item"
+        title={focusJob?.status === "failed"
+          ? `${focusJob.title} needs attention`
+          : focusJob?.status === "ready"
+            ? `${focusJob.title} is ready`
+            : focusJob
+              ? `Refracting ${focusJob.title}`
+              : "Refracting a found item"}
+        detail="Item artwork is prepared softly in the background. The image remains hidden until it appears through discovery."
+        stepLabel={activeJobs.length > 0
+          ? "Synthesizing item artwork"
+          : queuedJobs.length > 0
+            ? "Waiting in the Refract queue"
+            : failedJobs.length > 0
+              ? "Choose Retry to queue another attempt"
+              : "Artwork saved to this mansion"}
+        progress={readyJobs.length === itemSynthesisJobs.length ? 1 : null}
+        startedAt={activeJobs[0]?.startedAt ?? focusJob?.queuedAt ?? null}
+        footer="Soft Refract — keep investigating. Click Prism whenever you want to check progress."
+      >
+        <div className={styles.itemSynthesisQueue} aria-label="Found item synthesis queue">
+          {renderJobs(activeJobs, "active")}
+          {renderJobs(queuedJobs, "queued")}
+          {renderJobs(failedJobs, "failed")}
+          {renderJobs(readyJobs, "ready")}
+        </div>
+      </PrismBlockingLoader>
+    );
+  };
+  const renderRoomUpgradeSynthesisLoader = (): React.JSX.Element | null => {
+    if (!roomUpgradeSynthesisJob) return null;
+    const retryRoom = state.rooms.find((room) => room.id === roomUpgradeSynthesisJob.roomId) ?? null;
+    const status = roomUpgradeSynthesisJob.status;
+    return (
+      <PrismBlockingLoader
+        open
+        placement="docked"
+        theme={props.theme}
+        eyebrow="Whodunnit · Room presentation"
+        title={status === "failed"
+          ? `${roomUpgradeSynthesisJob.title} needs attention`
+          : status === "ready"
+            ? `${roomUpgradeSynthesisJob.title} is ready`
+            : `Refracting ${roomUpgradeSynthesisJob.title}`}
+        detail={status === "failed"
+          ? roomUpgradeSynthesisJob.error ?? "The original Mosaic is still in place."
+          : status === "ready"
+            ? "The room's Mosaic composition is preserved; Upgraded is now ready whenever you return."
+            : "PRISM is preparing this room in the background. Keep investigating; its Mosaic remains in place until the derivative is ready."}
+        stepLabel={status === "refracting"
+          ? "Preserving composition and validating the derivative"
+          : status === "failed"
+            ? "Choose Retry to try this room again"
+            : "Upgraded presentation saved for this room"}
+        progress={status === "ready" ? 1 : null}
+        startedAt={roomUpgradeSynthesisJob.startedAt}
+        footer="Soft Refract — keep investigating. Click Prism whenever you want to check progress."
+      >
+        <div className={styles.itemSynthesisQueue} aria-label="Room upgrade synthesis status">
+          <section className={styles.itemSynthesisGroup} data-status={status}>
+            <strong>{status === "refracting" ? "Refracting" : status === "failed" ? "Needs attention" : "Ready"}</strong>
+            <div className={styles.itemSynthesisActions}>
+              {status === "failed" && retryRoom ? (
+                <button type="button" onClick={() => startRoomUpgradeSoftSynthesis(retryRoom)}>Retry</button>
+              ) : null}
+              {status !== "refracting" ? (
+                <button type="button" onClick={() => setRoomUpgradeSynthesisJob(null)}>Dismiss</button>
+              ) : null}
+            </div>
+          </section>
+        </div>
+      </PrismBlockingLoader>
+    );
+  };
+
+  if (state.playPhase === "title_card" || visitingExterior) {
+    const preparedMansionExteriorUrl = sealedMysteryAssetObjectUrl(
+      sealedAssetObjectUrls,
+      "room",
+      DEBATE_MYSTERY_MANSION_EXTERIOR_SUBJECT_ID_V1,
+      state.mansionExterior,
+    );
+    const mansionExteriorUrl = props.mansionExteriorUrl ?? preparedMansionExteriorUrl ??
+      debateMysteryMansionExteriorFallbackV1(
+        state.config.houseStyle,
+        state.config.scaleClass,
+        venueProfile,
+      );
+    const acceptedEntryTarget = state.mansionExterior?.entryTarget ??
+      venueProfile?.presentation?.entryTarget;
+    const mansionDoorTarget = acceptedEntryTarget
+      ? {
+          xPercent: acceptedEntryTarget.x * 100,
+          yPercent: acceptedEntryTarget.y * 100,
+        }
+      : debateMysteryMansionDoorTargetV1(
+          state.config.houseStyle,
+          state.config.scaleClass,
+          venueProfile,
+        );
+    const mansionDoorEntry = state.config.investigationMode === "full" && !spectator;
+    const firstPersonExterior = visitingExterior || props.exteriorIntroStarted;
+    const publicOpening = state.dialogueHistory.find(
+      (entry) => entry.nodeId === "briefing-opening",
+    )?.visibleText ?? "";
+    const exteriorInvestigationThought = mysteryExteriorInvestigationThought(
+      publicOpening,
+      venuePlaceNoun,
+    );
+    const startWhodunnit = (): void => {
+      if (!mansionDoorEntry) {
+        void sendAction({ action: "move" });
+        return;
+      }
+      props.onExteriorIntroStart();
+      beginVenueArrival();
+    };
+    const enterFromExterior = (): void => {
+      void beginExteriorEntry(visitingExterior);
+    };
+    // The arrival line follows the dialogue contract: one click fills the
+    // line and silences the take, the next clears the exterior to the door.
+    const advanceVenueArrival = (): void => {
+      if (!arrivalLine) return;
+      if (arrivalLine.revealed < arrivalLine.text.length || arrivalLine.playing) {
+        arrivalAudioRef.current?.pause();
+        setArrivalLine({ ...arrivalLine, revealed: arrivalLine.text.length, playing: false });
+        return;
+      }
+      setEntryStage("door");
+    };
+    const handleExteriorEntryPlacement = (
+      event: React.MouseEvent<HTMLButtonElement>,
+    ): void => {
+      event.stopPropagation();
+      if (sceneRepairJob) return;
+      if (event.detail === 0) {
+        setError("Click the doorway or gangway on the exterior to mark it.");
+        return;
+      }
+      const coverPlane = titleCoverPlaneRef.current;
+      const entryTarget = coverPlane
+        ? debateMysteryExteriorEntryTargetFromClientPointV1(
+            coverPlane.getBoundingClientRect(),
+            event,
+          )
+        : null;
+      if (!entryTarget) {
+        setError("The exterior is not ready for entrance placement yet.");
+        return;
+      }
+      void repairScene("align_exterior_door", null, null, {
+        entryTarget,
+        onSuccess: () => setExteriorEntryPlacementOpen(false),
+      });
+    };
+    const cancelExteriorEntryPlacement = (
+      event: React.MouseEvent<HTMLButtonElement>,
+    ): void => {
+      event.stopPropagation();
+      setExteriorEntryPlacementOpen(false);
+      setError(null);
+    };
+    const handleExteriorBackdropClick = (event: React.MouseEvent<HTMLElement>): void => {
+      if (
+        !firstPersonExterior ||
+        entryStage === "loading" ||
+        entryStage === "speaking" ||
+        exteriorEntryPresentation ||
+        mysteryDialogueGestureOriginIsInteractive(event.target)
+      ) return;
+      setExteriorThoughtKey((key) => key + 1);
+      if (state.playPhase === "title_card") setExteriorOpeningAcknowledged(true);
+    };
+    return (
+      <main
+        className={styles.titleCard}
+        data-theme={props.theme}
+        data-entry-stage={entryStage}
+        data-first-person-exterior={firstPersonExterior ? "true" : undefined}
+        data-exterior-entering={exteriorEntryPresentation ? "true" : undefined}
+        onClick={handleExteriorBackdropClick}
+        style={{
+          "--mansion-exterior-image": `url("${mansionExteriorUrl}")`,
+          "--mansion-door-x": `${mansionDoorTarget.xPercent}%`,
+          "--mansion-door-y": `${mansionDoorTarget.yPercent}%`,
+        } as CSSProperties}
+      >
+        <div
+          ref={titleCoverPlaneRef}
+          className={styles.titleCoverPlane}
+          data-entry-placement={exteriorEntryPlacementOpen ? "true" : undefined}
+        >
+          <span className={styles.titleCoverMedia} aria-hidden="true" />
+          <SceneMediaVignette
+            theme={props.theme}
+            style={{ "--scene-vignette-z": 1 } as CSSProperties}
+          />
+          {exteriorEntryPlacementOpen ? (
+            <button
+              type="button"
+              className={styles.exteriorEntryPlacementSurface}
+              disabled={Boolean(sceneRepairJob)}
+              aria-label="Place the entrance at this point"
+              onClick={handleExteriorEntryPlacement}
+            />
+          ) : firstPersonExterior && mansionDoorEntry ? (
+              <button
+                type="button"
+                className={styles.titleDoor}
+                data-tutorial-target="whodunnit-enter-mansion"
+                disabled={busy && !exteriorEntryPresentation}
+                aria-label={exteriorEntryPresentation
+                  ? visitingExterior
+                    ? `Enter ${venueEntryRoom?.name ?? "the venue entry"} now`
+                    : `${venueEntryAction} now`
+                  : venueEntryAction}
+                onClick={enterFromExterior}
+              >
+                <span className={styles.titleDoorFocus} aria-hidden="true">
+                  <span className={styles.titleDoorMark} />
+                </span>
+                <span className={styles.titleEntryAction}>{venueEntryAction}</span>
+              </button>
+          ) : null}
+        </div>
+        {exteriorEntryPlacementOpen ? (
+          <aside
+            className={styles.exteriorEntryPlacementHud}
+            role="dialog"
+            aria-label="Place the exterior entrance"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div>
+              <p className={styles.eyebrow}>Field repair</p>
+              <strong>Mark the threshold</strong>
+              <span>Click the doorway or gangway the party should enter.</span>
+              {error ? <small role="alert">{error}</small> : null}
+            </div>
+            <button
+              type="button"
+              disabled={Boolean(sceneRepairJob)}
+              onClick={cancelExteriorEntryPlacement}
+            >
+              Cancel
+            </button>
+          </aside>
+        ) : null}
+        {!firstPersonExterior ? (
+          <>
+            <button type="button" className={styles.archiveButton} data-session-local-back="true" disabled={busy} onClick={props.onExit}>← Archive</button>
+            <div
+              className={styles.titleCardContent}
+              data-door-threshold={mansionDoorEntry ? "true" : undefined}
+            >
+              <div className={styles.titlePrism} aria-hidden="true">◇</div>
+              <p className={styles.eyebrow}>PRISM presents</p>
+              <h1>{state.caseTitle}</h1>
+              <p>{state.fictionLabel}</p>
+              <div className={styles.titleMetadata}>
+                {state.caseCharge ? <span>{state.caseCharge.title}</span> : null}{client ? <span>Defending: {client.name}</span> : null}<span>{state.suspects.length} witnesses</span><span>{state.config.trialType === "jury" ? "Jury Trial" : "Bench Trial"}</span>{state.config.investigationMode === "court_only" ? <span>Court act</span> : null}<span>{state.voicesEnabled ? "Local performance ready" : "Text performance"}</span>
+              </div>
+              {state.prosecutionCaseSummary ? <p className={styles.titleCaseSummary}>{state.prosecutionCaseSummary}</p> : null}
+              <button
+                type="button"
+                className={styles.primaryAction}
+                disabled={busy}
+                onClick={startWhodunnit}
+                data-tutorial-target="whodunnit-start"
+              >Start</button>
+              {error ? <p className={styles.error}>{error}</p> : null}
+            </div>
+          </>
+        ) : null}
+        {entryStage === "loading" ? <WhodunnitRoomLoadingOverlay theme={props.theme} /> : null}
+        {entryStage === "speaking" && arrivalLine && prosecutorBot ? (
+          // The investigator, alone before the blurred venue, speaks the
+          // arrival line in their own voice; the exterior clears on dismissal.
+          <div
+            className={styles.entryArrival}
+            role="presentation"
+            onClick={(event) => {
+              event.stopPropagation();
+              advanceVenueArrival();
+            }}
+          >
+            <aside
+              className={styles.entryArrivalActor}
+              style={{ "--actor-color": prosecutorBot.color ?? "#72d7ff" } as CSSProperties}
+              aria-hidden="true"
+            >
+              {props.renderMysteryBotAvatar(prosecutorBot, "full", {
+                demeanor: "partner",
+                talking: arrivalLine.playing,
+                blinkEnabled: true,
+              })}
+            </aside>
+            <div
+              className={styles.entryArrivalBox}
+              role="button"
+              tabIndex={0}
+              aria-live="polite"
+              style={{ "--dialogue-accent": playerCharacterColor } as CSSProperties}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" || event.key === " ") {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  advanceVenueArrival();
+                }
+              }}
+            >
+              <small className={styles.dialogueSpeakerSignature}>
+                <i aria-hidden="true">
+                  {props.renderBotGlyph(playerCharacterGlyph ?? null, { size: 14, strokeWidth: 1.65 })}
+                </i>
+                <span>{playerCharacterName}</span>
+              </small>
+              <p>
+                <span className={styles.dialogueTextReserve} aria-hidden="true">{arrivalLine.text}</span>
+                <span className={styles.dialogueTextRevealed}>{arrivalLine.text.slice(0, arrivalLine.revealed)}</span>
+              </p>
+              <span
+                className={styles.dialogueContinueHint}
+                role="status"
+                data-pending={arrivalLine.revealed >= arrivalLine.text.length && !arrivalLine.playing ? undefined : "true"}
+              >
+                Click to continue
+              </span>
+            </div>
+          </div>
+        ) : null}
+        {firstPersonExterior && exteriorThoughtKey > 0 && entryStage !== "loading" && entryStage !== "speaking" ? (
+          <aside
+            key={exteriorThoughtKey}
+            className={styles.exteriorInvestigationThought}
+            role="status"
+            aria-live="polite"
+            style={{ "--dialogue-accent": playerCharacterColor } as CSSProperties}
+          >
+            <small className={styles.dialogueSpeakerSignature}>
+              <i aria-hidden="true">
+                {props.renderBotGlyph(playerCharacterGlyph ?? null, { size: 14, strokeWidth: 1.65 })}
+              </i>
+              <span>{playerCharacterName}</span>
+            </small>
+            <p>{exteriorInvestigationThought}</p>
+          </aside>
+        ) : null}
+        {firstPersonExterior && !exteriorEntryPlacementOpen
+          ? renderSceneRepairControl("exterior")
+          : null}
+        {renderItemSynthesisLoader()}
+        {renderSceneRepairLoader()}
+      </main>
+    );
+  }
+
+  if (state.playPhase === "case_opening") {
+    const openingDialogue = state.dialogueHistory.findLast((entry) => entry.nodeId === "briefing-opening") ?? lastDialogue;
+    const openingText = openingDialogue
+      ? mysteryProsecutorOpeningText(
+          splitDebateMysteryStageActionTextV2(openingDialogue.visibleText, null).spokenText,
+        )
+      : `The known details of ${state.caseTitle ?? "this case"} are in the file.`;
+    const openingJourney = travelPresentation?.openingArrival ? travelPresentation : null;
+    const continueOpening = (): void => {
+      if (busy) return;
+      if (openingJourney) {
+        finishMansionTravel(true);
+        return;
+      }
+      void beginCaseOpeningJourney();
+    };
+    const handleOpeningKeyDown = (event: React.KeyboardEvent<HTMLElement>): void => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        event.stopPropagation();
+        if (openingJourney) finishMansionTravel(true);
+        else operateVisibleDialogueGesture(1, continueOpening);
+      }
+    };
+    return (
+      <main className={styles.caseOpening} data-theme={props.theme}>
+        <section
+          className={styles.caseOpeningStage}
+          data-stage={openingJourney ? "journey" : "thought"}
+          aria-label={openingJourney
+            ? `${playerCharacterName} is moving through the ${venuePlaceNoun} to ${currentRoom?.name ?? "the incident scene"}. Activate to arrive now.`
+            : `Internal thought from ${playerCharacterName}. Click anywhere to continue to the incident scene.`}
+          aria-busy={busy || undefined}
+          role="button"
+          tabIndex={0}
+          onClick={(event) => {
+            if (mysteryDialogueGestureOriginIsInteractive(event.target)) return;
+            if (openingJourney) finishMansionTravel(true);
+            else if (!operateVisibleDialogueGesture(event.detail, continueOpening)) return;
+            event.preventDefault();
+            event.stopPropagation();
+          }}
+          onKeyDown={handleOpeningKeyDown}
+        >
+          {openingJourney ? (
+            <div
+              className={styles.caseOpeningJourney}
+              style={{ "--player-orb-color": playerCharacterColor } as CSSProperties}
+            >
+              <header>
+                <small>Inside the {venuePlaceNoun}</small>
+                <strong>{mansionFloorDisplayName}</strong>
+              </header>
+              <div className={`${styles.mansionCanvas} ${styles.caseOpeningMansionCanvas}`}>
+                {mansionCorridors.map((placement) => (
+                  <i
+                    key={placement.corridor.id}
+                    className={styles.mansionCorridor}
+                    data-route={openingJourney.route.entityIds.includes(placement.corridor.id) ? "true" : undefined}
+                    aria-hidden="true"
+                    style={{
+                      left: `${mansionX(placement.x)}%`,
+                      top: `${mansionY(placement.y)}%`,
+                      width: `${mansionWidth(placement.width)}%`,
+                      height: `${mansionHeight(placement.height)}%`,
+                    }}
+                  />
+                ))}
+                {mansionDoors.map((door) => (
+                  <i
+                    key={door.key}
+                    className={styles.mansionDoor}
+                    data-orientation={door.orientation}
+                    aria-hidden="true"
+                    style={{ left: `${mansionX(door.x)}%`, top: `${mansionY(door.y)}%` }}
+                  />
+                ))}
+                {mansionPlacements.map((placement) => {
+                  const isDestination = placement.room.id === currentRoom?.id;
+                  return (
+                    <i
+                      key={placement.room.id}
+                      className={styles.caseOpeningJourneyRoom}
+                      data-destination={isDestination ? "true" : undefined}
+                      data-route={openingJourney.route.entityIds.includes(placement.room.id) ? "true" : undefined}
+                      aria-hidden="true"
+                      style={{
+                        left: `${mansionX(placement.x)}%`,
+                        top: `${mansionY(placement.y)}%`,
+                        width: `${mansionWidth(placement.width)}%`,
+                        height: `${mansionHeight(placement.height)}%`,
+                      }}
+                    >
+                      {isDestination ? <strong>{placement.room.name}</strong> : null}
+                    </i>
+                  );
+                })}
+                {mansionPlayerPoint ? (
+                  <MysteryPlayerOrb
+                    className={styles.mansionPlayerOrb}
+                    color={playerCharacterColor}
+                    glyph={playerCharacterGlyph}
+                    label={`${playerCharacterName} walking to ${currentRoom?.name ?? "the incident scene"}`}
+                    renderBotGlyph={props.renderBotGlyph}
+                    style={{
+                      left: `${mansionX(mansionPlayerPoint.x)}%`,
+                      top: `${mansionY(mansionPlayerPoint.y)}%`,
+                    }}
+                  />
+                ) : null}
+              </div>
+              <span className={styles.caseOpeningJourneyStatus} role="status">
+                Walking to {currentRoom?.name ?? "the incident scene"} · click, Enter, or Space to arrive now
+              </span>
+            </div>
+          ) : (
+            <div
+              className={styles.caseOpeningDialogue}
+              style={{ "--dialogue-accent": playerCharacterColor } as CSSProperties}
+            >
+              <small className={styles.dialogueSpeakerSignature}>
+                <i aria-hidden="true">
+                  {props.renderBotGlyph(playerCharacterGlyph ?? null, { size: 14, strokeWidth: 1.65 })}
+                </i>
+                <span>{playerCharacterName}</span>
+              </small>
+              <p>{revealedSpeechText(whodunnitCaptionSpeechText(openingText), captionSpeechTiming)}</p>
+              <span className={styles.dialogueContinueHint} role="status">{busy ? "Preparing the route…" : "Continue"}</span>
+            </div>
+          )}
+        </section>
+        {error ? (
+          <WhodunnitChromeErrorNotice
+            message={error}
+            onDismiss={() => setError(null)}
+          />
+        ) : null}
+        {renderItemSynthesisLoader()}
+      </main>
+    );
+  }
+
+  if (state.playPhase === "verdict" && state.caseCheck && !courtPresentationActive) {
+    return (
+      <main className={styles.verdict} data-theme={props.theme}>
+        <button type="button" className={styles.archiveButton} data-session-local-back="true" onClick={props.onExit}>← Archive</button>
+        <p className={styles.eyebrow}>Case concluded · Court skipped</p>
+        <h1 data-case-check-result={state.caseCheck.accusationCorrect ? "correct" : "incorrect"}>{state.caseCheck.accusationCorrect ? "CORRECT" : "INCORRECT"}</h1>
+        <section className={styles.truthGrade}>
+          <p>{state.caseCheck.accusationCorrect ? "Your selected accused match the Case’s responsible parties." : "Your selected accused do not match the Case’s responsible parties."}</p>
+          <p>This checks only who you accused. Method, motive, opportunity, and proof were not graded. No legal verdict was issued.</p>
+        </section>
+        <div className={styles.verdictActions}>
+          <WhodunnitTranscriptCopyButton state={props.transcriptCopyState} onCopy={props.onCopyVerboseTranscript} />
+          <button type="button" disabled={caseExportState === "exporting"} onClick={() => void exportReusableCase()} data-tutorial-target="whodunnit-case-export">{caseExportState === "exporting" ? "Exporting .case…" : caseExportState === "failed" ? "Export .case again" : "Export reusable .case"}</button>
+          <button type="button" data-session-local-back="true" onClick={props.onExit}>Return to Archive</button>
+        </div>
+        {error ? <p className={styles.error} role="alert">{error}</p> : null}
+      </main>
+    );
+  }
+
+  if (state.playPhase === "verdict" && state.verdict && !courtPresentationActive) {
+    const retryable = state.court?.credibilityRemaining === 0 && Boolean(state.court.checkpoint);
+    return (
+      <main className={styles.verdict} data-theme={props.theme}>
+        {callout ? <div key={callout.id} className={styles.callout} style={calloutStyle} role="status" aria-live="assertive"><span>{CALLOUT_COPY[callout.callout]}</span></div> : null}
+        <button type="button" className={styles.archiveButton} data-session-local-back="true" onClick={props.onExit}>← Archive</button>
+        <p className={styles.eyebrow}>The Court finds · {state.caseCharge?.title ?? "Filed charge"}</p>
+        <h1 data-result={verdictIsMixed ? "mixed" : state.verdict.legalResult}>{verdictIsMixed ? "MIXED VERDICT" : state.verdict.legalResult === "guilty" ? "GUILTY" : "NOT GUILTY"}</h1>
+        {defendantVerdicts.length ? (
+          <section className={styles.defendantVerdicts} aria-label="Verdicts by defendant">
+            {defendantVerdicts.map((entry) => {
+              const defendant = state.suspects.find((suspect) => suspect.seatId === entry.seatId);
+              return <article key={entry.seatId} data-result={entry.legalResult}><strong>{defendant?.name ?? "Defendant"}</strong><span>{entry.legalResult === "guilty" ? "GUILTY" : "NOT GUILTY"}</span></article>;
+            })}
+          </section>
+        ) : null}
+        <section className={styles.truthGrade}>
+          <h2>{whodunnitVerdictClassificationCopy(state.verdict.classification, counsel.stance).title}</h2>
+          <p>{whodunnitVerdictClassificationCopy(state.verdict.classification, counsel.stance).detail}</p>
+          <p>Truth and proof grade: <strong>{state.verdict.proofGrade}</strong></p>
+          <p>The sealed truth remained fixed throughout the social verdict.</p>
+        </section>
+        {state.verdict.jurorBallots.length > 0 ? (
+          <section className={styles.ballots}><h2>Juror breakdown</h2>{state.verdict.jurorBallots.map((ballot) => {
+            const bot = botById.get(ballot.jurorBotId);
+            const defendant = state.suspects.find((suspect) => suspect.seatId === ballot.defendantSeatId);
+            return <article key={`${ballot.jurorBotId}:${ballot.defendantSeatId ?? "legacy"}`}><strong>{bot?.name ?? "Juror"}</strong><span>{ballot.vote.replace("_", " ")}</span>{defendant ? <small>Re: {defendant.name}</small> : null}<p>{ballot.reason}</p>{ballot.powerAffected ? <small>Power affected</small> : null}</article>;
+          })}</section>
+        ) : null}
+        <div className={styles.verdictActions}>
+          <button type="button" disabled={caseExportState === "exporting"} onClick={() => void exportReusableCase()} data-tutorial-target="whodunnit-case-export">
+            {caseExportState === "exporting" ? "Exporting .case…" : caseExportState === "exported" ? ".case exported" : caseExportState === "failed" ? "Export .case again" : "Export reusable .case"}
+          </button>
+          {retryable && !spectator ? <button type="button" className={styles.primaryAction} disabled={busy} onClick={() => void sendAction({ action: "retry_witness_checkpoint" })}>Retry current witness</button> : null}
+          <button
+            type="button"
+            className={styles.primaryAction}
+            data-tutorial-target="debate-copy-all-review-data"
+            disabled={props.reviewCopyState === "copying"}
+            onClick={() => void props.onCopyAllReviewData()}
+          >
+            {props.reviewCopyState === "copying"
+              ? "Copying review…"
+              : props.reviewCopyState === "copied"
+                ? "Review data copied"
+                : props.reviewCopyState === "failed"
+                  ? "Copy failed — try again"
+                  : "Copy all review data"}
+          </button>
+          <button
+            type="button"
+            data-tutorial-target="debate-copy-transcript"
+            disabled={props.transcriptCopyState === "copying"}
+            onClick={() => void props.onCopyVerboseTranscript()}
+          >
+            {props.transcriptCopyState === "copying"
+              ? "Copying transcript…"
+              : props.transcriptCopyState === "copied"
+                ? "Transcript copied"
+                : props.transcriptCopyState === "failed"
+                  ? "Copy failed — try again"
+                  : "Copy verbose transcript"}
+          </button>
+          <button type="button" data-session-local-back="true" onClick={props.onExit}>Return to Archive</button>
+        </div>
+        {error ? <p className={styles.error}>{error}</p> : null}
+        {renderItemSynthesisLoader()}
+      </main>
+    );
+  }
+
+  if (courtPresentationActive && state.court && activeStatement) {
+    return (
+      <main className={styles.court} style={props.stageAlignmentStyle} data-theme={props.theme} data-dialogue-playback={dialoguePerformanceActive ? "active" : undefined} data-arrival={courtArrivalActive ? "true" : undefined} data-tutorial-target="mystery-v2-court">
+        <SessionAtmosphereLayer
+          sessionKey={`whodunnit-v2-court:${props.session.id}`}
+          backgroundUrl="/audio/debate/courtroom-audience-murmur-loop.mp3"
+          active={props.audioEnabled}
+          volume={props.audioVolume}
+          mix={WHODUNNIT_COURT_ATMOSPHERE_MIX}
+          lifecycleTransitionMs={600}
+          mixTransitionMs={400}
+          backgroundRecordable={false}
+          ambientFoley={false}
+        />
+        {identityPresentationBlackout}
+        {callout && !courtArrivalActive ? <div key={callout.id} className={styles.callout} style={calloutStyle} role="status" aria-live="assertive"><span>{CALLOUT_COPY[callout.callout]}</span></div> : null}
+        <header className={styles.courtHeader}>
+          <button type="button" data-session-local-back="true" onClick={props.onExit}>← Archive</button>
+          <div><p className={styles.eyebrow}>{state.caseTitle}</p><strong>{spectator ? `Gallery · ${prosecutorBot?.name ?? counsel.playerRoleLabel}` : `${prosecutorBot?.name ?? counsel.playerRoleLabel} · Cross-Examination`}</strong></div>
+          <button type="button" onClick={() => { setCaseFileOpen(true); setCaseFileUpdate(null); }} data-tutorial-target="mystery-v2-case-file">Case File <span>{caseFileEntryCount}</span></button>
+        </header>
+        <div className={styles.credibility} aria-label={`${state.court.credibilityRemaining} of ${state.court.credibilityMaximum} credibility remaining`}>
+          <span>Credibility</span><div>{Array.from({ length: state.court.credibilityMaximum }, (_, index) => <i key={index} data-full={index < state.court!.credibilityRemaining ? "true" : undefined} />)}</div>
+        </div>
+        <section
+          className={styles.courtStage}
+          data-camera={courtCamera}
+          aria-label={whodunnitCourtCameraLabel(courtCamera)}
+        >
+          <div className={styles.courtBackdrop} aria-hidden="true" />
+          {courtCamera === "wide" ? (
+            <div className={styles.wideCourtComposition} aria-label="Courtroom establishing view">
+              <article className={styles.wideCourtPresence} data-role="prosecution" data-speaking={prosecutorDialogueActive ? "true" : undefined} style={{ "--court-presence-color": prosecutorBot?.color ?? "#72d7ff" } as CSSProperties}>
+                {prosecutorBot ? props.renderMysteryBotAvatar(prosecutorBot, "mini", { demeanor: "partner", talking: speechTiming !== null && prosecutorDialogueActive, speechTiming: prosecutorDialogueActive ? speechTiming : null, blinkEnabled: true, facing: "left" }) : <span>◇</span>}
+                <small>{counsel.playerSideLabel}</small>
+              </article>
+              <article className={styles.wideCourtPresence} data-role="judge" data-speaking={judgeDialogueActive ? "true" : undefined} style={{ "--court-presence-color": judgeBot?.color ?? "#d5c8ff" } as CSSProperties}>
+                {judgeBot ? props.renderMysteryBotAvatar(judgeBot, "mini", { demeanor: "partner", talking: speechTiming !== null && judgeDialogueActive, speechTiming: judgeDialogueActive ? speechTiming : null, blinkEnabled: true }) : <span>◇</span>}
+                <small>Judge</small>
+              </article>
+              <article className={styles.wideCourtPresence} data-role="defense" data-speaking={defenseDialogueActive ? "true" : undefined} style={{ "--court-presence-color": defenseBot?.color ?? "#ff7eaa" } as CSSProperties}>
+                {defenseBot ? props.renderMysteryBotAvatar(defenseBot, "mini", { demeanor: "partner", talking: speechTiming !== null && defenseDialogueActive, speechTiming: defenseDialogueActive ? speechTiming : null, blinkEnabled: true, facing: "right" }) : <span>◇</span>}
+                <small>{counsel.opposingSideLabel}</small>
+              </article>
+              <div className={styles.courtGallery} aria-label="Public gallery">
+                {courtGallerySeats.map((seat, index) => (
+                  <article
+                    key={seat.bot.id}
+                    className={styles.courtGallerySeat}
+                    data-side={seat.side}
+                    data-row={seat.row}
+                    data-arrived={!courtArrivalProgress || index < courtArrivalProgress.revealedCount ? "true" : undefined}
+                    style={{ "--court-seat-x": `${seat.xPercent}%`, "--court-presence-color": seat.bot.color ?? "#a98cff" } as CSSProperties}
+                  >
+                    {props.renderMysteryBotAvatar(seat.bot, "mini", { demeanor: seat.role === "juror" ? "partner" : "suspect", talking: false, speechTiming: null, blinkEnabled: true, facing: seat.side === "left" ? "right" : "left" })}
+                    <small>{seat.role === "juror" ? "Juror" : seat.bot.name}</small>
+                  </article>
+                ))}
+              </div>
+              {courtArrivalActive && courtArrivalProgress ? (
+                <div className={styles.courtArrivalChrome} role="status" aria-live="polite" style={{ "--court-arrival-progress": courtArrivalProgress.ratio } as CSSProperties}>
+                  <span>Public gallery</span>
+                  <strong>{courtArrivalProgress.revealedCount < courtGallerySeats.length ? "Gathering" : "Court is seated"}</strong>
+                  <i aria-hidden="true" />
+                </div>
+              ) : null}
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img className={styles.wideEvidenceTable} src={`/coffee-table/table_${props.theme}.png`} alt="Evidence table" />
+            </div>
+          ) : null}
+          {courtCamera === "witness" ? (
+            <>
+              <div className={styles.galleryRail} aria-hidden="true" />
+              <section className={styles.counselComposition} aria-label="Court counsel">
+                <article className={styles.counselSeat} data-side="prosecution" data-speaking={prosecutorDialogueActive ? "true" : undefined} style={{ "--counsel-color": prosecutorBot?.color ?? "#72d7ff" } as CSSProperties}>
+                  {prosecutorDialogueActive && dialogueActionPresentation ? <SignalVoiceActionText key={`prosecution:${displayedDialogue?.nodeId ?? ""}:${displayedDialogue?.occurredAt ?? ""}`} {...dialogueActionPresentation} accent={prosecutorBot?.color} /> : null}
+                  <div className={styles.counselAvatar}>{prosecutorBot ? props.renderMysteryBotAvatar(prosecutorBot, "mini", { demeanor: "partner", thinking: courtProsecutorThinking, talking: speechTiming !== null && prosecutorDialogueActive, speechTiming: prosecutorDialogueActive ? speechTiming : null, blinkEnabled: true, facing: "left" }) : <span>◇</span>}</div>
+                  <i className={styles.counselGlyph} aria-hidden="true">{props.renderBotGlyph(prosecutorBot?.glyph ?? null, { size: 26, strokeWidth: 1.5 })}</i>
+                  <div className={styles.counselIdentity}><small>Player {counsel.playerRoleLabel}</small><strong>{prosecutorBot?.name ?? counsel.playerRoleLabel}</strong></div>
+                </article>
+                <article className={styles.counselSeat} data-side="defense" data-speaking={defenseDialogueActive ? "true" : undefined} style={{ "--counsel-color": defenseBot?.color ?? "#ff7eaa" } as CSSProperties}>
+                  {defenseDialogueActive && dialogueActionPresentation ? <SignalVoiceActionText key={`defense:${displayedDialogue?.nodeId ?? ""}:${displayedDialogue?.occurredAt ?? ""}`} {...dialogueActionPresentation} accent={defenseBot?.color} /> : null}
+                  <div className={styles.counselAvatar}>{defenseBot ? props.renderMysteryBotAvatar(defenseBot, "mini", { demeanor: "partner", talking: speechTiming !== null && defenseDialogueActive, speechTiming: defenseDialogueActive ? speechTiming : null, blinkEnabled: true, facing: "right" }) : <span>◇</span>}</div>
+                  <i className={styles.counselGlyph} aria-hidden="true">{props.renderBotGlyph(defenseBot?.glyph ?? null, { size: 26, strokeWidth: 1.5 })}</i>
+                  <div className={styles.counselIdentity}><small>{counsel.opposingRoleLabel}</small><strong>{defenseBot?.name ?? counsel.opposingSideLabel}</strong></div>
+                </article>
+              </section>
+              <section className={styles.witnessStand} style={{ "--witness-color": courtPresentedWitness?.color ?? "#a98cff" } as CSSProperties}>
+                <div ref={courtWitnessStandRef} className={styles.witnessAvatar} data-drop-target={presentDrag.active ? (presentDrag.overSuspect ? "hover" : "armed") : undefined}>{courtPresentedWitnessBot ? props.renderMysteryBotAvatar(courtPresentedWitnessBot, "full", { demeanor: "suspect", thinking: courtWitnessThinking, talking: speechTiming !== null && courtPresentedWitnessDialogueActive, speechTiming: courtPresentedWitnessDialogueActive ? speechTiming : null, blinkEnabled: true, facing: "left" }) : <span>◇</span>}{courtWitnessActionPresentation ? <SignalVoiceActionText key={`witness:${displayedDialogue?.nodeId ?? activeStatement?.statementId ?? ""}:${displayedDialogue?.occurredAt ?? ""}`} {...courtWitnessActionPresentation} accent={courtPresentedWitness?.color} /> : null}</div>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img className={styles.witnessStandAsset} src={`/debate/whodunnit-witness-foreground-${props.theme}.png`} alt="" aria-hidden="true" />
+              </section>
+            </>
+          ) : null}
+          {courtCamera === "prosecution" && prosecutorBot ? (
+            <section className={styles.courtPodiumFocus} data-side="prosecution" style={{ "--court-presence-color": prosecutorBot.color ?? "#72d7ff" } as CSSProperties}>
+              <div className={styles.courtPodiumAvatar}>{props.renderMysteryBotAvatar(prosecutorBot, "full", { demeanor: "partner", thinking: courtProsecutorThinking, talking: speechTiming !== null && prosecutorDialogueActive, speechTiming: prosecutorDialogueActive ? speechTiming : null, blinkEnabled: true, facing: "left" })}{dialogueActionPresentation ? <SignalVoiceActionText key={`prosecution-focus:${displayedDialogue?.nodeId ?? ""}:${displayedDialogue?.occurredAt ?? ""}`} {...dialogueActionPresentation} accent={prosecutorBot.color} /> : null}</div>
+              <div className={styles.courtPodiumForeground} aria-hidden="true" />
+              <div className={styles.courtPodiumIdentity}><small>Player {counsel.playerRoleLabel}</small><strong>{prosecutorBot.name}</strong></div>
+            </section>
+          ) : null}
+          {courtCamera === "defense" && defenseFocusBot ? (
+            <section className={styles.courtPodiumFocus} data-side="defense" style={{ "--court-presence-color": defenseFocusBot.color ?? "#ff7eaa" } as CSSProperties}>
+              <div className={styles.courtPodiumAvatar}>{props.renderMysteryBotAvatar(defenseFocusBot, "full", { demeanor: defendantDialogueActive ? "suspect" : "partner", talking: speechTiming !== null && (defenseDialogueActive || defendantDialogueActive), speechTiming: defenseDialogueActive || defendantDialogueActive ? speechTiming : null, blinkEnabled: true, facing: "right" })}{dialogueActionPresentation ? <SignalVoiceActionText key={`defense-focus:${displayedDialogue?.nodeId ?? ""}:${displayedDialogue?.occurredAt ?? ""}`} {...dialogueActionPresentation} accent={defenseFocusBot.color} /> : null}</div>
+              <div className={styles.courtPodiumForeground} aria-hidden="true" />
+              <div className={styles.courtPodiumIdentity}><small>{defenseFocusRole}</small><strong>{defenseFocusBot.name}</strong></div>
+            </section>
+          ) : null}
+          {courtCamera === "judge" ? (
+            <section className={styles.courtJudgeFocus} style={{ "--court-presence-color": judgeBot?.color ?? "#d5c8ff" } as CSSProperties}>
+              <div className={styles.courtJudgeAvatar}>{judgeBot ? props.renderMysteryBotAvatar(judgeBot, "full", { demeanor: "partner", talking: speechTiming !== null && judgeDialogueActive, speechTiming: judgeDialogueActive ? speechTiming : null, blinkEnabled: true }) : <span>◇</span>}{dialogueActionPresentation ? <SignalVoiceActionText key={`judge-focus:${displayedDialogue?.nodeId ?? ""}:${displayedDialogue?.occurredAt ?? ""}`} {...dialogueActionPresentation} accent={judgeBot?.color} /> : null}</div>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img className={styles.courtJudgeGavel} src={`/debate/moderator-gavel-${props.theme}-down.png`} alt="" aria-hidden="true" />
+              <div className={styles.courtPodiumIdentity}><small>Presiding Judge</small><strong>{judgeBot?.name ?? "The Court"}</strong></div>
+            </section>
+          ) : null}
+          {presentedCourtRecordItem && courtCamera === "witness" ? (
+            <aside
+              className={styles.courtEvidenceProjectors}
+              aria-label={`Presented evidence: ${presentedCourtRecordItem.title}`}
+              data-court-evidence-projectors="true"
+            >
+              <article className={styles.courtEvidenceProjector} data-projector-side="image" aria-label="Evidence image">
+                <div className={styles.courtEvidenceProjection} data-court-evidence-plane="image">
+                  <small>Exhibit visual</small>
+                  <div className={styles.courtEvidenceVisual}>
+                    {presentedCourtRecordAssetUrl ? (
+                      // Direct delivery preserves the sealed route's no-store boundary.
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={presentedCourtRecordAssetUrl} alt="" />
+                    ) : <span aria-hidden="true">{presentedCourtRecordItem.emoji}</span>}
+                  </div>
+                </div>
+                <i className={styles.courtEvidenceBeam} aria-hidden="true" />
+                <div className={styles.courtEvidenceProjectorMount} aria-hidden="true">
+                  <i className={styles.courtEvidencePrism} />
+                  <i className={styles.courtEvidenceSocket} />
+                </div>
+              </article>
+              <article className={styles.courtEvidenceProjector} data-projector-side="record" aria-label="Court record description">
+                <div className={styles.courtEvidenceProjection} data-court-evidence-plane="record">
+                  <small>Presented to the Court</small>
+                  <strong>{presentedCourtRecordItem.title}</strong>
+                  <p>{presentedCourtRecordItem.description}</p>
+                  <span>{presentedCourtRecordKindLabel} · Admitted record</span>
+                </div>
+                <i className={styles.courtEvidenceBeam} aria-hidden="true" />
+                <div className={styles.courtEvidenceProjectorMount} aria-hidden="true">
+                  <i className={styles.courtEvidencePrism} />
+                  <i className={styles.courtEvidenceSocket} />
+                </div>
+              </article>
+            </aside>
+          ) : null}
+        </section>
+        <section className={styles.testimony}>
+          <div className={styles.testimonyNav}>
+            {spectator ? null : <button type="button" aria-label="Previous statement" onClick={() => focusStatement(-1)} disabled={busy || dialoguePerformanceActive}>‹</button>}
+            <span>{activeStatementIndex + 1} / {state.court.statements.length}</span>
+            {spectator ? null : <button type="button" aria-label="Next statement" onClick={() => focusStatement(1)} disabled={busy || dialoguePerformanceActive}>›</button>}
+          </div>
+          <p role="button" tabIndex={0} onClick={handleCourtDialogueClick} onKeyDown={handleCourtDialogueKeyDown}>{revealedSpeechText(whodunnitCaptionSpeechText(activeStatementDelivery.spokenText), captionSpeechTiming)}</p>
+          <small>{activeStatement.pressed ? "Pressed" : "Sworn statement"}{activeStatement.version > 1 ? ` · Revision ${activeStatement.version}` : ""}</small>
+        </section>
+        {displayedDialogue && displayedDialogue.lineId !== activeStatement.lineId ? (
+          <aside className={styles.courtReaction} role="button" tabIndex={0} data-thought={displayedDialogue.nodeId.startsWith("prosecutor-strategy") ? "true" : undefined} onClick={handleCourtDialogueClick} onKeyDown={handleCourtDialogueKeyDown}><strong>{dialogueBot?.name ?? "Court"}{displayedDialogue.nodeId.startsWith("prosecutor-strategy") ? " · thinking" : ""}</strong><p>{revealedSpeechText(whodunnitCaptionSpeechText(displayedDialogueDelivery.spokenText), captionSpeechTiming)}</p></aside>
+        ) : null}
+        {spectator ? <aside className={styles.courtReaction} role="status"><strong>Watch-only court</strong><p>The selected {counsel.playerRoleLabel} is conducting the examination from the frozen admissible record.</p></aside> : <nav className={styles.courtActions} aria-label="Prosecution actions" data-console-label="Prosecution console">
+          <button type="button" data-command="press" disabled={busy || dialoguePerformanceActive} onClick={() => { playControlSfx("clip"); setCourtBusyAction("press"); setPresentedCourtRecord(null); void sendAction({ action: "press_statement", statementId: activeStatement.statementId }); }} data-tutorial-target="mystery-v2-press"><span>!</span>Press</button>
+          <button type="button" data-command="objection" data-active={command === "present" ? "true" : undefined} aria-pressed={command === "present"} disabled={busy || dialoguePerformanceActive} onClick={() => { playControlSfx("paper"); setCommand("present"); }} data-tutorial-target="mystery-v2-present-record"><span>◇</span>Objection</button>
+          <button type="button" data-command="think" disabled={busy || dialoguePerformanceActive} onClick={() => { playControlSfx("pencil"); setCourtBusyAction("think"); void sendAction({ action: "review_strategy", contextNodeId: state.activeDialogueNodeId }); }} data-tutorial-target="mystery-v2-think"><span>◈</span>Think</button>
+        </nav>}
+        {!spectator && command === "present" && courtPresentedWitness ? <WhodunnitPresentDrawer suspectName={courtPresentedWitness.name} items={admittedRecord} presentedKeys={mysteryCourtPresentedRecordKeysV1(state, activeStatement.statementId)} copy={{ eyebrow: "Objection", title: `Confront ${courtPresentedWitness.name}`, help: `Click an item to read it. Drag it onto ${courtPresentedWitness.name} to object with it.`, action: "Object with this", again: "Object with this again", seen: `This has already been put to ${courtPresentedWitness.name}. Drag it onto them again, or`, drag: `Drag it onto ${courtPresentedWitness.name}, or` }} assetUrlFor={(item) => item.reference.kind === "evidence" ? sealedMysteryAssetObjectUrl(sealedAssetObjectUrls, "evidence", item.reference.id, item.sealedAsset) : null} disabled={busy || dialoguePerformanceActive} suspectTarget={courtWitnessStandRef} onPresent={(record) => { setPresentDrag({ active: false, overSuspect: false }); setCommand(null); setCourtBusyAction("object"); setPresentedCourtRecord(record); void sendAction({ action: "object_statement", statementId: activeStatement.statementId, record }); }} onClose={() => { setPresentDrag({ active: false, overSuspect: false }); setCommand(null); }} onDragStateChange={setPresentDrag} playSfx={playControlSfx} /> : null}
+        {!spectator && state.pendingProsecutionChoice ? <div className={styles.prosecutionChoice} role="dialog" aria-modal="true" aria-labelledby="prosecution-choice-title"><p className={styles.eyebrow}>Your response</p><h2 id="prosecution-choice-title">{state.pendingProsecutionChoice.prompt}</h2>{state.pendingProsecutionChoice.options.map((option) => <button key={option.id} type="button" disabled={busy || dialoguePerformanceActive} onClick={() => void sendAction({ action: "choose_prosecution_response", choiceId: state.pendingProsecutionChoice!.id, optionId: option.id })}>{option.text}</button>)}</div> : null}
+        {caseFileUpdate ? <CaseFileUpdateNotice update={caseFileUpdate} onView={() => { setCaseFileOpen(true); setCaseFileUpdate(null); }} onDismiss={() => setCaseFileUpdate(null)} /> : null}
+        {caseFileOpen ? <CaseFile state={state} playerName={playerCharacterName} playerBot={prosecutorBot} playerColor={playerCharacterColor} playerGlyph={playerCharacterGlyph ?? null} renderBotGlyph={props.renderBotGlyph} renderMysteryBotAvatar={props.renderMysteryBotAvatar} objectUrls={sealedAssetObjectUrls} onClose={() => setCaseFileOpen(false)} transcriptCopyState={props.transcriptCopyState} onCopyVerboseTranscript={props.onCopyVerboseTranscript} caseFileOverrides={state.caseFilePresentationOverrides ?? null} cleanBusy={Boolean(sceneRepairJob)} canUndoClean={state.sceneRepairUndo?.action === "clean_case_file" && !whodunnitSceneRepairUndoIsDismissed(dismissedSceneRepairUndoId, state.sceneRepairUndo.id)} onClean={() => void repairScene("clean_case_file")} onUndoClean={() => void undoSceneRepair()} voicesEnabling={voicesEnabling} onEnableVoices={() => void enableCaseVoices()} /> : null}
+        {error ? (
+          <WhodunnitChromeErrorNotice
+            message={error}
+            onDismiss={() => setError(null)}
+          />
+        ) : null}
+        {renderItemSynthesisLoader()}
+      </main>
+    );
+  }
+
+  const arrivalCardVisible = arrivalGate !== "done" && !spectator &&
+    (state.playPhase === "investigation" || state.playPhase === "theory");
+  // The map needs no plate; a room is ready once its backdrop has painted.
+  const arrivalReady = roomView === "mansion" || !roomEntryLoading;
+  const arrivalCoverUrl = props.mansionExteriorUrl ??
+    sealedMysteryAssetObjectUrl(sealedAssetObjectUrls, "room", DEBATE_MYSTERY_MANSION_EXTERIOR_SUBJECT_ID_V1, state.mansionExterior) ??
+    debateMysteryMansionExteriorFallbackV1(state.config.houseStyle, state.config.scaleClass, venueProfile);
+  const arrivalOpening = state.dialogueHistory.find((entry) => entry.nodeId === "briefing-opening")
+    ?.visibleText.replace(/\s+/gu, " ").trim() ?? "";
+  const arrivalDescription = arrivalOpening ||
+    (state.caseCharge ? `${state.caseCharge.title}. ${state.caseCharge.subject}` : state.fictionLabel);
+  const arrivalResumeLabel = state.playPhase === "theory"
+    ? "Resume at the Theory Board"
+    : roomView === "room" && currentRoom
+      ? `Resume in ${currentRoom.name}`
+      : "Resume on the venue map";
+  return (
+    <main className={styles.investigation} data-theme={props.theme} data-view={roomView} data-room-loading={roomEntryLoading ? "true" : undefined} aria-busy={roomEntryLoading} inert={roomEntryLoading ? true : undefined} data-opening-map-reveal={openingMapReveal ? "true" : undefined} data-exterior-room-reveal={exteriorRoomReveal ? "true" : undefined} data-tutorial-target="mystery-v2-investigation" onClickCapture={handleInvestigationDialogueClickCapture}>
+      {roomEntryLoading && !arrivalCardVisible ? <WhodunnitRoomLoadingOverlay theme={props.theme} /> : null}
+      {arrivalCardVisible ? (
+        <WhodunnitArrivalCard
+          theme={props.theme}
+          coverUrl={arrivalCoverUrl}
+          title={state.caseTitle ?? "Whodunnit"}
+          fictionLabel={state.fictionLabel}
+          chargeTitle={state.caseCharge?.title ?? null}
+          description={arrivalDescription}
+          resumeLabel={arrivalResumeLabel}
+          witnessCount={state.suspects.length}
+          ready={arrivalReady}
+          leaving={arrivalGate === "leaving"}
+          onStart={() => {
+            if (returningToVenue) {
+              // Outside first: the door, the arrival line, then the entry.
+              setArrivalGate("done");
+              setVisitingExterior(true);
+              beginVenueArrival();
+              return;
+            }
+            setArrivalGate("leaving");
+          }}
+        />
+      ) : null}
+      <SessionAtmosphereLayer
+        sessionKey={`whodunnit-v2-mansion-ambience:${props.session.id}:${state.config.houseStyle.id}`}
+        backgroundUrl={`/api/debates/${encodeURIComponent(props.session.id)}/mystery-mansion/atmosphere?repair=${audioAssetRefreshNonce}`}
+        backgroundFallbackUrl={mansionAmbienceAsset?.url ?? null}
+        active={props.audioEnabled && mansionAmbienceAsset !== null}
+        volume={props.audioVolume}
+        mix={mansionAmbienceMix}
+        lifecycleTransitionMs={WHODUNNIT_MANSION_AMBIENCE_FADE_MS}
+        mixTransitionMs={WHODUNNIT_MANSION_AMBIENCE_TRANSITION_MS}
+        backgroundRecordable={false}
+        ambientFoley={false}
+      />
+      <SessionAtmosphereLayer
+        sessionKey={`whodunnit-v2-investigation:${props.session.id}`}
+        backgroundUrl={`/api/debates/${encodeURIComponent(props.session.id)}/mystery-mansion/theme?repair=${audioAssetRefreshNonce}`}
+        backgroundFallbackUrl={WHODUNNIT_INVESTIGATION_MUSIC_URL}
+        active={props.audioEnabled}
+        volume={props.audioVolume}
+        mix={mysteryInvestigationMusicMix({
+          caseFileOpen,
+          outside: visitingExterior,
+          roomIntroductionActive,
+          roomComplete,
+          suspectPresent: currentSuspect !== null,
+          roomView: roomView,
+        })}
+        lifecycleTransitionMs={WHODUNNIT_INVESTIGATION_MUSIC_FADE_MS}
+        mixTransitionMs={WHODUNNIT_INVESTIGATION_MUSIC_TRANSITION_MS}
+        backgroundRecordable={false}
+        ambientFoley={false}
+      />
+      {identityPresentationBlackout}
+      {!roomIntroductionActive ? liveSessionHeaderPortalTargets ? <>
+        {createPortal(
+          renderInvestigationHeaderIdentity(true),
+          liveSessionHeaderPortalTargets.title,
+        )}
+        {createPortal(
+          renderInvestigationHeaderActions(true),
+          liveSessionHeaderPortalTargets.actions,
+        )}
+      </> : <header className={styles.investigationHeader}>
+        <button type="button" data-session-local-back="true" disabled={busy} onClick={props.onExit}>← Archive</button>
+        {renderInvestigationHeaderIdentity()}
+        {renderInvestigationHeaderActions()}
+      </header> : null}
+      {spectatorTheory ? (
+        <section className={styles.partnerFindings} aria-labelledby="prosecutor-findings-title">
+          <p className={styles.eyebrow}>Selected {counsel.playerRoleLabel} · automated</p>
+          <h1 id="prosecutor-findings-title">Review the proposed conclusion</h1>
+          <p>The selected {counsel.playerRoleLabel} investigated offstage. Only the authorized physical findings in the Case File are public; revise the editable theory, then file it when it reflects the case you want carried into court.</p>
+        </section>
+      ) : roomView === "mansion" ? (
+        <section className={styles.mansionBoard} aria-label="Mystery Venue Move map" aria-busy={travelPresentation ? "true" : undefined} data-visuals-mode={roomVisualsMode ? "true" : undefined} data-tutorial-target="mystery-v2-mansion">
+          <header className={styles.mansionHeading}>
+            <div><p className={styles.eyebrow}>{roomVisualsMode ? "Room visuals · editing" : "Mystery Venue"}</p><strong>{mansionFloorDisplayName}</strong></div>
+            {state.rooms.length > 0 ? (
+              <div className={styles.mansionAssetActions}>
+                <PrismRefractTarget
+                  target={{
+                    id: `whodunnit-room-visuals-${props.session.id}`,
+                    kind: "magic",
+                    interaction: "immediate",
+                    ownsPresentation: true,
+                    label: roomVisualsMode ? "Close visual tools" : "Visuals",
+                    run: () => setRoomVisualsMode((current) => !current),
+                    disabled: () => Boolean(roomVisualJob),
+                  }}
+                >
+                  {(binding) => (
+                    <button
+                      {...binding}
+                      type="button"
+                      className={styles.roomVisualsMagicButton}
+                      disabled={Boolean(roomVisualJob)}
+                      aria-pressed={roomVisualsMode}
+                      onClick={() => {
+                        setRoomVisualDialogId(null);
+                        setRoomVisualResult("idle");
+                        setRoomVisualsMode((current) => !current);
+                      }}
+                      data-tutorial-target="mystery-v2-room-visuals"
+                    >
+                      <span aria-hidden="true">✦</span>
+                      {roomVisualsMode ? "Done with visuals" : "Visuals"}
+                    </button>
+                  )}
+                </PrismRefractTarget>
+              </div>
+            ) : null}
+            <nav className={styles.mansionFloorPicker} aria-label="Venue tiers">
+              {mansionFloors.map((floor) => (
+                <button
+                  key={floor}
+                  type="button"
+                  aria-label={`Show ${venueTierLabel(floor)}`}
+                  aria-pressed={mansionFloor === floor}
+                  disabled={travelPresentation !== null}
+                  data-deck-control={maritimeDeckMap ? "true" : undefined}
+                  data-selected={mansionFloor === floor ? "true" : undefined}
+                  title={venueTierLabel(floor)}
+                  onClick={() => {
+                    const room = state.rooms.find((candidate) => candidate.floor === floor);
+                    setMansionFloor(floor);
+                    if (room) setSelectedMansionRoomId(room.id);
+                  }}
+                >{maritimeDeckMap ? <><span>D{deckOrdinalForFloor(floor)}</span><small>{venueTierLabel(floor)}</small></> : floor}</button>
+              ))}
+              {mapPlanUrl ? (
+                <>
+                  <label className={styles.mansionPlanToggle} title="Overhead view of the venue">
+                    <input type="checkbox" checked={mapPlanVisible} onChange={(event) => setMapPlanVisible(event.currentTarget.checked)} />
+                    <span>Overhead</span>
+                    <input type="range" min={0.2} max={1} step={0.05} value={mapPlanOpacity} aria-label="Overhead view opacity" disabled={!mapPlanVisible} onChange={(event) => setMapPlanOpacity(Number(event.currentTarget.value))} />
+                  </label>
+                  {mapPlanVisible ? (
+                    <button
+                      type="button"
+                      className={styles.mansionPlanAdjust}
+                      title="Open the overhead editor: draw the picture again or place it by hand"
+                      disabled={travelPresentation !== null}
+                      onClick={() => setOverheadEditorOpen(true)}
+                    >Edit</button>
+                  ) : null}
+                </>
+              ) : null}
+            </nav>
+          </header>
+          <div className={styles.mansionWorkspace} data-with-assets={roomVisualsMode && foundEvidenceItems.length > 0 ? "true" : undefined}>
+            {roomVisualsMode && foundEvidenceItems.length > 0 ? (
+              <aside className={styles.foundItemVisualsPanel} aria-label="Found item assets">
+              <header>
+                <div>
+                  <strong>Found item assets</strong>
+                  <small>Generate presentation art without previewing or exposing unfound evidence.</small>
+                </div>
+              </header>
+              <div>
+                {foundEvidenceItems.map((item) => {
+                  const ready = item.sealedAsset?.status === "ready";
+                  const generating = itemSynthesisJobs.some((job) =>
+                    job.subjectId === item.reference.id && job.status === "generating");
+                  const queued = itemSynthesisJobs.some((job) =>
+                    job.subjectId === item.reference.id && job.status === "queued");
+                  return (
+                    <button
+                      key={item.reference.id}
+                      type="button"
+                      disabled={Boolean(sceneRepairJob) || queued || liveResponseMode === "local"}
+                      onClick={() => void repairScene("regenerate_evidence_asset", null, item)}
+                    >
+                      <span aria-hidden="true">{item.emoji}</span>
+                      <strong>{item.title}</strong>
+                      <small>{generating
+                        ? "Refracting softly"
+                        : queued
+                          ? "Queued"
+                          : ready
+                            ? "Asset ready"
+                            : "Emoji fallback"}</small>
+                      <em>{generating
+                        ? queued
+                          ? "Regeneration queued"
+                          : "Queue regeneration"
+                        : queued
+                          ? "Queued"
+                          : ready
+                            ? "Regenerate"
+                            : "Generate"}</em>
+                    </button>
+                  );
+                })}
+              </div>
+              {liveResponseMode === "local" ? (
+                <small>Item generation is ONLINE-only. Found-item facts remain local and unchanged.</small>
+              ) : null}
+              </aside>
+            ) : null}
+          <div className={styles.mansionMapStage}>
+          <div className={styles.mansionViewport}>
+            {mapPlanUrl && mapPlanVisible ? (
+              // The overhead lives in the viewport, not the canvas: clipped to the map's
+              // rounded frame with faded edges, on a plane that mirrors the canvas tilt so
+              // it stays registered with the tiles without ever leaving the board.
+              <div className={styles.mansionOverheadLayer} aria-hidden="true">
+                <div className={styles.mansionOverheadPlane} data-map-style={venueProfile?.presentation?.mapStyle}>
+                  {/* The player's placement turns about the board center; pan is in cells so it holds across floors. */}
+                  <div
+                    className={styles.mansionOverheadPlacement}
+                    style={{
+                      transform: `translate(${mansionWidth(overheadPlacement.x)}%, ${mansionHeight(overheadPlacement.y)}%) rotate(${overheadPlacement.rotation}deg) scale(${overheadPlacement.scale})`,
+                    }}
+                  >
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      key={mapPlanAsset?.id}
+                      className={styles.mansionDeckPlan}
+                      src={mapPlanUrl}
+                      alt=""
+                      draggable={false}
+                      style={{
+                        left: `${mansionX(MANSION_OVERHEAD_FRAME_V1.left)}%`,
+                        top: `${mansionY(MANSION_OVERHEAD_FRAME_V1.top)}%`,
+                        width: `${mansionWidth(MANSION_OVERHEAD_FRAME_V1.columns)}%`,
+                        height: `${mansionHeight(MANSION_OVERHEAD_FRAME_V1.rows)}%`,
+                        opacity: mapPlanOpacity,
+                      }}
+                    />
+                  </div>
+                  <div className={styles.mansionOverheadScrim} />
+                </div>
+              </div>
+            ) : null}
+            <button
+              type="button"
+              className={styles.mansionOutsideTravelTarget}
+              data-selected={mansionOutsideSelected ? "true" : undefined}
+              aria-label={`Select the exterior of the ${venuePlaceNoun}`}
+              aria-pressed={mansionOutsideSelected}
+              disabled={busy || travelPresentation !== null}
+              onClick={() => setSelectedMansionRoomId(MYSTERY_MANSION_OUTSIDE_SELECTION_ID)}
+            />
+            <div className={styles.mansionCanvas} data-map-style={venueProfile?.presentation?.mapStyle} data-deck-plan={mapPlanUrl && mapPlanVisible ? "true" : undefined}>
+              {maritimeDeckMap && venueTierOutlinePoints ? (
+                <>
+                  {/* The abstract hull steps aside once the venue's real exterior is on the board. */}
+                  {!(mapPlanUrl && mapPlanVisible) ? (
+                    <svg className={styles.venueHullOutline} viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+                      <polygon points={venueTierOutlinePoints} />
+                    </svg>
+                  ) : null}
+                  <div className={styles.venueMapOrientation} aria-hidden="true">
+                    <span data-edge="top">PORT</span>
+                    <span data-edge="right">FORE / BOW</span>
+                    <span data-edge="bottom">STARBOARD</span>
+                    <span data-edge="left">AFT / STERN</span>
+                    <strong>D{deckOrdinal} · {mansionFloorDisplayName}</strong>
+                  </div>
+                </>
+              ) : null}
+              {mansionAmbientSpaces.map((space) => (
+                <i
+                  key={space.id}
+                  aria-hidden="true"
+                  className={styles.mansionAmbientSpace}
+                  data-ambient-space-id={space.id}
+                  data-pattern={space.pattern}
+                  style={{
+                    left: `${mansionX(space.x)}%`,
+                    top: `${mansionY(space.y)}%`,
+                    width: `${mansionWidth(space.width)}%`,
+                    height: `${mansionHeight(space.height)}%`,
+                  }}
+                />
+              ))}
+              {mansionSideRooms.map(({ block, x, y, width, height }) => {
+                const name = block.name?.trim() ?? "";
+                return (
+                  <button
+                    key={block.id}
+                    type="button"
+                    className={styles.mansionRoom}
+                    data-side-room="true"
+                    aria-disabled="true"
+                    title={`${name || "Side room"} · not part of this case`}
+                    aria-label={`${name || "Side room"}, not part of this case`}
+                    onClick={(event) => event.preventDefault()}
+                    style={{
+                      left: `${mansionX(x)}%`,
+                      top: `${mansionY(y)}%`,
+                      width: `${mansionWidth(width)}%`,
+                      height: `${mansionHeight(height)}%`,
+                    }}
+                  >
+                    {name ? <strong>{name}</strong> : null}
+                  </button>
+                );
+              })}
+              {mansionCorridors.map((placement) => (
+                <i
+                  key={placement.corridor.id}
+                  className={styles.mansionCorridor}
+                  aria-hidden="true"
+                  style={{
+                    left: `${mansionX(placement.x)}%`,
+                    top: `${mansionY(placement.y)}%`,
+                    width: `${mansionWidth(placement.width)}%`,
+                    height: `${mansionHeight(placement.height)}%`,
+                  }}
+                />
+              ))}
+              {mansionDoors.map((door) => (
+                <i
+                  key={door.key}
+                  className={styles.mansionDoor}
+                  data-orientation={door.orientation}
+                  aria-hidden="true"
+                  style={{ left: `${mansionX(door.x)}%`, top: `${mansionY(door.y)}%` }}
+                />
+              ))}
+              {connectorLandings.map(({ connector, point }) => (
+                <i
+                  key={`${connector.id}:${mansionFloor}`}
+                  className={styles.venueConnectorLanding}
+                  data-kind={connector.kind}
+                  title={connector.label ?? connector.kind}
+                  aria-label={`${connector.label ?? connector.kind} landing`}
+                  style={{ left: `${mansionX(point.x)}%`, top: `${mansionY(point.y)}%` }}
+                >{connector.kind === "lift" ? "⇅" : connector.kind === "stairs" ? "≋" : connector.kind === "ladder" ? "↕" : "◇"}</i>
+              ))}
+              {mansionPlacements.map((placement) => {
+                const room = placement.room;
+                const visualReadiness = whodunnitRoomVisualReadiness(
+                  room,
+                  roomArtUpgradeStatus,
+                );
+                const sealedRoomArtReady = room.sealedAsset?.revealed === true &&
+                  room.sealedAsset.status === "ready";
+                const roomMapArt = whodunnitDiscoveredMansionRoomArtV1({
+                  discovered: room.visited,
+                  upgradeEnabled: roomUpgradeEnabled,
+                  illustratedReady: Boolean(
+                    roomArtUpgradeStatus?.readyRoomIds.includes(room.id) &&
+                      loadedUpgradeRoomIds.has(room.id) &&
+                      !failedUpgradeRoomIds.has(room.id),
+                  ),
+                  sealedIllustratedUrl: sealedRoomArtReady
+                    ? whodunnitSealedRoomArtUrl({
+                        sessionId: props.session.id,
+                        subjectId: whodunnitIllustratedRoomSubjectId(room.id),
+                        style: "illustrated",
+                      })
+                    : null,
+                  sealedMosaicUrl: sealedRoomArtReady
+                    ? whodunnitSealedRoomArtUrl({
+                        sessionId: props.session.id,
+                        subjectId: room.id,
+                        style: "mosaic",
+                      })
+                    : null,
+                  imageId: room.imageId,
+                  templateId: room.templateId,
+                  bundledAssetPath: room.bundledAssetPath,
+                });
+                const roomSuspects = room.visited
+                  ? state.suspects.filter((suspect) => suspect.roomId === room.id)
+                  : [];
+                const examinedHotspots = room.hotspots.filter((hotspot) => hotspot.examined).length;
+                const verticalConnector = mansionLayout?.verticalConnectors.find((connector) =>
+                  connector.lowerEntityId === room.id || connector.upperEntityId === room.id);
+                const hasVerticalNeighbor = (room.neighborIds ?? []).some((id) =>
+                  state.rooms.find((candidate) => candidate.id === id)?.floor !== room.floor);
+                return (
+                  <button
+                    key={room.id}
+                    type="button"
+                    className={styles.mansionRoom}
+                    disabled={busy}
+                    data-discovered={room.visited ? "true" : undefined}
+                    data-room-art={roomMapArt?.style}
+                    data-current={room.id === currentRoom?.id ? "true" : undefined}
+                    data-selected={room.id === mansionSelectedRoom?.id ? "true" : undefined}
+                    data-visited={room.visited ? "true" : undefined}
+                    data-searched={room.hotspots.length > 0 && examinedHotspots === room.hotspots.length ? "true" : undefined}
+                    data-locked={!room.visited ? "true" : undefined}
+                    data-visuals-mode={roomVisualsMode ? "true" : undefined}
+                    data-visual-readiness={roomVisualsMode ? visualReadiness : undefined}
+                    aria-pressed={room.id === mansionSelectedRoom?.id}
+                    aria-label={`${room.visited ? room.name : "Unknown room"}${room.sealedAsset?.status === "pending" ? ", being secured" : ""}${room.visited ? ", visited" : ""}${roomSuspects.length ? `, ${roomSuspects.map((suspect) => suspect.name).join(" and ")} known to be here` : ""}`}
+                    onClick={() => {
+                      if (roomVisualsMode) {
+                        setRoomVisualDialogId(room.id);
+                        setRoomVisualResult("idle");
+                        return;
+                      }
+                      setSelectedMansionRoomId(room.id);
+                    }}
+                    style={{
+                      left: `${mansionX(placement.x)}%`,
+                      top: `${mansionY(placement.y)}%`,
+                      width: `${mansionWidth(placement.width)}%`,
+                      height: `${mansionHeight(placement.height)}%`,
+                      "--mansion-room-image": roomMapArt
+                        ? `url("${roomMapArt.url}")`
+                        : "none",
+                    } as CSSProperties}
+                  >
+                    {roomVisualsMode ? (
+                      <span className={styles.mansionRoomVisualStatus}>
+                        {visualReadiness === "fallback"
+                          ? "Fallback"
+                          : visualReadiness === "upgraded"
+                            ? "Upgraded"
+                            : "Default"}
+                      </span>
+                    ) : null}
+                    {room.visited ? <strong>{room.name}</strong> : null}
+                    {roomSuspects.map((suspect) => {
+                      const bot = presentMysteryBot(botById.get(suspect.botId) ?? null);
+                      const position = mysteryMapOccupantPosition(props.session.id, room.id, suspect.seatId);
+                      return (
+                        <i
+                          key={suspect.seatId}
+                          className={styles.mansionOccupant}
+                          role="img"
+                          aria-label={`${bot?.name ?? suspect.name} is known to be here`}
+                          data-tutorial-target="mystery-v2-micro-avatar"
+                          style={{ left: `${position.xPct}%`, top: `${position.yPct}%`, color: suspect.color ?? "#a98cff" }}
+                        >{props.renderBotGlyph(bot?.glyph ?? null, { size: 18, strokeWidth: 1.5, className: styles.mansionOccupantGlyph })}</i>
+                      );
+                    })}
+                    {room.hotspots.length > 0 && examinedHotspots === room.hotspots.length ? <i className={styles.mansionRoomCompleteMark} aria-hidden="true">✓</i> : null}
+                    {hasVerticalNeighbor ? <small>{verticalConnector?.label ?? (venueProfile ? "Connector" : "Stairs")}</small> : null}
+                  </button>
+                );
+              })}
+              {mansionPlayerPoint ? (
+                <MysteryPlayerOrb
+                  className={styles.mansionPlayerOrb}
+                  color={playerCharacterColor}
+                  glyph={playerCharacterGlyph}
+                  label={`${playerCharacterName} in the ${venuePlaceNoun}`}
+                  renderBotGlyph={props.renderBotGlyph}
+                  style={{
+                    left: `${mansionX(mansionPlayerPoint.x)}%`,
+                    top: `${mansionY(mansionPlayerPoint.y)}%`,
+                  }}
+                />
+              ) : null}
+              {travelPresentation ? (
+                <button
+                  type="button"
+                  className={styles.mansionTravelSkip}
+                  onClick={() => finishMansionTravel(true)}
+                  aria-label={`Traveling from ${travelPresentation.fromRoom.name} to ${travelPresentation.toRoom.name}. Activate to arrive now.`}
+                >
+                  <span role="status">Traveling to {travelPresentation.toRoom.name} · click, Enter, or Space to arrive now</span>
+                </button>
+              ) : null}
+            </div>
+          </div>
+          </div>
+          </div>
+          {mansionOutsideSelected ? (
+            <section className={styles.mansionRoomDetails} aria-live="polite" data-outside="true">
+              <div>
+                <small>Selected area</small>
+                <strong>Exterior</strong>
+                <span>Outside the {venuePlaceNoun}</span>
+              </div>
+              <button type="button" disabled={busy || travelPresentation !== null || roomVisualsMode} title={roomVisualsMode ? "Finish with visuals before moving." : undefined} onClick={() => setVisitingExterior(true)}>{roomVisualsMode ? "Finish visuals first" : "Go outside"}</button>
+            </section>
+          ) : mansionSelectedRoom ? (
+            <section className={styles.mansionRoomDetails} aria-live="polite" data-locked={!mansionSelectedRoom.unlocked ? "true" : undefined} data-visuals-mode={roomVisualsMode ? "true" : undefined}>
+              <div>
+                <small>Selected room</small>
+                <strong>{mansionSelectedRoom.visited ? mansionSelectedRoom.name : "Unknown room"}</strong>
+                <span>{mansionFloorDisplayName} · {mansionSelectedRoomPending ? "Being secured" : mansionSelectedRoom.unlocked ? (mansionSelectedRoom.visited ? "Visited" : "Not yet visited") : "Locked"}</span>
+              </div>
+              <dl>
+                <div><dt>Known occupant</dt><dd>{mansionSelectedRoom.visited ? mansionSelectedSuspect?.name ?? "Unknown" : "Unknown"}</dd></div>
+                <div><dt>Details reviewed</dt><dd>{mansionSelectedRoom.visited ? `${mansionSelectedRoom.hotspots.filter((hotspot) => hotspot.examined).length} / ${mansionSelectedRoom.hotspots.length}` : "Unknown"}</dd></div>
+              </dl>
+              {mansionSelectedRoomPending ? <p className={styles.securedRoomStatus} role="status" aria-live="polite">This room is still being prepared. Try again shortly.</p> : null}
+              <button type="button" disabled={busy || !mansionSelectedRoom.unlocked || mansionSelectedRoomPending || !mansionSelectedRoomReachable || roomVisualsMode} title={roomVisualsMode ? "Finish with visuals before moving." : undefined} onClick={() => void beginMansionTravel(mansionSelectedRoom)}>
+                {roomVisualsMode
+                  ? "Finish visuals first"
+                  : mansionSelectedRoomPending
+                  ? "Being secured"
+                  : !mansionSelectedRoom.unlocked
+                    ? "Locked"
+                    : !mansionSelectedRoomReachable
+                      ? "Not adjacent"
+                      : mansionSelectedRoom.visited
+                        ? `Walk to ${mansionSelectedRoom.name}`
+                        : "Enter room"}
+              </button>
+            </section>
+          ) : null}
+          <small className={styles.mansionHint} data-visuals-mode={roomVisualsMode ? "true" : undefined}>{roomVisualsMode
+            ? "Visuals mode: choose a room to generate or upgrade its art. Movement resumes when you are done with visuals."
+            : "Discover through connected doors. Walk back to any visited room."}</small>
+        </section>
+      ) : currentRoom ? (
+        <section
+          className={styles.roomScene}
+          style={roomSceneStyle}
+          data-mystery-room-stage="true"
+          data-art-style={currentRoomArtStyle}
+          data-art-crossfading={roomArtCrossfading ? "true" : undefined}
+          data-parallax-enabled={roomParallaxEnabled ? "true" : undefined}
+          data-lens-active={lensActive ? "true" : undefined}
+          data-room-introduction={roomIntroductionActive ? roomIntroductionPhase : undefined}
+          data-suspended={caseFileOpen ? "true" : undefined}
+          onPointerMove={handleRoomPointerMove}
+          onPointerLeave={handleRoomPointerLeave}
+          onClick={handleRoomInvestigationClick}
+        >
+          {currentRoom.sealedAsset?.status === "pending" ? (
+            <div className={styles.roomSecuring} role="status" aria-live="polite">
+              <strong>This room is still being prepared.</strong>
+              <span>Try again shortly.</span>
+            </div>
+          ) : null}
+          <div
+            ref={roomArtFrameRef}
+            className={styles.roomArtFrame}
+            data-room-art-frame="true"
+          >
+          {currentRoomMosaicUrl ? (
+            <img
+              ref={mosaicBackdropRef}
+              className={styles.roomBackdropImage}
+              data-art-style="mosaic"
+              data-blurred={roomBackdropBlurred ? "true" : undefined}
+              key={`${currentRoom.id}:mosaic:${currentRoomMosaicGrid}:${sceneAssetRefreshNonce}`}
+              src={currentRoomMosaicUrl}
+              onError={() => setFailedMosaicUrls((current) => new Set([...current, currentRoomMosaicUrl]))}
+              alt=""
+              aria-hidden="true"
+              draggable={false}
+            />
+          ) : null}
+          {currentRoomUpgradeAssetUrl ? (
+            <img
+              ref={upgradeBackdropRef}
+              className={styles.roomBackdropImage}
+              data-art-style="illustrated"
+              data-blurred={roomBackdropBlurred ? "true" : undefined}
+              data-upgrade-layer="true"
+              data-loaded={currentRoomIllustratedUpgradeLoaded ? "true" : undefined}
+              data-active={currentRoomArtStyle === "illustrated" ? "true" : undefined}
+              key={`${currentRoom.id}:upgrade:${sceneAssetRefreshNonce}`}
+              src={currentRoomUpgradeAssetUrl}
+              alt=""
+              aria-hidden="true"
+              draggable={false}
+              onLoad={handleCurrentRoomUpgradeArtLoad}
+              onError={handleCurrentRoomArtLoadError}
+            />
+          ) : null}
+          <DebateMysteryRoomCinematographyLayer
+              room={currentRoom}
+              lights={currentRoomLights}
+              effects={currentRoomEffects}
+              artStyle={currentRoomArtStyle}
+              viewport
+              sourceAspectRatio={currentRoomArtAspect}
+              templateLightingAligned={currentRoomUsesTemplateLightGeometry && !(currentRoomLayoutEntity?.kind === "room" && currentRoomLayoutEntity.lightBlendMode !== undefined)}
+              blurred={roomBackdropBlurred}
+              reducedMotion={reducedMotion || caseFileOpen}
+            />
+          <div className={styles.roomParallaxLayer}>
+            {command === "examine" && examineTargetsRemain ? <div className={styles.hotspots} aria-label="Examination points">{currentRoomUnexaminedHotspots.map((hotspot) => {
+              const point = currentRoomHotspotFocusPoints.get(hotspot.id);
+              return point ? <button
+                key={hotspot.id}
+                type="button"
+                aria-label={`Examine ${hotspot.label}`}
+                disabled={!lensActive}
+                data-examining={examiningHotspotId === hotspot.id ? "true" : undefined}
+                style={hotspotSpotStyle(hotspot.polygon)}
+                onFocus={() => {
+                  setExaminationKeyboardFocusActive(true);
+                  setInvestigationLens(resolveDebateMysteryV2Lens(point.x, point.y, currentRoomLensRegions));
+                }}
+                onBlur={() => setExaminationKeyboardFocusActive(false)}
+                onClick={(event) => {
+                  if (event.detail !== 0) return;
+                  event.stopPropagation();
+                  const target = resolveDebateMysteryV2Lens(point.x, point.y, currentRoomLensRegions);
+                  if (target.hotspotId === hotspot.id) void examineHotspot(hotspot.id);
+                }}
+              /> : null;
+            })}{currentRoomInterests.map((interest) => {
+              const id = `interest:${interest.id}`;
+              const point = currentRoomHotspotFocusPoints.get(id);
+              return point ? <button
+                key={id}
+                type="button"
+                aria-label={`Look at ${interest.label}`}
+                disabled={!lensActive}
+                data-interest="true"
+                data-examining={examiningHotspotId === id ? "true" : undefined}
+                style={hotspotSpotStyle(interest.polygon)}
+                onFocus={() => {
+                  setExaminationKeyboardFocusActive(true);
+                  setInvestigationLens(resolveDebateMysteryV2Lens(point.x, point.y, currentRoomLensRegions));
+                }}
+                onBlur={() => setExaminationKeyboardFocusActive(false)}
+                onClick={(event) => {
+                  if (event.detail !== 0) return;
+                  event.stopPropagation();
+                  const target = resolveDebateMysteryV2Lens(point.x, point.y, currentRoomLensRegions);
+                  if (target.hotspotId === id) void observeInterest(interest.id);
+                }}
+              /> : null;
+            })}</div> : null}
+          </div>
+          {command !== "examine" && command !== "move" ? (
+            <SceneMediaVignette theme={props.theme} style={{ "--scene-vignette-z": 2 } as CSSProperties} />
+          ) : null}
+          {command === "examine" && examineTargetsRemain ? <div className={styles.examinationGrid} data-art-style={currentRoomArtStyle} style={examinationGridStyle} aria-hidden="true">{[...examinationIlluminatedCells].map((index) => {
+            const column = index % DEBATE_MYSTERY_V2_EXAMINE_GRID_COLUMNS;
+            const row = Math.floor(index / DEBATE_MYSTERY_V2_EXAMINE_GRID_COLUMNS);
+            return <i key={index} style={{
+              left: `${(column / DEBATE_MYSTERY_V2_EXAMINE_GRID_COLUMNS) * 100}%`,
+              top: `${(row / DEBATE_MYSTERY_V2_EXAMINE_GRID_ROWS) * 100}%`,
+              width: `${100 / DEBATE_MYSTERY_V2_EXAMINE_GRID_COLUMNS}%`,
+              height: `${100 / DEBATE_MYSTERY_V2_EXAMINE_GRID_ROWS}%`,
+            }} />;
+          })}</div> : null}
+          {command === "examine" && examineTargetsRemain && examiningHotspot ? <i className={styles.examinationScan} aria-hidden="true" data-phase={busy ? "scanning" : "resolved"} style={hotspotSpotStyle(examiningHotspot.polygon)} /> : null}
+          </div>
+          {roomIntroductionPhase !== "casekeeper" ? <div className={styles.roomShade} /> : null}
+          {!roomIntroductionActive ? <div className={styles.roomTitle}><small>{venueTierLabel(currentRoom.floor)}</small><h1>{currentRoom.name}</h1></div> : null}
+          {roomActorVisible && currentBot && !caseFileOpen ? <div ref={suspectActorRef} className={styles.roomActor} data-art-style={currentRoomArtStyle} data-first-entry={interrogationFirstEntryState.suspectEntered ? "true" : undefined} data-interrogation-phase={interrogationPhase ?? undefined} data-staging={interrogationStagingActive ? "two-shot" : undefined} data-thinking={suspectThinking ? "true" : undefined} data-drop-target={presentDrag.active ? (presentDrag.overSuspect ? "hover" : "armed") : undefined} style={{ "--actor-color": currentBot.color ?? "#a98cff" } as CSSProperties}><div className={styles.roomActorDrift} style={mysteryRoomActorDriftStyle(`${props.session.id}:${currentBot.id}:suspect`)}>{props.renderMysteryBotAvatar(currentBot, investigationAvatarPresentation, { demeanor: "suspect", thinking: suspectThinking, talking: (audioMouthActive && roomDisplayedDialogue?.speakerSeatId === currentSuspect?.seatId) || vocalReactingBotId === currentBot.id, speechTiming: audioMouthActive && roomDisplayedDialogue?.speakerSeatId === currentSuspect?.seatId ? speechTiming : null, blinkEnabled: true, facing: "left", speechInkVisible: roomSpeechInkVisible })}<strong>{currentBot.name}</strong>{roomSuspectStageActionText && roomActionPresentation ? <SignalVoiceActionText key={`suspect:${roomDisplayedDialogue?.nodeId ?? ""}:${roomDisplayedDialogue?.occurredAt ?? ""}`} {...roomActionPresentation} accent={currentBot.color} /> : null}</div></div> : null}
+          {roomProsecutorVisible && prosecutorBot && !caseFileOpen ? <aside className={`${styles.roomActor} ${styles.roomProsecutorActor}`} data-art-style={currentRoomArtStyle} data-first-entry={interrogationFirstEntryState.prosecutorEntered ? "true" : undefined} data-prosecutor-speaking="true" data-staging={interrogationStagingActive ? "two-shot" : undefined} data-thinking={playerThinking ? "true" : undefined} data-interrogation-phase={interrogationPhase ?? undefined} style={{ "--actor-color": prosecutorBot.color ?? "#72d7ff" } as CSSProperties}>
+            <div className={styles.roomActorDrift} style={mysteryRoomActorDriftStyle(`${props.session.id}:${prosecutorBot.id}:prosecutor`)}>
+              {roomProsecutorStageActionText && roomActionPresentation ? <SignalVoiceActionText key={`room-prosecutor:${roomDisplayedDialogue?.nodeId ?? ""}:${roomDisplayedDialogue?.occurredAt ?? ""}`} {...roomActionPresentation} accent={prosecutorBot.color} /> : null}
+              {props.renderMysteryBotAvatar(prosecutorBot, investigationAvatarPresentation, { demeanor: "partner", thinking: playerThinking, talking: (audioMouthActive && !heldDialogue && roomProsecutorActive) || vocalReactingBotId === prosecutorBot.id, speechTiming: audioMouthActive && !heldDialogue && roomProsecutorActive ? speechTiming : null, blinkEnabled: true, facing: "right", speechInkVisible: roomSpeechInkVisible })}
+              <strong>{prosecutorBot.name} · {counsel.playerRoleLabel}</strong>
+            </div>
+          </aside> : null}
+          {roomDisplayedDialogue && !roomEntryLoading ? (
+            <WhodunnitInvestigationDialogue onGesture={(clickCount) => { operateVisibleDialogueGesture(clickCount, advanceVisibleRoomDialogue); }}>
+            <div
+              key={roomDialoguePresentationKey ?? roomDisplayedDialogue.nodeId}
+              className={styles.dialogueBox}
+              data-speaker={roomDialogueSpeakerKind}
+              data-casekeeper-stage={roomIntroductionAwaitingContinue
+                ? roomCasekeeperNarrationVisible ? "narration" : "beat"
+                : undefined}
+              data-examination={roomDialogueIsTextOnly ? "true" : undefined}
+              data-awaiting-continue={roomObservationAwaitingContinue || roomIntroductionActive ? "true" : undefined}
+              data-handoff={interrogationPhase === "handoff" ? "true" : undefined}
+              style={roomDialogueAccentStyle}
+              role="button"
+              tabIndex={0}
+              aria-live="polite"
+              aria-busy={roomIntroductionBringingForward}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" || event.key === " ") {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  operateVisibleDialogueGesture(1, advanceVisibleRoomDialogue);
+                }
+              }}
+            >
+              {roomIntroductionAwaitingContinue ? null : (
+                <small>
+                  {roomPlayerObservationActive
+                    ? (
+                        <span className={styles.dialogueSpeakerSignature}>
+                          <i aria-hidden="true">
+                            {props.renderBotGlyph(playerCharacterGlyph ?? null, {
+                              size: 14,
+                              strokeWidth: 1.65,
+                            })}
+                          </i>
+                          <span>{playerCharacterName}</span>
+                        </span>
+                      )
+                    : roomPersonaDialogueActive && roomDialoguePersonaName
+                      ? (
+                          <span className={styles.dialogueSpeakerSignature}>
+                            <i aria-hidden="true">
+                              {props.renderBotGlyph(roomDialoguePersonaGlyph, {
+                                size: 14,
+                                strokeWidth: 1.65,
+                              })}
+                            </i>
+                            <span>{roomDialoguePersonaName}</span>
+                          </span>
+                        )
+                      : roomDialogueBot
+                        ? (roomProsecutorActive && firstPersonInvestigation
+                            ? "You"
+                            : `${roomDialogueBot.name}${roomProsecutorActive ? ` · ${counsel.playerRoleLabel}` : ""}`)
+                        : "Observation"}
+                </small>
+              )}
+              <p className={styles.dialogueText}>
+                {roomIntroductionAwaitingContinue && !roomCasekeeperNarrationVisible
+                  ? (
+                      <span className={styles.casekeeperThinkingDots} aria-label="Taking in the room">
+                        <span aria-hidden="true">...</span>
+                      </span>
+                    )
+                  : (
+                      <>
+                        {/* The full line reserves the box's final size on its
+                            first frame; the typewriter paints over it. */}
+                        <span className={styles.dialogueTextReserve} aria-hidden="true">
+                          {whodunnitCaptionSpeechText(roomDialogueDelivery.spokenText)}
+                        </span>
+                        <span className={styles.dialogueTextRevealed}>
+                          {revealedSpeechText(
+                            whodunnitCaptionSpeechText(roomDialogueDelivery.spokenText),
+                            captionSpeechTiming,
+                          ) || (roomDialogueSettled
+                            ? ""
+                            : (
+                                // A line whose voice or caption clock has not
+                                // started yet shows a beat, never an empty box.
+                                <span className={styles.casekeeperThinkingDots} data-pending-line="true" aria-label="Waiting for the line">
+                                  <span aria-hidden="true">...</span>
+                                </span>
+                              ))}
+                        </span>
+                      </>
+                    )}
+              </p>
+              {/* Always mounted so the box never grows when the hint appears;
+                  it stays invisible until the line waits for a gesture. */}
+              <span
+                className={styles.dialogueContinueHint}
+                role="status"
+                data-pending={roomObservationAwaitingContinue || roomDialogueSettled || (roomIntroductionAwaitingContinue && roomCasekeeperNarrationVisible) ? undefined : "true"}
+              >
+                {roomIntroductionBringingForward
+                  ? "Bringing the occupant forward…"
+                  : "Click to continue"}
+              </span>
+            </div>
+            </WhodunnitInvestigationDialogue>
+          ) : null}
+          {completionCueVisible ? <div className={styles.roomComplete} role="status" aria-live="polite"><p>Everything that matters here has entered the record.</p><strong>{currentRoom.name} complete</strong></div> : null}
+        </section>
+      ) : null}
+      {!roomIntroductionActive
+        ? caseFileOpen
+          ? renderSceneRepairControl("casefile")
+          : activeFoundEvidence
+          ? renderSceneRepairControl("item", null, activeFoundEvidence)
+          : roomView === "room" && currentRoom
+            ? renderSceneRepairControl("room", currentRoom)
+            : roomView === "mansion"
+              ? renderSceneRepairControl("map")
+              : null
+        : null}
+      {!spectatorTheory && !roomIntroductionActive && currentRoom && (command === "examine" || command === "move") ? (
+        <button
+          type="button"
+          className={styles.investigationModeBackButton}
+          data-focus-mode={command}
+          disabled={backToRoomDisabled}
+          onClick={() => {
+            playControlSfx("navigate");
+            if (roomView === "room") {
+              setCommand(null);
+              return;
+            }
+            void sendAction({ action: "move", roomId: currentRoom.id });
+          }}
+        >← Back to room</button>
+      ) : null}
+      {!spectatorTheory && !roomIntroductionActive && !roomDisplayedDialogue ? <nav
+        className={styles.investigationCommands}
+        aria-label="Investigation commands"
+        aria-hidden={investigationCommandsDismissed ? "true" : undefined}
+        data-console-label="Case desk · field commands"
+        data-dismissed={investigationCommandsDismissed ? "true" : undefined}
+        inert={investigationCommandsDismissed ? true : undefined}
+      >
+        <button type="button" data-command="move" data-active={roomView === "mansion" ? "true" : undefined} aria-pressed={roomView === "mansion"} disabled={busy || dialoguePerformanceActive} onClick={() => { playControlSfx("navigate"); setCommand("move"); if (roomView === "room") setMapOpeningAhead(true); void sendAction({ action: "move" }).finally(() => setMapOpeningAhead(false)); }} data-tutorial-target="mystery-v2-move"><span>⌂</span>Move</button>
+        <button type="button" data-command="examine" data-active={command === "examine" ? "true" : undefined} aria-pressed={command === "examine"} disabled={busy || dialoguePerformanceActive || roomView !== "room"} onClick={() => { playControlSfx("clip"); setCommand("examine"); }} data-tutorial-target="mystery-v2-examine"><span>⌕</span>Examine</button>
+        <button type="button" data-command="talk" data-active={command === "talk" ? "true" : undefined} aria-pressed={command === "talk"} disabled={busy || dialoguePerformanceActive || !currentSuspect} onClick={() => { playControlSfx("enter"); setCommand("talk"); }} data-tutorial-target="mystery-v2-talk"><span>“”</span>Talk</button>
+        <button type="button" data-command="present" data-active={command === "present" ? "true" : undefined} aria-pressed={command === "present"} disabled={busy || dialoguePerformanceActive || !currentSuspect || admittedRecord.length === 0} onClick={() => { playControlSfx("paper"); setCommand("present"); }} data-tutorial-target="mystery-v2-present"><span>◇</span>Present</button>
+      </nav> : null}
+      {!spectatorTheory && !roomIntroductionActive && command === "talk" && currentSuspect && !dialoguePerformanceActive ? <div className={styles.choiceTray}><header><div><p className={styles.eyebrow}>Talk</p><h2>{currentSuspect.name}</h2></div><button type="button" onClick={() => setCommand(null)}>Close</button></header><p className={styles.topicHelp}>Ask about people, motives, alibis, or rooms. Evidence and testimony stay in Present.</p><div className={styles.topicGroups}>{groupDebateMysteryTalkTopicsV2(state.topics.filter((topic) => topic.suspectSeatId === currentSuspect.seatId)).map((group) => <section key={group.category} className={styles.topicGroup} aria-labelledby={`talk-${currentSuspect.seatId}-${group.category}`}><h3 id={`talk-${currentSuspect.seatId}-${group.category}`}>{group.label}</h3><div className={styles.topicList}>{group.topics.map((topic) => <button key={topic.nodeId} type="button" disabled={busy || dialoguePerformanceActive || !topic.unlocked} data-complete={topic.completed ? "true" : undefined} data-blocked={!topic.unlocked ? "true" : undefined} onClick={() => void sendAction({ action: "talk", suspectSeatId: currentSuspect.seatId, topicNodeId: topic.nodeId })}><span className={styles.topicIcon} aria-hidden="true">{topic.completed ? "✓" : topic.unlocked ? "?" : "×"}</span><span className={styles.topicCopy}><strong>{debateMysteryTalkTopicDisplayLabelV2(topic, state.rooms)}</strong>{!topic.unlocked ? <small>Blocked</small> : null}</span></button>)}</div></section>)}</div></div> : null}
+      {!spectatorTheory && !roomIntroductionActive && command === "present" && currentSuspect ? <WhodunnitPresentDrawer suspectName={currentSuspect.name} items={admittedRecord} presentedKeys={mysteryPresentedRecordKeysV1(state, currentSuspect.seatId)} assetUrlFor={(item) => item.reference.kind === "evidence" ? sealedMysteryAssetObjectUrl(sealedAssetObjectUrls, "evidence", item.reference.id, item.sealedAsset) : null} disabled={busy || dialoguePerformanceActive} suspectTarget={suspectActorRef} onPresent={(record) => { setPresentDrag({ active: false, overSuspect: false }); void sendAction({ action: "present_to_suspect", suspectSeatId: currentSuspect.seatId, record }); }} onClose={() => { setPresentDrag({ active: false, overSuspect: false }); setCommand(null); }} onDragStateChange={setPresentDrag} playSfx={playControlSfx} /> : null}
+      {!spectatorTheory && !roomIntroductionActive && state.theoryAvailable ? <button type="button" className={styles.fileChargesButton} onClick={() => { playControlSfx("theory"); setTheoryOpen(true); }} data-tutorial-target="mystery-v2-file-theory">File Charges</button> : !spectatorTheory && !roomIntroductionActive ? <small className={styles.theoryHint}>The Theory Board opens after the briefing, one interview, and one admitted record item.</small> : null}
+      {caseFileUpdate ? <CaseFileUpdateNotice update={caseFileUpdate} onView={() => { setCaseFileOpen(true); setCaseFileUpdate(null); }} onDismiss={() => setCaseFileUpdate(null)} /> : null}
+      {caseFileOpen ? <CaseFile state={state} playerName={playerCharacterName} playerBot={prosecutorBot} playerColor={playerCharacterColor} playerGlyph={playerCharacterGlyph ?? null} renderBotGlyph={props.renderBotGlyph} renderMysteryBotAvatar={props.renderMysteryBotAvatar} objectUrls={sealedAssetObjectUrls} onClose={() => setCaseFileOpen(false)} transcriptCopyState={props.transcriptCopyState} onCopyVerboseTranscript={props.onCopyVerboseTranscript} caseFileOverrides={state.caseFilePresentationOverrides ?? null} cleanBusy={Boolean(sceneRepairJob)} canUndoClean={state.sceneRepairUndo?.action === "clean_case_file" && !whodunnitSceneRepairUndoIsDismissed(dismissedSceneRepairUndoId, state.sceneRepairUndo.id)} onClean={() => void repairScene("clean_case_file")} onUndoClean={() => void undoSceneRepair()} voicesEnabling={voicesEnabling} onEnableVoices={() => void enableCaseVoices()} keepVenueUpdates={canKeepVenueUpdates ? keepVenueUpdates : null} keepVenueUpdatesOverwritesOriginal={keepVenueUpdatesOverwritesOriginal} onKeepVenueUpdatesChange={setKeepVenueUpdates} keepVenueUpdatesDisabled={busy || mansionSaveState === "saving"} /> : null}
+      {theoryOpen || spectatorTheory ? (
+        <div className={styles.theoryBoard} role="dialog" aria-modal="true" aria-labelledby="theory-v2-title">
+          <header>
+            <div>
+              <p className={styles.eyebrow}>{spectatorTheory ? `${counsel.playerRoleLabel} research · editable` : "Theory Board"}</p>
+              <h2 id="theory-v2-title">{spectatorTheory ? `Review the ${counsel.playerRoleLabel} conclusion` : counsel.stance === "defense" ? "Name who is really responsible" : "File the prosecution's case"}</h2>
+            </div>
+            {spectatorTheory ? null : <button type="button" onClick={() => setTheoryOpen(false)}>Close</button>}
+          </header>
+          <div className={styles.theoryBoardFields}>
+          {state.caseCharge ? (
+            <section className={styles.caseCharge} aria-label="Charge">
+              <small>Charge · {state.caseCharge.title}</small>
+              <strong>{state.caseCharge.accusationPrompt}</strong>
+            </section>
+          ) : null}
+          {spectatorTheory ? <p>The selected {counsel.playerRoleLabel}&apos;s conclusion is a public hypothesis built from the admitted physical findings. You may revise every field before filing it.</p> : null}
+          {client ? (
+            <section className={styles.caseCharge} aria-label="Client">
+              <small>Your client</small>
+              <strong>{client.name}</strong>
+            </section>
+          ) : null}
+          <fieldset>
+            <legend>Accused · choose one or two</legend>
+            {state.suspects.filter((suspect) => suspect.seatId !== clientSeatId).map((suspect) => {
+              const selected = theoryAccusedSeatIds.includes(suspect.seatId);
+              return (
+                <label key={suspect.seatId}>
+                  <input
+                    type="checkbox"
+                    checked={selected}
+                    disabled={!selected && theoryAccusedSeatIds.length >= 2}
+                    onChange={(event) => setTheory((current) => {
+                      const currentAccused = debateMysteryTheoryAccusedSeatIdsV2(current);
+                      const nextAccused = event.target.checked
+                        ? [...currentAccused, suspect.seatId].slice(0, 2)
+                        : currentAccused.filter((seatId) => seatId !== suspect.seatId);
+                      return debateMysteryTheoryWithAccusedSeatIdsV2(current, nextAccused);
+                    })}
+                  />
+                  {suspect.name}
+                </label>
+              );
+            })}
+          </fieldset>
+          <label>Method<textarea value={theory.method} onChange={(event) => setTheory((current) => ({ ...current, method: event.target.value }))} placeholder="How was the incident carried out?" /></label>
+          <label>Motive<textarea value={theory.motive} onChange={(event) => setTheory((current) => ({ ...current, motive: event.target.value }))} placeholder="Why was each accused responsible?" /></label>
+          <label>Opportunity<textarea value={theory.opportunity} onChange={(event) => setTheory((current) => ({ ...current, opportunity: event.target.value }))} placeholder="When and where did each accused have the opportunity?" /></label>
+          <fieldset>
+            <legend>Evidence to admit</legend>
+            {admittedRecord.filter((item) => item.reference.kind === "evidence").map((item) => (
+              <label key={item.reference.id}>
+                <input type="checkbox" checked={theory.evidenceIds.includes(item.reference.id)} onChange={(event) => setTheory((current) => ({ ...current, evidenceIds: event.target.checked ? [...current.evidenceIds, item.reference.id] : current.evidenceIds.filter((id) => id !== item.reference.id) }))} />
+                {item.emoji} {item.title}
+              </label>
+            ))}
+          </fieldset>
+          <p>Incomplete method, motive, or opportunity will weaken the case, but will not block trial.</p>
+          {canKeepVenueUpdates ? (
+            <KeepVenueUpdatesField
+              checked={keepVenueUpdates}
+              disabled={busy || mansionSaveState === "saving"}
+              overwritesOriginal={keepVenueUpdatesOverwritesOriginal}
+              onChange={setKeepVenueUpdates}
+            />
+          ) : null}
+          </div>
+          <footer className={styles.theoryBoardActions}>
+          <button type="button" className={styles.primaryAction} disabled={busy || mansionSaveState === "saving" || theoryAccusedSeatIds.length === 0} onClick={() => { void concludeInvestigation("file_theory").then((accepted) => { if (accepted && !spectatorTheory) setTheoryOpen(false); }); }}>{mansionSaveState === "saving" ? "Saving venue…" : spectatorTheory ? "File conclusion and watch court" : counsel.stance === "defense" ? "File the defense theory and open court" : "File charges and open court"}</button>
+          {state.theoryAvailable && state.config.investigationMode !== "court_only" ? <WhodunnitCaseCheckActions busy={busy || mansionSaveState === "saving"} hasAccused={theoryAccusedSeatIds.length > 0} error={error} onCheck={async () => { if (await concludeInvestigation("check_case")) setTheoryOpen(false); }} /> : null}
+          <WhodunnitTranscriptCopyButton state={props.transcriptCopyState} onCopy={props.onCopyVerboseTranscript} />
+          </footer>
+        </div>
+      ) : null}
+      {roomVisualDialogRoom && roomVisualDialogReadiness ? (
+        <>
+          <button
+            type="button"
+            className={styles.roomVisualDialogBackdrop}
+            aria-label="Close room visuals"
+            onClick={() => setRoomVisualDialogId(null)}
+          />
+          <section
+            className={styles.roomVisualDialog}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="mystery-room-visual-title"
+            data-readiness={roomVisualDialogReadiness}
+          >
+            <header>
+              <div>
+                <p className={styles.eyebrow}>Room visuals · {roomVisualDialogReadiness}</p>
+                <h2 id="mystery-room-visual-title">
+                  {roomVisualDialogRoom.visited ? roomVisualDialogRoom.name : "Unopened room"}
+                </h2>
+              </div>
+              <button type="button" onClick={() => setRoomVisualDialogId(null)}>Close</button>
+            </header>
+            <p>
+              {roomVisualDialogReadiness === "fallback"
+                ? roomVisualDialogRoom.sealedAsset?.status === "pending"
+                  ? "This room is already being prepared. Its compatible fallback remains safe until the new Mosaic passes review."
+                  : "This room is using its compatible fallback. You can generate a mansion-specific Mosaic without changing its doors, examination anchors, clues, or lights."
+                : roomVisualDialogReadiness === "upgraded"
+                  ? failedUpgradeRoomIds.has(roomVisualDialogRoom.id)
+                    ? "This room has an Upgraded presentation, but its image could not be loaded in this session. Retry loads it again without regenerating anything."
+                    : "This room has both its authored Mosaic and its Upgraded presentation."
+                  : roomVisualResult === "generated"
+                    ? "The mansion-specific Mosaic is ready. Would you like to create its optional Upgraded presentation too?"
+                    : "This room is using its default Mosaic. You can add an optional Upgraded presentation while keeping the same composition."}
+            </p>
+            <p className={styles.roomVisualDiscoveryNotice}>
+              No room art is previewed here. You discover it only by entering the room. Accepted room artwork, exact anchors, and dynamic lights can be kept for future cases when you file charges, which overwrites the original venue.
+            </p>
+            {liveResponseMode === "local" && roomVisualDialogReadiness !== "upgraded" ? (
+              <p className={styles.roomVisualOnlineNotice}>Room generation is ONLINE-only. LOCAL remains fully offline.</p>
+            ) : null}
+            <footer>
+              <button type="button" onClick={() => setRoomVisualDialogId(null)}>Not now</button>
+              {roomVisualDialogReadiness === "fallback" ? (
+                <button
+                  type="button"
+                  className={styles.roomVisualPrimaryAction}
+                  disabled={
+                    Boolean(roomVisualJob) ||
+                    liveResponseMode === "local" ||
+                    roomVisualDialogRoom.sealedAsset?.status === "pending"
+                  }
+                  onClick={() => void generateRoomVisual(roomVisualDialogRoom)}
+                >Generate this room</button>
+              ) : roomVisualDialogReadiness === "default" ? (
+                <button
+                  type="button"
+                  className={styles.roomVisualPrimaryAction}
+                  disabled={Boolean(roomVisualJob) || liveResponseMode === "local"}
+                  onClick={() => void upgradeRoomVisual(roomVisualDialogRoom)}
+                >Upgrade this room</button>
+              ) : failedUpgradeRoomIds.has(roomVisualDialogRoom.id) ? (
+                <button
+                  type="button"
+                  className={styles.roomVisualPrimaryAction}
+                  onClick={() => { retryRoomUpgradeArt(roomVisualDialogRoom.id); setRoomVisualDialogId(null); }}
+                >Retry Upgraded image</button>
+              ) : (
+                <button type="button" className={styles.roomVisualPrimaryAction} onClick={() => setRoomVisualDialogId(null)}>Ready to discover</button>
+              )}
+            </footer>
+          </section>
+        </>
+      ) : null}
+      {roomUpgradeConfirmationRoom ? (
+        <>
+          <button
+            type="button"
+            className={styles.roomVisualDialogBackdrop}
+            aria-label="Keep the current Mosaic presentation"
+            onClick={() => setRoomUpgradeConfirmationRoomId(null)}
+          />
+          <section
+            className={styles.roomVisualDialog}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="mystery-room-upgrade-confirmation-title"
+            data-readiness="default"
+          >
+            <header>
+              <div>
+                <p className={styles.eyebrow}>Upgraded room presentation</p>
+                <h2 id="mystery-room-upgrade-confirmation-title">Upgrade {roomUpgradeConfirmationRoom.name}?</h2>
+              </div>
+              <button type="button" onClick={() => setRoomUpgradeConfirmationRoomId(null)}>Close</button>
+            </header>
+            <p>
+              PRISM will softly prepare an Upgraded derivative for this room only. You can keep investigating while its accepted Mosaic remains on stage.
+            </p>
+            <p className={styles.roomVisualDiscoveryNotice}>
+              Its composition, doors, anchors, evidence geometry, lights, dialogue, and original Mosaic stay unchanged. The presentation switches only after the derivative is ready and loads successfully.
+            </p>
+            {liveResponseMode === "local" ? (
+              <p className={styles.roomVisualOnlineNotice}>Upgraded room synthesis is ONLINE-only. LOCAL keeps this room's Mosaic and sends nothing to a remote generator.</p>
+            ) : null}
+            <footer>
+              <button type="button" onClick={() => setRoomUpgradeConfirmationRoomId(null)}>Keep Mosaic</button>
+              <button
+                type="button"
+                className={styles.roomVisualPrimaryAction}
+                disabled={liveResponseMode === "local" || roomUpgradeSynthesisJob?.status === "refracting"}
+                onClick={() => startRoomUpgradeSoftSynthesis(roomUpgradeConfirmationRoom)}
+              >Upgrade this room</button>
+            </footer>
+          </section>
+        </>
+      ) : null}
+      <PrismBlockingLoader
+        open={Boolean(roomVisualJob)}
+        operation="refraction"
+        operationId={roomVisualRun?.id}
+        estimatedDurationMs={roomVisualRun?.estimatedDurationMs}
+        onCancel={() => roomVisualRunOwner.cancel()}
+        cancelLabel="Cancel room refraction"
+        placement="fullscreen"
+        theme={props.theme}
+        eyebrow="PRISM / Mystery Venue"
+        title={roomVisualJob?.kind === "upgrade" ? "Upgrading the unopened room" : "Refracting a room for this venue"}
+        detail={roomVisualJob?.kind === "upgrade"
+          ? "PRISM is preserving the accepted Mosaic composition while creating its higher-detail presentation. The room stays hidden until you visit it."
+          : "PRISM is generating against the mansion's frozen geometry, anchors, and lighting contract. The room stays hidden until you visit it."}
+        stepLabel={roomVisualJob?.kind === "upgrade" ? "Checking composition fidelity" : "Preparing the room behind closed doors"}
+        startedAt={roomVisualJob?.startedAt ?? null}
+        footer="No preview is shown here. Discovery still happens inside the mansion."
+      />
+      {renderItemSynthesisLoader()}
+      {renderRoomUpgradeSynthesisLoader()}
+      {overheadEditorOpen ? <MapOverheadEditorDialog
+        key={`${props.session.id}:overhead`}
+        placeNoun={venuePlaceNoun}
+        levelLabel={mansionFloorDisplayName}
+        imageUrl={mapPlanUrl}
+        frame={{
+          left: mansionX(MANSION_OVERHEAD_FRAME_V1.left),
+          top: mansionY(MANSION_OVERHEAD_FRAME_V1.top),
+          width: mansionWidth(MANSION_OVERHEAD_FRAME_V1.columns),
+          height: mansionHeight(MANSION_OVERHEAD_FRAME_V1.rows),
+        }}
+        cell={{ width: mansionWidth(1), height: mansionHeight(1) }}
+        tiles={[
+          ...mansionPlacements.map((placement) => ({
+            id: placement.room.id,
+            label: placement.room.visited ? placement.room.name : "Unknown room",
+            kind: "room" as const,
+            left: mansionX(placement.x), top: mansionY(placement.y),
+            width: mansionWidth(placement.width), height: mansionHeight(placement.height),
+            current: placement.room.id === currentRoom?.id,
+          })),
+          ...mansionCorridors.map((entry) => ({
+            id: entry.corridor.id, label: "", kind: "corridor" as const,
+            left: mansionX(entry.x), top: mansionY(entry.y),
+            width: mansionWidth(entry.width), height: mansionHeight(entry.height),
+          })),
+          ...mansionSideRooms.map(({ block, x, y, width, height }) => ({
+            id: block.id, label: block.name?.trim() ?? "", kind: "side" as const,
+            left: mansionX(x), top: mansionY(y), width: mansionWidth(width), height: mansionHeight(height),
+          })),
+        ]}
+        placement={savedOverheadPlacement}
+        theme={props.theme}
+        online={liveResponseMode === "online"}
+        onClose={() => setOverheadEditorOpen(false)}
+        onSave={async (placement) => { await saveOverheadPlacement(placement); setOverheadEditorOpen(false); }}
+        onGenerate={() => repairScene("generate_map_plan")}
+      /> : null}
+      {lightEditorRoomId === currentRoom?.id && currentRoom ? <RoomLightEditorDialog
+        key={`${props.session.id}:${currentRoom.id}:lighting`}
+        room={currentRoom} imageUrl={currentRoomImageUrl} artStyle={currentRoomArtStyle}
+        lights={currentRoomLights} effects={currentRoomEffects} theme={props.theme}
+        blendMode={currentRoomLayoutEntity?.kind === "room" ? currentRoomLayoutEntity.lightBlendMode : undefined}
+        onClose={() => setLightEditorRoomId(null)}
+        onSave={async (draft) => {
+          const result = await props.request<{ session: DebateSessionV1 }>(
+            `/api/debates/${encodeURIComponent(props.session.id)}/mystery-room-lighting`,
+            mutationBody({ roomId: currentRoom.id, ...draft }),
+          );
+          props.onSessionChange(result.session);
+          setLightEditorRoomId(null);
+        }}
+        onAutoPlace={liveResponseMode === "online" ? async (draft) => {
+          const result = await props.request<{ lights: MansionDynamicLightV2[]; trace?: unknown }>(
+            `/api/debates/${encodeURIComponent(props.session.id)}/mystery-room-lighting/detect`,
+            mutationBody({ roomId: currentRoom.id, artStyle: currentRoomArtStyle === "illustrated" ? "upgraded" : "mosaic", ...draft }),
+          );
+          return { lights: result.lights, trace: result.trace ?? null };
+        } : undefined}
+        onTune={liveResponseMode === "online" ? async (args) => props.request<{ lights: MansionDynamicLightV2[]; blendMode: MansionLightBlendModeV1; tune?: unknown }>(
+          `/api/debates/${encodeURIComponent(props.session.id)}/mystery-room-lighting/tune`,
+          mutationBody({ roomId: currentRoom.id, ...args.draft, sheet: args.sheet, pass: args.pass }),
+        ) : undefined}
+      /> : null}
+      {renderSceneRepairLoader()}
+      {callout ? <div key={callout.id} className={styles.callout} style={calloutStyle} role="status" aria-live="assertive"><span>{CALLOUT_COPY[callout.callout]}</span></div> : null}
+      {error ? (
+        <WhodunnitChromeErrorNotice
+          message={error}
+          onDismiss={() => setError(null)}
+        />
+      ) : null}
+    </main>
+  );
+}
+
+function KeepVenueUpdatesField(props: {
+  checked: boolean;
+  disabled: boolean;
+  overwritesOriginal: boolean;
+  onChange: (checked: boolean) => void;
+}): React.JSX.Element {
+  return (
+    <label className={styles.keepVenueUpdates} data-tutorial-target="mystery-v2-keep-venue-updates">
+      <input
+        type="checkbox"
+        checked={props.checked}
+        disabled={props.disabled}
+        onChange={(event) => props.onChange(event.currentTarget.checked)}
+      />
+      <span>
+        <strong>Keep these venue updates for future cases</strong>
+        <small>
+          {props.overwritesOriginal
+            ? "This replaces the original venue in your library."
+            : "This saves this venue to your library for future cases."}
+        </small>
+      </span>
+    </label>
+  );
+}
+
+function CaseFileUpdateNotice(props: {
+  update: DebateMysteryCaseFileUpdateV2;
+  onView: () => void;
+  onDismiss: () => void;
+}): React.JSX.Element {
+  const label = props.update.kind === "case_kit"
+    ? "Item acquired"
+    : props.update.kind === "record"
+      ? "Added to Case File"
+      : "Observation logged";
+  const title = props.update.kind === "observation"
+    ? props.update.observation.roomName
+    : props.update.item.title;
+  const description = props.update.kind === "observation"
+    ? props.update.observation.text
+    : props.update.item.description;
+  return (
+    <aside className={styles.acquisitionNotice} role="status" aria-live="assertive">
+      <span aria-hidden="true">{props.update.kind === "case_kit" ? props.update.item.emoji : "✦"}</span>
+      <div><small>{label}</small><strong>{title}</strong><p>{description}</p></div>
+      <button type="button" onClick={props.onView}>View Case File</button>
+      <button type="button" aria-label="Dismiss Case File update" onClick={props.onDismiss}>×</button>
+    </aside>
+  );
+}
+
+function CaseFile(props: {
+  state: DebateWhodunnitFormatStateV2;
+  playerName: string;
+  playerBot: MysteryBotSummary | null;
+  playerColor: string;
+  playerGlyph: string | null;
+  renderBotGlyph: BotPickerGlyphRenderer;
+  renderMysteryBotAvatar: V2SharedProps["renderMysteryBotAvatar"];
+  objectUrls: Readonly<Record<string, string>>;
+  onClose: () => void;
+  transcriptCopyState: V2ReviewCopyState;
+  onCopyVerboseTranscript: () => Promise<void>;
+  /** Presentation-only text from the last Case File clean-up. */
+  caseFileOverrides: DebateMysteryCaseFilePresentationOverridesV1 | null;
+  cleanBusy: boolean;
+  canUndoClean: boolean;
+  onClean: () => void;
+  onUndoClean: () => void;
+  /** A text case can be given voices in place; lines synthesize as they are heard. */
+  voicesEnabling: boolean;
+  onEnableVoices: () => void;
+  keepVenueUpdates?: boolean | null;
+  keepVenueUpdatesOverwritesOriginal?: boolean;
+  onKeepVenueUpdatesChange?: (checked: boolean) => void;
+  keepVenueUpdatesDisabled?: boolean;
+}): React.JSX.Element {
+  const observations = debateMysteryCaseFileObservationsV2({
+    dialogueHistory: props.state.dialogueHistory,
+    rooms: props.state.rooms,
+  });
+  const metWitnesses = props.state.suspects.filter((suspect) =>
+    props.state.metSuspectSeatIds.includes(suspect.seatId));
+  const { canUndoClean, cleanBusy, onUndoClean } = props;
+  useEffect(() => {
+    // Standard undo while the file is open; text fields keep their own undo.
+    const onKeyDown = (event: globalThis.KeyboardEvent): void => {
+      if (!(event.metaKey || event.ctrlKey) || event.shiftKey || event.altKey || event.key.toLowerCase() !== "z") return;
+      const target = event.target as HTMLElement | null;
+      if (target?.closest("input, textarea, [contenteditable=\"true\"]")) return;
+      if (!canUndoClean || cleanBusy) return;
+      event.preventDefault();
+      onUndoClean();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [canUndoClean, cleanBusy, onUndoClean]);
+  return (
+    <>
+      <div className={styles.caseFileBackdrop} aria-hidden="true" />
+      {/* The investigator stands in the blurred room outside the file as their
+          embodied bot, exactly as they appear on the room stage. A player with
+          no bot keeps the selected-tile stand-in. */}
+      <div className={styles.caseFileInvestigatorStage} aria-label={`${props.playerName}, Investigator`} role="img">
+        {props.playerBot
+          ? (
+              <div className={styles.caseFileInvestigatorActor} style={{ "--actor-color": props.playerColor } as CSSProperties}>
+                {props.renderMysteryBotAvatar(props.playerBot, "full", { demeanor: "partner", blinkEnabled: true, facing: "right" })}
+                <strong>{props.playerName}</strong>
+              </div>
+            )
+          : (
+              <BotPickerTile
+                item={{ id: "investigator", name: props.playerName, color: props.playerColor, glyph: props.playerGlyph }}
+                selected
+                forceName
+                forceGlyph
+                accentColor={props.playerColor}
+                geometry={{ tileSize: 192, glyphSize: 96, glyphStroke: 1.6 }}
+                renderGlyph={props.renderBotGlyph}
+                style={{ "--tile-size": "192px" } as CSSProperties}
+                buttonProps={{ tabIndex: -1, "aria-hidden": "true" }}
+              />
+            )}
+        <small>Investigator</small>
+      </div>
+      <aside className={styles.caseFile} role="dialog" aria-modal="true" aria-labelledby="mystery-v2-case-file-title">
+        <header><div><p className={styles.eyebrow}>{debateMysteryCounselSeatsV2(props.state.config).playerSideLabel} record</p><h2 id="mystery-v2-case-file-title">Case File</h2></div><div className={styles.caseFileHeaderActions}><WhodunnitTranscriptCopyButton state={props.transcriptCopyState} onCopy={props.onCopyVerboseTranscript} /><button type="button" disabled={props.cleanBusy} title="Rewrite every entry to be concise and organized. Undo keeps the previous file." onClick={props.onClean}>Clean up</button><button type="button" disabled={!props.canUndoClean || props.cleanBusy} title="Undo the last clean-up (⌘Z)" onClick={props.onUndoClean}>Undo</button><button type="button" onClick={props.onClose}>Close</button></div></header>
+        <div className={styles.caseFileLayout}>
+          <div className={styles.caseFileContents}>
+            <section>
+              <h3>Case Kit</h3>
+              {(props.state.caseKit ?? []).map((item) => (
+                <article key={item.id}>
+                  <span aria-hidden="true">{item.emoji}</span>
+                  <div><strong>{item.title}</strong><small>{item.kind} · acquired by {props.playerName}</small><p>{props.caseFileOverrides?.caseKit?.[item.id]?.description ?? item.description}</p></div>
+                </article>
+              ))}
+              {(props.state.caseKit ?? []).length === 0 ? <p className={styles.caseFileEmpty}>No access items recovered yet.</p> : null}
+            </section>
+            <section className={styles.caseFileObservationSection}>
+              <h3>Observation Log</h3>
+              <div className={styles.caseFileObservationEntries} tabIndex={0} aria-label="Case-relevant observations">
+                {observations.map((observation) => (
+                  <article key={observation.id}>
+                    <span aria-hidden="true">✦</span>
+                    <div><strong>{observation.roomName}</strong><small>{props.playerName} · personal observation</small><p>{props.caseFileOverrides?.observations?.[observation.id]?.text ?? observation.text}</p></div>
+                  </article>
+                ))}
+                {observations.length === 0 ? <p className={styles.caseFileEmpty}>No case-relevant room observations recorded yet.</p> : null}
+              </div>
+            </section>
+            <section>
+              <h3>Evidence &amp; sworn testimony</h3>
+              {props.state.record.filter((item) => item.admitted).map((item) => {
+          const assetUrl = item.reference.kind === "evidence"
+            ? sealedMysteryAssetObjectUrl(
+                props.objectUrls,
+                "evidence",
+                item.reference.id,
+                item.sealedAsset,
+              )
+            : null;
+                return (
+                  <article key={recordKey(item.reference)}>
+                    {assetUrl
+                      ? <>
+                          {/* A short-lived object URL keeps authenticated bytes out of durable browser storage. */}
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img className={styles.caseFileAssetImage} src={assetUrl} alt={`${item.title} evidence`} />
+                        </>
+                      : <span aria-hidden="true">{item.emoji}</span>}
+                    <div>
+                      <strong>{item.title}</strong>
+                      <small>{item.reference.kind}</small>
+                      <p>{item.description}</p>
+                    </div>
+                  </article>
+                );
+              })}
+            </section>
+            <section>
+              <h3>Witnesses</h3>
+              {metWitnesses.map((suspect) => (
+                <article key={suspect.seatId}>
+                  <span aria-hidden="true" style={{ color: suspect.color ?? undefined }}>●</span>
+                  <div><strong>{suspect.name}</strong><small>Met</small></div>
+                </article>
+              ))}
+              {metWitnesses.length === 0
+                ? <p className={styles.caseFileEmpty}>No witnesses met yet.</p>
+                : null}
+            </section>
+            {props.keepVenueUpdates != null && props.onKeepVenueUpdatesChange ? (
+              <KeepVenueUpdatesField
+                checked={props.keepVenueUpdates}
+                disabled={props.keepVenueUpdatesDisabled === true}
+                overwritesOriginal={props.keepVenueUpdatesOverwritesOriginal === true}
+                onChange={props.onKeepVenueUpdatesChange}
+              />
+            ) : null}
+            <small className={styles.caseFileVoiceStatus}>
+              {props.state.voicesEnabled
+                ? "Local English performance ready · spoken lines cache on demand"
+                : (
+                    <>
+                      <span>Playing as a validated text case · the cast has no voices.</span>
+                      <button type="button" disabled={props.voicesEnabling} title="Give this case local voices. Each spoken line is synthesized the first time it is heard." onClick={props.onEnableVoices}>
+                        {props.voicesEnabling ? "Enabling voices…" : "Enable voices"}
+                      </button>
+                    </>
+                  )}
+            </small>
+          </div>
+        </div>
+      </aside>
+    </>
+  );
+}

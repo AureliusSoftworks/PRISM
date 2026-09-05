@@ -73,6 +73,21 @@ const nextConfig: NextConfig = {
   ],
   // `/api/*` is proxied by `src/app/api/[[...path]]/route.ts` so long-running
   // requests (image generation) are not cut off by Next’s rewrite proxy timeout.
+  //
+  // Dev only: opt the document into Chrome's JS Self-Profiling API. Coffee's
+  // remaining lag is render *cost* inside a 149k-line component — the one
+  // question a sampling profiler answers in a single run and no counter can.
+  // `new Profiler(...)` throws without this header. It is gated on dev so no
+  // production build ever ships a profiler-enabled document.
+  async headers() {
+    if (process.env.NODE_ENV !== "development") return [];
+    return [
+      {
+        source: "/:path*",
+        headers: [{ key: "Document-Policy", value: "js-profiling" }],
+      },
+    ];
+  },
 };
 
 export default nextConfig;

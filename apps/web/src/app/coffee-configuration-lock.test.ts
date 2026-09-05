@@ -4,10 +4,10 @@ import test from "node:test";
 
 const pageSource = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
 
-test("active Coffee centrally locks configuration while preserving End Session", () => {
+test("active Coffee centrally locks configuration while preserving shared Back", () => {
   assert.match(
     pageSource,
-    /coffeeSessionPhase === "arriving" \|\| coffeeSessionPhase === "live"/u,
+    /const coffeeConfigurationLocked =\s*coffeeChromePolicy\.liveSessionActive \|\|\s*coffeeIntroPlaying \|\|\s*coffeeGuestRevealConcealed/u,
   );
   assert.match(
     pageSource,
@@ -23,11 +23,23 @@ test("active Coffee centrally locks configuration while preserving End Session",
   );
   assert.match(
     pageSource,
-    /disabledActions:\s*shellPolicy\.disabledNavbarActions/u,
+    /disabledActions:\s*coffeeChromePolicy\.disabledNavbarActions/u,
   );
   assert.match(
     pageSource,
-    /disabledActionTooltips:\s*shellPolicy\.disabledNavbarActionTooltips/u,
+    /disabledActionTooltips:\s*coffeeChromePolicy\.disabledNavbarActionTooltips/u,
+  );
+  assert.match(
+    pageSource,
+    /buildSharedWorkspaceMenuEntries\(\{[\s\S]*?disabledActions:\s*coffeeChromePolicy\.disabledNavbarActions,[\s\S]*?disabledActionTooltips:\s*coffeeChromePolicy\.disabledNavbarActionTooltips,[\s\S]*?importBots:\s*true,[\s\S]*?\}\)/u,
+  );
+  assert.match(
+    pageSource,
+    /function buildSharedWorkspaceMenuEntries[\s\S]*?disabledActions\?:\s*UniversalNavbarDisabledMap;[\s\S]*?disabledActionTooltips\?:\s*UniversalNavbarTooltipMap;[\s\S]*?disabled:\s*actionDisabled\("promptCenter"\)[\s\S]*?disabled:\s*actionDisabled\("usage"\)[\s\S]*?disabled:\s*actionDisabled\("memories"\)[\s\S]*?disabled:\s*actionDisabled\("images"\)[\s\S]*?disabled:\s*actionDisabled\("theme"\)/u,
+  );
+  assert.match(
+    pageSource,
+    /function renderCoffeeBotContextMenu[\s\S]*?coffeeChromePolicy\.disabledNavbarActions\[action\][\s\S]*?disabled:\s*botActionsDisabled[\s\S]*?disabled:\s*memoriesDisabled[\s\S]*?disabled:\s*imagesDisabled[\s\S]*?disabled:\s*botActionsDisabled \|\| protectedBot/u,
   );
   assert.doesNotMatch(pageSource, /Favorites unavailable in Coffee/u);
   assert.match(
@@ -39,18 +51,96 @@ test("active Coffee centrally locks configuration while preserving End Session",
     /const coffeeHeaderModelControlsLocked = \(\): boolean =>\s*coffeeHeaderModelControlsLockReason\(\) !== null/u,
   );
   assert.match(pageSource, /disabled=\{coffeeHeaderModelControlsLocked\(\)\}/u);
-  assert.match(pageSource, /disabled:\s*coffeeHeaderModelControlsLocked\(\)/u);
   assert.match(
     pageSource,
-    /renderCoffeeHeaderModelPicker\(\)[\s\S]*renderVoiceModeSelector\(\{[\s\S]*disabled:\s*coffeeConfigurationLocked/u,
+    /renderSharedAppletNavbar\("Coffee tools", \{[\s\S]*liveSessionActive: coffeeChromePolicy\.liveSessionActive[\s\S]*renderCoffeeHeaderModelPicker\(\)/u,
   );
   assert.match(
     pageSource,
-    /shellPolicy\.showEndSessionInSwitcher[\s\S]*End session[\s\S]*renderAppSwitcher\(\)/u,
+    /recordedReplay:\s*coffeeChromePolicy\.reviewActive/u,
   );
-  assert.match(pageSource, />\s*End session\s*</iu);
   assert.match(
     pageSource,
-    /data-live-session-locked=\{[\s\S]*shellPolicy\.liveSessionActive/u,
+    /const liveChromePolicy = options\.liveSessionActive[\s\S]*disabledNavbarActions\.voice/u,
+  );
+  assert.match(
+    pageSource,
+    /data-recorded-replay="true"[\s\S]*Recorded replay/u,
+  );
+  assert.match(
+    pageSource,
+    /liveSessionExit: coffeeChromePolicy\.liveSessionActive[\s\S]{0,260}label: "Back"[\s\S]{0,260}liveSessionRoutingChip: coffeeLiveRoutingChip/u,
+  );
+  assert.doesNotMatch(
+    pageSource,
+    /data-tutorial-target="coffee-end-session"[\s\S]*End session/u,
+  );
+  assert.match(pageSource, /beginCoffeeLiveWithIntro/u);
+  assert.match(pageSource, /CoffeeIntroCurtain/u);
+  assert.doesNotMatch(pageSource, /setAppNavbarSessionHidden/u);
+  assert.match(
+    pageSource,
+    /data-live-session-minimal-chrome="true"/u,
+  );
+});
+
+test("Coffee's PRISM wordmark returns to Coffee Home", () => {
+  assert.match(
+    pageSource,
+    /renderSharedAppletNavbar\("Coffee tools", \{[\s\S]*brandAppletId: "coffee"/u,
+  );
+  assert.doesNotMatch(pageSource, /returnToCoffeeStart/u);
+  assert.match(
+    pageSource,
+    /const openCurrentAppletHome =[\s\S]{0,1000}appletId === "coffee"[\s\S]{0,120}resetCoffeeToPicker\(\)/u,
+  );
+});
+
+test("leaving the Coffee topic picker discards its placeholder session", () => {
+  const discardPolicyStart = pageSource.indexOf(
+    "const coffeeSessionShouldDiscardOnExit =",
+  );
+  const departureStart = pageSource.indexOf(
+    "const recordCoffeePlayerDepartureOnExit =",
+    discardPolicyStart,
+  );
+  const discardPolicy = pageSource.slice(discardPolicyStart, departureStart);
+  assert.ok(discardPolicyStart >= 0 && departureStart > discardPolicyStart);
+  assert.match(discardPolicy, /if \(phase === "topic"\) return true/u);
+
+  const selectedExitStart = pageSource.indexOf(
+    "const exitCoffeeSessionToSelectedView = async () => {",
+  );
+  const selectedExitEnd = pageSource.indexOf(
+    "const deleteCoffeeSession = async",
+    selectedExitStart,
+  );
+  const selectedExit = pageSource.slice(selectedExitStart, selectedExitEnd);
+  assert.ok(selectedExitStart >= 0 && selectedExitEnd > selectedExitStart);
+  assert.match(selectedExit, /coffeeSessionShouldDiscardOnExit\(/u);
+  assert.match(
+    selectedExit,
+    /if \(shouldDiscard\) \{\s*await discardCoffeeConversation\(sessionId\);\s*\}/u,
+  );
+});
+
+test("Coffee records and restores baked mouth puppeteering independently of current Voice", () => {
+  assert.match(pageSource, /startCoffeeAudioMasterCapture/u);
+  assert.match(
+    pageSource,
+    /freezeRecordingVoiceSelection\(\s*"coffee",\s*sourceId/u,
+  );
+  assert.match(
+    pageSource,
+    /replayAudioMasterCaptureMouthTracks\(\s*conversation\.id\s*,?\s*\)/u,
+  );
+  assert.match(
+    pageSource,
+    /replayMouthShapeAtV2\([\s\S]{0,140}coffeeReplayAudioMasterElapsedMs/u,
+  );
+  assert.match(pageSource, /<ReplayMouthPresentationCapture/u);
+  assert.match(
+    pageSource,
+    /voicePlaybackSelectionRef\.current\.voiceMode ===\s*"bottish"/u,
   );
 });

@@ -17,6 +17,10 @@ export interface PromptShortcutRunMetadata {
   commandId: string;
   name: string;
   invocation: string;
+  runId?: string;
+  parentRunId?: string;
+  depth?: number;
+  sourceKind?: "prompt" | "deck" | "wildcard" | "choice";
   sourceStart?: number;
   sourceEnd?: number;
   resolvedPrompt: string;
@@ -168,6 +172,25 @@ export const BUILT_IN_PROMPT_WILDCARD_SLOTS = [
     aliases: ["time", "when"],
     title: "Generate a random time or era.",
     generationHint: "Return one time, date, season, era, or temporal phrase.",
+    pickerVisibility: "primary",
+  },
+  {
+    key: "TODAY",
+    label: "TODAY",
+    aliases: ["today", "date", "current-date"],
+    title: "Insert today’s calendar date.",
+    generationHint:
+      "Return today’s real calendar date in a short natural format. Never invent a fictional date.",
+    pickerVisibility: "primary",
+  },
+  {
+    key: "VAR",
+    label: "VAR",
+    aliases: ["var"],
+    title:
+      "Insert whatever you typed after the /prompt. One shared capture only — repeat {VAR} as often as you like, but no A/B/C letter links.",
+    generationHint:
+      "Never invent a value. Fill this from the text typed after the slash command only. There is only one VAR capture per prompt; numbered or letter-linked variants are not supported.",
     pickerVisibility: "primary",
   },
   {
@@ -521,10 +544,306 @@ export function parseBuiltInPromptWildcardReference(
   if (!base || !reference) return null;
   const slot = getBuiltInPromptWildcardSlot(base);
   if (!slot) return null;
+  // Passthrough `{VAR}` is a single shared capture — no A/B/C letter links.
+  if (slot.key === "VAR") {
+    return {
+      slot,
+      key: slot.key as BuiltInPromptWildcardSlotKey,
+      reference: null,
+    };
+  }
   return {
     slot,
     key: slot.key as BuiltInPromptWildcardSlotKey,
     reference,
+  };
+}
+
+/** Built-ins resolved from local context (not random seeds or the model). */
+export function isContextualBuiltInPromptWildcardKey(key: string): boolean {
+  return key === "TODAY";
+}
+
+/**
+ * Built-ins filled from text typed after a `/prompt` (not random seeds or the model).
+ */
+export function isPassthroughBuiltInPromptWildcardKey(key: string): boolean {
+  return key === "VAR";
+}
+
+const PASSTHROUGH_BUILT_IN_WILDCARD_BRACE_RE = /\{([^{}\r\n]{1,80})\}/gu;
+
+/** True when the template still contains an unresolved `{VAR}`. */
+export function promptContainsPassthroughBuiltInPromptWildcards(
+  source: string
+): boolean {
+  PASSTHROUGH_BUILT_IN_WILDCARD_BRACE_RE.lastIndex = 0;
+  for (const match of source.matchAll(PASSTHROUGH_BUILT_IN_WILDCARD_BRACE_RE)) {
+    const parsed = parseBuiltInPromptWildcardReference(match[1] ?? "");
+    if (parsed && isPassthroughBuiltInPromptWildcardKey(parsed.key)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Replaces every `{VAR}` / `{var}` with the captured text after a `/prompt`.
+ * There is only one shared capture — repeats get the same string; letter-linked
+ * A/B/C variants are not supported for VAR.
+ */
+export function applyPromptShortcutVarPassthrough(
+  source: string,
+  passthrough: string,
+  options: {
+    existingReplacements?: readonly PromptShortcutWildcardReplacement[];
+  } = {}
+): {
+  prompt: string;
+  replaced: boolean;
+  replacements: PromptShortcutWildcardReplacement[];
+} {
+  const matches: Array<{
+    start: number;
+    end: number;
+    key: BuiltInPromptWildcardSlotKey;
+    token: string;
+  }> = [];
+  PASSTHROUGH_BUILT_IN_WILDCARD_BRACE_RE.lastIndex = 0;
+  for (const match of source.matchAll(PASSTHROUGH_BUILT_IN_WILDCARD_BRACE_RE)) {
+    const token = match[0] ?? "";
+    const parsed = parseBuiltInPromptWildcardReference(match[1] ?? "");
+    if (!parsed || !isPassthroughBuiltInPromptWildcardKey(parsed.key)) continue;
+    const start = match.index ?? -1;
+    if (start < 0 || !token) continue;
+    matches.push({
+      start,
+      end: start + token.length,
+      key: parsed.key,
+      token,
+    });
+  }
+
+  const existing = (options.existingReplacements ?? [])
+    .filter((replacement) => {
+      const start = replacement.start;
+      const end = replacement.end;
+      return (
+        typeof start === "number" &&
+        typeof end === "number" &&
+        Number.isFinite(start) &&
+        Number.isFinite(end) &&
+        start >= 0 &&
+        end > start &&
+        end <= source.length
+      );
+    })
+    .map((replacement) => ({ ...replacement }));
+
+  if (matches.length === 0) {
+    return {
+      prompt: source,
+      replaced: false,
+      replacements: existing.sort(
+        (a, b) => (a.start ?? 0) - (b.start ?? 0) || (a.end ?? 0) - (b.end ?? 0)
+      ),
+    };
+  }
+
+  let prompt = "";
+  let cursor = 0;
+  const replacements: PromptShortcutWildcardReplacement[] = [];
+  const preserveSegment = (
+    segmentStart: number,
+    segmentEnd: number,
+    resolvedSegmentStart: number
+  ) => {
+    for (const replacement of existing) {
+      const start = replacement.start ?? -1;
+      const end = replacement.end ?? -1;
+      if (start < segmentStart || end > segmentEnd) continue;
+      replacements.push({
+        ...replacement,
+        start: resolvedSegmentStart + (start - segmentStart),
+        end: resolvedSegmentStart + (end - segmentStart),
+      });
+    }
+  };
+
+  for (const match of matches) {
+    const segmentStart = cursor;
+    const segmentEnd = match.start;
+    const resolvedSegmentStart = prompt.length;
+    prompt += source.slice(segmentStart, segmentEnd);
+    preserveSegment(segmentStart, segmentEnd, resolvedSegmentStart);
+    const start = prompt.length;
+    prompt += passthrough;
+    replacements.push({
+      key: match.key,
+      value: passthrough,
+      start,
+      end: start + passthrough.length,
+      source: "wildcard",
+    });
+    cursor = match.end;
+  }
+  const finalSegmentStart = cursor;
+  const finalResolvedSegmentStart = prompt.length;
+  prompt += source.slice(finalSegmentStart);
+  preserveSegment(finalSegmentStart, source.length, finalResolvedSegmentStart);
+
+  return {
+    prompt,
+    replaced: true,
+    replacements: replacements.sort(
+      (a, b) => (a.start ?? 0) - (b.start ?? 0) || (a.end ?? 0) - (b.end ?? 0)
+    ),
+  };
+}
+
+/**
+ * Formats today’s date for `{TODAY}` using the runtime locale.
+ * Example: "Saturday, July 25, 2026"
+ */
+export function formatBuiltInPromptWildcardToday(
+  now: Date = new Date(),
+  locales?: Intl.LocalesArgument
+): string {
+  return new Intl.DateTimeFormat(locales, {
+    weekday: "long",
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+  }).format(now);
+}
+
+export function contextualBuiltInPromptWildcardValue(
+  key: string,
+  options: {
+    now?: Date;
+    locales?: Intl.LocalesArgument;
+  } = {}
+): string | null {
+  if (key === "TODAY") {
+    return formatBuiltInPromptWildcardToday(options.now, options.locales);
+  }
+  return null;
+}
+
+const CONTEXTUAL_BUILT_IN_WILDCARD_BRACE_RE = /\{([^{}\r\n]{1,80})\}/gu;
+
+/**
+ * Replaces contextual built-ins such as `{TODAY}` with local values before
+ * random/model wildcard resolution.
+ */
+export function resolveContextualBuiltInPromptWildcards(
+  source: string,
+  options: {
+    now?: Date;
+    locales?: Intl.LocalesArgument;
+    existingReplacements?: readonly PromptShortcutWildcardReplacement[];
+  } = {}
+): {
+  prompt: string;
+  replacements: PromptShortcutWildcardReplacement[];
+} {
+  const matches: Array<{
+    start: number;
+    end: number;
+    key: BuiltInPromptWildcardSlotKey;
+    token: string;
+    value: string;
+  }> = [];
+  CONTEXTUAL_BUILT_IN_WILDCARD_BRACE_RE.lastIndex = 0;
+  for (const match of source.matchAll(CONTEXTUAL_BUILT_IN_WILDCARD_BRACE_RE)) {
+    const token = match[0] ?? "";
+    const parsed = parseBuiltInPromptWildcardReference(match[1] ?? "");
+    if (!parsed || !isContextualBuiltInPromptWildcardKey(parsed.key)) continue;
+    const value = contextualBuiltInPromptWildcardValue(parsed.key, options);
+    if (!value) continue;
+    const start = match.index ?? -1;
+    if (start < 0 || !token) continue;
+    matches.push({
+      start,
+      end: start + token.length,
+      key: parsed.key,
+      token,
+      value,
+    });
+  }
+
+  const existing = (options.existingReplacements ?? [])
+    .filter((replacement) => {
+      const start = replacement.start;
+      const end = replacement.end;
+      return (
+        typeof start === "number" &&
+        typeof end === "number" &&
+        Number.isFinite(start) &&
+        Number.isFinite(end) &&
+        start >= 0 &&
+        end > start &&
+        end <= source.length
+      );
+    })
+    .sort(
+      (a, b) => (a.start ?? 0) - (b.start ?? 0) || (a.end ?? 0) - (b.end ?? 0)
+    );
+
+  if (matches.length === 0) {
+    return {
+      prompt: source,
+      replacements: existing.map((replacement) => ({ ...replacement })),
+    };
+  }
+
+  let prompt = "";
+  let cursor = 0;
+  const replacements: PromptShortcutWildcardReplacement[] = [];
+  const preserveSegment = (
+    segmentStart: number,
+    segmentEnd: number,
+    resolvedSegmentStart: number
+  ): void => {
+    for (const replacement of existing) {
+      const start = replacement.start ?? -1;
+      const end = replacement.end ?? -1;
+      if (start < segmentStart || end > segmentEnd) continue;
+      replacements.push({
+        ...replacement,
+        start: resolvedSegmentStart + (start - segmentStart),
+        end: resolvedSegmentStart + (end - segmentStart),
+      });
+    }
+  };
+
+  for (const match of matches) {
+    const segmentStart = cursor;
+    const segmentEnd = match.start;
+    const resolvedSegmentStart = prompt.length;
+    prompt += source.slice(segmentStart, segmentEnd);
+    preserveSegment(segmentStart, segmentEnd, resolvedSegmentStart);
+    const start = prompt.length;
+    prompt += match.value;
+    replacements.push({
+      key: match.key,
+      value: match.value,
+      start,
+      end: start + match.value.length,
+      source: "wildcard",
+    });
+    cursor = match.end;
+  }
+  const finalSegmentStart = cursor;
+  const finalResolvedSegmentStart = prompt.length;
+  prompt += source.slice(finalSegmentStart);
+  preserveSegment(finalSegmentStart, source.length, finalResolvedSegmentStart);
+
+  return {
+    prompt,
+    replacements: replacements.sort(
+      (a, b) => (a.start ?? 0) - (b.start ?? 0) || (a.end ?? 0) - (b.end ?? 0)
+    ),
   };
 }
 
@@ -551,12 +870,51 @@ export interface PromptWildcardRunMetadata {
   wildcardReplacements?: PromptShortcutWildcardReplacement[];
 }
 
+export const PSYCHIC_THOUGHT_PASS_STAGES = [
+  "plan",
+  "alternatives",
+  "draft",
+  "audit",
+  "red_team",
+  "constraint_lock",
+  "revise_draft",
+  "compliance_sweep",
+  "synthesis",
+  /** Legacy stored stage; new runs emit `synthesis`. */
+  "revision",
+] as const;
+
+export type PsychicThoughtPassStage = (typeof PSYCHIC_THOUGHT_PASS_STAGES)[number];
+
+export function isPsychicThoughtPassStage(
+  value: unknown,
+): value is PsychicThoughtPassStage {
+  return (
+    typeof value === "string" &&
+    (PSYCHIC_THOUGHT_PASS_STAGES as readonly string[]).includes(value)
+  );
+}
+
+export interface PsychicThoughtPass {
+  stage: PsychicThoughtPassStage;
+  /** Safe, user-readable account of what this pass contributed. */
+  summary: string;
+}
+
 export interface PsychicThoughtPayload {
   v: 1;
   summary: string;
   effort: "auto" | "none" | "minimal" | "low" | "medium" | "high" | "xhigh";
-  provider: "local" | "openai" | "anthropic";
+  provider: "local" | "ollama_cloud" | "openai" | "anthropic";
   model?: string;
+  /** How PRISM produced the readable Psychic rationale for this turn. */
+  planningMode?: "simulated" | "native" | "public";
+  /** Completed public/simulated planning passes, when known. */
+  passCount?: number;
+  /** Distinct user-readable summaries for completed planning passes. */
+  passes?: PsychicThoughtPass[];
+  /** The model's own chain-of-thought when native thinking produced the turn. */
+  nativeThinking?: string;
   createdAt: string;
 }
 
@@ -581,10 +939,46 @@ function readPromptShortcutString(value: unknown, maxLength: number): string {
   return value.trim().slice(0, maxLength);
 }
 
+/**
+ * Prompt bodies / resolved prompts may intentionally keep trailing newlines
+ * and spaces. Only strip accidental leading whitespace.
+ */
+function readPromptShortcutBodyString(value: unknown, maxLength: number): string {
+  if (typeof value !== "string") return "";
+  return value.replace(/^\s+/u, "").slice(0, maxLength);
+}
+
 function readPromptShortcutRange(value: unknown): number | undefined {
   if (typeof value !== "number" || !Number.isFinite(value)) return undefined;
   const normalized = Math.floor(value);
   return normalized >= 0 && normalized <= 20000 ? normalized : undefined;
+}
+
+const PSYCHIC_THOUGHT_PASS_STAGE_SET = new Set<PsychicThoughtPassStage>(
+  PSYCHIC_THOUGHT_PASS_STAGES,
+);
+
+function normalizePsychicThoughtPasses(value: unknown): PsychicThoughtPass[] {
+  if (!Array.isArray(value)) return [];
+  const passes: PsychicThoughtPass[] = [];
+  const seen = new Set<PsychicThoughtPassStage>();
+  for (const entry of value) {
+    if (!entry || typeof entry !== "object") continue;
+    const row = entry as Record<string, unknown>;
+    if (
+      typeof row.stage !== "string" ||
+      !PSYCHIC_THOUGHT_PASS_STAGE_SET.has(row.stage as PsychicThoughtPassStage)
+    ) {
+      continue;
+    }
+    const stage = row.stage as PsychicThoughtPassStage;
+    const summary = readPromptShortcutString(row.summary, 1200);
+    if (!summary || seen.has(stage)) continue;
+    seen.add(stage);
+    passes.push({ stage, summary });
+    if (passes.length >= 12) break;
+  }
+  return passes;
 }
 
 function normalizeManualAskQuestionOptionId(value: unknown, fallback: string): string {
@@ -662,7 +1056,7 @@ export function normalizePromptShortcutMetadata(value: unknown): PromptShortcutM
   const name = readPromptShortcutString(row.name, 96).replace(/^\/+/, "");
   const invocation = readPromptShortcutString(row.invocation, 2000);
   if (!commandId || !name || !invocation) return undefined;
-  const template = readPromptShortcutString(row.template, 20000);
+  const template = readPromptShortcutBodyString(row.template, 20000);
   const flags = Array.isArray(row.flags)
     ? row.flags
         .map((flag): PromptShortcutFlag | null => {
@@ -679,17 +1073,17 @@ export function normalizePromptShortcutMetadata(value: unknown): PromptShortcutM
     row.wildcardReplacements
   ).slice(0, 80);
   const passthrough = readPromptShortcutString(row.passthrough, 2000);
-  const resolvedPrompt = readPromptShortcutString(row.resolvedPrompt, 20000);
+  const resolvedPrompt = readPromptShortcutBodyString(row.resolvedPrompt, 20000);
   const promptRuns = normalizePromptShortcutRuns(row.promptRuns);
   return {
     v: 1,
     commandId,
     name,
     invocation,
-    ...(template ? { template } : {}),
+    ...(template.trim() ? { template } : {}),
     flags,
     ...(passthrough ? { passthrough } : {}),
-    ...(resolvedPrompt ? { resolvedPrompt } : {}),
+    ...(resolvedPrompt.trim() ? { resolvedPrompt } : {}),
     ...(wildcardReplacements.length > 0 ? { wildcardReplacements } : {}),
     ...(promptRuns.length > 0 ? { promptRuns } : {}),
   };
@@ -744,8 +1138,8 @@ function normalizePromptShortcutRuns(value: unknown): PromptShortcutRunMetadata[
           const commandId = readPromptShortcutString(row.commandId, 160);
           const name = readPromptShortcutString(row.name, 96).replace(/^\/+/, "");
           const invocation = readPromptShortcutString(row.invocation, 2000);
-          const resolvedPrompt = readPromptShortcutString(row.resolvedPrompt, 20000);
-          if (!commandId || !name || !invocation || !resolvedPrompt) return null;
+          const resolvedPrompt = readPromptShortcutBodyString(row.resolvedPrompt, 20000);
+          if (!commandId || !name || !invocation || !resolvedPrompt.trim()) return null;
           const sourceStart = readPromptShortcutRange(row.sourceStart);
           const sourceEnd = readPromptShortcutRange(row.sourceEnd);
           const hasValidSourceRange =
@@ -755,10 +1149,26 @@ function normalizePromptShortcutRuns(value: unknown): PromptShortcutRunMetadata[
           const wildcardReplacements = normalizePromptWildcardReplacements(
             row.wildcardReplacements
           ).slice(0, 80);
+          const runId = readPromptShortcutString(row.runId, 160);
+          const parentRunId = readPromptShortcutString(row.parentRunId, 160);
+          const depthValue = readPromptShortcutRange(row.depth);
+          const depth =
+            depthValue !== undefined && depthValue <= 16 ? depthValue : undefined;
+          const sourceKind =
+            row.sourceKind === "prompt" ||
+            row.sourceKind === "deck" ||
+            row.sourceKind === "wildcard" ||
+            row.sourceKind === "choice"
+              ? row.sourceKind
+              : undefined;
           return {
             commandId,
             name,
             invocation,
+            ...(runId ? { runId } : {}),
+            ...(parentRunId ? { parentRunId } : {}),
+            ...(depth !== undefined ? { depth } : {}),
+            ...(sourceKind ? { sourceKind } : {}),
             ...(sourceStart !== undefined ? { sourceStart } : {}),
             ...(hasValidSourceRange ? { sourceEnd } : {}),
             resolvedPrompt,
@@ -775,14 +1185,14 @@ export function normalizePromptWildcardRunMetadata(
 ): PromptWildcardRunMetadata | undefined {
   if (!value || typeof value !== "object") return undefined;
   const row = value as Record<string, unknown>;
-  const template = readPromptShortcutString(row.template, 20000);
-  if (!template) return undefined;
-  const resolvedPrompt = readPromptShortcutString(row.resolvedPrompt, 20000);
+  const template = readPromptShortcutBodyString(row.template, 20000);
+  if (!template.trim()) return undefined;
+  const resolvedPrompt = readPromptShortcutBodyString(row.resolvedPrompt, 20000);
   const wildcardReplacements = normalizePromptWildcardReplacements(row.wildcardReplacements);
   return {
     v: 1,
     template,
-    ...(resolvedPrompt ? { resolvedPrompt } : {}),
+    ...(resolvedPrompt.trim() ? { resolvedPrompt } : {}),
     ...(wildcardReplacements.length > 0 ? { wildcardReplacements } : {}),
   };
 }
@@ -798,12 +1208,25 @@ export function normalizePsychicThoughtPayload(value: unknown): PsychicThoughtPa
     return undefined;
   }
   const model = readPromptShortcutString(row.model, 200);
+  const planningMode =
+    row.planningMode === "simulated" ||
+    row.planningMode === "native" ||
+    row.planningMode === "public"
+      ? row.planningMode
+      : undefined;
+  const passCount = readPromptShortcutRange(row.passCount);
+  const passes = normalizePsychicThoughtPasses(row.passes);
+  const nativeThinking = readPromptShortcutString(row.nativeThinking, 8_000);
   return {
     v: 1,
     summary,
     effort: normalizePsychicThoughtEffort(row.effort),
     provider,
     ...(model ? { model } : {}),
+    ...(planningMode ? { planningMode } : {}),
+    ...(passCount !== undefined ? { passCount } : {}),
+    ...(passes.length > 0 ? { passes } : {}),
+    ...(nativeThinking ? { nativeThinking } : {}),
     createdAt,
   };
 }
@@ -870,8 +1293,8 @@ export function withPromptShortcutResolvedPrompt(
 ): PromptShortcutMetadata | undefined {
   const normalized = normalizePromptShortcutMetadata(promptShortcut);
   if (!normalized) return undefined;
-  const prompt = readPromptShortcutString(resolvedPrompt, 20000);
-  return prompt ? { ...normalized, resolvedPrompt: prompt } : normalized;
+  const prompt = readPromptShortcutBodyString(resolvedPrompt, 20000);
+  return prompt.trim() ? { ...normalized, resolvedPrompt: prompt } : normalized;
 }
 
 export function withPromptWildcardResolvedPrompt(
@@ -880,8 +1303,8 @@ export function withPromptWildcardResolvedPrompt(
 ): PromptWildcardRunMetadata | undefined {
   const normalized = normalizePromptWildcardRunMetadata(promptWildcards);
   if (!normalized) return undefined;
-  const prompt = readPromptShortcutString(resolvedPrompt, 20000);
-  return prompt ? { ...normalized, resolvedPrompt: prompt } : normalized;
+  const prompt = readPromptShortcutBodyString(resolvedPrompt, 20000);
+  return prompt.trim() ? { ...normalized, resolvedPrompt: prompt } : normalized;
 }
 
 export function serializePromptShortcutPayload(

@@ -1,4 +1,5 @@
 import {
+  BOTCAST_STUDIO_FLOOR_GLOW_SCALE_MAX,
   normalizeBotcastStudioLayout,
   type BotcastSpeakerRole,
   type BotcastStudioLayout,
@@ -6,6 +7,21 @@ import {
 } from "@localai/shared";
 
 export const SIGNAL_STUDIO_VOICE_MAX_PAN = 0.18;
+export const SIGNAL_STUDIO_ARTWORK_OVERSCAN_PERCENT = 5;
+export const SIGNAL_STUDIO_FLOOR_GLOW_MAX_WIDTH_PERCENT = 26;
+export const SIGNAL_STUDIO_FLOOR_GLOW_MAX_HEIGHT_PERCENT = 8.5;
+
+type SignalStudioFloorGlowItem = "hostFloorGlow" | "guestFloorGlow";
+
+function signalStudioPercent(value: number): string {
+  return `${Math.round(value * 10_000) / 10_000}%`;
+}
+
+export function signalStudioOverscanCoordinate(value: number): number {
+  const overscan = SIGNAL_STUDIO_ARTWORK_OVERSCAN_PERCENT;
+  const projected = (value + overscan) / (1 + (overscan * 2) / 100);
+  return Math.round(projected * 10_000) / 10_000;
+}
 
 export function signalStudioPlacementStyle(
   layout: BotcastStudioLayout | null | undefined,
@@ -16,6 +32,81 @@ export function signalStudioPlacementStyle(
     left: `${point.x}%`,
     top: `${point.y}%`,
   };
+}
+
+export function signalStudioFloorGlowHandleStyle(
+  layout: BotcastStudioLayout | null | undefined,
+  item: SignalStudioFloorGlowItem,
+): { left: string; top: string; width: string; height: string } {
+  const point = normalizeBotcastStudioLayout(layout)[item];
+  const scale = point.scale ?? BOTCAST_STUDIO_FLOOR_GLOW_SCALE_MAX;
+  return {
+    left: `${point.x}%`,
+    top: `${point.y}%`,
+    width: signalStudioPercent(
+      SIGNAL_STUDIO_FLOOR_GLOW_MAX_WIDTH_PERCENT * scale,
+    ),
+    height: signalStudioPercent(
+      SIGNAL_STUDIO_FLOOR_GLOW_MAX_HEIGHT_PERCENT * scale,
+    ),
+  };
+}
+
+export function signalStudioMaskedFloorGlowStyle(
+  layout: BotcastStudioLayout | null | undefined,
+  item: SignalStudioFloorGlowItem,
+): { left: string; top: string; width: string; height: string } {
+  const point = normalizeBotcastStudioLayout(layout)[item];
+  const scale = point.scale ?? BOTCAST_STUDIO_FLOOR_GLOW_SCALE_MAX;
+  const overscannedCanvasScale =
+    1 + (SIGNAL_STUDIO_ARTWORK_OVERSCAN_PERCENT * 2) / 100;
+  return {
+    left: signalStudioPercent(signalStudioOverscanCoordinate(point.x)),
+    top: signalStudioPercent(signalStudioOverscanCoordinate(point.y)),
+    width: signalStudioPercent(
+      (SIGNAL_STUDIO_FLOOR_GLOW_MAX_WIDTH_PERCENT * scale) /
+        overscannedCanvasScale,
+    ),
+    height: signalStudioPercent(
+      (SIGNAL_STUDIO_FLOOR_GLOW_MAX_HEIGHT_PERCENT * scale) /
+        overscannedCanvasScale,
+    ),
+  };
+}
+
+/**
+ * Resolves role-owned colors into physical left/right studio seats. Fixed
+ * artwork masks (such as the authored microphone trim) need this projection
+ * when the host and guest exchange sides.
+ */
+export function signalStudioSeatColorOrder(
+  layout: BotcastStudioLayout | null | undefined,
+  hostColor: string,
+  guestColor: string,
+): { leftColor: string; rightColor: string } {
+  const normalized = normalizeBotcastStudioLayout(layout);
+  return normalized.hostBot.x <= normalized.guestBot.x
+    ? { leftColor: hostColor, rightColor: guestColor }
+    : { leftColor: guestColor, rightColor: hostColor };
+}
+
+/** Keeps role-owned labels attached to their resolved physical studio seat. */
+export function signalStudioNameplateSide(
+  layout: BotcastStudioLayout | null | undefined,
+  role: BotcastSpeakerRole,
+): "left" | "right" {
+  const normalized = normalizeBotcastStudioLayout(layout);
+  if (normalized.hostBot.x === normalized.guestBot.x) {
+    return role === "host" ? "left" : "right";
+  }
+  const hostIsLeft = normalized.hostBot.x < normalized.guestBot.x;
+  return role === "host"
+    ? hostIsLeft
+      ? "left"
+      : "right"
+    : hostIsLeft
+      ? "right"
+      : "left";
 }
 
 /**

@@ -51,6 +51,12 @@ Expected Windows artifact names:
 - `Prism-Desktop-Setup-v<version>-win-x64.exe`
 - `Prism-Desktop-Setup-v<version>-win-x64.msi` (optional)
 
+Expected Steam depot artifact names:
+
+- `Prism-Desktop-v<version>-steam-macos.zip` (`PRISM.app` at archive root)
+- `Prism-Desktop-v<version>-steam-win-x64.zip` (`prism_desktop.exe` at archive root)
+- `Prism-Desktop-v<version>-linux-x64.AppImage`
+
 ## CI Release Entry
 
 Desktop release automation is:

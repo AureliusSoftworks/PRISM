@@ -9,6 +9,7 @@ export type PrismSceneQuality = "full" | "balanced" | "minimal";
 export type PrismSceneRendererStatus =
   | "uninitialized"
   | "initializing"
+  | "dom"
   | "webgl"
   | "context-lost"
   | "fallback"
@@ -65,7 +66,6 @@ export interface PrismSceneFrameSampleResult {
     | "sleep-delta"
     | "target-changed";
   window?: PrismSceneTimingWindow;
-  qualityChanged?: PrismSceneQuality;
 }
 
 export type PrismWebGlRecoveryState =
@@ -111,12 +111,6 @@ export class PrismWebGlRecoveryController {
   }
 }
 
-export const PRISM_SCENE_QUALITY_ORDER: readonly PrismSceneQuality[] = [
-  "full",
-  "balanced",
-  "minimal",
-];
-
 export const PRISM_SCENE_QUALITY_CONFIG: Readonly<
   Record<PrismSceneQuality, Omit<PrismSceneQualityConfig, "effectiveDpr">>
 > = {
@@ -143,8 +137,6 @@ export const PRISM_SCENE_QUALITY_CONFIG: Readonly<
 export const PRISM_SCENE_SAMPLE_WINDOW_SIZE = 120;
 export const PRISM_SCENE_SAMPLE_WARMUP_MS = 2_000;
 export const PRISM_SCENE_SLEEP_DELTA_MS = 250;
-export const PRISM_SCENE_TIER_COOLDOWN_MS = 10_000;
-
 export function prismSceneActivityTargetFps(
   activity: PrismSceneActivity,
 ): number {
@@ -242,17 +234,21 @@ export function prismSceneTimingWindow(
   };
 }
 
+/**
+ * Observe-only scene pressure sampler. Quality changes only through the
+ * explicit `setCeiling` player-settings path.
+ */
 export class PrismAdaptiveQualityController {
   private qualityValue: PrismSceneQuality;
   private ceilingValue: PrismSceneQuality;
   private ignoredUntilMs: number;
   private activeTargetFps = 0;
   private samples: number[] = [];
-  private badWindowCount = 0;
-  private goodWindowCount = 0;
-  private lastTierChangeMs = Number.NEGATIVE_INFINITY;
 
-  constructor(nowMs = 0, ceiling: PrismSceneQuality = "full") {
+  constructor(
+    nowMs = 0,
+    ceiling: PrismSceneQuality = "full",
+  ) {
     this.ceilingValue = ceiling;
     this.qualityValue = ceiling;
     this.ignoredUntilMs = nowMs + PRISM_SCENE_SAMPLE_WARMUP_MS;
@@ -276,13 +272,10 @@ export class PrismAdaptiveQualityController {
   ): PrismSceneQuality | undefined {
     if (ceiling === this.ceilingValue) return undefined;
     this.ceilingValue = ceiling;
-    const qualityChanged = this.qualityValue !== ceiling;
+    const changed = this.qualityValue !== ceiling;
     this.qualityValue = ceiling;
-    this.badWindowCount = 0;
-    this.goodWindowCount = 0;
-    this.lastTierChangeMs = nowMs;
     this.noteDiscontinuity(nowMs);
-    return qualityChanged ? ceiling : undefined;
+    return changed ? ceiling : undefined;
   }
 
   noteDiscontinuity(nowMs: number): void {
@@ -316,52 +309,9 @@ export class PrismAdaptiveQualityController {
 
     const window = prismSceneTimingWindow(this.samples, targetFps);
     this.samples = [];
-    let qualityChanged: PrismSceneQuality | undefined;
-
-    if (window.bad) {
-      this.badWindowCount += 1;
-      this.goodWindowCount = 0;
-      if (this.badWindowCount >= 2) {
-        qualityChanged = this.changeTier(1, sample.nowMs);
-        this.badWindowCount = 0;
-      }
-    } else if (window.good) {
-      this.goodWindowCount += 1;
-      this.badWindowCount = 0;
-      if (this.goodWindowCount >= 4) {
-        qualityChanged = this.changeTier(-1, sample.nowMs);
-        this.goodWindowCount = 0;
-      }
-    } else {
-      this.badWindowCount = 0;
-      this.goodWindowCount = 0;
-    }
-
     return {
       accepted: true,
       window,
-      ...(qualityChanged ? { qualityChanged } : {}),
     };
-  }
-
-  private changeTier(
-    direction: -1 | 1,
-    nowMs: number,
-  ): PrismSceneQuality | undefined {
-    if (nowMs - this.lastTierChangeMs < PRISM_SCENE_TIER_COOLDOWN_MS) {
-      return undefined;
-    }
-    const currentIndex = PRISM_SCENE_QUALITY_ORDER.indexOf(this.qualityValue);
-    const ceilingIndex = PRISM_SCENE_QUALITY_ORDER.indexOf(this.ceilingValue);
-    const nextIndex = Math.max(
-      ceilingIndex,
-      Math.min(PRISM_SCENE_QUALITY_ORDER.length - 1, currentIndex + direction),
-    );
-    const next = PRISM_SCENE_QUALITY_ORDER[nextIndex];
-    if (!next || next === this.qualityValue) return undefined;
-    this.qualityValue = next;
-    this.lastTierChangeMs = nowMs;
-    this.noteDiscontinuity(nowMs);
-    return next;
   }
 }

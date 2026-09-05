@@ -9,6 +9,24 @@ export type ModelPreparationRequestFn = <T>(
   init?: RequestInit,
 ) => Promise<T>;
 
+/**
+ * Auto owns a fallback lane, not one concrete model. Blocking the experience
+ * while warming the account's default model defeats that contract and can
+ * hold Coffee or Signal behind a loading curtain for minutes even though a
+ * healthy fallback is already available.
+ */
+export function autoModelPreparationNotApplicable(): ModelPreparationResponse {
+  return {
+    ok: true,
+    state: "not_applicable",
+    model: null,
+    startedAt: null,
+    expiresAt: null,
+    retryAfterMs: null,
+    failure: null,
+  };
+}
+
 function abortableDelay(ms: number, signal?: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
     if (signal?.aborted) {
@@ -32,6 +50,8 @@ export async function waitForModelPreparation(args: {
   provider: ModelPreparationRequest["provider"];
   model?: string | null;
   experience: ModelPreparationExperience;
+  liveSessionId?: string;
+  responseMode?: ModelPreparationRequest["responseMode"];
   signal?: AbortSignal;
   retry?: boolean;
   onStatus?: (status: ModelPreparationResponse) => void;
@@ -48,6 +68,10 @@ export async function waitForModelPreparation(args: {
           provider: args.provider,
           model: args.model ?? null,
           experience: args.experience,
+          ...(args.liveSessionId
+            ? { liveSessionId: args.liveSessionId }
+            : {}),
+          ...(args.responseMode ? { responseMode: args.responseMode } : {}),
           ...(retry ? { retry: true } : {}),
         } satisfies ModelPreparationRequest),
       },

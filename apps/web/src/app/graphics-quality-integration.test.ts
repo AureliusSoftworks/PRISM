@@ -27,6 +27,10 @@ const backupSource = readFileSync(
   new URL("../../../api/src/backup.ts", import.meta.url),
   "utf8",
 );
+const crtFocusSource = readFileSync(
+  new URL("./crtFocus.ts", import.meta.url),
+  "utf8",
+);
 
 describe("graphics quality integration", () => {
   it("connects the accessible selector to persisted settings", () => {
@@ -40,11 +44,25 @@ describe("graphics quality integration", () => {
     assert.match(backupSource, /graphics_quality = \?/u);
   });
 
-  it("applies the persisted value to the document and Coffee scene ceiling", () => {
+  it("persists one global CRT focus and applies it to the shared screen brush", () => {
+    assert.match(pageSource, /data-crt-focus-control="true"/u);
+    assert.match(pageSource, /name="crtFocus"/u);
+    assert.match(pageSource, /applyCrtFocusToDocument\(document, crtFocus\)/u);
+    assert.match(serverSource, /crtFocus: normalizeCrtFocus\(user\.crt_focus\)/u);
+    assert.match(serverSource, /crt_focus = \?/u);
+    assert.match(backupSource, /crtFocus: normalizeCrtFocus\(user\.crt_focus\)/u);
+    assert.match(backupSource, /crt_focus = \?/u);
+    assert.match(crtFocusSource, /--prism-crt-focus-radius-scale/u);
+  });
+
+  it("applies the persisted value outside live Coffee and omits the live scene", () => {
     assert.match(pageSource, /applyGraphicsQualityToDocument\(document, graphicsQuality\)/u);
     assert.match(pageSource, /const graphicsQuality = committedGraphicsQuality/u);
     assert.match(pageSource, /setCommittedGraphicsQuality\(savedGraphicsQuality\)/u);
-    assert.match(pageSource, /<CoffeeAtmosphereScene[\s\S]*graphicsQuality=\{graphicsQuality\}/u);
+    assert.match(
+      pageSource,
+      /!conversationActive\s*&&\s*!coffeeAtmosphereRetiredAfterLiveRef\.current\s*\? \([\s\S]*<CoffeeAtmosphereScene[\s\S]*graphicsQuality=\{graphicsQuality\}/u,
+    );
     assert.match(coffeeSource, /qualityCeiling: prismSceneQualityCeilingForGraphicsQuality/u);
     assert.match(coffeeSource, /setQualityCeiling/u);
     assert.match(hostSource, /new PrismAdaptiveQualityController\([\s\S]*options\.qualityCeiling/u);

@@ -182,8 +182,11 @@ describe("Slate API", () => {
     const chatResponse = await owner.request(
       `/api/slate/projects/${created.id}/chat`,
     );
-    assert.equal(chatResponse.status, 200);
-    assert.deepEqual((await body(chatResponse)).messages, []);
+    assert.equal(chatResponse.status, 410);
+    assert.match(
+      String((await body(chatResponse)).error),
+      /moved to the global Prism companion/u,
+    );
 
     const lockedShape = await owner.request(
       `/api/slate/projects/${created.id}/shape`,
@@ -913,7 +916,7 @@ describe("Slate API", () => {
       "application/vnd.prism.slate+zip",
     );
     assert.match(downloaded.headers.get("content-disposition") ?? "", /\.slate"$/u);
-    assert.equal(downloaded.headers.get("x-prism-slate-version"), "1");
+    assert.equal(downloaded.headers.get("x-prism-slate-version"), "2");
     const archive = new Uint8Array(await downloaded.arrayBuffer());
     assert.equal(Buffer.from(archive.subarray(0, 4)).toString("hex"), "504b0304");
     const projectsBeforePreview = db.prepare("SELECT COUNT(*) AS count FROM slate_projects")

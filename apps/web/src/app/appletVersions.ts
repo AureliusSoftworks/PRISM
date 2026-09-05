@@ -1,7 +1,7 @@
 export const PRISM_APPLET_ORDER = [
   "chat",
   "zen",
-  "arena",
+  "debate",
   "polling",
   "coffee",
   "botcast",
@@ -19,6 +19,12 @@ export type PrismAppletId = (typeof PRISM_APPLET_ORDER)[number];
 export type PrismAppletStatus = "active" | "preview" | "planned";
 export type BotPowerMuteModePolicy =
   | "enforced"
+  | "not_applicable"
+  | "required_before_activation";
+export type BotPowerBreathlessModePolicy = BotPowerMuteModePolicy;
+export type BotPowerSpeechCopyModePolicy =
+  | "direct"
+  | "adapted"
   | "not_applicable"
   | "required_before_activation";
 export type BotPowerCandorModePolicy =
@@ -40,19 +46,34 @@ export type BotPowerGhostModePolicy =
   | "irrelevant"
   | "deferred";
 export type BotPowerAvatarScaleModePolicy = BotPowerGhostModePolicy;
+export type BotPowerAvatarColorCycleModePolicy = BotPowerGhostModePolicy;
 export type BotPowerAvatarVisibilityModePolicy = BotPowerGhostModePolicy;
 export type BotPowerVoicePresenceModePolicy = BotPowerGhostModePolicy;
 export type BotPowerSpeechObfuscationModePolicy = BotPowerGhostModePolicy;
+export type BotPowerSpeechIntentRevealModePolicy = BotPowerGhostModePolicy;
+export type BotPowerCursedTongueModePolicy = BotPowerGhostModePolicy;
 export type BotPowerAddressedFandomModePolicy = BotPowerGhostModePolicy;
+export type BotPowerChromaticBiasModePolicy = BotPowerGhostModePolicy;
+export type BotPowerCredulityModePolicy = BotPowerGhostModePolicy;
+export type BotPowerAntiTruthModePolicy = BotPowerGhostModePolicy;
 export type BotPowerIntermittentMuteModePolicy =
   BotPowerHearingRepeatModePolicy;
+export type BotPowerIntermittentAudibilityModePolicy = BotPowerGhostModePolicy;
+export type BotPowerAnnoyanceModePolicy = BotPowerGhostModePolicy;
 export type BotPowerResponseBudgetModePolicy = BotPowerGhostModePolicy;
 export type BotPowerInterruptionModePolicy = BotPowerGhostModePolicy;
+export type BotPowerTrollModePolicy = BotPowerGhostModePolicy;
 export type BotPowerIdentityMirrorModePolicy = BotPowerGhostModePolicy;
+export type BotPowerIdentityShapeshiftModePolicy = BotPowerGhostModePolicy;
+export type BotPowerFalseNameModePolicy = BotPowerGhostModePolicy;
 export type BotPowerEternalIntroductionModePolicy = BotPowerGhostModePolicy;
 export type BotPowerMoodBoostModePolicy = BotPowerGhostModePolicy;
 export type BotPowerMoodDrainModePolicy = BotPowerGhostModePolicy;
 export type BotPowerThemeCompoundModePolicy = BotPowerGhostModePolicy;
+export type BotPowerSpectralPerceptionModePolicy = BotPowerGhostModePolicy;
+export type BotPowerImmunityModePolicy = BotPowerGhostModePolicy;
+export type BotPowerIneptitudeModePolicy = BotPowerGhostModePolicy;
+export type BotPowerDesignationModePolicy = BotPowerGhostModePolicy;
 
 export interface PrismAppletVersion {
   id: PrismAppletId;
@@ -65,20 +86,20 @@ export const PRISM_APPLETS: Record<PrismAppletId, PrismAppletVersion> = {
   chat: {
     id: "chat",
     name: "Chat",
-    version: "1.21",
+    version: "1.53",
     status: "active",
   },
   zen: {
     id: "zen",
     name: "Zen",
-    version: "1.20",
+    version: "1.52",
     status: "active",
   },
-  arena: {
-    id: "arena",
-    name: "Arena",
-    version: "0.0",
-    status: "planned",
+  debate: {
+    id: "debate",
+    name: "Debate",
+    version: "0.61",
+    status: "preview",
   },
   polling: {
     id: "polling",
@@ -89,13 +110,13 @@ export const PRISM_APPLETS: Record<PrismAppletId, PrismAppletVersion> = {
   coffee: {
     id: "coffee",
     name: "Coffee",
-    version: "2.18",
+    version: "2.76",
     status: "active",
   },
   botcast: {
     id: "botcast",
     name: "Signal",
-    version: "1.29",
+    version: "1.98",
     status: "active",
   },
   feed: {
@@ -113,8 +134,8 @@ export const PRISM_APPLETS: Record<PrismAppletId, PrismAppletVersion> = {
   story: {
     id: "story",
     name: "Story",
-    version: "0.19",
-    status: "preview",
+    version: "0.43",
+    status: "planned",
   },
   gym: {
     id: "gym",
@@ -125,7 +146,7 @@ export const PRISM_APPLETS: Record<PrismAppletId, PrismAppletVersion> = {
   slate: {
     id: "slate",
     name: "Slate",
-    version: "0.7",
+    version: "0.9",
     status: "preview",
   },
   pseudo: {
@@ -142,34 +163,117 @@ export const PRISM_APPLETS: Record<PrismAppletId, PrismAppletVersion> = {
   },
 };
 
-/** Direct-address identity theft exists only where bots can address bots at runtime. */
-export const BOT_POWER_IDENTITY_MIRROR_MODE_POLICY: Record<
+/** Troll uses bounded public bait; only real multi-bot runtimes cut the floor. */
+export const BOT_POWER_TROLL_MODE_POLICY: Record<
   PrismAppletId,
-  BotPowerIdentityMirrorModePolicy
+  BotPowerTrollModePolicy
 > = {
-  chat: "irrelevant",
-  zen: "irrelevant",
-  arena: "deferred",
+  chat: "cue",
+  zen: "adapted",
+  debate: "direct",
   polling: "deferred",
   coffee: "direct",
   botcast: "direct",
   feed: "deferred",
   games: "deferred",
-  story: "cue",
+  story: "adapted",
   gym: "deferred",
   slate: "irrelevant",
   pseudo: "deferred",
   surf: "deferred",
 };
 
-/** Every holder turn gets a stable one-to-four-message public tail and no older continuity. */
-export const BOT_POWER_ETERNAL_INTRODUCTION_MODE_POLICY: Record<
+/**
+ * Every bot-speaking applet must preserve exact short public speech, including
+ * language-bearing Foley, as a Copycat source before it can activate.
+ */
+export const BOT_POWER_SPEECH_COPY_MODE_POLICY: Record<
   PrismAppletId,
-  BotPowerEternalIntroductionModePolicy
+  BotPowerSpeechCopyModePolicy
 > = {
   chat: "direct",
   zen: "direct",
-  arena: "deferred",
+  debate: "adapted",
+  polling: "required_before_activation",
+  coffee: "adapted",
+  botcast: "adapted",
+  feed: "required_before_activation",
+  games: "required_before_activation",
+  story: "adapted",
+  gym: "required_before_activation",
+  slate: "not_applicable",
+  pseudo: "required_before_activation",
+  surf: "required_before_activation",
+};
+
+/** The holder changes other bot names; hearers may take one soft social reaction beat. */
+export const BOT_POWER_DESIGNATION_MODE_POLICY: Record<
+  PrismAppletId,
+  BotPowerDesignationModePolicy
+> = {
+  chat: "cue",
+  zen: "cue",
+  debate: "direct",
+  polling: "deferred",
+  coffee: "direct",
+  botcast: "direct",
+  feed: "deferred",
+  games: "deferred",
+  story: "adapted",
+  gym: "deferred",
+  slate: "irrelevant",
+  pseudo: "deferred",
+  surf: "deferred",
+};
+
+/** Participant perception stays separate from the human live/replay projection. */
+export const BOT_POWER_SPECTRAL_PERCEPTION_MODE_POLICY: Record<
+  PrismAppletId,
+  BotPowerSpectralPerceptionModePolicy
+> = {
+  chat: "direct",
+  zen: "direct",
+  debate: "direct",
+  polling: "deferred",
+  coffee: "direct",
+  botcast: "direct",
+  feed: "deferred",
+  games: "deferred",
+  story: "adapted",
+  gym: "deferred",
+  slate: "irrelevant",
+  pseudo: "deferred",
+  surf: "deferred",
+};
+
+/** Other bots' Powers disappear only through the holder's participant view. */
+export const BOT_POWER_IMMUNITY_MODE_POLICY: Record<
+  PrismAppletId,
+  BotPowerImmunityModePolicy
+> = {
+  chat: "direct",
+  zen: "direct",
+  debate: "direct",
+  polling: "deferred",
+  coffee: "direct",
+  botcast: "direct",
+  feed: "deferred",
+  games: "deferred",
+  story: "adapted",
+  gym: "deferred",
+  slate: "irrelevant",
+  pseudo: "deferred",
+  surf: "deferred",
+};
+
+/** The holder visibly botches every instruction and bot-authored production role. */
+export const BOT_POWER_INEPTITUDE_MODE_POLICY: Record<
+  PrismAppletId,
+  BotPowerIneptitudeModePolicy
+> = {
+  chat: "direct",
+  zen: "direct",
+  debate: "adapted",
   polling: "deferred",
   coffee: "adapted",
   botcast: "adapted",
@@ -182,11 +286,122 @@ export const BOT_POWER_ETERNAL_INTRODUCTION_MODE_POLICY: Record<
   surf: "deferred",
 };
 
-/** Every future bot-embodying applet must enforce mute before it can activate. */
+/** The holder's authored color stays the resting fallback in every projection. */
+export const BOT_POWER_AVATAR_COLOR_CYCLE_MODE_POLICY: Record<
+  PrismAppletId,
+  BotPowerAvatarColorCycleModePolicy
+> = {
+  chat: "direct",
+  zen: "direct",
+  debate: "direct",
+  polling: "deferred",
+  coffee: "direct",
+  botcast: "direct",
+  feed: "deferred",
+  games: "deferred",
+  story: "adapted",
+  gym: "deferred",
+  slate: "irrelevant",
+  pseudo: "deferred",
+  surf: "deferred",
+};
+
+/**
+ * Direct-address identity theft exists only on participant surfaces that can
+ * freeze an eligible addresser. Coffee and Signal use bot targets; Debate also
+ * admits Whodunnit's player-controlled Prosecutor. Direct modes retain the
+ * holder's complete speech identity and deterministic presentation.
+ */
+export const BOT_POWER_IDENTITY_MIRROR_MODE_POLICY: Record<
+  PrismAppletId,
+  BotPowerIdentityMirrorModePolicy
+> = {
+  chat: "irrelevant",
+  zen: "irrelevant",
+  debate: "direct",
+  polling: "deferred",
+  coffee: "direct",
+  botcast: "direct",
+  feed: "deferred",
+  games: "deferred",
+  story: "cue",
+  gym: "deferred",
+  slate: "irrelevant",
+  pseudo: "deferred",
+  surf: "deferred",
+};
+
+/**
+ * Session-sticky Library/Marketplace public form; quoted name presentation is
+ * direct, while Coffee and Signal add only an active-target observer cue.
+ */
+export const BOT_POWER_IDENTITY_SHAPESHIFT_MODE_POLICY: Record<
+  PrismAppletId,
+  BotPowerIdentityShapeshiftModePolicy
+> = {
+  chat: "direct",
+  zen: "direct",
+  debate: "direct",
+  polling: "deferred",
+  coffee: "direct",
+  botcast: "direct",
+  feed: "deferred",
+  games: "deferred",
+  story: "adapted",
+  gym: "deferred",
+  slate: "irrelevant",
+  pseudo: "deferred",
+  surf: "deferred",
+};
+
+/** Session-sticky believed persona name; reshuffles with short-term amnesia. */
+export const BOT_POWER_FALSE_NAME_MODE_POLICY: Record<
+  PrismAppletId,
+  BotPowerFalseNameModePolicy
+> = {
+  chat: "direct",
+  zen: "direct",
+  debate: "direct",
+  polling: "deferred",
+  coffee: "direct",
+  botcast: "direct",
+  feed: "deferred",
+  games: "deferred",
+  story: "adapted",
+  gym: "deferred",
+  slate: "irrelevant",
+  pseudo: "deferred",
+  surf: "deferred",
+};
+
+/** Every holder turn gets only the current other-speaker message and no older continuity. */
+export const BOT_POWER_ETERNAL_INTRODUCTION_MODE_POLICY: Record<
+  PrismAppletId,
+  BotPowerEternalIntroductionModePolicy
+> = {
+  chat: "direct",
+  zen: "direct",
+  debate: "adapted",
+  polling: "deferred",
+  coffee: "adapted",
+  botcast: "adapted",
+  feed: "deferred",
+  games: "deferred",
+  story: "adapted",
+  gym: "deferred",
+  slate: "irrelevant",
+  pseudo: "deferred",
+  surf: "deferred",
+};
+
+/**
+ * Every future bot-embodying applet must implement mute before the applet
+ * activates. This is a shipping requirement, never a bot eligibility gate.
+ */
 export const BOT_POWER_MUTE_MODE_POLICY: Record<PrismAppletId, BotPowerMuteModePolicy> = {
   chat: "enforced",
   zen: "enforced",
-  arena: "required_before_activation",
+  debate: "enforced",
   polling: "required_before_activation",
   coffee: "enforced",
   botcast: "enforced",
@@ -199,11 +414,69 @@ export const BOT_POWER_MUTE_MODE_POLICY: Record<PrismAppletId, BotPowerMuteModeP
   surf: "required_before_activation",
 };
 
+/**
+ * Every future bot-embodying applet must suppress lung Foley for breathless
+ * holders before the applet activates. Speech remains; breath Foley does not.
+ */
+export const BOT_POWER_BREATHLESS_MODE_POLICY: Record<
+  PrismAppletId,
+  BotPowerBreathlessModePolicy
+> = {
+  chat: "enforced",
+  zen: "enforced",
+  debate: "enforced",
+  polling: "required_before_activation",
+  coffee: "enforced",
+  botcast: "enforced",
+  feed: "required_before_activation",
+  games: "required_before_activation",
+  story: "required_before_activation",
+  gym: "required_before_activation",
+  slate: "not_applicable",
+  pseudo: "required_before_activation",
+  surf: "required_before_activation",
+};
+
+
+/** Exhaustive gullibility policy: holder believes claims; soft cue in 1:1, direct in social modes. */
+export const BOT_POWER_CREDULITY_MODE_POLICY: Record<PrismAppletId, BotPowerCredulityModePolicy> = {
+  chat: "cue",
+  zen: "cue",
+  debate: "direct",
+  polling: "deferred",
+  coffee: "direct",
+  botcast: "direct",
+  feed: "deferred",
+  games: "deferred",
+  story: "adapted",
+  gym: "deferred",
+  slate: "irrelevant",
+  pseudo: "deferred",
+  surf: "deferred",
+};
+
+/** Exhaustive anti-truth policy: soft lies always; hard invert on addressed questions in live modes. */
+export const BOT_POWER_ANTI_TRUTH_MODE_POLICY: Record<PrismAppletId, BotPowerAntiTruthModePolicy> = {
+  chat: "direct",
+  zen: "direct",
+  debate: "adapted",
+  polling: "deferred",
+  coffee: "adapted",
+  botcast: "adapted",
+  feed: "deferred",
+  games: "deferred",
+  story: "adapted",
+  gym: "deferred",
+  slate: "irrelevant",
+  pseudo: "deferred",
+  surf: "deferred",
+};
+
 /** Exhaustive candor policy: future applets cannot inherit social pressure silently. */
 export const BOT_POWER_CANDOR_MODE_POLICY: Record<PrismAppletId, BotPowerCandorModePolicy> = {
   chat: "cue",
   zen: "cue",
-  arena: "deferred",
+  debate: "direct",
   polling: "deferred",
   coffee: "direct",
   botcast: "direct",
@@ -223,7 +496,27 @@ export const BOT_POWER_ADDRESSED_FANDOM_MODE_POLICY: Record<
 > = {
   chat: "direct",
   zen: "direct",
-  arena: "deferred",
+  debate: "adapted",
+  polling: "deferred",
+  coffee: "adapted",
+  botcast: "adapted",
+  feed: "deferred",
+  games: "deferred",
+  story: "adapted",
+  gym: "deferred",
+  slate: "irrelevant",
+  pseudo: "deferred",
+  surf: "deferred",
+};
+
+/** Exhaustive hue-prejudice policy: bots judge phosphor color, never people or the player. */
+export const BOT_POWER_CHROMATIC_BIAS_MODE_POLICY: Record<
+  PrismAppletId,
+  BotPowerChromaticBiasModePolicy
+> = {
+  chat: "cue",
+  zen: "cue",
+  debate: "adapted",
   polling: "deferred",
   coffee: "adapted",
   botcast: "adapted",
@@ -243,7 +536,7 @@ export const BOT_POWER_MOOD_BOOST_MODE_POLICY: Record<
 > = {
   chat: "cue",
   zen: "cue",
-  arena: "deferred",
+  debate: "adapted",
   polling: "deferred",
   coffee: "adapted",
   botcast: "adapted",
@@ -263,7 +556,7 @@ export const BOT_POWER_MOOD_DRAIN_MODE_POLICY: Record<
 > = {
   chat: "cue",
   zen: "cue",
-  arena: "deferred",
+  debate: "adapted",
   polling: "deferred",
   coffee: "adapted",
   botcast: "adapted",
@@ -283,7 +576,7 @@ export const BOT_POWER_THEME_COMPOUND_MODE_POLICY: Record<
 > = {
   chat: "cue",
   zen: "cue",
-  arena: "deferred",
+  debate: "adapted",
   polling: "deferred",
   coffee: "adapted",
   botcast: "adapted",
@@ -303,7 +596,7 @@ export const BOT_POWER_HEARING_REPEAT_MODE_POLICY: Record<
 > = {
   chat: "cue",
   zen: "cue",
-  arena: "required_before_activation",
+  debate: "enforced",
   polling: "required_before_activation",
   coffee: "enforced",
   botcast: "adapted",
@@ -320,7 +613,7 @@ export const BOT_POWER_HEARING_REPEAT_MODE_POLICY: Record<
 export const BOT_POWER_GHOST_MODE_POLICY: Record<PrismAppletId, BotPowerGhostModePolicy> = {
   chat: "direct",
   zen: "direct",
-  arena: "deferred",
+  debate: "direct",
   polling: "deferred",
   coffee: "direct",
   botcast: "direct",
@@ -340,7 +633,7 @@ export const BOT_POWER_AVATAR_VISIBILITY_MODE_POLICY: Record<
 > = {
   chat: "direct",
   zen: "direct",
-  arena: "deferred",
+  debate: "direct",
   polling: "deferred",
   coffee: "direct",
   botcast: "direct",
@@ -353,14 +646,14 @@ export const BOT_POWER_AVATAR_VISIBILITY_MODE_POLICY: Record<
   surf: "deferred",
 };
 
-/** Exhaustive size-Power policy: bot embodiments share one restrained relative scale. */
+/** Exhaustive six-tier size policy: embodiments use canonical scale and edge bias. */
 export const BOT_POWER_AVATAR_SCALE_MODE_POLICY: Record<
   PrismAppletId,
   BotPowerAvatarScaleModePolicy
 > = {
   chat: "direct",
   zen: "direct",
-  arena: "deferred",
+  debate: "direct",
   polling: "deferred",
   coffee: "direct",
   botcast: "direct",
@@ -380,7 +673,47 @@ export const BOT_POWER_VOICE_PRESENCE_MODE_POLICY: Record<
 > = {
   chat: "direct",
   zen: "direct",
-  arena: "deferred",
+  debate: "direct",
+  polling: "deferred",
+  coffee: "direct",
+  botcast: "direct",
+  feed: "deferred",
+  games: "deferred",
+  story: "adapted",
+  gym: "deferred",
+  slate: "irrelevant",
+  pseudo: "deferred",
+  surf: "deferred",
+};
+
+/** Quiet listener rolls exist only where another bot can receive the line. */
+export const BOT_POWER_INTERMITTENT_AUDIBILITY_MODE_POLICY: Record<
+  PrismAppletId,
+  BotPowerIntermittentAudibilityModePolicy
+> = {
+  chat: "irrelevant",
+  zen: "irrelevant",
+  debate: "adapted",
+  polling: "deferred",
+  coffee: "direct",
+  botcast: "direct",
+  feed: "deferred",
+  games: "deferred",
+  story: "adapted",
+  gym: "deferred",
+  slate: "irrelevant",
+  pseudo: "deferred",
+  surf: "deferred",
+};
+
+/** Loud annoyance targets exactly one eligible audible bot, never the player. */
+export const BOT_POWER_ANNOYANCE_MODE_POLICY: Record<
+  PrismAppletId,
+  BotPowerAnnoyanceModePolicy
+> = {
+  chat: "irrelevant",
+  zen: "irrelevant",
+  debate: "adapted",
   polling: "deferred",
   coffee: "direct",
   botcast: "direct",
@@ -400,7 +733,7 @@ export const BOT_POWER_SPEECH_OBFUSCATION_MODE_POLICY: Record<
 > = {
   chat: "direct",
   zen: "direct",
-  arena: "deferred",
+  debate: "direct",
   polling: "deferred",
   coffee: "direct",
   botcast: "adapted",
@@ -413,14 +746,54 @@ export const BOT_POWER_SPEECH_OBFUSCATION_MODE_POLICY: Record<
   surf: "deferred",
 };
 
-/** Quiet's stable half-mute needs an explicit mood adaptation in every live bot mode. */
+/** Player-only exact intent reveal for committed primary Gibberish speech. */
+export const BOT_POWER_SPEECH_INTENT_REVEAL_MODE_POLICY: Record<
+  PrismAppletId,
+  BotPowerSpeechIntentRevealModePolicy
+> = {
+  chat: "direct",
+  zen: "direct",
+  debate: "direct",
+  polling: "deferred",
+  coffee: "direct",
+  botcast: "adapted",
+  feed: "deferred",
+  games: "deferred",
+  story: "adapted",
+  gym: "deferred",
+  slate: "irrelevant",
+  pseudo: "deferred",
+  surf: "deferred",
+};
+
+/** Public censor performance is direct in speech lanes and adapted to formal records. */
+export const BOT_POWER_CURSED_TONGUE_MODE_POLICY: Record<
+  PrismAppletId,
+  BotPowerCursedTongueModePolicy
+> = {
+  chat: "direct",
+  zen: "direct",
+  debate: "adapted",
+  polling: "deferred",
+  coffee: "direct",
+  botcast: "direct",
+  feed: "deferred",
+  games: "deferred",
+  story: "adapted",
+  gym: "deferred",
+  slate: "irrelevant",
+  pseudo: "deferred",
+  surf: "deferred",
+};
+
+/** Arbitrary intermittent-mute Powers retain an explicit mood adaptation in every live bot mode. */
 export const BOT_POWER_INTERMITTENT_MUTE_MODE_POLICY: Record<
   PrismAppletId,
   BotPowerIntermittentMuteModePolicy
 > = {
   chat: "enforced",
   zen: "enforced",
-  arena: "required_before_activation",
+  debate: "enforced",
   polling: "required_before_activation",
   coffee: "enforced",
   botcast: "enforced",
@@ -440,7 +813,7 @@ export const BOT_POWER_RESPONSE_BUDGET_MODE_POLICY: Record<
 > = {
   chat: "direct",
   zen: "direct",
-  arena: "deferred",
+  debate: "adapted",
   polling: "deferred",
   coffee: "adapted",
   botcast: "adapted",
@@ -460,7 +833,7 @@ export const BOT_POWER_INTERRUPTION_MODE_POLICY: Record<
 > = {
   chat: "cue",
   zen: "cue",
-  arena: "deferred",
+  debate: "adapted",
   polling: "deferred",
   coffee: "direct",
   botcast: "adapted",
@@ -475,7 +848,9 @@ export const BOT_POWER_INTERRUPTION_MODE_POLICY: Record<
 
 export const PRISM_TOP_LEVEL_SWITCHER_APPLET_IDS = [
   "chat",
+  "zen",
   "coffee",
+  "debate",
   "botcast",
   "slate",
 ] as const satisfies readonly PrismAppletId[];

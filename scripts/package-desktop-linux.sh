@@ -46,6 +46,7 @@ fi
 mkdir -p "${DIST_DIR}"
 APPIMAGE_TARGET="${DIST_DIR}/Prism-Desktop-v${VERSION}-linux-x64.AppImage"
 cp "${APPIMAGE_SOURCE}" "${APPIMAGE_TARGET}"
+chmod 0755 "${APPIMAGE_TARGET}"
 
 # Optional Linux signing hook for CI (for example cosign or gpg flows).
 if [ -n "${PRISM_DESKTOP_LINUX_SIGN_SCRIPT:-}" ]; then

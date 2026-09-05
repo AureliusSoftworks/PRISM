@@ -6,6 +6,7 @@ import {
   maskBuiltInWildcardSlotsForPending,
   maskModelFilledWildcardSlotsForPending,
   pendingCleanupOptimisticMessageContent,
+  preservePromptBodyWhitespace,
   promptContainsBuiltInWildcardSlots,
   promptContainsModelFilledWildcardSlots,
   promptInsertionStartsSentence,
@@ -137,6 +138,23 @@ describe("formatPromptShortcutInsertion", () => {
     assert.equal(formatPromptShortcutInsertion("say hello.", "", ""), "Say hello.");
     assert.equal(formatPromptShortcutInsertion("PRISM memory", "ask ", ""), "PRISM memory");
     assert.equal(formatPromptShortcutInsertion("I remember this", "and ", ""), "I remember this");
+  });
+
+  it("keeps intentional trailing newlines from Prompt Center bodies", () => {
+    assert.equal(
+      formatPromptShortcutInsertion(
+        "Say nothing other than the text following this prompt:\n\n",
+        "",
+        "hello",
+      ),
+      "Say nothing other than the text following this prompt:\n\n",
+    );
+    assert.equal(
+      preservePromptBodyWhitespace(
+        "  Say nothing other than the text following this prompt:\n\n  ",
+      ),
+      "Say nothing other than the text following this prompt:\n\n",
+    );
   });
 });
 
@@ -412,6 +430,25 @@ describe("resolveBuiltInPromptWildcardInvocations", () => {
       },
     ]);
   });
+
+  it("resolves {TODAY} locally before send", () => {
+    const now = new Date(2026, 6, 25, 12, 0, 0);
+    const result = resolveBuiltInPromptWildcardInvocations(
+      "Journal entry for {TODAY}.",
+      undefined,
+      { now, locales: "en-US" }
+    );
+    assert.match(result.prompt, /Journal entry for Saturday, July 25, 2026\./u);
+    assert.deepEqual(result.replacements, [
+      {
+        key: "TODAY",
+        value: "Saturday, July 25, 2026",
+        start: "Journal entry for ".length,
+        end: "Journal entry for Saturday, July 25, 2026".length,
+        source: "wildcard",
+      },
+    ]);
+  });
 });
 
 describe("pending built-in wildcard slot masking", () => {
@@ -461,6 +498,8 @@ describe("pending built-in wildcard slot masking", () => {
     assert.equal(promptContainsModelFilledWildcardSlots("Make it {number1}."), true);
     assert.equal(promptContainsModelFilledWildcardSlots("Make it {CHARACTER}."), false);
     assert.equal(promptContainsModelFilledWildcardSlots("Make it {CHARACTER1}."), false);
+    assert.equal(promptContainsModelFilledWildcardSlots("Make it {VAR}."), false);
+    assert.equal(promptContainsModelFilledWildcardSlots("Make it {var}."), false);
     assert.equal(promptContainsModelFilledWildcardSlots("Pick {red|green}."), false);
     assert.equal(promptContainsModelFilledWildcardSlots("Keep {word} literal."), false);
   });

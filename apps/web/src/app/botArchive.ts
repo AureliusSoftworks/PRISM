@@ -1,7 +1,11 @@
 import { strFromU8, strToU8, unzipSync, zipSync } from "fflate";
 import {
   DEFAULT_BOT_FACE_GLYPH_ANIMATION,
+  DEFAULT_BOT_FACE_EYE_MOVEMENT,
+  fullySaturateBotColor,
+  normalizeBotIdentityColor,
   normalizeBotFaceGlyphAnimation,
+  normalizeBotFaceEyeMovement,
   parseBotAvatarDetailsV1,
   normalizeBotNamePronunciation,
   normalizeBotSelfReferral,
@@ -11,6 +15,8 @@ import {
   type BotFaceEyeCount,
   type BotFaceFontId,
   type BotFaceGlyphAnimation,
+  type BotFaceCustomSpeechPoses,
+  type BotFaceEyeMovement,
   type BotFaceThinkingFrames,
   type BotProfileFields,
   type BotAudioVoiceProfileV1,
@@ -36,6 +42,8 @@ export interface PrismBotArchiveJson {
     namePronunciation?: string;
     selfReferral?: string;
     color?: string | null;
+    /** Null/omitted means stable Auto resolution from the primary color. */
+    accentColor?: string | null;
     glyph?: string | null;
     avatarDetails?: BotAvatarDetailsV1 | null;
     temperature?: number;
@@ -49,10 +57,11 @@ export interface PrismBotArchiveJson {
     openaiImageModel?: string | null;
     faceEyesFont?: BotFaceFontId | null;
     faceEyeCharacter?: string | null;
-    faceEyeAnimation?: BotFaceGlyphAnimation | null;
+    faceEyeAnimation?: BotFaceEyeMovement | BotFaceGlyphAnimation | null;
     faceMouthFont?: BotFaceFontId | null;
     faceMouthCharacter?: string | null;
     faceMouthAnimation?: BotFaceGlyphAnimation | null;
+    faceMouthSpeechPoses?: BotFaceCustomSpeechPoses | null;
     faceMouthCoffeePucker?: boolean;
     faceFontWeight?: number | null;
     faceEyeScale?: number | null;
@@ -60,15 +69,21 @@ export interface PrismBotArchiveJson {
     faceEyeOffsetY?: number | null;
     faceEyeRotationDeg?: number | null;
     faceEyeCount?: BotFaceEyeCount | number | null;
+    faceEyeSpacing?: number | null;
     faceMouthScale?: number | null;
     faceMouthOffsetX?: number | null;
     faceMouthOffsetY?: number | null;
     faceMouthRotationDeg?: number | null;
     faceBlinkBar?: BotFaceBlinkBar | null;
+    faceBlinkCount?: BotFaceEyeCount | number | null;
     faceBlinkScale?: number | null;
     faceBlinkOffsetX?: number | null;
     faceBlinkOffsetY?: number | null;
+    faceBlinkRotationDeg?: number | null;
     faceThinkingFrames?: BotFaceThinkingFrames | null;
+    faceThinkingScale?: number | null;
+    faceThinkingOffsetX?: number | null;
+    faceThinkingOffsetY?: number | null;
     onlineEnabled?: boolean;
     flirtEnabled?: boolean;
     chatEnabled?: boolean;
@@ -94,6 +109,12 @@ export function resolvePrismBotArchiveFaceGlyphAnimation(
   return (
     normalizeBotFaceGlyphAnimation(value) ?? DEFAULT_BOT_FACE_GLYPH_ANIMATION
   );
+}
+
+export function resolvePrismBotArchiveFaceEyeMovement(
+  value: unknown,
+): BotFaceEyeMovement {
+  return normalizeBotFaceEyeMovement(value) ?? DEFAULT_BOT_FACE_EYE_MOVEMENT;
 }
 
 export function createPrismBotArchive(args: {
@@ -205,6 +226,12 @@ function validateBotJson(parsed: unknown): PrismBotArchiveJson {
     ...(botJson as PrismBotArchiveJson),
     bot: {
       ...botJson.bot,
+      ...(typeof bot.color === "string"
+        ? { color: fullySaturateBotColor(bot.color) }
+        : {}),
+      ...(bot.accentColor !== undefined
+        ? { accentColor: normalizeBotIdentityColor(bot.accentColor) }
+        : {}),
       ...(bot.namePronunciation !== undefined
         ? { namePronunciation: normalizeBotNamePronunciation(bot.namePronunciation) }
         : {}),

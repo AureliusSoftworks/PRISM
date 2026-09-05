@@ -1,4 +1,5 @@
-.backdrop {
+.backdrop,
+.docked {
   --loader-bg: rgba(7, 8, 15, .82);
   --loader-card: rgba(18, 19, 31, .92);
   --loader-ink: #f8f7ff;
@@ -10,6 +11,10 @@
   --prism-i: #b8f34a;
   --prism-s: #2fd3e3;
   --prism-m: #9a6cff;
+  color: var(--loader-ink);
+}
+
+.backdrop {
   position: fixed;
   inset: 0;
   z-index: 5000;
@@ -17,7 +22,6 @@
   place-items: center;
   padding: max(20px, env(safe-area-inset-top)) max(20px, env(safe-area-inset-right)) max(20px, env(safe-area-inset-bottom)) max(20px, env(safe-area-inset-left));
   overflow: hidden;
-  color: var(--loader-ink);
   background:
     radial-gradient(circle at 18% 15%, color-mix(in srgb, var(--prism-p) 18%, transparent), transparent 38%),
     radial-gradient(circle at 83% 80%, color-mix(in srgb, var(--prism-s) 16%, transparent), transparent 40%),
@@ -27,13 +31,212 @@
   cursor: wait;
 }
 
-.backdrop[data-theme="light"] {
+/* Soft waits: the real companion orb occupies this card's empty orb slot. */
+.softDismiss {
+  position: fixed;
+  inset: 0;
+  z-index: 759;
+  margin: 0;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  cursor: default;
+}
+
+.docked {
+  --soft-orb-anchor: 44px;
+  position: fixed;
+  z-index: 760;
+  width: min(390px, calc(100vw - 28px));
+  pointer-events: none;
+  will-change: left, top;
+}
+
+.docked[data-dock="center"][data-vertical="below"] {
+  transform: translate(-50%, calc(-1 * var(--soft-orb-anchor)));
+}
+
+.docked[data-dock="left"][data-vertical="below"] {
+  transform: translate(calc(-1 * var(--soft-orb-anchor)), calc(-1 * var(--soft-orb-anchor)));
+}
+
+.docked[data-dock="right"][data-vertical="below"] {
+  transform: translate(calc(-100% + var(--soft-orb-anchor)), calc(-1 * var(--soft-orb-anchor)));
+}
+
+.docked[data-dock="center"][data-vertical="above"] {
+  transform: translate(-50%, calc(-100% + var(--soft-orb-anchor)));
+}
+
+.docked[data-dock="left"][data-vertical="above"] {
+  transform: translate(calc(-1 * var(--soft-orb-anchor)), calc(-100% + var(--soft-orb-anchor)));
+}
+
+.docked[data-dock="right"][data-vertical="above"] {
+  transform: translate(calc(-100% + var(--soft-orb-anchor)), calc(-100% + var(--soft-orb-anchor)));
+}
+
+.docked > .card {
+  pointer-events: auto;
+  width: 100%;
+  justify-items: stretch;
+  gap: 8px;
+  border-radius: 18px;
+  padding: 18px;
+  text-align: left;
+}
+
+.docked[data-vertical="above"] .prismOrbSlot {
+  order: 2;
+}
+
+.docked .prismOrbSlot,
+.docked .prismOrb {
+  --prism-orb-size: 52px;
+  justify-self: center;
+  margin-bottom: 0;
+}
+
+.docked[data-dock="left"] .prismOrbSlot {
+  justify-self: start;
+}
+
+.docked[data-dock="right"] .prismOrbSlot {
+  justify-self: end;
+}
+
+.prismOrbSlot {
+  display: grid;
+  place-items: center;
+  width: var(--prism-orb-size, 72px);
+  height: var(--prism-orb-size, 72px);
+  min-height: var(--prism-orb-size, 72px);
+}
+
+.prismOrbSlot:not([data-orb-visible="true"]) {
+  opacity: 0;
+}
+
+.jobSections {
+  width: 100%;
+  display: grid;
+  gap: 10px;
+  margin-top: 2px;
+}
+
+.jobSection {
+  display: grid;
+  gap: 6px;
+}
+
+.jobSectionLabel {
+  color: color-mix(in srgb, var(--loader-muted) 88%, var(--prism-s));
+  font: 800 0.62rem/1 system-ui, sans-serif;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.docked .eyebrow {
+  justify-self: start;
+}
+
+.docked .card h2 {
+  max-width: none;
+  margin: 0;
+  font-size: 1.05rem;
+  line-height: 1.25;
+}
+
+.docked .card p {
+  max-width: none;
+  font-size: 0.8rem;
+}
+
+.docked .progressBlock {
+  margin-top: 6px;
+}
+
+.docked .progressTrack {
+  height: 8px;
+}
+
+.chatReturn {
+  justify-self: start;
+  min-height: 30px;
+  border: 1px solid color-mix(in srgb, var(--prism-s) 38%, var(--loader-line));
+  border-radius: 999px;
+  padding: 0 11px;
+  color: color-mix(in srgb, var(--loader-ink) 82%, var(--prism-s));
+  background: color-mix(in srgb, var(--prism-s) 8%, var(--loader-card));
+  font: 750 .66rem/1 system-ui, sans-serif;
+  cursor: pointer;
+}
+
+.chatReturn:hover,
+.chatReturn:focus-visible {
+  border-color: color-mix(in srgb, var(--prism-s) 68%, var(--loader-line));
+  color: var(--loader-ink);
+}
+
+.chatReturn:focus-visible {
+  outline: 2px solid var(--prism-s);
+  outline-offset: 2px;
+}
+
+.footerActions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.footerActions > button {
+  min-height: 34px;
+  border: 1px solid var(--loader-line);
+  border-radius: 999px;
+  padding: 0 12px;
+  color: var(--loader-ink);
+  background: color-mix(in srgb, var(--prism-m) 14%, var(--loader-card));
+  font: 750 0.72rem/1 system-ui, sans-serif;
+  cursor: pointer;
+}
+
+.footerActions > button:disabled {
+  cursor: wait;
+  opacity: 0.55;
+}
+
+.backdrop[data-theme="light"],
+.docked[data-theme="light"],
+:global(body[data-prism-theme="light"]) .backdrop,
+:global(body[data-prism-theme="light"]) .docked {
   --loader-bg: rgba(246, 246, 252, .82);
   --loader-card: rgba(255, 255, 255, .88);
   --loader-ink: #181725;
   --loader-muted: rgba(45, 43, 64, .66);
   --loader-line: rgba(47, 45, 70, .13);
   --loader-shadow: rgba(63, 58, 108, .18);
+}
+
+/* Portaled loaders may omit `theme`, so the canonical body theme marker is
+   also authoritative. These selectors intentionally outrank the component's
+   default data-theme="dark" without changing a dark document. */
+.backdrop[data-theme="light"] .card,
+.docked[data-theme="light"] .card,
+:global(body[data-prism-theme="light"]) .backdrop .card,
+:global(body[data-prism-theme="light"]) .docked .card {
+  border-color: color-mix(in srgb, var(--prism-s) 31%, #8094aa52);
+  background:
+    radial-gradient(circle at 12% -8%, color-mix(in srgb, var(--prism-s) 16%, transparent), transparent 42%),
+    radial-gradient(circle at 92% 8%, color-mix(in srgb, var(--prism-m) 13%, transparent), transparent 40%),
+    linear-gradient(124deg, #ffffffe8 0%, #f4fbffe0 54%, #f8f1ffe3 100%);
+  box-shadow:
+    0 28px 72px -38px #536d8a66,
+    0 0 24px color-mix(in srgb, var(--prism-m) 11%, transparent),
+    inset 0 1px 0 #fff;
+  backdrop-filter: blur(20px) saturate(1.12);
+  -webkit-backdrop-filter: blur(20px) saturate(1.12);
 }
 
 .card {
@@ -68,8 +271,8 @@
   top: 15px;
   right: 15px;
   z-index: 2;
-  width: 38px;
-  height: 38px;
+  width: 44px;
+  height: 44px;
   display: grid;
   place-items: center;
   border: 1px solid var(--loader-line);
@@ -91,42 +294,10 @@
 }
 .cancelButton:focus-visible { outline: 2px solid var(--prism-s); outline-offset: 3px; }
 
-.prismMark {
-  position: relative;
-  width: 92px;
-  height: 72px;
+.prismOrb {
+  --prism-orb-size: 72px;
   margin-bottom: 3px;
-  filter: drop-shadow(0 13px 24px color-mix(in srgb, var(--prism-m) 26%, transparent));
 }
-
-.lightCore {
-  position: absolute;
-  top: 29px;
-  left: 9px;
-  width: 18px;
-  height: 18px;
-  border-radius: 50%;
-  background: #fff;
-  box-shadow: 0 0 10px #fff, 0 0 26px rgba(255, 255, 255, .74);
-  animation: blockingLightPulse 1.8s ease-in-out infinite;
-}
-
-.prismMark > span:not(.lightCore) {
-  position: absolute;
-  left: 28px;
-  top: 34px;
-  width: 58px;
-  height: 7px;
-  border-radius: 99px;
-  transform-origin: left center;
-  animation: blockingRayBreathe 1.8s ease-in-out infinite;
-}
-
-.rayPink { background: var(--prism-p); transform: rotate(-29deg); }
-.rayOrange { background: var(--prism-r); transform: rotate(-14deg); }
-.rayLime { background: var(--prism-i); transform: rotate(0); }
-.rayCyan { background: var(--prism-s); transform: rotate(14deg); }
-.rayViolet { background: var(--prism-m); transform: rotate(29deg); }
 
 .eyebrow {
   color: color-mix(in srgb, var(--loader-ink) 62%, var(--prism-m));
@@ -181,6 +352,89 @@
   font-weight: 800;
 }
 
+.elapsedRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--loader-muted);
+  font: 650 .7rem/1.3 system-ui, sans-serif;
+}
+
+.elapsedRow strong {
+  color: var(--loader-ink);
+  font-variant-numeric: tabular-nums;
+  font-weight: 800;
+}
+
+.confirmPanel {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  display: grid;
+  align-content: center;
+  justify-items: center;
+  gap: 10px;
+  padding: 28px 24px;
+  text-align: center;
+  background: color-mix(in srgb, var(--loader-card) 92%, transparent);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+
+.confirmPanel strong {
+  max-width: 18ch;
+  color: var(--loader-ink);
+  font: 800 1.15rem/1.2 system-ui, sans-serif;
+  text-wrap: balance;
+}
+
+.confirmPanel p {
+  max-width: 36ch;
+  margin: 0;
+  color: var(--loader-muted);
+  font: 500 .82rem/1.45 system-ui, sans-serif;
+}
+
+.confirmActions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.confirmKeep,
+.confirmStop {
+  min-height: 40px;
+  border-radius: 999px;
+  padding: 0 16px;
+  font: 700 .78rem/1 system-ui, sans-serif;
+  cursor: pointer;
+}
+
+.confirmKeep {
+  border: 1px solid var(--loader-line);
+  color: var(--loader-ink);
+  background: color-mix(in srgb, var(--loader-card) 88%, transparent);
+}
+
+.confirmStop {
+  border: 1px solid color-mix(in srgb, var(--prism-p) 55%, var(--loader-line));
+  color: #fff;
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--prism-p) 88%, #000),
+    color-mix(in srgb, var(--prism-m) 72%, #000)
+  );
+}
+
+.confirmKeep:focus-visible,
+.confirmStop:focus-visible {
+  outline: 2px solid var(--prism-s);
+  outline-offset: 3px;
+}
+
 .progressTrack {
   position: relative;
   width: 100%;
@@ -219,24 +473,20 @@
   100% { transform: translateX(275%); }
 }
 
-@keyframes blockingLightPulse {
-  0%, 100% { transform: scale(.88); opacity: .78; }
-  50% { transform: scale(1.08); opacity: 1; }
-}
-
-@keyframes blockingRayBreathe {
-  0%, 100% { opacity: .62; filter: saturate(.9); }
-  50% { opacity: 1; filter: saturate(1.2); }
-}
-
 @media (max-width: 620px) {
   .card { border-radius: 22px; padding: 28px 20px; }
-  .prismMark { transform: scale(.88); margin-block: -4px; }
+  .prismOrbSlot,
+  .prismOrb { --prism-orb-size: 64px; margin-block: -4px; }
+  .docked > .card {
+    border-radius: 16px;
+    padding: 16px;
+  }
+  .docked { --soft-orb-anchor: 39px; }
+  .docked .prismOrbSlot,
+  .docked .prismOrb { --prism-orb-size: 46px; margin-block: 0; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .lightCore,
-  .prismMark > span:not(.lightCore),
   .progressTrack[data-indeterminate="true"] .progressFill {
     animation: none;
   }

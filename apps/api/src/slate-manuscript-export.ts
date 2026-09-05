@@ -306,12 +306,25 @@ export function prepareSlateManuscriptExport(
   const resolved = resolveSections(ordered, requestedScope);
   const blocks: SlateCleanDocumentBlock[] = [{ kind: "title", text: title }];
   let priorLeafHadProse = false;
+  let importedRun = "";
 
-  for (const section of resolved.sections) {
+  for (const [sectionIndex, section] of resolved.sections.entries()) {
     const sectionTitle = normalizedLabel(section.title, `Section ${section.id} title`);
     const prose = normalizedProse(section.prose);
     const leaf = section.kind === "scene" || section.kind === "imported";
 
+    if (section.kind === "imported") {
+      importedRun += section.prose;
+      if (resolved.sections[sectionIndex + 1]?.kind !== "imported") {
+        const importedProse = normalizedProse(importedRun);
+        if (importedProse.length > 0) {
+          blocks.push({ kind: "prose", text: importedProse });
+        }
+        importedRun = "";
+      }
+      priorLeafHadProse = false;
+      continue;
+    }
     if (!leaf) priorLeafHadProse = false;
     if (leaf && prose.trim().length > 0 && priorLeafHadProse) {
       blocks.push({ kind: "scene-break" });

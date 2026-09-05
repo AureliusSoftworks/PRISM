@@ -18,6 +18,7 @@ function createDiscardTestDb(): DatabaseSync {
       user_id TEXT NOT NULL,
       role TEXT NOT NULL,
       content TEXT NOT NULL,
+      tool_payload TEXT,
       created_at TEXT NOT NULL
     );
     CREATE TABLE memory_summaries (
@@ -26,6 +27,14 @@ function createDiscardTestDb(): DatabaseSync {
       conversation_id TEXT,
       summary TEXT NOT NULL,
       created_at TEXT NOT NULL
+    );
+    CREATE TABLE memories (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      target_bot_id TEXT,
+      source TEXT NOT NULL DEFAULT 'direct',
+      tier TEXT NOT NULL DEFAULT 'short_term',
+      source_message_ids TEXT NOT NULL DEFAULT '[]'
     );
   `);
   return db;
@@ -70,21 +79,45 @@ function seedMessage(
 }
 
 describe("discardLatestZenAssistantMessage", () => {
-  it("deletes the latest Zen assistant message and clears conversation summaries", () => {
+  it("deletes the latest Zen assistant and every revocable derivative of it", () => {
     const db = createDiscardTestDb();
     seedConversation(db);
     seedMessage(db, {
-      id: "user-later",
+      id: "user-before",
       role: "user",
-      createdAt: "2026-01-01T00:00:02.000Z",
+      createdAt: "2026-01-01T00:00:01.000Z",
     });
     seedMessage(db, {
       id: "assistant-latest",
-      createdAt: "2026-01-01T00:00:01.000Z",
+      createdAt: "2026-01-01T00:00:02.000Z",
     });
     db.prepare(
       "INSERT INTO memory_summaries (id, user_id, conversation_id, summary, created_at) VALUES (?, ?, ?, ?, ?)"
     ).run("summary-1", "user-1", "conv-1", "old summary", "2026-01-01T00:00:03.000Z");
+    const insertMemory = db.prepare(
+      "INSERT INTO memories (id, user_id, source, tier, source_message_ids) VALUES (?, ?, ?, ?, ?)",
+    );
+    insertMemory.run(
+      "linked-inferred",
+      "user-1",
+      "inferred",
+      "short_term",
+      JSON.stringify(["assistant-latest"]),
+    );
+    insertMemory.run(
+      "linked-long-term",
+      "user-1",
+      "direct",
+      "long_term",
+      JSON.stringify(["assistant-latest"]),
+    );
+    insertMemory.run(
+      "unlinked",
+      "user-1",
+      "inferred",
+      "short_term",
+      JSON.stringify(["another-message"]),
+    );
 
     const result = discardLatestZenAssistantMessage(
       db,
@@ -93,18 +126,30 @@ describe("discardLatestZenAssistantMessage", () => {
       "2026-01-01T00:00:04.000Z"
     );
 
-    assert.deepEqual(result, { conversationId: "conv-1", conversationMode: "zen" });
+    assert.deepEqual(result, {
+      conversationId: "conv-1",
+      conversationMode: "zen",
+      deletedSummaryIds: ["summary-1"],
+    });
     assert.equal(
       (db.prepare("SELECT COUNT(*) AS n FROM messages WHERE id = ?").get("assistant-latest") as { n: number }).n,
       0
     );
     assert.equal(
-      (db.prepare("SELECT COUNT(*) AS n FROM messages WHERE id = ?").get("user-later") as { n: number }).n,
+      (db.prepare("SELECT COUNT(*) AS n FROM messages WHERE id = ?").get("user-before") as { n: number }).n,
       1
     );
     assert.equal(
       (db.prepare("SELECT COUNT(*) AS n FROM memory_summaries WHERE conversation_id = ?").get("conv-1") as { n: number }).n,
       0
+    );
+    assert.deepEqual(
+      (
+        db.prepare("SELECT id FROM memories ORDER BY id ASC").all() as Array<{
+          id: string;
+        }>
+      ).map((row) => row.id),
+      ["linked-long-term", "unlinked"],
     );
     assert.equal(
       (db.prepare("SELECT updated_at FROM conversations WHERE id = ?").get("conv-1") as { updated_at: string }).updated_at,
@@ -120,7 +165,7 @@ describe("discardLatestZenAssistantMessage", () => {
 
     assert.throws(
       () => discardLatestZenAssistantMessage(db, "user-1", "assistant-old"),
-      /Only the latest Zen assistant message/
+      /Only the latest Chat or Zen assistant message/
     );
   });
 
@@ -145,7 +190,7 @@ describe("discardLatestZenAssistantMessage", () => {
     );
     assert.throws(
       () => discardLatestZenAssistantMessage(db, "user-1", "sandbox-assistant"),
-      /Only Zen assistant messages/
+      /Only Chat or Zen assistant messages/
     );
   });
 

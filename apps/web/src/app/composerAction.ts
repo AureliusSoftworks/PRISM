@@ -16,7 +16,12 @@ export function splitComposerAction(value: string): ComposerActionParts {
 }
 
 export function normalizeComposerAction(value: string): string {
-  return value.replace(/\*/gu, "").replace(/\s+/gu, " ").trimStart();
+  return value
+    .normalize("NFC")
+    .replace(/\s/gu, " ")
+    .replace(/[^\p{L}\p{M} ]/gu, "")
+    .replace(/ +/gu, " ")
+    .trimStart();
 }
 
 /** Serializes action and speech through the canonical text all existing parsers consume. */
@@ -41,4 +46,11 @@ export function serializeComposerActionDraft(
 
 export function composerMainValueActivatesActionInput(value: string): boolean {
   return value === "**";
+}
+
+/** Returns the submitted action only when the speech field is empty. */
+export function composerActionOnlySubmission(value: string): string | null {
+  const parts = splitComposerAction(value);
+  const action = parts.action.trim();
+  return action && !parts.message.trim() ? action : null;
 }

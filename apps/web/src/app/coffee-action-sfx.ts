@@ -1,15 +1,56 @@
-import { extractStageDirectionCues } from "./botMention.ts";
+import {
+  extractStageDirectionCues,
+  extractStageDirections,
+  getBotMentionDisplayText,
+} from "./botMention.ts";
+import {
+  replayAudioMasterCaptureActive,
+  routeAudioElementToPrismOutput,
+} from "./replayAudioMasterCapture.ts";
+import {
+  resolveActionSfxPackPlayback,
+} from "./action-sfx-pack-client.ts";
+import {
+  resolveBodilyActionSfxPlayback,
+  resolveLegacyBodilyActionSfxPlayback,
+} from "./corporality-action-sfx.ts";
+import {
+  playBodilyFoleyThroughVoiceBus,
+  stopBodilyFoleyThroughVoiceBus,
+} from "./voiceEffects.ts";
+import {
+  botPowerIsBreathActionSfxKindV1,
+  botPowerIsBreathlessV1,
+  isActionSfxPackKind,
+  normalizeBotAudioVoiceProfileV1,
+  normalizeCorporality,
+  type ActionSfxPackKind,
+  type ActionSfxPackOwnerKind,
+  type BotAudioVoiceProfileV1,
+} from "@localai/shared";
 
 export type CoffeeActionSfxKind =
   | "cup_set_down"
   | "coffee_pour"
   | "spoon_stir"
   | "table_knock"
-  | BundledCoffeeActionSfxKind;
+  | BundledCoffeeActionSfxKind
+  | VocalActionSfxKind;
 
 export type BundledCoffeeActionSfxKind = "fart" | "burp" | "cough";
 
-export type CoffeeActionReactionKind = "nod" | BundledCoffeeActionSfxKind;
+/** Pack-only vocal Foley — silent until a local action pack exists. */
+export type VocalActionSfxKind = "laugh" | "sigh" | "gasp" | "throat_clear";
+
+/** Fancy action kinds that may play pack (vocal) or corporality (bodily). */
+export type PackPlayableActionSfxKind =
+  | ActionSfxPackKind
+  | BundledCoffeeActionSfxKind;
+
+export type CoffeeActionReactionKind =
+  | "nod"
+  | BundledCoffeeActionSfxKind
+  | VocalActionSfxKind;
 
 export interface CoffeeActionReactionPlan {
   kind: CoffeeActionReactionKind;
@@ -22,8 +63,14 @@ export interface CoffeeActionSfxPlan {
 }
 
 export interface BundledActionSfxPlan {
-  kind: BundledCoffeeActionSfxKind;
+  kind: PackPlayableActionSfxKind;
   revealAtDisplayLength: number;
+}
+
+export interface BundledActionSfxCharacterAlignment {
+  characters: string[];
+  characterStartTimesSeconds: number[];
+  characterEndTimesSeconds: number[];
 }
 
 export interface CoffeeActionSfxGateState {
@@ -97,14 +144,31 @@ export function coffeeActionReactionKindForAction(
     return "burp";
   }
   if (
-    /\b(?:cough(?:s|ed|ing)?|hack(?:s|ed|ing)?|ahem(?:s|ed|ing)?)\b/u.test(
-      normalized,
-    ) ||
     /\bclear(?:s|ed|ing)?\s+(?:(?:his|her|their|its)\s+)?throat\b/u.test(
       normalized,
     )
   ) {
+    return "throat_clear";
+  }
+  if (
+    /\b(?:cough(?:s|ed|ing)?|hack(?:s|ed|ing)?|ahem(?:s|ed|ing)?)\b/u.test(
+      normalized,
+    )
+  ) {
     return "cough";
+  }
+  if (
+    /\b(?:laugh(?:s|ed|ing)?|chuckl(?:e|es|ed|ing)|giggle(?:s|d|ing)?|snicker(?:s|ed|ing)?)\b/u.test(
+      normalized,
+    )
+  ) {
+    return "laugh";
+  }
+  if (/\bsigh(?:s|ed|ing)?\b/u.test(normalized)) {
+    return "sigh";
+  }
+  if (/\bgasp(?:s|ed|ing)?\b/u.test(normalized)) {
+    return "gasp";
   }
   if (
     /\bnod(?:s|ded|ding)?\b/u.test(normalized) ||
@@ -134,10 +198,160 @@ export function buildCoffeeActionReactionPlan(
   return null;
 }
 
+function comparableActionSfxCharacters(value: string): string[] {
+  return Array.from(value.toLocaleLowerCase()).filter((character) =>
+    /[\p{L}\p{N}]/u.test(character),
+  );
+}
+
+function alignedActionSfxCueAtMs(
+  prefix: string,
+  durationMs: number,
+  alignment: BundledActionSfxCharacterAlignment | null | undefined,
+): number | null {
+  if (!alignment) return null;
+  const count = alignment.characters.length;
+  if (
+    count === 0 ||
+    count !== alignment.characterStartTimesSeconds.length ||
+    count !== alignment.characterEndTimesSeconds.length
+  ) {
+    return null;
+  }
+  const target = comparableActionSfxCharacters(prefix);
+  if (target.length === 0) return 0;
+  let targetIndex = 0;
+  let matchedAlignmentIndex = -1;
+  let previousEndSeconds = 0;
+  for (let index = 0; index < count; index += 1) {
+    const startSeconds = alignment.characterStartTimesSeconds[index];
+    const endSeconds = alignment.characterEndTimesSeconds[index];
+    if (
+      typeof startSeconds !== "number" ||
+      typeof endSeconds !== "number" ||
+      !Number.isFinite(startSeconds) ||
+      !Number.isFinite(endSeconds) ||
+      startSeconds < 0 ||
+      endSeconds < startSeconds ||
+      endSeconds < previousEndSeconds
+    ) {
+      return null;
+    }
+    previousEndSeconds = endSeconds;
+    const character = alignment.characters[index] ?? "";
+    if (!/[\p{L}\p{N}]/u.test(character)) continue;
+    if (character.toLocaleLowerCase() !== target[targetIndex]) return null;
+    targetIndex += 1;
+    matchedAlignmentIndex = index;
+    if (targetIndex >= target.length) break;
+  }
+  if (targetIndex < target.length || matchedAlignmentIndex < 0) return null;
+  const alignmentDurationSeconds = alignment.characterEndTimesSeconds.at(-1);
+  const cueEndSeconds =
+    alignment.characterEndTimesSeconds[matchedAlignmentIndex];
+  if (
+    typeof alignmentDurationSeconds !== "number" ||
+    typeof cueEndSeconds !== "number" ||
+    alignmentDurationSeconds <= 0
+  ) {
+    return null;
+  }
+  return Math.max(
+    0,
+    Math.min(
+      durationMs,
+      Math.round(
+        cueEndSeconds * 1_000 * (durationMs / (alignmentDurationSeconds * 1_000)),
+      ),
+    ),
+  );
+}
+
+/**
+ * Resolves a bundled cue onto the utterance clock. Provider character timing
+ * wins so an inline cue fires after the preceding word; a proportional clock
+ * keeps silent caption fallbacks and replays deterministic.
+ */
+export function bundledActionSfxCueAtMs(
+  messageText: string,
+  durationMs: number,
+  alignment?: BundledActionSfxCharacterAlignment | null,
+): number | null {
+  const plan = buildBundledActionSfxPlan(messageText);
+  if (!plan) return null;
+  const normalizedDurationMs = Math.max(1, Math.round(durationMs));
+  if (plan.revealAtDisplayLength <= 0) return 0;
+  const displayText = getBotMentionDisplayText(
+    extractStageDirections(messageText).mainText,
+  );
+  const displayCharacters = Array.from(displayText);
+  if (displayCharacters.length === 0) return 0;
+  const prefix = displayCharacters
+    .slice(0, plan.revealAtDisplayLength)
+    .join("")
+    .trimEnd();
+  const alignedCueAtMs = alignedActionSfxCueAtMs(
+    prefix,
+    normalizedDurationMs,
+    alignment,
+  );
+  if (alignedCueAtMs !== null) return alignedCueAtMs;
+  return Math.max(
+    0,
+    Math.min(
+      normalizedDurationMs,
+      Math.round(
+        normalizedDurationMs *
+          (plan.revealAtDisplayLength / displayCharacters.length),
+      ),
+    ),
+  );
+}
+
 export function isBundledCoffeeActionSfxKind(
   kind: CoffeeActionSfxKind,
 ): kind is BundledCoffeeActionSfxKind {
   return kind === "fart" || kind === "burp" || kind === "cough";
+}
+
+export function isVocalActionSfxKind(
+  kind: CoffeeActionSfxKind,
+): kind is VocalActionSfxKind {
+  return (
+    kind === "laugh" ||
+    kind === "sigh" ||
+    kind === "gasp" ||
+    kind === "throat_clear"
+  );
+}
+
+export function isPackPlayableActionSfxKind(
+  kind: CoffeeActionSfxKind,
+): kind is PackPlayableActionSfxKind {
+  return isActionSfxPackKind(kind) || isBundledCoffeeActionSfxKind(kind);
+}
+
+export function authoredLocalLaughOwnsActionSfx(args: {
+  kind: CoffeeActionSfxKind;
+  voiceProfile?: BotAudioVoiceProfileV1 | null;
+  voiceEngineUsed?: string | null;
+}): boolean {
+  if (args.kind !== "laugh" || !args.voiceProfile) return false;
+  const profile = normalizeBotAudioVoiceProfileV1(args.voiceProfile);
+  if (!profile.localLaughSyllable) return false;
+  if (typeof args.voiceEngineUsed !== "string") return false;
+  // Premium opted the authored recipe in, so the provider take already says
+  // the laugh. Letting the pack clip fire too would laugh twice over itself.
+  if (profile.premiumLaughEnabled === true) {
+    if (/^elevenlabs(?:-|$)/u.test(args.voiceEngineUsed)) return true;
+  }
+  return (
+    profile.localVoiceSource === "portable" &&
+    !profile.systemVoiceName &&
+    profile.localEnginePreference !== "voice-plus" &&
+    /^builtin(?:-|$)/u.test(args.voiceEngineUsed) &&
+    args.voiceEngineUsed !== "builtin-babble"
+  );
 }
 
 export function coffeeActionSfxKindForAction(
@@ -202,12 +416,12 @@ export function buildCoffeeActionSfxPlan(
   return null;
 }
 
-/** Shared bodily-action foley that is safe to play outside Coffee. */
+/** Shared bodily/vocal-action foley that is safe to play outside Coffee. */
 export function buildBundledActionSfxPlan(
   messageText: string,
 ): BundledActionSfxPlan | null {
   const plan = buildCoffeeActionSfxPlan(messageText);
-  if (!plan || !isBundledCoffeeActionSfxKind(plan.kind)) return null;
+  if (!plan || !isPackPlayableActionSfxKind(plan.kind)) return null;
   return {
     kind: plan.kind,
     revealAtDisplayLength: plan.revealAtDisplayLength,
@@ -238,7 +452,7 @@ export function coffeeActionSfxIsEligible(args: {
   elevenLabsKeyAvailable: boolean;
 }): boolean {
   if (!bundledActionSfxIsEligible(args)) return false;
-  if (isBundledCoffeeActionSfxKind(args.kind)) return true;
+  if (isPackPlayableActionSfxKind(args.kind)) return true;
   return (
     args.coffeeProvider !== "local" &&
     !args.offlineProtectedBotPresent &&
@@ -273,10 +487,28 @@ export function coffeeActionSfxGate(args: {
   };
 }
 
+/** Soft release when a new foley starts or the scene tears down. */
+export const COFFEE_ACTION_SFX_RELEASE_FADE_MS = 180;
+
+/** Bodily foley that should drive the default CRT “oh” mouth while it plays. */
+export function coffeeActionSfxDrivesOhMouth(
+  kind: CoffeeActionReactionKind | CoffeeActionSfxKind | null | undefined,
+): boolean {
+  return (
+    kind === "fart" ||
+    kind === "burp" ||
+    kind === "cough" ||
+    kind === "laugh" ||
+    kind === "gasp" ||
+    kind === "throat_clear"
+  );
+}
+
 const preparedClips = new Map<CoffeeActionSfxKind, Blob>();
 const pendingClips = new Map<CoffeeActionSfxKind, Promise<void>>();
 let activeAudio: HTMLAudioElement | null = null;
 let activeAudioUrl: string | null = null;
+let activeAudioOutputCleanup: (() => void) | null = null;
 
 export function prefetchCoffeeActionSfx(args: {
   kind: CoffeeActionSfxKind;
@@ -286,6 +518,7 @@ export function prefetchCoffeeActionSfx(args: {
   if (
     typeof window === "undefined" ||
     isBundledCoffeeActionSfxKind(args.kind) ||
+    isVocalActionSfxKind(args.kind) ||
     preparedClips.has(args.kind) ||
     pendingClips.has(args.kind)
   ) {
@@ -330,30 +563,158 @@ export function resolveBundledCoffeeActionSfxPlayback(
   return { source, playbackRate };
 }
 
+function stableActionSfxUnit(seed: string, index: number): number {
+  let hash = 2166136261;
+  const value = `${seed}:${index}`;
+  for (let offset = 0; offset < value.length; offset += 1) {
+    hash ^= value.charCodeAt(offset);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0) / 0xffffffff;
+}
+
+export function bundledCoffeeActionSfxPlaybackForSeed(
+  kind: BundledCoffeeActionSfxKind,
+  seed: string,
+): { source: string; playbackRate: number } {
+  let index = 0;
+  return resolveBundledCoffeeActionSfxPlayback(
+    kind,
+    () => stableActionSfxUnit(seed, index++),
+  );
+}
+
 export async function playPreparedCoffeeActionSfx(args: {
   kind: CoffeeActionSfxKind;
   voiceVolume: number;
+  seed?: string;
+  ownerKind?: ActionSfxPackOwnerKind;
+  ownerId?: string | null;
+  /** Pack-owner Ready Powers; breathless refuses sigh/gasp. */
+  powers?: unknown;
+  /** Identity corporality continuum (0 artificial → 1 ethereal). */
+  corporality?: number | null;
+  /** Voice profile used to color bodily Foley through the vocal FX bus. */
+  voiceProfile?: BotAudioVoiceProfileV1 | null;
+  /** Resolved speech engine; authored Instant laugh owns eligible laugh cues. */
+  voiceEngineUsed?: string | null;
+  voiceEffectsEnabled?: boolean;
 }): Promise<boolean> {
-  const bundledPlayback = isBundledCoffeeActionSfxKind(args.kind)
-    ? resolveBundledCoffeeActionSfxPlayback(args.kind)
-    : null;
-  const clip = bundledPlayback ? null : preparedClips.get(args.kind);
+  if (authoredLocalLaughOwnsActionSfx(args)) return false;
   if (
-    (!clip && !bundledPlayback) ||
+    botPowerIsBreathActionSfxKindV1(args.kind) &&
+    botPowerIsBreathlessV1(args.powers)
+  ) {
+    return false;
+  }
+  let packPlayback: { source: string; variantIndex: number } | null = null;
+  // Vocal packs only — bodily gags never query Action SFX packs.
+  if (
+    typeof window !== "undefined" &&
+    isVocalActionSfxKind(args.kind) &&
+    args.ownerKind
+  ) {
+    try {
+      packPlayback = await resolveActionSfxPackPlayback({
+        origin: window.location.origin,
+        ownerKind: args.ownerKind,
+        ownerId: args.ownerId,
+        kind: args.kind,
+      });
+    } catch {
+      packPlayback = null;
+    }
+  }
+
+  const bodilyKind = isBundledCoffeeActionSfxKind(args.kind)
+    ? args.kind
+    : null;
+  if (bodilyKind) {
+    const corporality = normalizeCorporality(
+      args.corporality ??
+        (args.voiceProfile
+          ? normalizeBotAudioVoiceProfileV1(args.voiceProfile).corporality
+          : undefined),
+    );
+    const resolved =
+      resolveBodilyActionSfxPlayback({
+        kind: bodilyKind,
+        corporality,
+        random: args.seed
+          ? (() => {
+              let index = 0;
+              return () => stableActionSfxUnit(args.seed!, index++);
+            })()
+          : Math.random,
+      }) ??
+      resolveLegacyBodilyActionSfxPlayback(
+        bodilyKind,
+        args.seed
+          ? (() => {
+              let index = 0;
+              return () => stableActionSfxUnit(args.seed!, index++);
+            })()
+          : Math.random,
+      );
+
+    stopCoffeeActionSfx(COFFEE_ACTION_SFX_RELEASE_FADE_MS);
+    const profile = normalizeBotAudioVoiceProfileV1(
+      args.voiceProfile ?? undefined,
+    );
+    try {
+      return await playBodilyFoleyThroughVoiceBus({
+        urls: resolved.urls,
+        gains: resolved.gains,
+        profile,
+        effectsEnabled: args.voiceEffectsEnabled !== false,
+        voiceVolume: args.voiceVolume,
+        playbackRate: resolved.playbackRate,
+      });
+    } catch {
+      // Fall through to HTMLAudioElement legacy path below.
+    }
+  }
+
+  const bundledPlayback =
+    !packPlayback && bodilyKind
+      ? args.seed
+        ? bundledCoffeeActionSfxPlaybackForSeed(bodilyKind, args.seed)
+        : resolveBundledCoffeeActionSfxPlayback(bodilyKind)
+      : null;
+  // Vocal Foley is pack-only — never fall through to prepared / sound-gen clips.
+  if (isVocalActionSfxKind(args.kind) && !packPlayback) {
+    return false;
+  }
+  const clip =
+    !packPlayback && !bundledPlayback ? preparedClips.get(args.kind) : null;
+  if (
+    (!clip && !bundledPlayback && !packPlayback) ||
     typeof Audio === "undefined" ||
     (clip && typeof URL.createObjectURL !== "function")
   ) {
     return false;
   }
-  stopCoffeeActionSfx();
-  const url = clip ? URL.createObjectURL(clip) : bundledPlayback!.source;
+  // Fade the previous clip instead of hard-cutting mid-waveform.
+  stopCoffeeActionSfx(COFFEE_ACTION_SFX_RELEASE_FADE_MS);
+  const url = packPlayback
+    ? packPlayback.source
+    : clip
+      ? URL.createObjectURL(clip)
+      : bundledPlayback!.source;
   const audio = new Audio(url);
+  const outputCleanup = routeAudioElementToPrismOutput(audio);
+  if (!outputCleanup && replayAudioMasterCaptureActive()) {
+    if (clip) URL.revokeObjectURL(url);
+    return false;
+  }
+  activeAudioOutputCleanup = outputCleanup;
   activeAudio = audio;
   activeAudioUrl = clip ? url : null;
   audio.preload = "auto";
-  audio.volume = bundledPlayback
-    ? Math.min(0.48, Math.max(0, args.voiceVolume) * 0.42)
-    : Math.min(0.24, Math.max(0, args.voiceVolume) * 0.22);
+  audio.volume =
+    packPlayback || bundledPlayback
+      ? Math.min(0.48, Math.max(0, args.voiceVolume) * 0.42)
+      : Math.min(0.24, Math.max(0, args.voiceVolume) * 0.22);
   if (bundledPlayback) {
     audio.playbackRate = bundledPlayback.playbackRate;
     audio.preservesPitch = false;
@@ -362,7 +723,12 @@ export async function playPreparedCoffeeActionSfx(args: {
     ).webkitPreservesPitch = false;
   }
   const release = (): void => {
-    if (activeAudio === audio) activeAudio = null;
+    if (activeAudio !== audio) return;
+    activeAudio = null;
+    outputCleanup?.();
+    if (activeAudioOutputCleanup === outputCleanup) {
+      activeAudioOutputCleanup = null;
+    }
     if (clip) {
       if (activeAudioUrl === url) activeAudioUrl = null;
       URL.revokeObjectURL(url);
@@ -379,9 +745,47 @@ export async function playPreparedCoffeeActionSfx(args: {
   }
 }
 
-export function stopCoffeeActionSfx(): void {
-  activeAudio?.pause();
+function releaseCoffeeActionAudioElement(
+  audio: HTMLAudioElement,
+  outputCleanup: (() => void) | null,
+  url: string | null,
+): void {
+  audio.pause();
+  outputCleanup?.();
+  if (url) URL.revokeObjectURL(url);
+}
+
+/** Stop active action foley. Prefer a short fade so bodily cues are not clipped. */
+export function stopCoffeeActionSfx(
+  fadeMs: number = COFFEE_ACTION_SFX_RELEASE_FADE_MS,
+): void {
+  stopBodilyFoleyThroughVoiceBus();
+  const audio = activeAudio;
+  if (!audio) {
+    activeAudioOutputCleanup?.();
+    activeAudioOutputCleanup = null;
+    if (activeAudioUrl) URL.revokeObjectURL(activeAudioUrl);
+    activeAudioUrl = null;
+    return;
+  }
+  // Detach from the singleton so a new clip can start while this one fades.
   activeAudio = null;
-  if (activeAudioUrl) URL.revokeObjectURL(activeAudioUrl);
+  const outputCleanup = activeAudioOutputCleanup;
+  activeAudioOutputCleanup = null;
+  const url = activeAudioUrl;
   activeAudioUrl = null;
+  const durationMs = Math.max(0, Math.round(fadeMs));
+  if (audio.paused || durationMs <= 0 || audio.volume <= 0) {
+    releaseCoffeeActionAudioElement(audio, outputCleanup, url);
+    return;
+  }
+  const initialVolume = audio.volume;
+  const startedAt = Date.now();
+  const fadeTimer = globalThis.setInterval(() => {
+    const progress = Math.min(1, (Date.now() - startedAt) / durationMs);
+    audio.volume = initialVolume * (1 - progress);
+    if (progress < 1) return;
+    globalThis.clearInterval(fadeTimer);
+    releaseCoffeeActionAudioElement(audio, outputCleanup, url);
+  }, 20);
 }

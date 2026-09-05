@@ -1,0 +1,55 @@
+.jobs {
+  display: grid;
+  gap: 7px;
+  margin: 10px 0 4px;
+  padding: 0;
+  list-style: none;
+}
+
+.jobs li {
+  display: grid;
+  grid-template-columns: 8px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.75rem;
+}
+
+.jobs li > span {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: rgba(174, 167, 194, 0.45);
+}
+
+.jobs li[data-status="generating"] > span,
+.jobs li[data-status="attaching"] > span {
+  background: #44d6d9;
+  box-shadow: 0 0 12px rgba(68, 214, 217, 0.85);
+}
+
+.jobs li[data-status="succeeded"] > span {
+  background: #86df72;
+}
+
+.jobs li[data-status="failed"] > span {
+  background: #ff6b82;
+}
+
+.jobs small {
+  color: rgba(235, 232, 248, 0.56);
+}
+
+.error {
+  margin: 8px 0 0;
+  border: 1px solid rgba(255, 96, 123, 0.3);
+  border-radius: 10px;
+  padding: 8px 10px;
+  color: #ff9bad;
+  background: rgba(133, 25, 48, 0.17);
+  font-size: 0.72rem;
+  line-height: 1.4;
+}
+
+:global([data-theme="light"]) .jobs small {
+  color: rgba(42, 35, 65, 0.55);
+}

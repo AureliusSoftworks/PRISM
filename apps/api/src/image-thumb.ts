@@ -9,6 +9,7 @@ import {
 } from "node:fs";
 import { dirname } from "node:path";
 import sharp from "sharp";
+import { assertRefractionActive } from "./refraction-cancellation.ts";
 import {
   readGeneratedImageBytes,
   resolveAbsoluteUnderDataRoot,
@@ -17,6 +18,10 @@ import {
 
 /** Longest edge for inline chat / gallery tiles (decode cost vs clarity on hi-DPI). */
 export const GENERATED_IMAGE_THUMB_MAX_EDGE_PX = 512;
+
+/** Deliberately small, replay-owned Signal image proxy. */
+export const SIGNAL_REPLAY_IMAGE_PROXY_MAX_EDGE_PX = 128;
+export const SIGNAL_REPLAY_IMAGE_PROXY_QUALITY = 40;
 
 /**
  * Downscale arbitrary raster bytes (typically PNG) to a bounded WebP thumbnail.
@@ -29,6 +34,36 @@ export async function encodeWebpThumbFromRasterBytes(inputBytes: Buffer): Promis
     })
     .webp({ quality: 82 })
     .toBuffer();
+}
+
+/**
+ * Encodes the durable, intentionally degraded image used by new Signal
+ * replays. The source is normalized PNG bytes, so WebP preserves transparency
+ * for physical items while dropping EXIF and other source metadata.
+ */
+export async function encodeSignalReplayImageProxyFromRasterBytes(
+  inputBytes: Buffer,
+): Promise<{ bytes: Buffer; width: number; height: number }> {
+  const encoded = await sharp(inputBytes)
+    .rotate()
+    .resize(
+      SIGNAL_REPLAY_IMAGE_PROXY_MAX_EDGE_PX,
+      SIGNAL_REPLAY_IMAGE_PROXY_MAX_EDGE_PX,
+      {
+        fit: "inside",
+        withoutEnlargement: true,
+      },
+    )
+    .webp({
+      quality: SIGNAL_REPLAY_IMAGE_PROXY_QUALITY,
+      alphaQuality: SIGNAL_REPLAY_IMAGE_PROXY_QUALITY,
+    })
+    .toBuffer({ resolveWithObject: true });
+  return {
+    bytes: encoded.data,
+    width: encoded.info.width,
+    height: encoded.info.height,
+  };
 }
 
 /**
@@ -59,36 +94,34 @@ export async function tryGenerateThumbAfterPngWrite(localPngRelPath: string): Pr
     const absolutePngPath = resolveAbsoluteUnderDataRoot(localPngRelPath);
     const pngBytes = readGeneratedImageBytes(localPngRelPath);
     const webp = await encodeWebpThumbFromRasterBytes(pngBytes);
-    if (!existsSync(absolutePngPath)) return;
-    const thumbRel = thumbWebpRelativePathFromPngRelativePath(localPngRelPath);
-    writeThumbWebpAtomically(resolveAbsoluteUnderDataRoot(thumbRel), webp);
-  } catch (error) {
-    console.warn(
-      "[image-thumb] post-write thumb failed:",
-      error instanceof Error ? error.message : error
-    );
+    assertRefractionActive();
+    if (existsSync(absolutePngPath)) {
+      const thumbRel = thumbWebpRelativePathFromPngRelativePath(localPngRelPath);
+      writeThumbWebpAtomically(resolveAbsoluteUnderDataRoot(thumbRel), webp);
+    }
+  } catch {
+    console.warn("[image-thumb] post-write thumbnail failed.");
   }
+  assertRefractionActive();
 }
 
 /**
- * Returns existing thumb bytes or creates the sidecar from the PNG and returns those bytes.
+ * Returns existing thumb bytes or creates the sidecar from the primary and returns those bytes.
+ * Primary may be hot PNG or cold full-res WebP.
  */
 export async function readOrCreateThumbBytes(
-  localPngRelPath: string,
+  localPrimaryRelPath: string,
   encode: (inputBytes: Buffer) => Promise<Buffer> = encodeWebpThumbFromRasterBytes,
 ): Promise<Buffer> {
-  const thumbRel = thumbWebpRelativePathFromPngRelativePath(localPngRelPath);
+  const thumbRel = thumbWebpRelativePathFromPngRelativePath(localPrimaryRelPath);
   const absThumb = resolveAbsoluteUnderDataRoot(thumbRel);
   if (existsSync(absThumb)) {
     return readFileSync(absThumb);
   }
-  const absPng = resolveAbsoluteUnderDataRoot(localPngRelPath);
-  const pngBytes = readGeneratedImageBytes(localPngRelPath);
-  const webp = await encode(pngBytes);
-  // No JavaScript cleanup can interleave between this synchronous existence
-  // check and the atomic write. If Asset Cleanup moved the PNG while encoding,
-  // do not recreate an orphan thumbnail in generated-images.
-  if (!existsSync(absPng)) {
+  const absPrimary = resolveAbsoluteUnderDataRoot(localPrimaryRelPath);
+  const primaryBytes = readGeneratedImageBytes(localPrimaryRelPath);
+  const webp = await encode(primaryBytes);
+  if (!existsSync(absPrimary)) {
     throw new Error("Generated image was removed while creating its thumbnail.");
   }
   writeThumbWebpAtomically(absThumb, webp);

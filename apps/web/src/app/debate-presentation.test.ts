@@ -1,0 +1,786 @@
+import assert from "node:assert/strict";
+import { describe, it } from "node:test";
+import {
+  DEBATE_EVIDENCE_LINK_PREFIX,
+  DEBATE_SOURCE_LINK_PREFIX,
+  DEBATE_UTTERANCE_PACE_BOOST,
+  debateActiveDurationLabel,
+  debateAudioEnabled,
+  debateEvidenceFromMarkdownHref,
+  debateEventCanOwnIdleCamera,
+  debateEvidenceUrlTransform,
+  debateEventSpokenLineDurationMs,
+  debateGavelAudioEnabled,
+  debateLiveElapsedDurationMs,
+  debateInitialProceedingsCursor,
+  debateAdoptProceedingsCursor,
+  debateInterruptedSpeechCaption,
+  debateRecessGalleryPhase,
+  debateResumeFloorReplayEvents,
+  debateWatchElapsedMs,
+  debateMarkdownSource,
+  debateGalleryReactingIndices,
+  debateGalleryReaction,
+  debateRevealDurationMs,
+  debateSourceFromMarkdownHref,
+  debateTranscriptIsAtLive,
+  debateTurnClockState,
+  debateTurnOwnerBotId,
+  debateUtterancePaceBoost,
+  debateVisibleContentAtProgress,
+  debateVisibleContentAtSpeechTime,
+  formatDebateElapsedDuration,
+  formatDebateSpokenDuration,
+} from "./debatePresentation.ts";
+
+const evidence = {
+  version: 1 as const,
+  notes: "",
+  frozenAt: "2026-07-28T00:00:00.000Z",
+  sources: [
+    {
+      id: "frozen-1",
+      title: "Frozen source",
+      url: "https://example.com/source",
+      snippet: "Evidence.",
+      publishedAt: null,
+    },
+  ],
+  exhibits: [
+    {
+      id: "exhibit-1",
+      adjective: "Rusty",
+      object: "spoon",
+      title: "Rusty spoon",
+      observation: "The handle is bent.",
+      emoji: "🥄",
+      visualKind: "emoji" as const,
+      imageId: null,
+      createdBy: "player" as const,
+    },
+  ],
+};
+
+describe("Debate live presentation", () => {
+  it("uses a calmer bounded reveal cadence", () => {
+    assert.equal(debateRevealDurationMs(""), 0);
+    assert.equal(debateRevealDurationMs("Short."), 1_400);
+    assert.equal(
+      debateRevealDurationMs(
+        Array.from({ length: 100 }, (_, index) => `word${index}`).join(" "),
+      ),
+      33_000,
+    );
+    assert.equal(
+      debateRevealDurationMs(
+        Array.from({ length: 1_000 }, (_, index) => `word${index}`).join(" "),
+      ),
+      60_000,
+    );
+  });
+
+  it("formats completed proceeding runtime as a rounded active duration", () => {
+    assert.equal(debateActiveDurationLabel(1_400), "~1 min active");
+    assert.equal(debateActiveDurationLabel(754_000), "~13 min active");
+  });
+
+  it("advances the public floor clock at one second per presented second", () => {
+    const event = {
+      version: 1 as const,
+      id: "timed-speech",
+      sequence: 2,
+      phase: "opening" as const,
+      stepKey: "opening_for",
+      kind: "speech" as const,
+      speakerKind: "advocate" as const,
+      speakerBotId: "for",
+      sideId: "for" as const,
+      content: "A deliberately long opening.",
+      sourceIds: [],
+      timing: {
+        limitMs: 20_000,
+        estimatedDurationMs: 25_000,
+        overtimeMs: 5_000,
+        status: "overtime" as const,
+      },
+      createdAt: "2026-07-29T00:00:00.000Z",
+    };
+    assert.deepEqual(
+      debateTurnClockState(event, {
+        elapsedMs: 4_000,
+        durationMs: 5_000,
+      }),
+      {
+        elapsedMs: 4_000,
+        limitMs: 20_000,
+        progress: 0.2,
+        remainingMs: 16_000,
+        status: "running",
+        timing: event.timing,
+      },
+    );
+    assert.equal(
+      debateTurnClockState(event, {
+        elapsedMs: 20_001,
+        durationMs: 25_000,
+      })?.status,
+      "overtime",
+    );
+    assert.equal(
+      debateTurnClockState({ ...event, timing: undefined }, null),
+      null,
+    );
+  });
+
+  it("freezes a mid-speech Pause cutoff with an em dash", () => {
+    assert.equal(
+      debateInterruptedSpeechCaption("And that is why I like to do the ch"),
+      "And that is why I like to do the ch—",
+    );
+    assert.equal(
+      debateInterruptedSpeechCaption("Hold that thought—"),
+      "Hold that thought—",
+    );
+    assert.equal(debateInterruptedSpeechCaption("   "), "—");
+  });
+
+  it("keeps a setting-independent duration for spoken and held-silence lines", () => {
+    const event = {
+      version: 1 as const,
+      id: "spoken-line",
+      sequence: 3,
+      phase: "opening" as const,
+      stepKey: "moderator_intro",
+      kind: "intro" as const,
+      speakerKind: "moderator" as const,
+      speakerBotId: "moderator",
+      sideId: null,
+      content: "Short.",
+      sourceIds: [],
+      createdAt: "2026-08-01T00:00:00.000Z",
+    };
+    assert.equal(debateEventSpokenLineDurationMs(event), 1_400);
+    assert.equal(formatDebateSpokenDuration(1_400), "0:01.4");
+    assert.equal(
+      debateEventSpokenLineDurationMs({
+        ...event,
+        speakerKind: "system",
+      }),
+      null,
+    );
+    assert.equal(
+      debateEventSpokenLineDurationMs({ ...event, kind: "silence" }),
+      900,
+    );
+  });
+
+  it("tracks one overall live Debate clock and removes explicit recesses", () => {
+    const event = {
+      version: 1 as const,
+      id: "opening",
+      sequence: 1,
+      phase: "opening" as const,
+      stepKey: "moderator_intro",
+      kind: "intro" as const,
+      speakerKind: "moderator" as const,
+      speakerBotId: "moderator",
+      sideId: null,
+      content: "The Debate begins.",
+      sourceIds: [],
+      createdAt: "2026-08-01T00:00:00.000Z",
+    };
+    const session = {
+      status: "live" as const,
+      createdAt: "2026-08-01T00:00:00.000Z",
+      updatedAt: "2026-08-01T00:00:50.000Z",
+      completedAt: null,
+      events: [
+        event,
+        {
+          ...event,
+          id: "pause",
+          sequence: 2,
+          stepKey: "pause",
+          createdAt: "2026-08-01T00:00:10.000Z",
+        },
+        {
+          ...event,
+          id: "resume",
+          sequence: 3,
+          stepKey: "resume",
+          createdAt: "2026-08-01T00:00:30.000Z",
+        },
+      ],
+    };
+    const nowMs = Date.parse("2026-08-01T00:00:50.000Z");
+    assert.equal(debateLiveElapsedDurationMs(session, nowMs), 30_000);
+    assert.equal(formatDebateElapsedDuration(30_000), "0:30");
+    assert.equal(formatDebateElapsedDuration(3_723_000), "1:02:03");
+    assert.equal(
+      debateLiveElapsedDurationMs(
+        {
+          ...session,
+          status: "paused",
+          events: session.events.slice(0, 2),
+        },
+        nowMs,
+      ),
+      10_000,
+    );
+    assert.equal(
+      debateLiveElapsedDurationMs(
+        {
+          ...session,
+          status: "paused",
+          events: [event],
+          pausedAt: "2026-08-01T00:00:10.000Z",
+          pausedDurationMs: 0,
+        },
+        nowMs,
+      ),
+      10_000,
+    );
+    assert.equal(
+      debateLiveElapsedDurationMs(
+        {
+          ...session,
+          events: [event],
+          pausedAt: null,
+          pausedDurationMs: 20_000,
+        },
+        nowMs,
+      ),
+      30_000,
+    );
+  });
+
+  it("keeps Debate time count-up and Proceedings cursors spoiler-safe", () => {
+    assert.equal(
+      debateWatchElapsedMs({
+        accumulatedMs: 12_000,
+        runningSinceMs: 1_000,
+        nowMs: 4_000,
+      }),
+      15_000,
+    );
+    assert.equal(
+      debateWatchElapsedMs({
+        accumulatedMs: 12_000,
+        runningSinceMs: null,
+        nowMs: 99_000,
+      }),
+      12_000,
+    );
+    assert.equal(
+      debateInitialProceedingsCursor(
+        {
+          id: "debate-1",
+          status: "paused",
+          events: [
+            {
+              version: 1,
+              id: "a",
+              sequence: 0,
+              phase: "opening",
+              stepKey: "intro",
+              kind: "intro",
+              speakerKind: "moderator",
+              speakerBotId: "mod",
+              sideId: null,
+              content: "Welcome.",
+              sourceIds: [],
+              createdAt: "2026-08-01T00:00:00.000Z",
+            },
+            {
+              version: 1,
+              id: "b",
+              sequence: 1,
+              phase: "opening",
+              stepKey: "opening_for",
+              kind: "speech",
+              speakerKind: "advocate",
+              speakerBotId: "for",
+              sideId: "for",
+              content: "Held line.",
+              sourceIds: [],
+              createdAt: "2026-08-01T00:00:01.000Z",
+            },
+          ],
+          pausedPresentationEventId: "b",
+          playerRole: "spectator",
+          stepKey: "opening_for",
+          completedAt: null,
+        },
+        false,
+      ),
+      0,
+    );
+    assert.equal(
+      debateInitialProceedingsCursor(
+        {
+          id: "debate-2",
+          status: "paused",
+          events: [
+            {
+              version: 1,
+              id: "a",
+              sequence: 0,
+              phase: "opening",
+              stepKey: "intro",
+              kind: "intro",
+              speakerKind: "moderator",
+              speakerBotId: "mod",
+              sideId: null,
+              content: "Welcome.",
+              sourceIds: [],
+              createdAt: "2026-08-01T00:00:00.000Z",
+            },
+          ],
+          pausedPresentationEventId: null,
+          playerRole: "spectator",
+          stepKey: "completed",
+          completedAt: null,
+        },
+        true,
+      ),
+      null,
+    );
+  });
+
+  it("keeps Resume from dumping a baked Spectator Proceedings tail", () => {
+    const events = [0, 1, 2, 3, 4].map((sequence) => ({
+      version: 1 as const,
+      id: `e${sequence}`,
+      sequence,
+      phase: "opening" as const,
+      stepKey: sequence === 0 ? "intro" : "opening_for",
+      kind: sequence === 0 ? ("intro" as const) : ("speech" as const),
+      speakerKind:
+        sequence === 0 ? ("moderator" as const) : ("advocate" as const),
+      speakerBotId: sequence === 0 ? "mod" : "for",
+      sideId: sequence === 0 ? null : ("for" as const),
+      content: `Line ${sequence}.`,
+      sourceIds: [] as string[],
+      createdAt: "2026-08-01T00:00:00.000Z",
+    }));
+    const held = events[1]!;
+    const fullPrevious = {
+      id: "debate-resume",
+      events,
+    };
+    const resumedNext = {
+      id: "debate-resume",
+      status: "live" as const,
+      events: [
+        ...events,
+        {
+          ...events[0]!,
+          id: "resume-announce",
+          sequence: 5,
+          stepKey: "resume",
+          kind: "speech" as const,
+          speakerKind: "moderator" as const,
+          speakerBotId: "mod",
+          sideId: null,
+          content: "Welcome back.",
+          sourceIds: [] as string[],
+          createdAt: "2026-08-01T00:01:00.000Z",
+        },
+      ],
+      pausedPresentationEventId: held.id,
+      playerRole: "spectator" as const,
+      stepKey: "opening_for",
+      completedAt: null,
+    };
+    assert.equal(
+      debateAdoptProceedingsCursor(fullPrevious, resumedNext),
+      0,
+    );
+    assert.equal(
+      debateAdoptProceedingsCursor(null, {
+        ...resumedNext,
+        status: "live",
+        pausedPresentationEventId: null,
+        stepKey: "challenge_for_prompt",
+      }),
+      null,
+    );
+    assert.equal(
+      debateAdoptProceedingsCursor(
+        { id: "debate-resume", events: events.slice(0, 1) },
+        {
+          ...resumedNext,
+          events: events.slice(0, 2),
+        },
+      ),
+      0,
+    );
+  });
+
+  it("replays a held floor without repeating prior calls to order", () => {
+    const event = (
+      id: string,
+      sequence: number,
+      stepKey: string,
+      kind: "speech" | "judge_gavel" = "speech",
+    ) => ({
+      version: 1 as const,
+      id,
+      sequence,
+      phase: "opening" as const,
+      stepKey,
+      kind,
+      speakerKind: "moderator" as const,
+      speakerBotId: "mod",
+      sideId: null,
+      content: id,
+      sourceIds: [] as string[],
+      createdAt: "2026-08-01T00:00:00.000Z",
+    });
+    const events = [
+      event("intro", 0, "intro"),
+      event("held", 1, "opening_for"),
+      event("prior-resume", 2, "resume", "judge_gavel"),
+      event("heard-recess-request", 3, "participant_recess_request"),
+      event("unheard-floor", 4, "opening_against"),
+      event("return-pause", 5, "pause"),
+      event("current-resume", 6, "resume", "judge_gavel"),
+      event("audience-order", 7, "audience_order", "judge_gavel"),
+    ];
+
+    assert.deepEqual(
+      debateResumeFloorReplayEvents(events, 1).map(({ id }) => id),
+      ["intro", "held", "unheard-floor", "audience-order"],
+    );
+  });
+
+  it("keeps repeated recess audio causal through one resume ceremony", () => {
+    const phase = (
+      overrides: Partial<Parameters<typeof debateRecessGalleryPhase>[0]>,
+    ) =>
+      debateRecessGalleryPhase({
+        sessionId: "debate-resume",
+        status: "paused",
+        presenting: false,
+        resumeCeremonySessionId: null,
+        gavelArmed: false,
+        audienceOrderActive: false,
+        audienceOrderReturning: false,
+        juryCameraVisible: false,
+        ...overrides,
+      });
+
+    for (let cycle = 0; cycle < 3; cycle += 1) {
+      assert.deepEqual(
+        [
+          phase({}),
+          phase({
+            resumeCeremonySessionId: "debate-resume",
+            audienceOrderActive: true,
+          }),
+          phase({
+            resumeCeremonySessionId: "debate-resume",
+            audienceOrderActive: true,
+            audienceOrderReturning: true,
+          }),
+          phase({
+            status: "live",
+            presenting: true,
+          }),
+        ],
+        ["murmur", "order", "hush", null],
+      );
+    }
+  });
+
+  it("does not hush a recess announcement before its gavel", () => {
+    const phase = (gavelArmed: boolean) =>
+      debateRecessGalleryPhase({
+        sessionId: "debate-pause",
+        status: "paused",
+        presenting: true,
+        resumeCeremonySessionId: null,
+        gavelArmed,
+        audienceOrderActive: false,
+        audienceOrderReturning: false,
+        juryCameraVisible: false,
+      });
+
+    assert.equal(phase(false), "murmur");
+    assert.equal(phase(true), "hush");
+  });
+
+  it("does not let completed recess housekeeping reclaim the idle camera", () => {
+    const event = (
+      kind: "speech" | "judge_gavel" | "ballot",
+      stepKey: string,
+      speakerKind: "advocate" | "moderator" | "juror",
+    ) => ({ kind, stepKey, speakerKind });
+
+    assert.equal(
+      debateEventCanOwnIdleCamera(
+        event("judge_gavel", "resume", "moderator"),
+        false,
+      ),
+      false,
+    );
+    assert.equal(
+      debateEventCanOwnIdleCamera(
+        event("speech", "rebuttal_against", "advocate"),
+        false,
+      ),
+      true,
+    );
+    assert.equal(
+      debateEventCanOwnIdleCamera(
+        event("ballot", "jury_ballot_1", "juror"),
+        false,
+      ),
+      false,
+    );
+    assert.equal(
+      debateEventCanOwnIdleCamera(
+        event("ballot", "jury_ballot_1", "juror"),
+        true,
+      ),
+      true,
+    );
+  });
+
+  it("keeps Debate audio independent from optional voice effects", () => {
+    assert.equal(
+      debateAudioEnabled({ voiceMode: "english", voiceVolume: 0.8 }),
+      true,
+    );
+    assert.equal(
+      debateAudioEnabled({ voiceMode: "bottish", voiceVolume: 0.8 }),
+      true,
+    );
+    assert.equal(
+      debateAudioEnabled({ voiceMode: "mute", voiceVolume: 0.8 }),
+      false,
+    );
+    assert.equal(
+      debateAudioEnabled({ voiceMode: "english", voiceVolume: 0 }),
+      false,
+    );
+    assert.equal(debateGavelAudioEnabled(0.8), true);
+    assert.equal(debateGavelAudioEnabled(0), false);
+  });
+
+  it("reveals a safe public prefix without splitting source markers", () => {
+    const content =
+      "A complete first clause. A sourced point [[source:frozen-1]] follows.";
+    assert.equal(debateVisibleContentAtProgress(content, 0), "");
+    assert.equal(debateVisibleContentAtProgress(content, 1), content);
+    const partial = debateVisibleContentAtProgress(content, 0.68);
+    assert.equal(partial.includes("[[source:"), false);
+    assert.ok(content.startsWith(partial));
+  });
+
+  it("reveals Proceedings from provider character timing instead of text fraction", () => {
+    const content = "One two three.";
+    const characters = Array.from(content);
+    const ends = [
+      0.05, 0.1, 0.2, 0.21, 0.65, 0.75, 0.8, 0.81, 0.9, 0.94, 0.97,
+      0.99, 1,
+    ];
+    assert.equal(
+      debateVisibleContentAtSpeechTime({
+        content,
+        spokenText: content,
+        elapsedMs: 400,
+        durationMs: 1_000,
+        alignment: {
+          characters,
+          characterStartTimesSeconds: ends.map((end, index) =>
+            index === 0 ? 0 : (ends[index - 1] ?? 0),
+          ),
+          characterEndTimesSeconds: ends,
+        },
+      }),
+      "One ",
+    );
+    assert.equal(
+      debateVisibleContentAtSpeechTime({
+        content,
+        spokenText: content,
+        elapsedMs: 1_000,
+        durationMs: 1_000,
+        alignment: null,
+      }),
+      content,
+    );
+  });
+
+  it("keeps an unheard suffix hidden when provider timing ends at a strict prefix", () => {
+    const content = "One two three four.";
+    const heard = "One two";
+    const characters = Array.from(heard);
+    const visible = debateVisibleContentAtSpeechTime({
+      content,
+      spokenText: content,
+      elapsedMs: 1_000,
+      durationMs: 1_000,
+      alignment: {
+        characters,
+        characterStartTimesSeconds: characters.map(
+          (_, index) => index / characters.length,
+        ),
+        characterEndTimesSeconds: characters.map(
+          (_, index) => (index + 1) / characters.length,
+        ),
+      },
+    });
+    assert.ok(content.startsWith(visible));
+    assert.match(visible, /One/u);
+    assert.doesNotMatch(visible, /three|four/u);
+  });
+
+  it("recognizes an exact live transcript clamp", () => {
+    assert.equal(
+      debateTranscriptIsAtLive({
+        scrollHeight: 1_000,
+        scrollTop: 600,
+        clientHeight: 400,
+      }),
+      true,
+    );
+    assert.equal(
+      debateTranscriptIsAtLive({
+        scrollHeight: 1_000,
+        scrollTop: 560,
+        clientHeight: 400,
+      }),
+      false,
+    );
+  });
+
+  it("tracks turn ownership independently from speech animation", () => {
+    assert.equal(
+      debateTurnOwnerBotId({
+        thinkingBotId: "for-bot",
+        presenting: false,
+        presentationSpeakerBotId: null,
+      }),
+      "for-bot",
+    );
+    assert.equal(
+      debateTurnOwnerBotId({
+        thinkingBotId: null,
+        presenting: true,
+        presentationSpeakerBotId: "moderator-bot",
+      }),
+      "moderator-bot",
+    );
+    assert.equal(
+      debateTurnOwnerBotId({
+        thinkingBotId: null,
+        presenting: false,
+        presentationSpeakerBotId: "stale-prose-speaker",
+      }),
+      null,
+    );
+  });
+
+  it("turns validated source and exhibit markers into custom Markdown links", () => {
+    const markdown = debateMarkdownSource(
+      "**Claim.** [[source:frozen-1]] [[exhibit:exhibit-1]] [[source:invented]]",
+      evidence,
+    );
+    assert.equal(
+      markdown,
+      `**Claim.** [Frozen source](${DEBATE_EVIDENCE_LINK_PREFIX}frozen-1) [rusty spoon](${DEBATE_EVIDENCE_LINK_PREFIX}exhibit-1) `,
+    );
+    assert.equal(
+      debateEvidenceUrlTransform(`${DEBATE_EVIDENCE_LINK_PREFIX}exhibit-1`),
+      `${DEBATE_EVIDENCE_LINK_PREFIX}exhibit-1`,
+    );
+    assert.equal(
+      debateEvidenceUrlTransform(`${DEBATE_SOURCE_LINK_PREFIX}frozen-1`),
+      `${DEBATE_SOURCE_LINK_PREFIX}frozen-1`,
+    );
+    assert.equal(debateEvidenceUrlTransform("javascript:alert(1)"), "");
+    assert.equal(
+      debateSourceFromMarkdownHref(
+        `${DEBATE_SOURCE_LINK_PREFIX}frozen-1`,
+        evidence,
+      )?.title,
+      "Frozen source",
+    );
+    assert.equal(
+      debateSourceFromMarkdownHref(
+        `${DEBATE_EVIDENCE_LINK_PREFIX}invented`,
+        evidence,
+      ),
+      null,
+    );
+    assert.equal(
+      debateEvidenceFromMarkdownHref(
+        `${DEBATE_EVIDENCE_LINK_PREFIX}exhibit-1`,
+        evidence,
+      )?.kind,
+      "exhibit",
+    );
+  });
+
+  it("derives restrained clause-level gallery reactions", () => {
+    assert.equal(
+      debateGalleryReaction("That point is supported. [[source:frozen-1]]"),
+      "evidence",
+    );
+    assert.equal(
+      debateGalleryReaction("I concede that premise."),
+      "concession",
+    );
+    assert.equal(
+      debateGalleryReaction("But does that answer the harm?"),
+      "question",
+    );
+    const seats = debateGalleryReactingIndices("One clause.", 3);
+    assert.ok(seats.length >= 1 && seats.length <= 2);
+    assert.ok(seats.every((index) => index >= 0 && index < 7));
+  });
+
+  it("boosts advocate pace when the turn clock is late or overtime", () => {
+    assert.equal(
+      debateUtterancePaceBoost({
+        limitMs: 10_000,
+        estimatedDurationMs: 4_000,
+        overtimeMs: 0,
+        status: "within_limit",
+      }),
+      0,
+    );
+    assert.equal(
+      debateUtterancePaceBoost({
+        limitMs: 10_000,
+        estimatedDurationMs: 9_000,
+        overtimeMs: 0,
+        status: "within_limit",
+      }),
+      DEBATE_UTTERANCE_PACE_BOOST,
+    );
+    assert.equal(
+      debateUtterancePaceBoost({
+        limitMs: 10_000,
+        estimatedDurationMs: 4_000,
+        overtimeMs: 500,
+        status: "overtime",
+      }),
+      DEBATE_UTTERANCE_PACE_BOOST,
+    );
+    assert.equal(
+      debateUtterancePaceBoost(
+        {
+          limitMs: 10_000,
+          estimatedDurationMs: 4_000,
+          overtimeMs: 0,
+          status: "within_limit",
+        },
+        0.85,
+      ),
+      DEBATE_UTTERANCE_PACE_BOOST,
+    );
+  });
+});

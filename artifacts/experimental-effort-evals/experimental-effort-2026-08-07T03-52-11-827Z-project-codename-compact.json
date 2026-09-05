@@ -1,0 +1,177 @@
+{
+  "schema": "prism-experimental-effort-eval-v1",
+  "createdAt": "2026-08-07T03:52:11.827Z",
+  "prompt": "Fill a Markdown table with columns: Field, Value for exactly these three fields from earlier thread context: Codename, Ship date, Provider mode.\n\nConstraints:\n- Exactly 3 data rows\n- Keep under 70 words\n- Do not invent values\n- Do not show step-by-step private reasoning",
+  "options": {
+    "suite": "soft-continuity",
+    "thinkingProvider": "openai",
+    "localModel": "llama3.2",
+    "thinkingModel": "gpt-5.6-sol",
+    "judgeModel": "gpt-5.5",
+    "effort": "high",
+    "outDir": "artifacts/experimental-effort-evals",
+    "temperature": 0.25,
+    "maxTokens": 3200,
+    "noJudge": false,
+    "includeScratchpad": true
+  },
+  "tempDbPath": "<removed>",
+  "runs": [
+    {
+      "id": "local-baseline",
+      "label": "Local baseline",
+      "provider": "local",
+      "model": "llama3.2",
+      "reasoningEffort": "none",
+      "experimentalAllModelEffortEnabled": false,
+      "psychicModeEnabled": false,
+      "requiresApiKey": null,
+      "status": "ok",
+      "durationMs": 1211,
+      "assistant": "| Field | Value |\n| --- | --- |\n| Codename | Lumen Gate |\n| Ship date | 2026-09-12 |\n| Provider mode | LOCAL only |",
+      "assistantChars": 115,
+      "continuityScore": {
+        "total": 3,
+        "max": 3,
+        "checks": {
+          "includes:Lumen Gate": true,
+          "includes:2026-09-12": true,
+          "includes:LOCAL": true
+        }
+      },
+      "continuityDigestSeen": false
+    },
+    {
+      "id": "thinking-reference",
+      "label": "Thinking reference",
+      "provider": "openai",
+      "model": "gpt-5.6-sol",
+      "reasoningEffort": "high",
+      "experimentalAllModelEffortEnabled": false,
+      "psychicModeEnabled": false,
+      "requiresApiKey": "openai",
+      "status": "ok",
+      "durationMs": 1421,
+      "assistant": "| Field | Value |\n|---|---|\n| Codename | Lumen Gate |\n| Ship date | 2026-09-12 |\n| Provider mode | LOCAL only |",
+      "assistantChars": 111,
+      "continuityScore": {
+        "total": 3,
+        "max": 3,
+        "checks": {
+          "includes:Lumen Gate": true,
+          "includes:2026-09-12": true,
+          "includes:LOCAL": true
+        }
+      },
+      "continuityDigestSeen": false
+    },
+    {
+      "id": "local-simulated-effort",
+      "label": "Local simulated effort",
+      "provider": "local",
+      "model": "llama3.2",
+      "reasoningEffort": "high",
+      "experimentalAllModelEffortEnabled": false,
+      "psychicModeEnabled": true,
+      "requiresApiKey": null,
+      "status": "ok",
+      "durationMs": 7291,
+      "assistant": "| Field | Value |\n| --- | --- |\n| Codename | Lumen Gate |\n| Ship date | 2026-09-12 |\n| Provider mode | LOCAL only |",
+      "assistantChars": 115,
+      "planningWarnings": [
+        "continuity_digest; card=thread_state; chars=186",
+        "audit_unusable; provider=local; model=llama3.2; chars=2; fallbackChars=275"
+      ],
+      "continuityScore": {
+        "total": 3,
+        "max": 3,
+        "checks": {
+          "includes:Lumen Gate": true,
+          "includes:2026-09-12": true,
+          "includes:LOCAL": true
+        }
+      },
+      "continuityDigestSeen": true,
+      "psychicDebug": {
+        "summary": "Lumen Gate project: ship on 2026-09-12 with LOCAL provider mode.",
+        "effort": "high",
+        "provider": "local",
+        "model": "llama3.2",
+        "simulated": true,
+        "passCount": 3,
+        "passes": [
+          {
+            "name": "plan",
+            "chars": 185,
+            "summary": "Lumen Gate project: ship on 2026-09-12 with LOCAL provider mode."
+          },
+          {
+            "name": "draft",
+            "chars": 17,
+            "summary": "Lumen Gate project details with LOCAL provider mode."
+          },
+          {
+            "name": "audit",
+            "chars": 275,
+            "summary": "I'm checking the constraints and risks in our project plan to ensure we're meeting all the requirements.",
+            "warning": "audit_unusable; provider=local; model=llama3.2; chars=2; fallbackChars=275"
+          }
+        ],
+        "guidanceChars": 1445,
+        "scratchpadChars": 526,
+        "scratchpad": "Plan scratchpad: Must-keep constraints: codename, ship date, and provider mode. Forbidden words: none. Likely failure modes: none. Answer structure: table with fields Codename, Ship date, Provider mode. Private draft: | Field | Value | Private audit: - Keep: Do not show step-by-step private reasoning - Keep: Keep under 70 words - Keep: Do not invent values - Fix: No analysis preamble; emit only the requested answer shape. - Fix: Never abbreviate the answer with ellipses; write the complete table and every required label."
+      }
+    }
+  ],
+  "judge": {
+    "model": "gpt-5.5",
+    "responseMap": {
+      "A": "local-baseline",
+      "B": "thinking-reference",
+      "C": "local-simulated-effort"
+    },
+    "result": {
+      "scores": {
+        "A": {
+          "correctness": 10,
+          "reasoning": 10,
+          "actionability": 10,
+          "constraints": 10,
+          "total": 10,
+          "notes": "Provides the requested Markdown table with exactly the three specified fields, concise formatting, and no extra reasoning or invented-looking additions."
+        },
+        "B": {
+          "correctness": 10,
+          "reasoning": 10,
+          "actionability": 10,
+          "constraints": 10,
+          "total": 10,
+          "notes": "Equivalent to A; contains exactly the requested three data rows, stays concise, and does not expose reasoning."
+        },
+        "C": {
+          "correctness": 10,
+          "reasoning": 10,
+          "actionability": 10,
+          "constraints": 10,
+          "total": 10,
+          "notes": "Equivalent to A; satisfies the table structure and constraint requirements."
+        }
+      },
+      "ranking": [
+        "A",
+        "B",
+        "C"
+      ],
+      "winner": "A",
+      "summary": "All three responses are substantively identical and fully satisfy the prompt constraints. A is selected as winner only as a deterministic tie-break."
+    }
+  },
+  "continuity": {
+    "threadSummary": "Project codename is Lumen Gate. Ship date is 2026-09-12. Provider mode must stay LOCAL only.",
+    "mustInclude": [
+      "Lumen Gate",
+      "2026-09-12",
+      "LOCAL"
+    ]
+  }
+}

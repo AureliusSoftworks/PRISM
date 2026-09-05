@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "PRISM",
-  "version": "0.14.0",
+  "version": "0.15.1",
   "identifier": "com.localai.prism-desktop",
   "build": {
     "frontendDist": "../webview"
@@ -12,13 +12,15 @@
       {
         "label": "main",
         "title": "PRISM",
-        "width": 1400,
-        "height": 948,
-        "minWidth": 1280,
-        "minHeight": 900,
+        "width": 1440,
+        "height": 900,
+        "minWidth": 800,
+        "minHeight": 520,
+        "center": true,
+        "preventOverflow": true,
         "resizable": true,
         "maximizable": true,
-        "fullscreen": true,
+        "fullscreen": false,
         "backgroundThrottling": "disabled"
       }
     ],
@@ -38,6 +40,44 @@
     "resources": {
       "../../../runtime": "runtime"
     },
+    "fileAssociations": [
+      {
+        "ext": ["case"],
+        "name": "PRISM Case",
+        "description": "Reusable sealed PRISM Whodunnit case",
+        "role": "Viewer",
+        "mimeType": "application/vnd.prism.case",
+        "rank": "Owner",
+        "exportedType": {
+          "identifier": "com.localai.prism.case",
+          "conformsTo": ["public.data"]
+        }
+      },
+      {
+        "ext": ["mansion"],
+        "name": "PRISM Mansion",
+        "description": "Portable PRISM Whodunnit mansion",
+        "role": "Viewer",
+        "mimeType": "application/vnd.prism.mansion",
+        "rank": "Owner",
+        "exportedType": {
+          "identifier": "com.localai.prism.mansion",
+          "conformsTo": ["public.data"]
+        }
+      },
+      {
+        "ext": ["whodunnit"],
+        "name": "PRISM Whodunnit",
+        "description": "Complete portable PRISM Whodunnit",
+        "role": "Viewer",
+        "mimeType": "application/vnd.prism.whodunnit",
+        "rank": "Owner",
+        "exportedType": {
+          "identifier": "com.localai.prism.whodunnit",
+          "conformsTo": ["public.data"]
+        }
+      }
+    ],
     "macOS": {
       "dmg": {
         "windowSize": {

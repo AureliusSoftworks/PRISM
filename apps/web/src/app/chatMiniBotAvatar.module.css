@@ -1,0 +1,274 @@
+/* Compact pixel chassis for empty Chat/Zen hero previews (and optional
+   badge-scale reuse). Its inset reproduces the previous 128px silhouette while
+   keeping the full avatar's base/alloy material separation. */
+.root {
+  --chat-mini-bot-color: var(--accent);
+  --chat-mini-bot-normalized-color: var(--chat-mini-bot-color);
+  --chat-mini-bot-alloy-color: #aeb8c1;
+  --chat-mini-bot-screen-ink: color-mix(
+    in srgb,
+    var(--chat-mini-bot-color) 88%,
+    #ffffff
+  );
+  --chat-mini-bot-lower-screen-ink: var(--chat-mini-bot-screen-ink);
+  --chat-mini-bot-render-size: 28px;
+  --chat-mini-bot-glyph-size: max(
+    7px,
+    calc(var(--chat-mini-bot-render-size) * 0.12)
+  );
+  /* One shared optical registration for every compact surface. */
+  --chat-mini-bot-upper-screen-nudge-y: clamp(
+    1px,
+    calc(var(--chat-mini-bot-render-size) * 0.02),
+    2px
+  );
+  --chat-mini-bot-eye-nudge-y: clamp(
+    0px,
+    calc(var(--chat-mini-bot-render-size) * 0.006),
+    1.5px
+  );
+  --chat-mini-bot-mouth-nudge-y: -1px;
+  /* Anchor the bare buckle glyph to the chassis coordinate plane. Percentage
+     registration stays invariant while Avatar Studio scales 1-299px Minis;
+     capped pixel nudges drift relative to the body. */
+  --chat-mini-bot-lower-screen-anchor-x: 50%;
+  --chat-mini-bot-lower-screen-anchor-y: 75.4%;
+  --chat-mini-bot-lower-screen-nudge-x: 1px;
+  --chat-mini-bot-lower-screen-nudge-y: 1px;
+  --chat-mini-bot-identity-glyph-scale: 0.92;
+  --chat-mini-bot-lower-screen-width: 13.5%;
+  --chat-mini-bot-lower-screen-height: 14%;
+  /* The 96px chassis raster is square, just like the HD source. Its aperture
+     is already authored slightly wider than tall. Keep the displayed frame
+     square so the canonical face plane is not compressed horizontally. */
+  --chat-mini-bot-frame-left: 10.546875%;
+  --chat-mini-bot-frame-top: 9.375%;
+  --chat-mini-bot-frame-width: 78.90625%;
+  --chat-mini-bot-frame-height: 78.90625%;
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  flex-shrink: 0;
+  isolation: isolate;
+  overflow: visible;
+  color: var(--chat-mini-bot-color);
+  width: var(--chat-mini-bot-render-size);
+  height: var(--chat-mini-bot-render-size);
+}
+
+.root::after {
+  content: "";
+  position: absolute;
+  pointer-events: none;
+}
+
+.root[data-size="hero"]::after,
+.root[data-size="room"]::after {
+  z-index: 0;
+  left: 19%;
+  right: 19%;
+  bottom: 3%;
+  height: 13%;
+  border-radius: 50%;
+  background: color-mix(in srgb, #000000 58%, transparent);
+  filter: blur(7px);
+  opacity: 0.56;
+  transform: scaleX(1.08);
+}
+
+.sizeBadge {
+  --chat-mini-bot-render-size: 28px;
+}
+
+.sizeHero {
+  --chat-mini-bot-glyph-size: clamp(20px, 1.9vw, 24px);
+  --chat-mini-bot-render-size: clamp(160px, 12.5vw, 184px);
+}
+
+.sizeRoom {
+  --chat-mini-bot-glyph-size: 11px;
+  --chat-mini-bot-render-size: clamp(76px, 6.7vw, 94px);
+}
+
+.frame {
+  position: absolute;
+  left: var(--chat-mini-bot-frame-left);
+  top: var(--chat-mini-bot-frame-top);
+  width: var(--chat-mini-bot-frame-width);
+  height: var(--chat-mini-bot-frame-height);
+  object-fit: fill;
+  image-rendering: pixelated;
+  pointer-events: none;
+  user-select: none;
+}
+
+.frameBase {
+  z-index: 2;
+  opacity: 1;
+  filter: drop-shadow(0 8px 9px rgba(0, 0, 0, 0.3));
+}
+
+/* The source sprites use one authored magenta key for every identity-colored
+   pixel. Their clean derivatives remove that key; this solid mask restores it
+   with the bot's normalized color over the untouched pixel chassis. Light
+   keys the face field and LEDs, while Dark keys only its authored LEDs. Keep
+   this above the alloy wash because that mask includes the LED coordinates. */
+.frameIdentityColor {
+  position: absolute;
+  left: var(--chat-mini-bot-frame-left);
+  top: var(--chat-mini-bot-frame-top);
+  z-index: 4;
+  width: var(--chat-mini-bot-frame-width);
+  height: var(--chat-mini-bot-frame-height);
+  pointer-events: none;
+  background: var(--chat-mini-bot-normalized-color, var(--chat-mini-bot-color));
+  image-rendering: pixelated;
+  -webkit-mask: url("/bot-frame/bot-frame-mini-dark-color-key-mask.png?v=1")
+    center / 100% 100% no-repeat;
+  mask: url("/bot-frame/bot-frame-mini-dark-color-key-mask.png?v=1") center /
+    100% 100% no-repeat;
+}
+
+/* The communication-style alloy is the only identity material on the silent
+   mini chassis. The canonical metal mask excludes screens and LED emission, so
+   there is no dim/off bulb layer to muddy the small silhouette. */
+.frameAlloy {
+  position: absolute;
+  left: var(--chat-mini-bot-frame-left);
+  top: var(--chat-mini-bot-frame-top);
+  z-index: 3;
+  width: var(--chat-mini-bot-frame-width);
+  height: var(--chat-mini-bot-frame-height);
+  pointer-events: none;
+  background: var(--chat-mini-bot-alloy-color);
+  -webkit-mask: url("/bot-frame/bot-frame-mini-metal-mask.png?v=1") center /
+    100% 100% no-repeat;
+  mask: url("/bot-frame/bot-frame-mini-metal-mask.png?v=1") center / 100% 100%
+    no-repeat;
+  /* These alloys are intentionally low-chroma already. Apply the complete hue
+     while preserving the authored frame luminance so they remain identifiable
+     after the chassis is reduced to a few dozen pixels. */
+  opacity: 1;
+  mix-blend-mode: color;
+}
+
+.upperScreen,
+.lowerScreen {
+  position: absolute;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  pointer-events: none;
+  color: var(--chat-mini-bot-screen-ink);
+}
+
+/* The Light Mini keeps Avatar Studio's normalized identity face with neutral
+   white expression marks. Its lower identity is a bare normalized-color glyph
+   over the chassis artwork. Dark Minis retain their authored identity-LED
+   treatment. */
+.root[data-theme="light"] {
+  --chat-mini-bot-screen-ink: var(--bot-avatar-screen-glyph, #fbfdff);
+  --chat-mini-bot-lower-screen-ink: var(
+    --chat-mini-bot-normalized-color,
+    var(--chat-mini-bot-color)
+  );
+  /* The white chassis makes the aperture read optically higher than the
+     authored dark shell. Correct only Light Minis so Dark keeps its approved
+     face registration. */
+  --chat-mini-bot-upper-screen-nudge-y: clamp(
+    2px,
+    calc(var(--chat-mini-bot-render-size) * 0.025),
+    3px
+  );
+}
+
+.root[data-theme="light"] .frameIdentityColor {
+  -webkit-mask-image: url("/bot-frame/bot-frame-mini-light-color-key-mask.png?v=1");
+  mask-image: url("/bot-frame/bot-frame-mini-light-color-key-mask.png?v=1");
+}
+
+.root[data-theme="light"] .lowerScreen {
+  color: var(--chat-mini-bot-lower-screen-ink);
+  background: transparent;
+  box-shadow: none;
+}
+
+/* Lay out the complete face + Ink stack on the same square chassis coordinate
+   plane as Avatar Studio, then let the mini bezel crop that finished face.
+   Laying Unicode out at the mini aperture size changes font metrics and makes
+   authored offsets drift; enlarging Ink separately breaks attached drawings. */
+.upperScreen {
+  left: var(--chat-mini-bot-frame-left);
+  top: var(--chat-mini-bot-frame-top);
+  /* The authored mini chassis includes an opaque black screen substrate.
+     Paint the clipped face plane above it or restored/rehydrated portraits
+     resolve to an empty ring even though their face DOM is present. */
+  z-index: 7;
+  width: var(--chat-mini-bot-frame-width);
+  height: var(--chat-mini-bot-frame-height);
+  container-type: inline-size;
+  /* Match the HD aperture's subtle horizontal bias without distorting the
+     square face/ink coordinate system beneath it. */
+  clip-path: ellipse(34.2% 33.4% at 50% 46.1%);
+}
+
+/* The mini's face and custom Ink share one player-facing coordinate plane.
+   The lower glyph has a separate transform so it can counter a whole-avatar
+   mirror and remain readable. */
+.upperScreenContent,
+.lowerScreenContent {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  transform-origin: 50% 50%;
+}
+
+.upperScreenContent {
+  transform: translateY(var(--chat-mini-bot-upper-screen-nudge-y, 0px))
+    scaleX(var(--chat-mini-bot-upper-screen-facing-scale-x, 1));
+  transition: none;
+  backface-visibility: hidden;
+}
+
+.lowerScreenContent {
+  transform: translate(
+      calc(var(--chat-mini-bot-lower-screen-nudge-x, 0px) * var(--chat-mini-bot-lower-screen-facing-scale-x, 1)),
+      var(--chat-mini-bot-lower-screen-nudge-y, 0px)
+    )
+    scaleX(var(--chat-mini-bot-lower-screen-facing-scale-x, 1))
+    scale(var(--chat-mini-bot-identity-glyph-scale, 0.92));
+  color: var(--chat-mini-bot-lower-screen-ink, var(--chat-mini-bot-screen-ink));
+}
+
+/* Light and Dark share this exact bare-glyph registration. The lower identity
+   is not a receiving screen, so its HD-oriented offset must remain unclipped. */
+.lowerScreen {
+  left: var(--chat-mini-bot-lower-screen-anchor-x);
+  top: var(--chat-mini-bot-lower-screen-anchor-y);
+  z-index: 7;
+  width: var(--chat-mini-bot-lower-screen-width);
+  height: var(--chat-mini-bot-lower-screen-height);
+  border-radius: 50%;
+  overflow: visible;
+  isolation: isolate;
+  transform: translate(-50%, -50%);
+  transform-origin: center;
+}
+
+.upperScreen > *,
+.lowerScreen > * {
+  max-width: 100%;
+  max-height: 100%;
+}
+
+.lowerScreen > * {
+  position: relative;
+  z-index: 1;
+}
+
+@media (max-width: 560px) {
+  .sizeHero {
+    --chat-mini-bot-render-size: 140px;
+  }
+}

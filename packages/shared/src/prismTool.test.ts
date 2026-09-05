@@ -5,6 +5,7 @@ import {
 } from "./botIdentityMirror.ts";
 import {
   hydrateAssistantMessageParts,
+  normalizeCoffeeInterruptionEvent,
   parseAssistantPrismTools,
   parseStoredAssistantToolPayload,
   parseStoredToolPayload,
@@ -281,6 +282,101 @@ describe("parseAssistantPrismTools", () => {
     });
   });
 
+  it("parses a userNotes save request from assistant tool JSON", () => {
+    const inner = JSON.stringify({
+      v: 1,
+      userNotes: { action: "save", title: "Groceries", body: "milk, eggs" },
+    });
+    const raw = `Saved.\n${PRISM_TOOL_START}\n${inner}\n${PRISM_TOOL_END}`;
+    const out = parseAssistantPrismTools(raw);
+    assert.equal(out.displayContent.trim(), "Saved.");
+    assert.deepEqual(out.userNotes, {
+      v: 1,
+      name: "userNotes",
+      action: "save",
+      title: "Groceries",
+      body: "milk, eggs",
+    });
+  });
+
+  it("parses userNotes list/get/delete requests", () => {
+    const listOut = parseAssistantPrismTools(
+      `Listing.\n${PRISM_TOOL_START}\n${JSON.stringify({
+        v: 1,
+        userNotes: { action: "list" },
+      })}\n${PRISM_TOOL_END}`
+    );
+    assert.deepEqual(listOut.userNotes, {
+      v: 1,
+      name: "userNotes",
+      action: "list",
+    });
+
+    const getOut = parseAssistantPrismTools(
+      `Opening.\n${PRISM_TOOL_START}\n${JSON.stringify({
+        v: 1,
+        userNotes: { action: "get", title: "Groceries" },
+      })}\n${PRISM_TOOL_END}`
+    );
+    assert.deepEqual(getOut.userNotes, {
+      v: 1,
+      name: "userNotes",
+      action: "get",
+      title: "Groceries",
+    });
+
+    const deleteOut = parseAssistantPrismTools(
+      `Removing.\n${PRISM_TOOL_START}\n${JSON.stringify({
+        v: 1,
+        userNotes: { action: "delete", id: "note-1" },
+      })}\n${PRISM_TOOL_END}`
+    );
+    assert.deepEqual(deleteOut.userNotes, {
+      v: 1,
+      name: "userNotes",
+      action: "delete",
+      id: "note-1",
+    });
+  });
+
+  it("rejects empty userNotes save create without title or body", () => {
+    const raw = `Nope.\n${PRISM_TOOL_START}\n${JSON.stringify({
+      v: 1,
+      userNotes: { action: "save", title: "  " },
+    })}\n${PRISM_TOOL_END}`;
+    const out = parseAssistantPrismTools(raw);
+    assert.equal(out.userNotes, undefined);
+    assert.equal(out.displayContent.trim(), "Nope.");
+  });
+
+  it("round-trips a userNotes receipt through serialize/hydrate", () => {
+    const serialized = serializeAssistantToolPayload({
+      userNotes: {
+        v: 1,
+        name: "userNotes",
+        action: "save",
+        status: "saved",
+        at: "2026-08-04T12:00:00.000Z",
+        id: "note-abc",
+        title: "Groceries",
+      },
+    });
+    assert.ok(serialized);
+    const hydrated = hydrateAssistantMessageParts({
+      content: "Got it.",
+      toolPayload: serialized,
+    });
+    assert.deepEqual(hydrated.userNotes, {
+      v: 1,
+      name: "userNotes",
+      action: "save",
+      status: "saved",
+      at: "2026-08-04T12:00:00.000Z",
+      id: "note-abc",
+      title: "Groceries",
+    });
+  });
+
   it("parses tellFictionalStory story action rail metadata", () => {
     const inner = JSON.stringify({
       v: 1,
@@ -445,6 +541,32 @@ describe("parseAssistantPrismTools", () => {
         { index: 2, x: 0.5, y: 0.5, align: "center" },
       ],
     });
+  });
+});
+
+describe("Troll presentation persistence", () => {
+  it("round-trips only the public replay projection", () => {
+    const botPowerTrollPresentation = {
+      v: 1 as const,
+      name: "trollPresentation" as const,
+      stableTurnKey: "conversation:troll:2",
+      deliveryKind: "meme" as const,
+      ordinaryInterruptionImmune: true as const,
+      fixedMood: "warm" as const,
+      memeCardId: 1,
+    };
+    const stored = serializeAssistantToolPayload({
+      botPowerTrollPresentation,
+    });
+    assert.deepEqual(
+      parseStoredAssistantToolPayload(stored).botPowerTrollPresentation,
+      botPowerTrollPresentation,
+    );
+    assert.deepEqual(
+      hydrateAssistantMessageParts({ content: "visible", toolPayload: stored })
+        .botPowerTrollPresentation,
+      botPowerTrollPresentation,
+    );
   });
 });
 
@@ -619,6 +741,49 @@ describe("hydrateAssistantMessageParts", () => {
     assert.deepEqual(h.coffeeAmbientAction, coffeeAmbientAction);
   });
 
+  it("hydrates persisted Coffee and Zen stage-action metadata from tool_payload", () => {
+    const coffeeStageAction = {
+      v: 1 as const,
+      name: "coffeeStageAction" as const,
+      source: "director" as const,
+      category: "judgemental" as const,
+      action: "raises an eyebrow",
+      seed: "coffee:bot:1",
+    };
+    const zenStageAction = {
+      v: 1 as const,
+      name: "zenStageAction" as const,
+      source: "llm" as const,
+      category: "warm" as const,
+      action: "takes a breath",
+      seed: "zen:bot:1",
+    };
+    const coffeeStored = serializeAssistantToolPayload({ coffeeStageAction });
+    const zenStored = serializeAssistantToolPayload({ zenStageAction });
+    assert.deepEqual(
+      parseStoredAssistantToolPayload(coffeeStored).coffeeStageAction,
+      coffeeStageAction,
+    );
+    assert.deepEqual(
+      parseStoredAssistantToolPayload(zenStored).zenStageAction,
+      zenStageAction,
+    );
+    assert.deepEqual(
+      hydrateAssistantMessageParts({
+        content: "Fine.",
+        toolPayload: coffeeStored,
+      }).coffeeStageAction,
+      coffeeStageAction,
+    );
+    assert.deepEqual(
+      hydrateAssistantMessageParts({
+        content: "I hear you.",
+        toolPayload: zenStored,
+      }).zenStageAction,
+      zenStageAction,
+    );
+  });
+
   it("hydrates persisted Coffee user actions from tool_payload", () => {
     const coffeeUserAction: CoffeeUserActionPayload = {
       v: 1,
@@ -635,6 +800,58 @@ describe("hydrateAssistantMessageParts", () => {
     });
     assert.equal(h.content, "*leans back and folds arms*");
     assert.deepEqual(h.coffeeUserAction, coffeeUserAction);
+  });
+
+  it("normalizes and hydrates persisted Coffee interruption metadata", () => {
+    const stored = JSON.stringify({
+      v: 1,
+      coffeeInterruption: {
+        kind: "botInterruptsBot",
+        interruptedBotId: "speaker",
+        interrupterBotId: "interrupter",
+        interruptedMessageId: "message-1",
+        interruptedSnippet: "The thought stops—",
+        pauseBeat: true,
+        reactionOutcome: "reclaim",
+        interrupterCue: "Hold on.",
+        interruptedSpeakerCue: "... sure. Go ahead.",
+        socialConsequences: [
+          {
+            botId: "speaker",
+            dispositionDelta: -0.2,
+            valuesFrictionDelta: 0.1,
+          },
+          { botId: "", dispositionDelta: 99, valuesFrictionDelta: 99 },
+        ],
+      },
+    });
+    const interruption =
+      parseStoredAssistantToolPayload(stored).coffeeInterruption;
+
+    assert.equal(interruption?.reactionOutcome, "resume");
+    assert.equal(interruption?.floorOutcome, "reclaim");
+    assert.deepEqual(interruption?.socialConsequences, [
+      {
+        botId: "speaker",
+        dispositionDelta: -0.2,
+        valuesFrictionDelta: 0.1,
+      },
+    ]);
+    assert.deepEqual(
+      hydrateAssistantMessageParts({
+        content: "...",
+        toolPayload: stored,
+      }).coffeeInterruption,
+      interruption,
+    );
+    assert.equal(
+      normalizeCoffeeInterruptionEvent({
+        kind: "botInterruptsBot",
+        interruptedBotId: "speaker",
+        socialConsequences: [],
+      }),
+      undefined,
+    );
   });
 
   it("hydrates persisted Coffee replay events from tool_payload", () => {
@@ -687,6 +904,10 @@ describe("hydrateAssistantMessageParts", () => {
           targetSource: "direct",
           visualAction: "nod",
           spokenCue: "mm-hm",
+          interjectionAttempt: true,
+          floorOutcome: "yield",
+          interruptedSpeakerCue: "... sure. Go ahead.",
+          interruptedSpeakerCuePlayback: "crosstalk",
           targetProgress: 0.52,
           seed: "coffee-listener-v1:test",
           cameraCutEligible: false,
@@ -715,6 +936,63 @@ describe("hydrateAssistantMessageParts", () => {
       {
         v: 1,
         name: "coffeeReplayEvent",
+        kind: "perceptionOverlap",
+        botId: "bot-2",
+        precedingBotId: "bot-1",
+        precedingMessageId: "message-1",
+        overlappingMessageId: "message-2",
+        startRatio: 0.64,
+        maxSimultaneousVoices: 2,
+        occurredAt: "2026-07-02T15:03:15.000Z",
+      },
+      {
+        v: 1,
+        name: "coffeeReplayEvent",
+        kind: "baristaDelivery",
+        botId: "barista-1",
+        occurredAt: "2026-07-02T15:03:16.000Z",
+        barista: {
+          id: "barista-1",
+          name: "Casey",
+          color: "#88aaff",
+          glyph: "sparkles",
+          fallback: false,
+        },
+        drink: {
+          choice: "surprise",
+          name: "Casey’s Blue Hour",
+          description: "Espresso, oat foam, and a quiet violet finish.",
+          imageId: "coffee-image-1",
+          fallback: false,
+        },
+        line: "Casey made this for you — Casey’s Blue Hour.",
+        voiceTakeId: "voice-take-1",
+      },
+      {
+        v: 1,
+        name: "coffeeReplayEvent",
+        kind: "powerAnnoyance",
+        botId: "bot-2",
+        sourceBotId: "bot-1",
+        sourceMessageId: "message-1",
+        strength: "small",
+        dispositionBefore: 0.7,
+        dispositionAfter: 0.64,
+        occurredAt: "2026-07-02T15:03:18.000Z",
+      },
+      {
+        v: 1,
+        name: "coffeeReplayEvent",
+        kind: "playerSip",
+        occurredAt: "2026-07-02T15:03:18.000Z",
+        fillId: "fill-1",
+        sipCount: 1,
+        drinkName: "Casey’s Blue Hour",
+        imageId: "coffee-image-1",
+      },
+      {
+        v: 1,
+        name: "coffeeReplayEvent",
         kind: "identityMirror",
         botId: "ian",
         occurredAt: "2026-07-02T15:03:20.000Z",
@@ -726,7 +1004,15 @@ describe("hydrateAssistantMessageParts", () => {
           targetBotName: "Mara Vale",
           targetPersonaPrompt: "A terse lunar cartographer.",
           targetFace: { faceEyeCharacter: "◉" },
-          targetVoice: { version: 1, enabled: true, preset: "warm" },
+          holderVoice: {
+            v: 2,
+            enabled: true,
+            baseVoiceId: "voice-3",
+            accentDefinitionId: "irish-english",
+            pronunciationMapPoint: { x: 0.17, y: 0.73 },
+            speechprintInfluence: "irish-english",
+            speechprintVariationSeed: "identity-crisis-holder",
+          },
           sourceMessageId: "message-2",
           occurredAt: "2026-07-02T15:03:20.000Z",
         }),
@@ -788,6 +1074,141 @@ describe("hydrateAssistantMessageParts", () => {
       autoRecovery
     );
     assert.equal(stored.includes("rawError"), false);
+  });
+
+  it("round-trips the actual contextual Auto route", () => {
+    const autoRoute = {
+      v: 1 as const,
+      lane: "online" as const,
+      provider: "anthropic" as const,
+      model: "claude-haiku-4-5",
+      reasoningEffort: "low" as const,
+      reasonCodes: ["light_request", "known_cost_preferred"] as const,
+    };
+    const stored = serializeAssistantToolPayload({ autoRoute });
+    assert.deepEqual(
+      hydrateAssistantMessageParts({ content: "Done.", toolPayload: stored })
+        .autoRoute,
+      autoRoute,
+    );
+  });
+
+  it("hydrates only bounded Coffee speaker-route provenance", () => {
+    const route = {
+      v: 1,
+      name: "coffeeTurnRoute",
+      source: "player_direct_address",
+      selectedSpeakerBotId: "bot-plankton",
+      addressedBotId: "bot-plankton",
+      playerAddressKind: "plain_text",
+    } as const;
+    assert.deepEqual(
+      hydrateAssistantMessageParts({
+        content: "One chum dish, directly answered.",
+        toolPayload: JSON.stringify({ v: 1, coffeeTurnRoute: route }),
+      }).coffeeTurnRoute,
+      route,
+    );
+    assert.equal(
+      hydrateAssistantMessageParts({
+        content: "I am still answering your follow-up.",
+        toolPayload: JSON.stringify({
+          v: 1,
+          coffeeTurnRoute: {
+            ...route,
+            playerAddressKind: "followup",
+          },
+        }),
+      }).coffeeTurnRoute?.playerAddressKind,
+      "followup",
+    );
+    assert.equal(
+      parseStoredAssistantToolPayload(
+        JSON.stringify({
+          v: 1,
+          coffeeTurnRoute: {
+            ...route,
+            source: "hidden_router_prompt",
+            rawDirective: "private chain of thought",
+          },
+        }),
+      ).coffeeTurnRoute,
+      undefined,
+    );
+  });
+
+  it("round-trips the concrete turn's Turbo provenance", () => {
+    const stored = serializeAssistantToolPayload({ turbo: true });
+    assert.equal(parseStoredAssistantToolPayload(stored).turbo, true);
+    assert.equal(
+      hydrateAssistantMessageParts({ content: "Fast.", toolPayload: stored })
+        .turbo,
+      true,
+    );
+  });
+
+  it("round-trips fixed-model Max effort provenance", () => {
+    const stored = serializeAssistantToolPayload({ reasoningEffort: "max" });
+    assert.equal(parseStoredAssistantToolPayload(stored).reasoningEffort, "max");
+    assert.equal(
+      hydrateAssistantMessageParts({ content: "Done.", toolPayload: stored })
+        .reasoningEffort,
+      "max",
+    );
+  });
+
+  it("round-trips provenance-marked social silence independently of Power silence", () => {
+    const socialSilence = {
+      v: 1 as const,
+      name: "socialSilence" as const,
+      provenance: "social" as const,
+      mode: "coffee" as const,
+      seed: "coffee:turn-4:rick",
+      volleyTurn: 4 as const,
+      holdMs: 900,
+    };
+    const stored = serializeAssistantToolPayload({ socialSilence });
+    assert.ok(stored);
+    assert.deepEqual(
+      parseStoredAssistantToolPayload(stored).socialSilence,
+      socialSilence,
+    );
+    assert.deepEqual(
+      hydrateAssistantMessageParts({
+        content: "...",
+        toolPayload: stored,
+      }).socialSilence,
+      socialSilence,
+    );
+    assert.equal(
+      parseStoredAssistantToolPayload(
+        JSON.stringify({
+          v: 1,
+          socialSilence: { ...socialSilence, provenance: "power" },
+        }),
+      ).socialSilence,
+      undefined,
+    );
+  });
+
+  it("round-trips a protected crosstalk reclaim link", () => {
+    const crosstalkReclaim = {
+      v: 1 as const,
+      name: "crosstalkReclaim" as const,
+      interruptedMessageId: "message-1",
+      speakerBotId: "rick",
+      heardFragment: "So if you are—",
+      protectFromImmediateReinterruption: true as const,
+    };
+    const stored = serializeAssistantToolPayload({ crosstalkReclaim });
+    assert.ok(stored);
+    assert.deepEqual(
+      hydrateAssistantMessageParts({
+        content: "No. I was saying—why the mustache?",
+        toolPayload: stored,
+      }).crosstalkReclaim,
+      crosstalkReclaim,
+    );
   });
 });
 

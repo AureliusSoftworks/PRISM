@@ -3,6 +3,10 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+
+const execFileAsync = promisify(execFile);
 
 function parseArgs(argv) {
   const args = {
@@ -59,6 +63,24 @@ function parseArgs(argv) {
   return args;
 }
 
+function validateSteamUploadBranch(branch) {
+  const normalized = String(branch ?? "").trim();
+  if (!normalized) {
+    throw new Error("Steam upload branch must be explicit and non-empty.");
+  }
+  if (normalized.toLowerCase() === "default") {
+    throw new Error(
+      "Refusing to export a Steam build for the public default branch. Use a private or prerelease branch first."
+    );
+  }
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/u.test(normalized)) {
+    throw new Error(
+      "Steam upload branch must contain only letters, numbers, periods, underscores, or hyphens."
+    );
+  }
+  return normalized;
+}
+
 async function ensureDir(target) {
   await fs.mkdir(target, { recursive: true });
 }
@@ -72,6 +94,43 @@ async function copyIfExists(source, destination) {
   await ensureDir(path.dirname(destination));
   await fs.copyFile(source, destination);
   return true;
+}
+
+async function copyRequired(source, destination, label) {
+  if (!(await copyIfExists(source, destination))) {
+    throw new Error(`Missing required ${label}: ${source}`);
+  }
+}
+
+async function extractZip(source, destination, label) {
+  try {
+    await fs.access(source);
+  } catch {
+    throw new Error(`Missing required ${label}: ${source}`);
+  }
+
+  await ensureDir(destination);
+  try {
+    await execFileAsync("unzip", ["-q", source, "-d", destination], { maxBuffer: 1024 * 1024 * 16 });
+  } catch (error) {
+    const details = error.stderr || error.stdout || error.message;
+    throw new Error(`Failed to extract ${label} with unzip: ${details}`);
+  }
+}
+
+async function assertExecutableFile(filePath, label, options = {}) {
+  let stats;
+  try {
+    stats = await fs.stat(filePath);
+  } catch {
+    throw new Error(`Missing required ${label}: ${filePath}`);
+  }
+  if (!stats.isFile()) {
+    throw new Error(`Expected ${label} to be a file: ${filePath}`);
+  }
+  if (options.requireUnixExecutableBit && (stats.mode & 0o111) === 0) {
+    throw new Error(`Expected ${label} to have an executable permission bit: ${filePath}`);
+  }
 }
 
 async function writeFile(filePath, content) {
@@ -101,6 +160,7 @@ async function main() {
       "Usage: export-desktop-depots.mjs --version <x.y.z> --app-id <id> --windows-depot-id <id> --mac-depot-id <id> --linux-depot-id <id> [--branch prerelease] [--artifacts-dir dist-desktop] [--output-dir steam-build]"
     );
   }
+  args.branch = validateSteamUploadBranch(args.branch);
 
   const projectRoot = process.cwd();
   const artifactsDir = path.resolve(projectRoot, args.artifactsDir);
@@ -114,45 +174,33 @@ async function main() {
   await ensureDir(path.join(contentDir, "linux"));
   await ensureDir(scriptsDir);
 
-  const copied = [];
-  if (
-    await copyIfExists(
-      path.join(artifactsDir, `Prism-Desktop-Setup-v${args.version}-win-x64.exe`),
-      path.join(contentDir, "windows", `Prism-Desktop-Setup-v${args.version}-win-x64.exe`)
-    )
-  ) {
-    copied.push("windows-exe");
-  }
-  if (
-    await copyIfExists(
-      path.join(artifactsDir, `Prism-Desktop-Setup-v${args.version}-win-x64.msi`),
-      path.join(contentDir, "windows", `Prism-Desktop-Setup-v${args.version}-win-x64.msi`)
-    )
-  ) {
-    copied.push("windows-msi");
-  }
-  if (
-    await copyIfExists(
-      path.join(artifactsDir, `Prism-Desktop-v${args.version}.dmg`),
-      path.join(contentDir, "macos", `Prism-Desktop-v${args.version}.dmg`)
-    )
-  ) {
-    copied.push("macos-dmg");
-  }
-  if (
-    await copyIfExists(
-      path.join(artifactsDir, `Prism-Desktop-v${args.version}-linux-x64.AppImage`),
-      path.join(contentDir, "linux", `Prism-Desktop-v${args.version}-linux-x64.AppImage`)
-    )
-  ) {
-    copied.push("linux-appimage");
-  }
+  await extractZip(
+    path.join(artifactsDir, `Prism-Desktop-v${args.version}-steam-win-x64.zip`),
+    path.join(contentDir, "windows"),
+    "Windows Steam depot zip"
+  );
+  await assertExecutableFile(path.join(contentDir, "windows", "prism_desktop.exe"), "Windows Steam executable");
 
-  if (!copied.includes("windows-exe") || !copied.includes("macos-dmg") || !copied.includes("linux-appimage")) {
-    throw new Error(
-      `Missing required desktop artifacts in ${artifactsDir}. Required: Windows EXE, macOS DMG, Linux AppImage.`
-    );
-  }
+  await extractZip(
+    path.join(artifactsDir, `Prism-Desktop-v${args.version}-steam-macos.zip`),
+    path.join(contentDir, "macos"),
+    "macOS Steam depot zip"
+  );
+  await assertExecutableFile(
+    path.join(contentDir, "macos", "PRISM.app", "Contents", "MacOS", "prism_desktop"),
+    "macOS Steam app bundle executable",
+    { requireUnixExecutableBit: true }
+  );
+
+  const linuxAppImageName = `Prism-Desktop-v${args.version}-linux-x64.AppImage`;
+  const linuxAppImageTarget = path.join(contentDir, "linux", linuxAppImageName);
+  await copyRequired(
+    path.join(artifactsDir, linuxAppImageName),
+    linuxAppImageTarget,
+    "Linux Steam AppImage"
+  );
+  await fs.chmod(linuxAppImageTarget, 0o755);
+  await assertExecutableFile(linuxAppImageTarget, "Linux Steam AppImage", { requireUnixExecutableBit: true });
 
   await writeFile(
     path.join(scriptsDir, `depot_build_${args.windowsDepotId}.vdf`),
@@ -192,6 +240,11 @@ async function main() {
       "- content/linux",
       "- scripts/app_build_<appid>.vdf",
       "- scripts/depot_build_<depotid>.vdf",
+      "",
+      "Expected Steam launch options:",
+      "- Windows: prism_desktop.exe",
+      "- macOS: PRISM.app",
+      `- Linux + SteamOS: ${linuxAppImageName}`,
       "",
       "Next:",
       "1) Review the staged artifacts manually.",

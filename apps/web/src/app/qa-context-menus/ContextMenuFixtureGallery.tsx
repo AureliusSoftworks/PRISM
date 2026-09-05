@@ -44,9 +44,7 @@ const FIXTURES = [
   "group-protected",
   "group-full",
   "group-multiselect",
-  "zen-avatar-minimum",
-  "zen-avatar-default",
-  "zen-avatar-maximum",
+  "zen-avatar",
   "canvas-chat-zen",
   "canvas-sandbox",
   "canvas-coffee-setup",
@@ -166,11 +164,7 @@ function fixtureEntries(id: FixtureId): PrismMenuEntry[] {
       ]),
     ];
   }
-  if (id.startsWith("zen-avatar")) return [
-    action("grow", "Grow", <Plus />, { disabled: id === "zen-avatar-maximum", disabledReason: id === "zen-avatar-maximum" ? "Avatar is at its maximum size." : undefined }),
-    action("shrink", "Shrink", <Trash2 />, { disabled: id === "zen-avatar-minimum", disabledReason: id === "zen-avatar-minimum" ? "Avatar is at its minimum size." : undefined }),
-    ...(id === "zen-avatar-default" ? [] : [action("reset", "Reset size", <RotateCcw />, { description: "190px default" })]),
-    { id: "avatar-separator", kind: "separator" },
+  if (id === "zen-avatar") return [
     action("edit", "Edit avatar", <PencilLine />),
   ];
   if (id.startsWith("canvas")) {
@@ -178,6 +172,9 @@ function fixtureEntries(id: FixtureId): PrismMenuEntry[] {
       action("settings", "Settings", <Settings />),
       action("atmosphere", "Atmosphere", <ImageGlyph />, { kind: "toggle", checked: false }),
       action("theme", "Theme: Dark", <Sparkles />),
+      action("copy-verbose-transcript", "Copy Verbose Transcript", <Copy />, {
+        feedback: "Copied",
+      }),
     ];
     const lock = id === "canvas-coffee-live"
       ? "Coffee setup is locked while the session is live."
@@ -198,6 +195,7 @@ function fixtureEntries(id: FixtureId): PrismMenuEntry[] {
     { id: "available", kind: "label", label: "Available applets" },
     action("chat", "Chat", <MessageSquare />, { kind: "radio", group: "app", checked: true }),
     action("coffee", "Coffee", <Users />, { kind: "radio", group: "app", checked: false }),
+    action("debate", "Debate", <Users />, { kind: "radio", group: "app", checked: false }),
     action("slate", "Slate", <PencilLine />, { kind: "radio", group: "app", checked: false }),
     { id: "roadmap-separator", kind: "separator" },
     {
@@ -206,7 +204,6 @@ function fixtureEntries(id: FixtureId): PrismMenuEntry[] {
       label: "Roadmap",
       description: "Planned for future PRISM releases.",
       entries: [
-        action("arena", "Arena", <Users />, { disabled: true, disabledReason: "Planned" }),
         action("games", "Games", <Sparkles />, { disabled: true, disabledReason: "Planned" }),
       ],
     },

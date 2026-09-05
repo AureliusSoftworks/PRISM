@@ -185,6 +185,47 @@ describe("Slate deterministic manuscript exports", () => {
     assert.equal(result.manifest.scope.kind, "chapter");
   });
 
+  it("rejoins chapter-split imported prose without generated headings or breaks", () => {
+    const imported =
+      "Chapter One\n\nThe door opened.\n\nChapter Two\n\nThe road answered.";
+    const splitAt = imported.indexOf("Chapter Two");
+    const source: SlateExportSource = {
+      projectId: "imported-book",
+      title: "Imported Book",
+      sections: [
+        {
+          id: "import-one",
+          parentSectionId: null,
+          kind: "imported",
+          ordinal: 0,
+          title: "Chapter One",
+          prose: imported.slice(0, splitAt),
+          revision: 0,
+        },
+        {
+          id: "import-two",
+          parentSectionId: null,
+          kind: "imported",
+          ordinal: 1,
+          title: "Chapter Two",
+          prose: imported.slice(splitAt),
+          revision: 0,
+        },
+      ],
+    };
+    const result = createSlateTextManuscriptExport({
+      source,
+      scope: { kind: "book" },
+      format: "text",
+      exportedAt: EXPORTED_AT,
+    });
+
+    assert.equal(result.payload, `Imported Book\n\n${imported}\n`);
+    assert.equal(result.payload.match(/Chapter One/gu)?.length, 1);
+    assert.equal(result.payload.match(/Chapter Two/gu)?.length, 1);
+    assert.ok(!result.payload.includes("* * *"));
+  });
+
   it("resolves act, chapter, scene, selection, and book scopes independently", () => {
     const source = novelSource();
     const act = prepareSlateManuscriptExport(source, {

@@ -1,0 +1,50 @@
+.svgHost {
+  overflow: visible;
+}
+
+.svgSource,
+.svgRaster {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+/* Avatar Studio Ink is an authoring surface, not a live phosphor preview. */
+:global([data-screen-mode="editing"]) .svgRaster {
+  opacity: 1;
+  filter: none;
+}
+
+.svgSource > svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.svgRaster {
+  object-fit: fill;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+  opacity: var(--bot-phosphor-core-opacity, 0.94);
+  /* Keep the logical cells intact and soften only their emitted beam. The
+     parent surface supplies the same multi-stop color halo as the face tube. */
+  filter: drop-shadow(
+    0 0 var(--bot-phosphor-beam-softness, 0.45px)
+      rgb(255 255 255 / 0.46)
+  );
+}
+
+.svgHost[data-phosphor-pixel-ready="true"] .svgSource {
+  opacity: 0;
+}
+
+/* Text glyphs opt into this alpha-safe emission pair only on render surfaces
+   that need it. Keeping both nodes inert by default avoids changing compact
+   faces, editor guides, and rapidly changing mouth/thinking glyphs. */
+.textMaskEmission,
+.textMaskEmissionSource {
+  display: none;
+}

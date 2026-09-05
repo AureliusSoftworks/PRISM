@@ -3,6 +3,12 @@
  * what the server actually runs.
  */
 
+import {
+  modelSupportsTurboMode,
+  resolveModelReasoningEffortCapability,
+  type ModelReasoningEffortPreference,
+} from "./reasoningEffort.ts";
+
 export const REQUIRED_LOCAL_MODELS = {
   chat: "llama3.2",
   embedding: "nomic-embed-text",
@@ -12,28 +18,301 @@ export const REQUIRED_PRIMARY_LOCAL_MODEL_ID = REQUIRED_LOCAL_MODELS.chat;
 export const DISABLED_MODEL_CHOICE = "disabled";
 const REQUIRED_VISIBLE_LOCAL_MODEL_ID_SET = new Set<string>([REQUIRED_PRIMARY_LOCAL_MODEL_ID]);
 
-export type AutoModelProvider = "local" | "openai" | "anthropic";
+export type AutoModelProvider =
+  | "local"
+  | "ollama_cloud"
+  | "openai"
+  | "anthropic";
+export type ResponseLane = "local" | "online";
 
-export const MODEL_VISIBILITY_DEFAULTS_VERSION = 5;
+export const AUTO_MODEL_ROUTING_POLICY_VERSION = 1 as const;
+
+export type ModelSelectionV1 =
+  | { kind: "auto" }
+  | { kind: "fixed"; provider: AutoModelProvider; modelId: string };
+
+export type AutoRouteReasonCode =
+  | "light_request"
+  | "standard_request"
+  | "deep_request"
+  | "structured_output"
+  | "tool_use"
+  | "research"
+  | "long_context"
+  | "high_stakes"
+  | "surface_complexity"
+  | "failure_escalation"
+  | "known_cost_preferred"
+  | "only_viable_candidate";
+
+export interface AutoRoutingContextV1 {
+  surface?: string;
+  inputText?: string;
+  inputTokens?: number;
+  outputTokens?: number;
+  structuredOutput?: boolean;
+  toolUse?: boolean;
+  research?: boolean;
+  highStakes?: boolean;
+  simulatedEffortEnabled?: boolean;
+}
+
+export interface AutoRouteDecisionV1 {
+  v: typeof AUTO_MODEL_ROUTING_POLICY_VERSION;
+  lane: ResponseLane;
+  provider: AutoModelProvider;
+  model: string;
+  reasoningEffort: ModelReasoningEffortPreference;
+  reasonCodes: AutoRouteReasonCode[];
+}
+
+export function normalizeAutoRouteDecisionV1(
+  value: unknown,
+): AutoRouteDecisionV1 | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const record = value as Record<string, unknown>;
+  if (record.v !== AUTO_MODEL_ROUTING_POLICY_VERSION) return undefined;
+  if (record.lane !== "local" && record.lane !== "online") return undefined;
+  if (
+    record.provider !== "local" &&
+    record.provider !== "ollama_cloud" &&
+    record.provider !== "openai" &&
+    record.provider !== "anthropic"
+  ) {
+    return undefined;
+  }
+  const model =
+    typeof record.model === "string" ? record.model.trim().slice(0, 240) : "";
+  if (!model) return undefined;
+  const reasoningEffort =
+    typeof record.reasoningEffort === "string" &&
+    ["none", "minimal", "low", "medium", "high", "xhigh"].includes(
+      record.reasoningEffort,
+    )
+      ? (record.reasoningEffort as ModelReasoningEffortPreference)
+      : null;
+  if (!reasoningEffort || !Array.isArray(record.reasonCodes)) return undefined;
+  const allowedReasons = new Set<AutoRouteReasonCode>([
+    "light_request",
+    "standard_request",
+    "deep_request",
+    "structured_output",
+    "tool_use",
+    "research",
+    "long_context",
+    "high_stakes",
+    "surface_complexity",
+    "failure_escalation",
+    "known_cost_preferred",
+    "only_viable_candidate",
+  ]);
+  const reasonCodes = record.reasonCodes.filter(
+    (reason): reason is AutoRouteReasonCode =>
+      typeof reason === "string" &&
+      allowedReasons.has(reason as AutoRouteReasonCode),
+  );
+  if (reasonCodes.length === 0) return undefined;
+  return {
+    v: AUTO_MODEL_ROUTING_POLICY_VERSION,
+    lane: record.lane,
+    provider: record.provider,
+    model,
+    reasoningEffort,
+    reasonCodes: Array.from(new Set(reasonCodes)),
+  };
+}
+
+export interface AutoModelPriceV1 {
+  inputUsdPerMillion: number;
+  outputUsdPerMillion: number;
+}
+
+export const MODEL_VISIBILITY_DEFAULTS_VERSION = 6;
+
+/** ONLINE Auto: -1 max OpenAI lean, 0 balanced, +1 max Anthropic lean. */
+export const ONLINE_AUTO_PROVIDER_BIAS_MIN = -1;
+export const ONLINE_AUTO_PROVIDER_BIAS_MAX = 1;
+export const ONLINE_AUTO_PROVIDER_BIAS_DEFAULT = 0;
+/**
+ * Soft ranking nudge at full lean — on the order of one latency step so
+ * near-ties flip, but clearly cheaper/faster other-provider models still win.
+ */
+export const ONLINE_AUTO_PROVIDER_BIAS_WEIGHT = 10_000;
+
+export const ONLINE_AUTO_PROVIDER_WEIGHTS_VERSION = 1 as const;
+export type OnlineAutoProviderId = "openai" | "anthropic" | "ollama_cloud";
+/**
+ * The provider triangle expresses taste; this setting expresses the quality
+ * boundary within which that taste may operate.
+ */
+export type OnlineAutoQualityPosture = "quality" | "open" | "economy";
+export const DEFAULT_ONLINE_AUTO_QUALITY_POSTURE: OnlineAutoQualityPosture =
+  "quality";
+
+export function normalizeOnlineAutoQualityPosture(
+  value: unknown,
+): OnlineAutoQualityPosture {
+  return value === "open" || value === "economy" ? value : "quality";
+}
+
+export function formatOnlineAutoQualityPostureLabel(value: unknown): string {
+  switch (normalizeOnlineAutoQualityPosture(value)) {
+    case "open":
+      return "Open mix";
+    case "economy":
+      return "Economy";
+    default:
+      return "Quality first";
+  }
+}
+
+export interface OnlineAutoProviderWeightsV1 {
+  v: typeof ONLINE_AUTO_PROVIDER_WEIGHTS_VERSION;
+  openai: number;
+  anthropic: number;
+  ollama_cloud: number;
+}
+export const BALANCED_ONLINE_AUTO_PROVIDER_WEIGHTS: OnlineAutoProviderWeightsV1 = {
+  v: ONLINE_AUTO_PROVIDER_WEIGHTS_VERSION,
+  openai: 1 / 3,
+  anthropic: 1 / 3,
+  ollama_cloud: 1 / 3,
+};
+
+/** Normalize persisted/UI weights, using the old two-provider lean as migration input. */
+export function normalizeOnlineAutoProviderWeights(
+  value: unknown,
+  legacyBias?: unknown,
+): OnlineAutoProviderWeightsV1 {
+  if (value && typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    const raw = (["openai", "anthropic", "ollama_cloud"] as const).map((key) =>
+      typeof record[key] === "number" && Number.isFinite(record[key])
+        ? Math.max(0, record[key] as number)
+        : 0,
+    );
+    const total = raw.reduce((sum, weight) => sum + weight, 0);
+    if (total > 0) {
+      return {
+        v: ONLINE_AUTO_PROVIDER_WEIGHTS_VERSION,
+        openai: raw[0] / total,
+        anthropic: raw[1] / total,
+        ollama_cloud: raw[2] / total,
+      };
+    }
+  }
+  if (typeof legacyBias === "number" && Number.isFinite(legacyBias)) {
+    const bias = clampOnlineAutoProviderBias(legacyBias);
+    return {
+      v: ONLINE_AUTO_PROVIDER_WEIGHTS_VERSION,
+      openai: (1 - bias) / 3,
+      anthropic: (1 + bias) / 3,
+      ollama_cloud: 1 / 3,
+    };
+  }
+  return { ...BALANCED_ONLINE_AUTO_PROVIDER_WEIGHTS };
+}
+
+export function parseStoredOnlineAutoProviderWeights(
+  value: unknown,
+  legacyBias?: unknown,
+): OnlineAutoProviderWeightsV1 {
+  if (typeof value !== "string") {
+    return normalizeOnlineAutoProviderWeights(value, legacyBias);
+  }
+  try {
+    return normalizeOnlineAutoProviderWeights(JSON.parse(value), legacyBias);
+  } catch {
+    return normalizeOnlineAutoProviderWeights(null, legacyBias);
+  }
+}
+
+export function serializeOnlineAutoProviderWeights(value: unknown): string {
+  return JSON.stringify(normalizeOnlineAutoProviderWeights(value));
+}
+
+export function formatOnlineAutoProviderWeightsLabel(value: unknown): string {
+  const weights = normalizeOnlineAutoProviderWeights(value);
+  const rounded = [
+    Math.round(weights.openai * 100),
+    Math.round(weights.anthropic * 100),
+    Math.round(weights.ollama_cloud * 100),
+  ];
+  const delta = 100 - rounded.reduce((sum, weight) => sum + weight, 0);
+  rounded[rounded.indexOf(Math.max(...rounded))] += delta;
+  return `OpenAI ${rounded[0]}% · Anthropic ${rounded[1]}% · Ollama Cloud ${rounded[2]}%`;
+}
 
 /** Minimal catalog shape: only model ids are read. */
 export interface CatalogShapeForAuto {
-  local: readonly { id: string }[];
-  online: readonly { id: string; provider?: AutoModelProvider }[];
+  local: readonly { id: string; thinking?: boolean }[];
+  online: readonly {
+    id: string;
+    provider?: AutoModelProvider;
+    thinking?: boolean;
+    supportsStructuredOutput?: boolean;
+  }[];
 }
 
 export interface ResolveAutoModelInput {
   provider: AutoModelProvider;
+  lane?: ResponseLane;
   explicitModelOverride?: string | null;
+  /** @deprecated Account defaults no longer participate in contextual Auto. */
   preferredModel?: string | null;
   hiddenModelIds: string[];
   catalog: CatalogShapeForAuto;
+  /**
+   * Soft ONLINE Auto lean between OpenAI (-1) and Anthropic (+1).
+   * Ignored for LOCAL. Clamped to [-1, 1]; default 0 = neutrality.
+   */
+  onlineAutoProviderBias?: number | null;
+  /** @deprecated Persisted for backup compatibility; foreground Auto ignores it. */
+  onlineAutoProviderWeights?: OnlineAutoProviderWeightsV1 | null;
+  /** @deprecated Persisted for backup compatibility; foreground Auto ignores it. */
+  onlineAutoQualityPosture?: OnlineAutoQualityPosture | null;
+  routingContext?: AutoRoutingContextV1;
+  /** Restrict contextual ONLINE Auto to models eligible for Turbo. */
+  turboOnly?: boolean;
+  priceForModel?: (
+    provider: AutoModelProvider,
+    modelId: string,
+  ) => AutoModelPriceV1 | null;
+}
+
+export function clampOnlineAutoProviderBias(value: unknown): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return ONLINE_AUTO_PROVIDER_BIAS_DEFAULT;
+  }
+  return Math.min(
+    ONLINE_AUTO_PROVIDER_BIAS_MAX,
+    Math.max(ONLINE_AUTO_PROVIDER_BIAS_MIN, value),
+  );
+}
+
+/** Human label for Settings / status chrome. */
+export function formatOnlineAutoProviderBiasLabel(value: unknown): string {
+  const bias = clampOnlineAutoProviderBias(value);
+  if (Math.abs(bias) < 0.05) return "Balanced";
+  const percent = Math.round(Math.abs(bias) * 100);
+  return bias < 0 ? `Lean OpenAI ${percent}%` : `Lean Anthropic ${percent}%`;
+}
+
+function providerBiasScoreDelta(
+  provider: AutoModelProvider,
+  bias: number,
+): number {
+  if (bias === 0 || provider === "local") return 0;
+  if (provider === "openai") return bias * ONLINE_AUTO_PROVIDER_BIAS_WEIGHT;
+  if (provider === "anthropic") return -bias * ONLINE_AUTO_PROVIDER_BIAS_WEIGHT;
+  return 0;
 }
 
 export interface ResolvedAutoModel {
   provider: AutoModelProvider;
   model: string;
   usedRequiredLocalFallback: boolean;
+  autoRoute?: AutoRouteDecisionV1;
 }
 
 export interface ModelForDefaultVisibility {
@@ -47,6 +326,7 @@ export function isDisabledModelChoice(value: unknown): boolean {
 
 const COMMON_OPENAI_CHAT_MODEL_PATTERNS = [
   /^gpt-5(?:\.\d+)?(?:-(?:mini|chat-latest|sol|terra|luna))?$/,
+  /^gpt-6(?:\.\d+)?(?:-astra)?$/,
   /^gpt-4\.1(?:-mini)?$/,
   /^gpt-4o(?:-mini)?$/,
   /^chatgpt-4o-latest$/,
@@ -112,6 +392,7 @@ export function isCommonOnlineChatModel(model: ModelForDefaultVisibility): boole
   ) {
     return false;
   }
+  if (provider === "ollama_cloud") return true;
   const patterns =
     provider === "anthropic"
       ? COMMON_ANTHROPIC_CHAT_MODEL_PATTERNS
@@ -152,17 +433,39 @@ export function reconcileHiddenModelIdsForCatalog(
   );
 }
 
-function providerCatalogIds(catalog: CatalogShapeForAuto, provider: AutoModelProvider): string[] {
-  if (provider === "local") {
-    return catalog.local.map((model) => model.id);
+function laneCatalogModels(
+  catalog: CatalogShapeForAuto,
+  lane: ResponseLane,
+): Array<{
+  id: string;
+  provider: AutoModelProvider;
+  thinking?: boolean;
+  supportsStructuredOutput?: boolean;
+}> {
+  if (lane === "local") {
+    return catalog.local.map((model) => ({
+      id: model.id,
+      provider: "local",
+      thinking: model.thinking,
+    }));
   }
-  return catalog.online
-    .filter((model) => (model.provider ?? "openai") === provider)
-    .map((model) => model.id);
+  return catalog.online.map((model) => ({
+    id: model.id,
+    provider: model.provider ?? "openai",
+    thinking: model.thinking,
+    supportsStructuredOutput: model.supportsStructuredOutput,
+  }));
 }
 
 function inferOnlineProviderFromModelId(modelId: string): Exclude<AutoModelProvider, "local"> | null {
   const normalized = modelId.trim().toLowerCase();
+  if (
+    normalized.startsWith("ollama-cloud-direct:") ||
+    normalized.endsWith(":cloud") ||
+    normalized.endsWith("-cloud")
+  ) {
+    return "ollama_cloud";
+  }
   if (normalized.startsWith("claude-")) return "anthropic";
   if (
     normalized.startsWith("gpt-") ||
@@ -198,8 +501,7 @@ function providerForCandidateModel(
     return inferredProvider === null || inferredProvider === "local" ? "local" : null;
   }
 
-  if (inferredProvider === "local" ||
-      (requestedProvider === "anthropic" && inferredProvider === "openai")) {
+  if (inferredProvider === "local") {
     return null;
   }
   return inferredProvider ?? requestedProvider;
@@ -220,33 +522,434 @@ function firstVisibleRoutableModel(
   return null;
 }
 
+const ROUTING_EFFORT_ORDER = [
+  "none",
+  "minimal",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+] as const satisfies readonly ModelReasoningEffortPreference[];
+
+function estimatedInputTokens(context: AutoRoutingContextV1 | undefined): number {
+  if (typeof context?.inputTokens === "number" && Number.isFinite(context.inputTokens)) {
+    return Math.max(0, Math.round(context.inputTokens));
+  }
+  return Math.ceil((context?.inputText?.trim().length ?? 0) / 4);
+}
+
+function routingComplexity(context: AutoRoutingContextV1 | undefined): {
+  score: number;
+  reasons: AutoRouteReasonCode[];
+} {
+  let score = 0;
+  const reasons: AutoRouteReasonCode[] = [];
+  const inputTokens = estimatedInputTokens(context);
+  if (inputTokens >= 8_000) {
+    score += 2;
+    reasons.push("long_context");
+  } else if (inputTokens >= 2_000) {
+    score += 1;
+    reasons.push("long_context");
+  }
+  if (context?.structuredOutput) {
+    score += 1;
+    reasons.push("structured_output");
+  }
+  if (context?.toolUse) {
+    score += 1;
+    reasons.push("tool_use");
+  }
+  if (context?.research) {
+    score += 2;
+    reasons.push("research");
+  }
+  if (context?.highStakes) {
+    score += 2;
+    reasons.push("high_stakes");
+  }
+  if (/^(?:debate|signal|story|slate|continuity)$/u.test(context?.surface ?? "")) {
+    score += 1;
+    reasons.push("surface_complexity");
+  }
+  reasons.unshift(score <= 0 ? "light_request" : score <= 2 ? "standard_request" : "deep_request");
+  return { score, reasons };
+}
+
+function modelSizeBillions(modelId: string): number | null {
+  const normalized = modelId.trim().toLowerCase();
+  const match = normalized.match(/(?:^|[-_:])([0-9]+(?:\.[0-9]+)?)b(?:$|[-_:])/u);
+  return match ? Number(match[1]) : null;
+}
+
+function routingProfile(provider: AutoModelProvider, modelId: string): {
+  capability: number;
+  latency: number;
+  known: boolean;
+} {
+  const id = modelId.trim().toLowerCase();
+  if (provider === "local") {
+    const size = modelSizeBillions(id);
+    if (size !== null) {
+      if (size <= 4) return { capability: 1, latency: 1, known: true };
+      if (size <= 10) return { capability: 2, latency: 2, known: true };
+      if (size <= 35) return { capability: 3, latency: 3, known: true };
+      return { capability: 4, latency: 4, known: true };
+    }
+    if (/llama3\.2|gemma3|qwen/u.test(id)) {
+      return { capability: 2, latency: 2, known: true };
+    }
+    return { capability: 2, latency: 5, known: false };
+  }
+  if (/nano|haiku|4o-mini/u.test(id)) {
+    return { capability: 1, latency: 1, known: true };
+  }
+  if (/mini|luna/u.test(id)) {
+    return { capability: 2, latency: 2, known: true };
+  }
+  if (/fable|mythos/u.test(id)) {
+    return { capability: 4, latency: 5, known: true };
+  }
+  if (/opus|pro|sol|astra|gpt-6|(?:^|-)o[345](?:-|$)/u.test(id)) {
+    return { capability: 4, latency: 4, known: true };
+  }
+  if (/sonnet|terra|gpt-5|gpt-4\.1|gpt-4o/u.test(id)) {
+    return { capability: 3, latency: 3, known: true };
+  }
+  return { capability: 2, latency: 5, known: false };
+}
+
+/**
+ * Coarse, provider-neutral capability ladder used only after an Auto attempt
+ * fails. Initial Auto selection still balances task fit, latency, provider
+ * preference, and price; recovery must move upward instead of walking a
+ * catalog- or cost-ordered fallback list.
+ */
+function autoEscalationTier(
+  provider: AutoModelProvider,
+  modelId: string,
+): number {
+  const id = modelId.trim().toLowerCase();
+  if (provider === "local") {
+    return routingProfile(provider, modelId).capability;
+  }
+  if (/gpt-3\.5|nano|haiku|4o-mini/u.test(id)) return 1;
+  if (/mini|luna/u.test(id)) return 2;
+  if (/gpt-4\.1|gpt-4o|chatgpt-4o/u.test(id)) return 3;
+  if (/opus|pro|sol|astra|gpt-6|(?:^|-)o[345](?:-|$)/u.test(id)) return 5;
+  if (/sonnet|terra|gpt-5/u.test(id)) return 4;
+  return Math.max(1, routingProfile(provider, modelId).capability);
+}
+
+function clampAutoEffort(args: {
+  provider: AutoModelProvider;
+  modelId: string;
+  target: ModelReasoningEffortPreference;
+  simulatedEffortEnabled: boolean;
+  ollamaNativeThinking?: boolean;
+}): ModelReasoningEffortPreference {
+  const capability = resolveModelReasoningEffortCapability({
+    provider: args.provider,
+    modelId: args.modelId,
+    simulatedEffortEnabled: args.simulatedEffortEnabled,
+    ollamaNativeThinking: args.ollamaNativeThinking,
+  });
+  if (capability.mode === "unavailable" || capability.levels.length === 0) {
+    return "none";
+  }
+  const targetIndex = Math.max(
+    0,
+    Math.min(
+      ROUTING_EFFORT_ORDER.length - 1,
+      ROUTING_EFFORT_ORDER.indexOf(
+        args.target as (typeof ROUTING_EFFORT_ORDER)[number],
+      ),
+    ),
+  );
+  const supported = capability.levels.filter(
+    (level): level is (typeof ROUTING_EFFORT_ORDER)[number] =>
+      ROUTING_EFFORT_ORDER.includes(
+        level as (typeof ROUTING_EFFORT_ORDER)[number],
+      ),
+  );
+  const atOrBelow = supported.filter(
+    (level) => ROUTING_EFFORT_ORDER.indexOf(level) <= targetIndex,
+  );
+  return atOrBelow.at(-1) ?? supported[0] ?? "none";
+}
+
+function contextualAutoRoute(input: ResolveAutoModelInput): AutoRouteDecisionV1 | null {
+  const lane: ResponseLane = input.lane ?? (input.provider === "local" ? "local" : "online");
+  const hidden = new Set(sanitizeHiddenModelIds(input.hiddenModelIds));
+  const candidates = laneCatalogModels(input.catalog, lane)
+    .map((candidate) => ({ ...candidate, id: candidate.id.trim() }))
+    .filter(
+      (candidate) =>
+        candidate.id &&
+        // Ollama Cloud is a bounded ONLINE helper, never a global foreground
+        // route. Keep this shared boundary ahead of every applet-specific
+        // eligibility rule so Auto and recovery agree everywhere.
+        (lane !== "online" || candidate.provider !== "ollama_cloud") &&
+        !hidden.has(candidate.id) &&
+        (!input.routingContext?.structuredOutput ||
+          candidate.supportsStructuredOutput !== false) &&
+        (!input.turboOnly || modelSupportsTurboMode(candidate.provider, candidate.id)),
+    );
+  if (candidates.length === 0) return null;
+
+  const complexity = routingComplexity(input.routingContext);
+  const capabilityFloor = complexity.score <= 0 ? 1 : complexity.score <= 2 ? 2 : complexity.score <= 4 ? 3 : 4;
+  const profiled = candidates.map((candidate) => ({
+    ...candidate,
+    profile: routingProfile(candidate.provider, candidate.id),
+  }));
+  const capable = profiled.filter((candidate) => candidate.profile.capability >= capabilityFloor);
+  const viable = capable.length > 0
+    ? capable
+    : profiled.filter(
+        (candidate) => candidate.profile.capability === Math.max(...profiled.map((entry) => entry.profile.capability)),
+      );
+  const inputTokens = estimatedInputTokens(input.routingContext);
+  const outputTokens = Math.max(1, Math.round(input.routingContext?.outputTokens ?? 800));
+  // Foreground ONLINE Auto is intentionally binary: the legacy scalar is the
+  // sole preference between OpenAI and Anthropic. Newer three-way values are
+  // accepted elsewhere for backup compatibility but never affect this route.
+  const providerBias =
+    lane === "online"
+      ? clampOnlineAutoProviderBias(input.onlineAutoProviderBias)
+      : ONLINE_AUTO_PROVIDER_BIAS_DEFAULT;
+  const ranked = viable
+    .map((candidate) => {
+      const price = input.priceForModel?.(candidate.provider, candidate.id) ?? null;
+      const estimatedCost = price
+        ? inputTokens * price.inputUsdPerMillion + outputTokens * price.outputUsdPerMillion
+        : candidate.provider === "local"
+          ? 0
+          : Number.MAX_SAFE_INTEGER / 4;
+      return {
+        ...candidate,
+        price,
+        score:
+          estimatedCost +
+          candidate.profile.latency * 10_000 +
+          (candidate.profile.known ? 0 : 1_000_000_000) +
+          providerBiasScoreDelta(candidate.provider, providerBias),
+      };
+    })
+    .sort((left, right) =>
+      left.score - right.score ||
+      left.provider.localeCompare(right.provider) ||
+      left.id.localeCompare(right.id),
+    );
+  const selected = ranked[0];
+  if (!selected) return null;
+  const targetEffort: ModelReasoningEffortPreference =
+    complexity.score <= 0
+      ? "none"
+      : complexity.score <= 2
+        ? "low"
+        : complexity.score <= 4
+          ? "medium"
+          : complexity.score <= 6
+            ? "high"
+            : "xhigh";
+  const reasonCodes = [...complexity.reasons];
+  if (selected.price) reasonCodes.push("known_cost_preferred");
+  if (ranked.length === 1) reasonCodes.push("only_viable_candidate");
+  return {
+    v: AUTO_MODEL_ROUTING_POLICY_VERSION,
+    lane,
+    provider: selected.provider,
+    model: selected.id,
+    reasoningEffort: clampAutoEffort({
+      provider: selected.provider,
+      modelId: selected.id,
+      target: targetEffort,
+      simulatedEffortEnabled: input.routingContext?.simulatedEffortEnabled === true,
+      ollamaNativeThinking: selected.thinking === true,
+    }),
+    reasonCodes: Array.from(new Set(reasonCodes)),
+  };
+}
+
+function targetAutoEffortForComplexity(
+  score: number,
+): ModelReasoningEffortPreference {
+  return score <= 0
+    ? "none"
+    : score <= 2
+      ? "low"
+      : score <= 4
+        ? "medium"
+        : score <= 6
+          ? "high"
+          : "xhigh";
+}
+
+/**
+ * Resolve one bounded Auto execution plan for a single prompt/work item.
+ * The first route is the ordinary contextual Auto choice. Every later route
+ * is selected from a strictly higher capability tier and receives effort
+ * recalculated for the failed work rather than inheriting a session snapshot.
+ * User-authored fixed-model fallback chains intentionally do not participate.
+ */
+export function resolveAutoModelRoutePlan(
+  input: ResolveAutoModelInput,
+  maxAttempts = 3,
+): AutoRouteDecisionV1[] {
+  const primary = contextualAutoRoute(input);
+  if (!primary) return [];
+
+  const attemptLimit = Math.max(1, Math.min(5, Math.floor(maxAttempts)));
+  if (attemptLimit === 1) return [primary];
+
+  const lane: ResponseLane =
+    input.lane ?? (input.provider === "local" ? "local" : "online");
+  const hidden = new Set(sanitizeHiddenModelIds(input.hiddenModelIds));
+  const candidates = laneCatalogModels(input.catalog, lane)
+    .map((candidate) => ({ ...candidate, id: candidate.id.trim() }))
+    .filter(
+      (candidate) =>
+        candidate.id &&
+        (lane !== "online" || candidate.provider !== "ollama_cloud") &&
+        !hidden.has(candidate.id) &&
+        (!input.routingContext?.structuredOutput ||
+          candidate.supportsStructuredOutput !== false) &&
+        (!input.turboOnly ||
+          modelSupportsTurboMode(candidate.provider, candidate.id)),
+    );
+  const complexity = routingComplexity(input.routingContext);
+  const inputTokens = estimatedInputTokens(input.routingContext);
+  const outputTokens = Math.max(
+    1,
+    Math.round(input.routingContext?.outputTokens ?? 800),
+  );
+  const providerBias =
+    lane === "online"
+      ? clampOnlineAutoProviderBias(input.onlineAutoProviderBias)
+      : ONLINE_AUTO_PROVIDER_BIAS_DEFAULT;
+  const primaryKey = `${primary.provider}:${primary.model.toLowerCase()}`;
+  const ranked = candidates
+    .filter(
+      (candidate) =>
+        `${candidate.provider}:${candidate.id.toLowerCase()}` !== primaryKey,
+    )
+    .map((candidate) => {
+      const price =
+        input.priceForModel?.(candidate.provider, candidate.id) ?? null;
+      const estimatedCost = price
+        ? inputTokens * price.inputUsdPerMillion +
+          outputTokens * price.outputUsdPerMillion
+        : candidate.provider === "local"
+          ? 0
+          : Number.MAX_SAFE_INTEGER / 4;
+      return {
+        ...candidate,
+        price,
+        tier: autoEscalationTier(candidate.provider, candidate.id),
+        score:
+          estimatedCost +
+          routingProfile(candidate.provider, candidate.id).latency * 10_000 +
+          providerBiasScoreDelta(candidate.provider, providerBias),
+      };
+    });
+
+  const plan: AutoRouteDecisionV1[] = [primary];
+  let currentTier = autoEscalationTier(primary.provider, primary.model);
+  while (plan.length < attemptLimit) {
+    const higherTiers = ranked
+      .map((candidate) => candidate.tier)
+      .filter((tier) => tier > currentTier);
+    if (higherTiers.length === 0) break;
+    const nextTier = Math.min(...higherTiers);
+    const selected = ranked
+      .filter((candidate) => candidate.tier === nextTier)
+      .sort((left, right) =>
+        left.score - right.score ||
+        left.provider.localeCompare(right.provider) ||
+        left.id.localeCompare(right.id),
+      )[0];
+    if (!selected) break;
+    const reasonCodes = Array.from(
+      new Set<AutoRouteReasonCode>([
+        ...complexity.reasons,
+        "failure_escalation",
+        ...(selected.price ? ["known_cost_preferred" as const] : []),
+      ]),
+    );
+    plan.push({
+      v: AUTO_MODEL_ROUTING_POLICY_VERSION,
+      lane,
+      provider: selected.provider,
+      model: selected.id,
+      reasoningEffort: clampAutoEffort({
+        provider: selected.provider,
+        modelId: selected.id,
+        target: targetAutoEffortForComplexity(
+          complexity.score + plan.length * 2,
+        ),
+        simulatedEffortEnabled:
+          input.routingContext?.simulatedEffortEnabled === true,
+        ollamaNativeThinking: selected.thinking === true,
+      }),
+      reasonCodes,
+    });
+    currentTier = nextTier;
+  }
+  return plan;
+}
+
 export function resolveAutoModel(input: ResolveAutoModelInput): ResolvedAutoModel {
   const hidden = new Set(sanitizeHiddenModelIds(input.hiddenModelIds));
+  const lane: ResponseLane = input.lane ?? (input.provider === "local" ? "local" : "online");
   const explicit = input.explicitModelOverride?.trim() || null;
-  const preferred = input.preferredModel?.trim() || null;
-  const providerCatalog = providerCatalogIds(input.catalog, input.provider);
-  const leadingCandidates = [explicit, preferred].filter(
-    (model): model is string => Boolean(model)
-  );
-  const leadingCandidateSet = new Set(leadingCandidates);
-  const providerCandidates = [
-    ...leadingCandidates,
-    ...providerCatalog.filter((model) => !leadingCandidateSet.has(model)),
-  ];
-  const providerModel = firstVisibleRoutableModel(
-    providerCandidates,
-    hidden,
-    input.provider,
-    input.catalog
-  );
-  if (providerModel) {
+  if (explicit) {
+    const structuredUnsupported =
+      input.routingContext?.structuredOutput === true &&
+      input.catalog.online.some(
+        (model) =>
+          model.id === explicit && model.supportsStructuredOutput === false,
+      );
+    const fixed = structuredUnsupported
+      ? null
+      : firstVisibleRoutableModel(
+          [explicit],
+          hidden,
+          input.provider,
+          input.catalog,
+        );
+    // A Cloud model is valid only when the player selected it explicitly.
+    // Contextual Auto and every recovery plan filter Cloud above.
+    if (fixed) {
+      return {
+        provider: fixed.provider,
+        model: fixed.model,
+        usedRequiredLocalFallback: false,
+      };
+    }
+  }
+
+  const autoRoute = contextualAutoRoute(input);
+  if (autoRoute) {
     return {
-      provider: providerModel.provider,
-      model: providerModel.model,
+      provider: autoRoute.provider,
+      model: autoRoute.model,
       usedRequiredLocalFallback: false,
+      autoRoute,
     };
   }
 
+  if (lane === "online") {
+    const provider = input.provider === "anthropic" ? "anthropic" : "openai";
+    return {
+      provider,
+      model:
+        provider === "anthropic"
+          ? "claude-sonnet-4-6"
+          : "gpt-4o-mini",
+      usedRequiredLocalFallback: false,
+    };
+  }
   return {
     provider: "local",
     model: REQUIRED_PRIMARY_LOCAL_MODEL_ID,

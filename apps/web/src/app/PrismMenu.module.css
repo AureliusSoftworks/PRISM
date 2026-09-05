@@ -41,6 +41,12 @@
   animation: prismMenuIn 110ms cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
+/* Navbar menus sit just under their header controls, not above the chrome. */
+.menu[data-navbar-picker-surface="true"] {
+  z-index: 179;
+  padding-top: 12px;
+}
+
 .menu::before {
   content: "";
   position: absolute;
@@ -86,7 +92,7 @@
   background: transparent;
   color: inherit;
   font: inherit;
-  font-size: 13px;
+  font-size: var(--prism-type-body);
   line-height: 1.16;
   text-align: left;
 }
@@ -95,12 +101,16 @@
   cursor: default;
 }
 
-.item:hover,
-.item:focus-visible,
-.item[data-active="true"] {
+.item:hover {
   outline: none;
   border-color: color-mix(in srgb, var(--prism-menu-accent) 26%, transparent);
   background: color-mix(in srgb, var(--prism-menu-accent) 10%, rgba(255, 255, 255, 0.055));
+}
+
+.item:focus-visible {
+  outline: 2px solid
+    color-mix(in srgb, var(--prism-menu-accent) 58%, transparent);
+  outline-offset: -2px;
 }
 
 .item[data-tone="danger"] {
@@ -113,10 +123,15 @@
 }
 
 .item:disabled:hover,
-.item:disabled:focus-visible,
-.item:disabled[data-active="true"] {
+.item:disabled:focus-visible {
   border-color: transparent;
   background: transparent;
+}
+
+.item[data-icon-presentation="identity"] {
+  grid-template-columns: 29px minmax(0, 1fr) auto;
+  min-height: 48px;
+  column-gap: 11px;
 }
 
 .icon,
@@ -139,6 +154,35 @@
 
 .indicator {
   color: var(--prism-menu-accent);
+}
+
+.identityIcon {
+  display: inline-grid;
+  place-items: center;
+  width: 29px;
+  height: 29px;
+  color: color-mix(in srgb, var(--prism-menu-accent) 88%, currentColor);
+}
+
+.identityIcon svg {
+  width: 25px;
+  height: 25px;
+  stroke-width: 1.9;
+}
+
+.selectionMark {
+  display: inline-grid;
+  place-items: center;
+  justify-self: end;
+  width: 17px;
+  height: 17px;
+  color: var(--prism-menu-accent);
+}
+
+.selectionMark svg {
+  width: 15px;
+  height: 15px;
+  stroke-width: 2.2;
 }
 
 .chevron {
@@ -165,7 +209,7 @@
 .copy small,
 .disabledReason {
   color: var(--prism-menu-muted);
-  font-size: 11px;
+  font-size: var(--prism-type-caption);
   font-weight: 520;
   line-height: 1.25;
 }
@@ -175,7 +219,7 @@
   padding-left: 12px;
   color: var(--prism-menu-muted);
   font-family: var(--font-geist-mono, ui-monospace, monospace);
-  font-size: 10.5px;
+  font-size: var(--prism-type-caption);
   white-space: nowrap;
 }
 
@@ -189,14 +233,14 @@
   min-height: 0;
   padding-block: 5px 3px;
   color: var(--prism-menu-muted);
-  font-size: 10px;
+  font-size: var(--prism-type-caption);
   font-weight: 720;
   letter-spacing: 0.09em;
   text-transform: uppercase;
 }
 
 .label .copy small {
-  font-size: 10.5px;
+  font-size: var(--prism-type-caption);
   font-weight: 520;
   letter-spacing: normal;
   line-height: 1.3;
@@ -216,14 +260,16 @@
   background: var(--prism-menu-bg);
   color: var(--prism-menu-fg);
   box-shadow: 0 12px 30px rgba(0, 0, 0, 0.28);
-  font-size: 12px;
+  font-size: var(--prism-type-label);
   font-weight: 700;
   pointer-events: none;
   animation: prismMenuFeedback 760ms ease both;
 }
 
 .menu[data-theme="light"],
-.feedback[data-theme="light"] {
+.feedback[data-theme="light"],
+:global(body[data-prism-theme="light"]) .menu,
+:global(body[data-prism-theme="light"]) .feedback {
   --prism-menu-bg: #f8fbfe;
   --prism-menu-fg: #172638;
   --prism-menu-muted: #637386;
@@ -236,7 +282,8 @@
   -webkit-backdrop-filter: none;
 }
 
-.menu[data-theme="light"] .item[data-tone="danger"] {
+.menu[data-theme="light"] .item[data-tone="danger"],
+:global(body[data-prism-theme="light"]) .menu .item[data-tone="danger"] {
   color: #a92b3a;
 }
 

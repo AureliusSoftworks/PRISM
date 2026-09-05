@@ -177,12 +177,19 @@ export function compareSlateContinuityProducerVersions(
 
 interface ProjectUpgradeRow {
   id: string;
+  series_id: string;
   continuity_active_version: string;
   continuity_target_version: string;
   continuity_active_generation: number;
   continuity_previous_generation: number | null;
   continuity_upgrade_status: string;
   continuity_last_success_at: string | null;
+}
+
+interface SeriesUpgradeRow {
+  id: string;
+  continuity_active_generation: number;
+  continuity_previous_generation: number | null;
 }
 
 interface GenerationRow {
@@ -233,7 +240,7 @@ function projectRow(
 ): ProjectUpgradeRow {
   const row = db
     .prepare(
-      `SELECT id, continuity_active_version, continuity_target_version,
+      `SELECT id, series_id, continuity_active_version, continuity_target_version,
               continuity_active_generation, continuity_previous_generation,
               continuity_upgrade_status, continuity_last_success_at
          FROM slate_projects
@@ -241,6 +248,22 @@ function projectRow(
     )
     .get(projectId, userId) as ProjectUpgradeRow | undefined;
   if (!row) throw new Error("Slate project not found.");
+  return row;
+}
+
+function seriesRow(
+  db: DatabaseSync,
+  userId: string,
+  seriesId: string,
+): SeriesUpgradeRow {
+  const row = db
+    .prepare(
+      `SELECT id, continuity_active_generation, continuity_previous_generation
+         FROM slate_series
+        WHERE id = ? AND user_id = ?`,
+    )
+    .get(seriesId, userId) as SeriesUpgradeRow | undefined;
+  if (!row) throw new Error("Slate series not found.");
   return row;
 }
 
@@ -258,6 +281,98 @@ function generationRow(
     .get(userId, projectId, generation) as GenerationRow | undefined;
   if (!row) throw new Error("Continuity generation not found.");
   return row;
+}
+
+function seriesGenerationRow(
+  db: DatabaseSync,
+  userId: string,
+  seriesId: string,
+  generation: number,
+  preferredProjectId: string,
+): GenerationRow {
+  const row = db
+    .prepare(
+      `SELECT generations.*
+         FROM slate_continuity_generations AS generations
+         JOIN slate_projects AS projects
+           ON projects.id = generations.project_id
+          AND projects.user_id = generations.user_id
+        WHERE generations.user_id = ?
+          AND projects.series_id = ?
+          AND generations.generation = ?
+        ORDER BY CASE WHEN generations.project_id = ? THEN 0 ELSE 1 END,
+                 generations.created_at ASC,
+                 generations.id ASC
+        LIMIT 1`,
+    )
+    .get(
+      userId,
+      seriesId,
+      generation,
+      preferredProjectId,
+    ) as GenerationRow | undefined;
+  if (!row) throw new Error("Continuity generation not found.");
+  return row;
+}
+
+function activeGeneration(
+  project: ProjectUpgradeRow,
+  series: SeriesUpgradeRow,
+): number {
+  const seriesGeneration = Number(series.continuity_active_generation);
+  return seriesGeneration > 0
+    ? seriesGeneration
+    : Number(project.continuity_active_generation);
+}
+
+function previousGeneration(
+  project: ProjectUpgradeRow,
+  series: SeriesUpgradeRow,
+): number | null {
+  if (Number(series.continuity_active_generation) > 0) {
+    return series.continuity_previous_generation === null
+      ? null
+      : Number(series.continuity_previous_generation);
+  }
+  return project.continuity_previous_generation === null
+    ? null
+    : Number(project.continuity_previous_generation);
+}
+
+function assertLegacySeriesProjectionIsUnambiguous(
+  db: DatabaseSync,
+  userId: string,
+  project: ProjectUpgradeRow,
+  series: SeriesUpgradeRow,
+): void {
+  if (Number(series.continuity_active_generation) > 0) return;
+  const rows = db
+    .prepare(
+      `SELECT DISTINCT continuity_active_generation,
+                       continuity_previous_generation
+         FROM slate_projects
+        WHERE user_id = ? AND series_id = ?
+          AND continuity_active_generation > 0`,
+    )
+    .all(userId, project.series_id) as Array<{
+      continuity_active_generation: number;
+      continuity_previous_generation: number | null;
+    }>;
+  const projections = new Set(
+    rows.map(
+      (row) =>
+        `${Number(row.continuity_active_generation)}:${
+          row.continuity_previous_generation === null
+            ? "none"
+            : Number(row.continuity_previous_generation)
+        }`,
+    ),
+  );
+  if (projections.size > 1) {
+    throw new Error(
+      "Legacy project Continuity generation pointers disagree; reconcile the series before promotion or rollback.",
+    );
+  }
 }
 
 function producerVersionsFromRow(row: GenerationRow): ContinuityProducerVersions {
@@ -308,16 +423,16 @@ function upgradeStatus(value: string): SlateContinuityUpgradeState["status"] {
     : "current";
 }
 
-function stateFromRow(row: ProjectUpgradeRow): SlateContinuityUpgradeState {
+function stateFromRows(
+  row: ProjectUpgradeRow,
+  series: SeriesUpgradeRow,
+): SlateContinuityUpgradeState {
   return {
     projectId: row.id,
     activeVersion: row.continuity_active_version,
     targetVersion: row.continuity_target_version,
-    activeGeneration: Number(row.continuity_active_generation),
-    previousGeneration:
-      row.continuity_previous_generation === null
-        ? null
-        : Number(row.continuity_previous_generation),
+    activeGeneration: activeGeneration(row, series),
+    previousGeneration: previousGeneration(row, series),
     status: upgradeStatus(row.continuity_upgrade_status),
     lastSuccessfulAt: row.continuity_last_success_at,
   };
@@ -340,15 +455,24 @@ function activeProducerVersions(
   userId: string,
   project: ProjectUpgradeRow,
 ): ContinuityProducerVersions {
-  if (Number(project.continuity_active_generation) <= 0) {
+  const series = seriesRow(db, userId, project.series_id);
+  assertLegacySeriesProjectionIsUnambiguous(
+    db,
+    userId,
+    project,
+    series,
+  );
+  const generation = activeGeneration(project, series);
+  if (generation <= 0) {
     return legacyProducerVersions(project.continuity_active_version);
   }
   return producerVersionsFromRow(
-    generationRow(
+    seriesGenerationRow(
       db,
       userId,
+      project.series_id,
+      generation,
       project.id,
-      Number(project.continuity_active_generation),
     ),
   );
 }
@@ -366,7 +490,11 @@ export function getSlateContinuityUpgradeState(
   userId: string,
   projectId: string,
 ): SlateContinuityUpgradeState {
-  return stateFromRow(projectRow(db, userId, projectId));
+  const project = projectRow(db, userId, projectId);
+  return stateFromRows(
+    project,
+    seriesRow(db, userId, project.series_id),
+  );
 }
 
 export function listSlateContinuityGenerations(
@@ -405,12 +533,17 @@ export function buildSlateContinuityShadowGeneration(
     const project = projectRow(db, userId, projectId);
     const pending = db
       .prepare(
-        `SELECT generation FROM slate_continuity_generations
-          WHERE user_id = ? AND project_id = ?
-            AND status IN ('building', 'ready')
+        `SELECT generations.generation
+           FROM slate_continuity_generations AS generations
+           JOIN slate_projects AS projects
+             ON projects.id = generations.project_id
+            AND projects.user_id = generations.user_id
+          WHERE generations.user_id = ?
+            AND projects.series_id = ?
+            AND generations.status IN ('building', 'ready')
           LIMIT 1`,
       )
-      .get(userId, projectId) as { generation: number } | undefined;
+      .get(userId, project.series_id) as { generation: number } | undefined;
     if (pending) {
       throw new Error(
         `Continuity generation ${pending.generation} is already in progress.`,
@@ -429,11 +562,14 @@ export function buildSlateContinuityShadowGeneration(
     }
     const maximum = db
       .prepare(
-        `SELECT COALESCE(MAX(generation), 0) AS generation
-           FROM slate_continuity_generations
-          WHERE user_id = ? AND project_id = ?`,
+        `SELECT COALESCE(MAX(generations.generation), 0) AS generation
+           FROM slate_continuity_generations AS generations
+           JOIN slate_projects AS projects
+             ON projects.id = generations.project_id
+            AND projects.user_id = generations.user_id
+          WHERE generations.user_id = ? AND projects.series_id = ?`,
       )
-      .get(userId, projectId) as { generation: number };
+      .get(userId, project.series_id) as { generation: number };
     const generation = Number(maximum.generation) + 1;
     const id = randomUUID();
     const now = new Date().toISOString();
@@ -456,8 +592,8 @@ export function buildSlateContinuityShadowGeneration(
     db.prepare(
       `UPDATE slate_projects
           SET continuity_target_version = ?, continuity_upgrade_status = 'building'
-        WHERE id = ? AND user_id = ?`,
-    ).run(target.continuity, projectId, userId);
+        WHERE series_id = ? AND user_id = ?`,
+    ).run(target.continuity, project.series_id, userId);
     return {
       generation: generationFromRow(
         generationRow(db, userId, projectId, generation),
@@ -476,7 +612,7 @@ export function completeSlateContinuityShadowGeneration(
 ): SlateContinuityGeneration {
   const summary = nonEmptyText(comparisonSummary, "Comparison summary", 32_000);
   return transaction(db, () => {
-    projectRow(db, userId, projectId);
+    const project = projectRow(db, userId, projectId);
     generationRow(db, userId, projectId, generation);
     const now = new Date().toISOString();
     const result = db.prepare(
@@ -491,8 +627,8 @@ export function completeSlateContinuityShadowGeneration(
     db.prepare(
       `UPDATE slate_projects
           SET continuity_upgrade_status = 'review'
-        WHERE id = ? AND user_id = ?`,
-    ).run(projectId, userId);
+        WHERE series_id = ? AND user_id = ?`,
+    ).run(project.series_id, userId);
     return generationFromRow(generationRow(db, userId, projectId, generation));
   });
 }
@@ -507,7 +643,7 @@ function finishWithoutActivation(
 ): SlateContinuityGeneration {
   const summary = nonEmptyText(explanation, "Upgrade explanation", 32_000);
   return transaction(db, () => {
-    projectRow(db, userId, projectId);
+    const project = projectRow(db, userId, projectId);
     generationRow(db, userId, projectId, generation);
     const now = new Date().toISOString();
     const result = db.prepare(
@@ -524,8 +660,8 @@ function finishWithoutActivation(
     db.prepare(
       `UPDATE slate_projects
           SET continuity_upgrade_status = ?
-        WHERE id = ? AND user_id = ?`,
-    ).run(status, projectId, userId);
+        WHERE series_id = ? AND user_id = ?`,
+    ).run(status, project.series_id, userId);
     return generationFromRow(generationRow(db, userId, projectId, generation));
   });
 }
@@ -572,6 +708,13 @@ export function activateSlateContinuityGeneration(
 ): SlateContinuityUpgradeState {
   return transaction(db, () => {
     const project = projectRow(db, userId, projectId);
+    const series = seriesRow(db, userId, project.series_id);
+    assertLegacySeriesProjectionIsUnambiguous(
+      db,
+      userId,
+      project,
+      series,
+    );
     const candidate = generationRow(db, userId, projectId, generation);
     if (candidate.status !== "ready") {
       throw new Error("Only a ready Continuity generation can be activated.");
@@ -597,13 +740,14 @@ export function activateSlateContinuityGeneration(
       );
     }
 
-    const oldActiveGeneration = Number(project.continuity_active_generation);
+    const oldActiveGeneration = activeGeneration(project, series);
     if (oldActiveGeneration > 0) {
-      const oldActive = generationRow(
+      const oldActive = seriesGenerationRow(
         db,
         userId,
-        projectId,
+        project.series_id,
         oldActiveGeneration,
+        projectId,
       );
       if (oldActive.status !== "active") {
         throw new Error("The active Continuity generation pointer is inconsistent.");
@@ -611,9 +755,18 @@ export function activateSlateContinuityGeneration(
       db.prepare(
         `UPDATE slate_continuity_generations
             SET status = 'superseded'
-          WHERE user_id = ? AND project_id = ? AND generation = ?
+          WHERE user_id = ? AND generation = ?
+            AND project_id IN (
+              SELECT id FROM slate_projects
+               WHERE user_id = ? AND series_id = ?
+            )
             AND status = 'active'`,
-      ).run(userId, projectId, oldActiveGeneration);
+      ).run(
+        userId,
+        oldActiveGeneration,
+        userId,
+        project.series_id,
+      );
     }
 
     const now = new Date().toISOString();
@@ -626,6 +779,40 @@ export function activateSlateContinuityGeneration(
     if (Number(candidateUpdate.changes) !== 1) {
       throw new Error("Continuity generation activation lost its ready state.");
     }
+    const rawSeriesActiveGeneration = Number(
+      series.continuity_active_generation,
+    );
+    const rawSeriesPreviousGeneration =
+      series.continuity_previous_generation === null
+        ? null
+        : Number(series.continuity_previous_generation);
+    const seriesUpdate = db.prepare(
+      `UPDATE slate_series
+          SET continuity_previous_generation = ?,
+              continuity_active_generation = ?,
+              updated_at = ?
+        WHERE id = ? AND user_id = ?
+          AND continuity_active_generation = ?
+          AND (
+            continuity_previous_generation = ?
+            OR (
+              continuity_previous_generation IS NULL
+              AND ? IS NULL
+            )
+          )`,
+    ).run(
+      oldActiveGeneration > 0 ? oldActiveGeneration : null,
+      generation,
+      now,
+      project.series_id,
+      userId,
+      rawSeriesActiveGeneration,
+      rawSeriesPreviousGeneration,
+      rawSeriesPreviousGeneration,
+    );
+    if (Number(seriesUpdate.changes) !== 1) {
+      throw new Error("Continuity activation lost the series generation race.");
+    }
     const projectUpdate = db.prepare(
       `UPDATE slate_projects
           SET continuity_previous_generation = ?,
@@ -633,22 +820,26 @@ export function activateSlateContinuityGeneration(
               continuity_active_version = ?,
               continuity_target_version = ?,
               continuity_upgrade_status = 'current',
-              continuity_last_success_at = ?
-        WHERE id = ? AND user_id = ? AND continuity_active_generation = ?`,
+              continuity_last_success_at = ?,
+              updated_at = ?
+        WHERE series_id = ? AND user_id = ?`,
     ).run(
       oldActiveGeneration > 0 ? oldActiveGeneration : null,
       generation,
       candidate.target_version,
       candidate.target_version,
       now,
-      projectId,
+      now,
+      project.series_id,
       userId,
-      oldActiveGeneration,
     );
-    if (Number(projectUpdate.changes) !== 1) {
-      throw new Error("Continuity activation lost the active generation race.");
+    if (Number(projectUpdate.changes) < 1) {
+      throw new Error("Continuity activation lost its project projections.");
     }
-    return stateFromRow(projectRow(db, userId, projectId));
+    return stateFromRows(
+      projectRow(db, userId, projectId),
+      seriesRow(db, userId, project.series_id),
+    );
   });
 }
 
@@ -660,16 +851,32 @@ export function rollbackSlateContinuityGeneration(
 ): SlateContinuityUpgradeState {
   return transaction(db, () => {
     const project = projectRow(db, userId, projectId);
-    const activeGeneration = Number(project.continuity_active_generation);
-    const previousGeneration =
-      project.continuity_previous_generation === null
-        ? null
-        : Number(project.continuity_previous_generation);
-    if (activeGeneration <= 0 || previousGeneration === null) {
+    const series = seriesRow(db, userId, project.series_id);
+    assertLegacySeriesProjectionIsUnambiguous(
+      db,
+      userId,
+      project,
+      series,
+    );
+    const currentGeneration = activeGeneration(project, series);
+    const priorGeneration = previousGeneration(project, series);
+    if (currentGeneration <= 0 || priorGeneration === null) {
       throw new Error("There is no previous Continuity generation to restore.");
     }
-    const active = generationRow(db, userId, projectId, activeGeneration);
-    const previous = generationRow(db, userId, projectId, previousGeneration);
+    const active = seriesGenerationRow(
+      db,
+      userId,
+      project.series_id,
+      currentGeneration,
+      projectId,
+    );
+    const previous = seriesGenerationRow(
+      db,
+      userId,
+      project.series_id,
+      priorGeneration,
+      projectId,
+    );
     if (active.status !== "active" || previous.status !== "superseded") {
       throw new Error("Continuity rollback pointers are inconsistent.");
     }
@@ -686,16 +893,58 @@ export function rollbackSlateContinuityGeneration(
     db.prepare(
       `UPDATE slate_continuity_generations
           SET status = 'superseded'
-        WHERE user_id = ? AND project_id = ? AND generation = ?
+        WHERE user_id = ? AND generation = ?
+          AND project_id IN (
+            SELECT id FROM slate_projects
+             WHERE user_id = ? AND series_id = ?
+          )
           AND status = 'active'`,
-    ).run(userId, projectId, activeGeneration);
+    ).run(userId, currentGeneration, userId, project.series_id);
     db.prepare(
       `UPDATE slate_continuity_generations
           SET status = 'active'
-        WHERE user_id = ? AND project_id = ? AND generation = ?
+        WHERE user_id = ? AND generation = ?
+          AND project_id IN (
+            SELECT id FROM slate_projects
+             WHERE user_id = ? AND series_id = ?
+          )
           AND status = 'superseded'`,
-    ).run(userId, projectId, previousGeneration);
+    ).run(userId, priorGeneration, userId, project.series_id);
     const now = new Date().toISOString();
+    const rawSeriesActiveGeneration = Number(
+      series.continuity_active_generation,
+    );
+    const rawSeriesPreviousGeneration =
+      series.continuity_previous_generation === null
+        ? null
+        : Number(series.continuity_previous_generation);
+    const seriesUpdate = db.prepare(
+      `UPDATE slate_series
+          SET continuity_previous_generation = ?,
+              continuity_active_generation = ?,
+              updated_at = ?
+        WHERE id = ? AND user_id = ?
+          AND continuity_active_generation = ?
+          AND (
+            continuity_previous_generation = ?
+            OR (
+              continuity_previous_generation IS NULL
+              AND ? IS NULL
+            )
+          )`,
+    ).run(
+      currentGeneration,
+      priorGeneration,
+      now,
+      project.series_id,
+      userId,
+      rawSeriesActiveGeneration,
+      rawSeriesPreviousGeneration,
+      rawSeriesPreviousGeneration,
+    );
+    if (Number(seriesUpdate.changes) !== 1) {
+      throw new Error("Continuity rollback lost the series generation race.");
+    }
     const projectUpdate = db.prepare(
       `UPDATE slate_projects
           SET continuity_previous_generation = ?,
@@ -703,23 +952,25 @@ export function rollbackSlateContinuityGeneration(
               continuity_active_version = ?,
               continuity_target_version = ?,
               continuity_upgrade_status = 'current',
-              continuity_last_success_at = ?
-        WHERE id = ? AND user_id = ? AND continuity_active_generation = ?
-          AND continuity_previous_generation = ?`,
+              continuity_last_success_at = ?,
+              updated_at = ?
+        WHERE series_id = ? AND user_id = ?`,
     ).run(
-      activeGeneration,
-      previousGeneration,
+      currentGeneration,
+      priorGeneration,
       previous.target_version,
       previous.target_version,
       now,
-      projectId,
+      now,
+      project.series_id,
       userId,
-      activeGeneration,
-      previousGeneration,
     );
-    if (Number(projectUpdate.changes) !== 1) {
-      throw new Error("Continuity rollback lost the generation race.");
+    if (Number(projectUpdate.changes) < 1) {
+      throw new Error("Continuity rollback lost its project projections.");
     }
-    return stateFromRow(projectRow(db, userId, projectId));
+    return stateFromRows(
+      projectRow(db, userId, projectId),
+      seriesRow(db, userId, project.series_id),
+    );
   });
 }

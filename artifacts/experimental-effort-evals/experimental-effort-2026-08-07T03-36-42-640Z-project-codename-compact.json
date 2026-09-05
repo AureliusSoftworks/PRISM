@@ -1,0 +1,177 @@
+{
+  "schema": "prism-experimental-effort-eval-v1",
+  "createdAt": "2026-08-07T03:36:42.640Z",
+  "prompt": "Fill a Markdown table with columns: Field, Value for exactly these three fields from earlier thread context: Codename, Ship date, Provider mode.\n\nConstraints:\n- Exactly 3 data rows\n- Keep under 70 words\n- Do not invent values\n- Do not show step-by-step private reasoning",
+  "options": {
+    "suite": "soft-continuity",
+    "thinkingProvider": "openai",
+    "localModel": "llama3.2",
+    "thinkingModel": "gpt-5.6-sol",
+    "judgeModel": "gpt-5.5",
+    "effort": "high",
+    "outDir": "artifacts/experimental-effort-evals",
+    "temperature": 0.25,
+    "maxTokens": 3200,
+    "noJudge": false,
+    "includeScratchpad": true
+  },
+  "tempDbPath": "<removed>",
+  "runs": [
+    {
+      "id": "local-baseline",
+      "label": "Local baseline",
+      "provider": "local",
+      "model": "llama3.2",
+      "reasoningEffort": "none",
+      "experimentalAllModelEffortEnabled": false,
+      "psychicModeEnabled": false,
+      "requiresApiKey": null,
+      "status": "ok",
+      "durationMs": 1127,
+      "assistant": "| Field | Value |\n| --- | --- |\n| Codename | Lumen Gate |\n| Ship date | 2026-09-12 |\n| Provider mode | LOCAL only |",
+      "assistantChars": 115,
+      "continuityScore": {
+        "total": 3,
+        "max": 3,
+        "checks": {
+          "includes:Lumen Gate": true,
+          "includes:2026-09-12": true,
+          "includes:LOCAL": true
+        }
+      },
+      "continuityDigestSeen": false
+    },
+    {
+      "id": "thinking-reference",
+      "label": "Thinking reference",
+      "provider": "openai",
+      "model": "gpt-5.6-sol",
+      "reasoningEffort": "high",
+      "experimentalAllModelEffortEnabled": false,
+      "psychicModeEnabled": false,
+      "requiresApiKey": "openai",
+      "status": "ok",
+      "durationMs": 1510,
+      "assistant": "| Field | Value |\n|---|---|\n| Codename | Lumen Gate |\n| Ship date | 2026-09-12 |\n| Provider mode | LOCAL only |",
+      "assistantChars": 111,
+      "continuityScore": {
+        "total": 3,
+        "max": 3,
+        "checks": {
+          "includes:Lumen Gate": true,
+          "includes:2026-09-12": true,
+          "includes:LOCAL": true
+        }
+      },
+      "continuityDigestSeen": false
+    },
+    {
+      "id": "local-simulated-effort",
+      "label": "Local simulated effort",
+      "provider": "local",
+      "model": "llama3.2",
+      "reasoningEffort": "high",
+      "experimentalAllModelEffortEnabled": false,
+      "psychicModeEnabled": true,
+      "requiresApiKey": null,
+      "status": "ok",
+      "durationMs": 6952,
+      "assistant": "| Field | Value |\n| --- | --- |\n| Codename | Lumen Gate |\n| Ship Date | 2026-09-12 |\n| Provider Mode | LOCAL only |",
+      "assistantChars": 115,
+      "planningWarnings": [
+        "continuity_digest; chars=265",
+        "audit_unusable; provider=local; model=llama3.2; chars=2; fallbackChars=275"
+      ],
+      "continuityScore": {
+        "total": 3,
+        "max": 3,
+        "checks": {
+          "includes:Lumen Gate": true,
+          "includes:2026-09-12": true,
+          "includes:LOCAL": true
+        }
+      },
+      "continuityDigestSeen": true,
+      "psychicDebug": {
+        "summary": "Lumen Gate project codename and ship date are fixed. The provider mode must remain LOCAL only.",
+        "effort": "high",
+        "provider": "local",
+        "model": "llama3.2",
+        "simulated": true,
+        "passCount": 3,
+        "passes": [
+          {
+            "name": "plan",
+            "chars": 155,
+            "summary": "Lumen Gate project codename and ship date are fixed. The provider mode must remain LOCAL only."
+          },
+          {
+            "name": "draft",
+            "chars": 115,
+            "summary": "Project details for Lumen Gate."
+          },
+          {
+            "name": "audit",
+            "chars": 275,
+            "summary": "I will ensure that the answer includes the word local and preserves required key terms, avoiding extra notes or analysis outside the requested format.",
+            "warning": "audit_unusable; provider=local; model=llama3.2; chars=2; fallbackChars=275"
+          }
+        ],
+        "guidanceChars": 1445,
+        "scratchpadChars": 594,
+        "scratchpad": "Plan scratchpad: Required constraints: Codename, Ship date, Provider mode. Forbidden words: None noted. Likely failure modes: N/A. Answer structure: Table with 3 data rows. Private draft: | Field | Value | | --- | --- | | Codename | Lumen Gate | | Ship Date | 2026-09-12 | | Provider Mode | LOCAL only | Private audit: - Keep: Do not show step-by-step private reasoning - Keep: Keep under 70 words - Keep: Do not invent values - Fix: No analysis preamble; emit only the requested answer shape. - Fix: Never abbreviate the answer with ellipses; write the complete table and every required label."
+      }
+    }
+  ],
+  "judge": {
+    "model": "gpt-5.5",
+    "responseMap": {
+      "A": "local-baseline",
+      "B": "thinking-reference",
+      "C": "local-simulated-effort"
+    },
+    "result": {
+      "scores": {
+        "A": {
+          "correctness": 10,
+          "reasoning": 10,
+          "actionability": 10,
+          "constraints": 10,
+          "total": 10,
+          "notes": "Provides exactly the requested Markdown table with the three specified data rows, preserves field names, stays concise, and does not include reasoning."
+        },
+        "B": {
+          "correctness": 10,
+          "reasoning": 10,
+          "actionability": 10,
+          "constraints": 10,
+          "total": 10,
+          "notes": "Equivalent to A; fully satisfies the requested table format, fields, concision, and no-reasoning constraint."
+        },
+        "C": {
+          "correctness": 8,
+          "reasoning": 10,
+          "actionability": 9,
+          "constraints": 7,
+          "total": 8.5,
+          "notes": "Values and row count are correct, but it changes the specified field labels from 'Ship date' and 'Provider mode' to title case, violating the request for exactly these fields."
+        }
+      },
+      "ranking": [
+        "A",
+        "B",
+        "C"
+      ],
+      "winner": "A",
+      "summary": "A and B are equally compliant and correct; A is selected as winner only as a tie-break. C is usable but loses points for not preserving the exact requested field names."
+    }
+  },
+  "continuity": {
+    "threadSummary": "Project codename is Lumen Gate. Ship date is 2026-09-12. Provider mode must stay LOCAL only.",
+    "mustInclude": [
+      "Lumen Gate",
+      "2026-09-12",
+      "LOCAL"
+    ]
+  }
+}

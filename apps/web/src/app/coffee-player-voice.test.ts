@@ -94,14 +94,39 @@ describe("Coffee player voice", () => {
 
   it("uses Default Prism for submitted and replayed Coffee speech", () => {
     const source = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
-    assert.match(source, /startCoffeePlayerVoiceForReveal\(trimmed\)/);
-    assert.match(source, /settings\.voiceMode === "mute"/);
-    assert.match(source, /const seed = `coffee-player:\$\{spokenText\}`/);
-    assert.match(source, /enqueueRobotVoiceMode\(\{[\s\S]*?source: \{ text: spokenText \}[\s\S]*?sourceText: spokenText/);
-    assert.match(source, /mode: settings\.voiceMode/);
+    const livePlayerVoice = source.slice(
+      source.indexOf("const startCoffeePlayerVoiceForReveal = async"),
+      source.indexOf(
+        "const queueCoffeeReveal =",
+        source.indexOf("const startCoffeePlayerVoiceForReveal = async"),
+      ),
+    );
+    assert.match(source, /startCoffeePlayerVoiceForReveal\(trimmed, \{/);
+    assert.match(
+      livePlayerVoice,
+      /const voiceSelection = voicePlaybackSelectionRef\.current/,
+    );
+    assert.match(livePlayerVoice, /voiceSelection\.voiceMode === "mute"/);
+    assert.match(
+      livePlayerVoice,
+      /const performanceText = voicePerformanceTextFromActionCues\(text, \{[\s\S]*?leadingMarkedAction: true,[\s\S]*?omitLocalFoleyTags: true/,
+    );
+    assert.match(
+      livePlayerVoice,
+      /englishEngine === "elevenlabs" && performanceText[\s\S]*?elevenLabsText: performanceText/,
+    );
+    assert.match(livePlayerVoice, /const seed = `coffee-player:\$\{spokenText\}`/);
+    assert.match(livePlayerVoice, /enqueueRobotVoiceMode\(\{[\s\S]*?source: \{ text: spokenText \}[\s\S]*?sourceText: spokenText/);
+    assert.match(livePlayerVoice, /mode: voiceSelection\.voiceMode/);
+    assert.doesNotMatch(livePlayerVoice, /settings\.voiceMode/);
     assert.match(
       source,
-      /await startCoffeePlayerVoiceForReveal\(trimmed\)[\s\S]*?setCoffeeUserRevealText\(trimmed\)/
+      /const takePlayerFloor = \(\): void => \{[\s\S]*?setCoffeeUserRevealText\(trimmed\)[\s\S]*?setCoffeeTurnRhythmState\("userTableTyping"\)[\s\S]*?startCoffeePlayerVoiceForReveal\(trimmed, \{/,
+    );
+    assert.match(source, /coffeePlayerVoiceRevealReadyRef\.current = false/);
+    assert.match(
+      source,
+      /playerFloorTakenPromise\.then\(waitForCoffeeUserRevealToSettle\)[\s\S]*?await startCoffeePlayerVoiceForReveal\(trimmed, \{[\s\S]*?coffeePlayerVoiceRevealReadyRef\.current = true/,
     );
     assert.match(source, /coffeePlayerPlaybackProfile\(settings\.prismDefaultBotAudioVoiceProfile\)/);
     assert.match(source, /playerMessage[\s\S]*?coffeePlayerPlaybackProfile\(settings\.prismDefaultBotAudioVoiceProfile\)/);
@@ -154,6 +179,33 @@ describe("Coffee player voice", () => {
     );
   });
 
+  it("starts voiced player interruptions before releasing the Coffee speaker", () => {
+    const source = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
+    const livePlayerVoice = source.slice(
+      source.indexOf("const startCoffeePlayerVoiceForReveal = async"),
+      source.indexOf(
+        "const commitCoffeePlayerCaptureTiming =",
+        source.indexOf("const startCoffeePlayerVoiceForReveal = async"),
+      ),
+    );
+    assert.match(
+      livePlayerVoice,
+      /const voiceChannel: VoicePlaybackChannel = options\.preserveOutgoingVoice[\s\S]*?\? "handoff"[\s\S]*?: "primary"/,
+    );
+    assert.match(
+      livePlayerVoice,
+      /const takeFloor = \(\): void => \{[\s\S]*?options\.onFloorTaken\?\.\(\);[\s\S]*?releaseRealtimeVoiceAudio\([\s\S]*?"primary"[\s\S]*?COFFEE_PLAYER_INTERRUPTION_RELEASE_MS[\s\S]*?outgoingVoiceController\?\.abort\(\)/,
+    );
+    assert.match(
+      source,
+      /captureCoffeePlayerInterruption\([\s\S]{0,320}preserveAudibleUtterance: true/,
+    );
+    assert.match(
+      source,
+      /startCoffeePlayerVoiceForReveal\(trimmed, \{[\s\S]{0,260}preserveOutgoingVoice: Boolean\(pendingPlayerInterruption\)[\s\S]{0,140}onFloorTaken: takePlayerFloor/,
+    );
+  });
+
   it("releases failed or completed Coffee voice before autoplay schedules again", () => {
     const source = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
     const botVoice = source.slice(
@@ -172,7 +224,7 @@ describe("Coffee player voice", () => {
     );
     assert.match(
       reveal,
-      /coffeeActiveVoiceMessageIdRef\.current === pendingMessage\?\.id[\s\S]*?voiceSynthesisAbortRef\.current\?\.abort\(\)[\s\S]*?coffeeVoicePlaybackBusyRef\.current = false/
+      /const voiceOwnedReveal =[\s\S]{0,120}coffeeActiveVoiceMessageIdRef\.current === pendingMessage\.id[\s\S]{0,120}voiceSynthesisAbortRef\.current\?\.abort\(\)[\s\S]{0,260}coffeeVoicePlaybackBusyRef\.current = false/
     );
 
     const scheduler = source.slice(
@@ -188,16 +240,43 @@ describe("Coffee player voice", () => {
 
   it("explains the Coffee persona in Default Prism's voice customizer", () => {
     const source = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
-    assert.match(source, /Prism represents you at the Coffee table/);
+    const personaStart = source.indexOf("Prism represents you at the Coffee table");
+    const personaEnd = source.indexOf("</p>", personaStart);
+    const personaSource = source.slice(personaStart, personaEnd);
+    assert.match(personaSource, /Prism represents you at the Coffee table/);
+    assert.match(
+      personaSource,
+      /live\s+messages\s+and session\s+replays use this voice/
+    );
+    assert.doesNotMatch(personaSource, /Your table voice|Name pronunciation/);
+    assert.doesNotMatch(personaSource, /playerNamePronunciation/);
     assert.match(
       source,
-      /live\s+messages and session[\s\S]*?replays use this voice/
+      /coffeePlayerPlaybackProfile\(settings\.prismDefaultBotAudioVoiceProfile\)/,
     );
-    assert.doesNotMatch(source, /Your table voice|Name pronunciation/);
-    assert.doesNotMatch(source, /playerAudioVoiceProfile|playerNamePronunciation/);
+    assert.match(
+      source,
+      /producerGuest === true[\s\S]*?settings\.prismDefaultBotAudioVoiceProfile/,
+    );
   });
 
-  it("houses replay Prism identity and pot together at the table", () => {
+  it("times the player's bundled bodily Foley to the visible action cue", () => {
+    const source = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
+    assert.match(
+      source,
+      /const playerActionPlan = buildBundledActionSfxPlan\(trimmed\)/,
+    );
+    assert.match(
+      source,
+      /coffeeLivePlayerActionMessageRef\.current = playerActionPlan[\s\S]*?prefetchCoffeeActionSfxForMessage/,
+    );
+    assert.match(
+      source,
+      /coffeeTurnRhythmState !== "userTableTyping"[\s\S]*?playCoffeeActionSfxOnce\([\s\S]*?coffeeTypewriterLength/,
+    );
+  });
+
+  it("shows Default Prism on Coffee replay with the pot docked to that seat", () => {
     const source = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
     const styles = readFileSync(new URL("./page.module.css", import.meta.url), "utf8");
     assert.match(
@@ -205,66 +284,22 @@ describe("Coffee player voice", () => {
       /coffeeComposerVisible[\s\S]*?renderViewSwitchOverlay\("workspace"\)[\s\S]*?coffeeFinishedControlsVisible/
     );
     assert.match(source, /coffeeGlobalComposer[^\n]*coffeeReplayComposerControls/);
-    assert.match(source, /className=\{styles\.coffeeReplayPlayerSeat\}/);
-    assert.match(source, /data-review-active=\{shellPolicy\.reviewActive \? "true" : undefined\}/);
-    assert.match(source, /zenDefaultPrismGlyph/);
     assert.match(
       source,
-      /data-player-thinking=\{\s*coffeeReplayPlayerThinking/
+      /coffeeReplayActive && \(replayState\?\.playerPresent \?\? true\)[\s\S]*?className=\{styles\.coffeeReplayPlayerSeat\}/,
     );
-    assert.match(source, /data-table-speaking=\{\s*replayPlayerTalking/);
-    assert.match(source, /className=\{styles\.coffeeReplayPlayerPot\}/);
-    assert.match(source, /className=\{styles\.coffeeReplayPlayerName\}/);
-    assert.match(source, /className=\{styles\.coffeeReplayPlayerGlyph\}/);
     assert.match(
       source,
       /ref=\{coffeeReplayPotDockRef\}[\s\S]*?className=\{styles\.coffeeReplayPlayerPot\}/,
     );
+    assert.match(source, /\$\{styles\.coffeeReplayPlayerAvatar\}/);
+    assert.match(source, /className=\{styles\.coffeeReplayPlayerName\}/);
+    assert.match(source, /className=\{styles\.coffeeReplayPlayerGlyph\}/);
+    assert.doesNotMatch(source, /className=\{styles\.coffeeReplayOffCameraPotDock\}/);
+    assert.doesNotMatch(source, /className=\{styles\.coffeePlayerCup\}/);
     assert.doesNotMatch(source, /className=\{styles\.coffeeReplayComposerPot\}/);
     assert.doesNotMatch(source, /className=\{styles\.coffeeReplayPersona\}/);
     assert.doesNotMatch(source, /className=\{styles\.coffeeReplayPersonaGlyph\}/);
-    assert.match(styles, /\.coffeeReplayPlayerSeat\b/);
-    assert.match(source, /<ZenLiveBotMannequin[\s\S]*?showThinkingSpinner=\{coffeeReplayPlayerThinking\}/);
-    assert.match(
-      styles,
-      /\.coffeeReplayPlayerPot img\s*\{[\s\S]*?width:\s*62px;/
-    );
-    assert.match(
-      styles,
-      /\.coffeeReplayPlayerSeat\s*\{[\s\S]*?bottom:\s*clamp\(-54px,\s*-4\.8vh,\s*-32px\);/,
-    );
-    assert.match(
-      styles,
-      /\.coffeeReplayPlayerAvatar\s*\{[\s\S]*?--zen-live-bot-avatar-size:\s*var\(\s*--coffee-seat-responsive-avatar-size,\s*clamp\(148px,\s*12\.6vw,\s*196px\)\s*\);[\s\S]*?--zen-live-bot-avatar-body-size:\s*var\(--zen-live-bot-avatar-size\);/,
-    );
-    assert.doesNotMatch(
-      styles,
-      /\.coffeeReplayPlayerAvatar\s*\{[\s\S]*?clamp\(126px,\s*12cqw,\s*168px\)/,
-    );
-    assert.match(
-      styles,
-      /\.zenLiveBotPresenceHitTarget\s*\{[\s\S]*?width:\s*77\.4%;[\s\S]*?height:\s*78\.6%;/,
-    );
-    assert.match(
-      styles,
-      /\.coffeeReplayPlayerSeat\s*\{[\s\S]*?width:\s*min\(268px,\s*calc\(100%\s*-\s*32px\)\);[\s\S]*?pointer-events:\s*none;/,
-    );
-    assert.match(
-      styles,
-      /\.coffeeReplayPlayerNameplate\s*\{[\s\S]*?width:\s*clamp\(232px,\s*21cqw,\s*268px\);[\s\S]*?margin-top:\s*clamp\(-41px,\s*-3\.2cqw,\s*-30px\);/,
-    );
-    assert.match(
-      source,
-      /className=\{styles\.coffeeReplayPlayerGlyph\}[\s\S]{0,180}<BotGlyph\s+name=\{zenDefaultPrismGlyph\}\s+size=\{16\}\s+strokeWidth=\{2\}/,
-    );
-    assert.match(
-      styles,
-      /\.coffeeReplayPlayerSeat\[data-player-thinking="true"\],[\s\S]*?\.coffeeReplayPlayerSeat\[data-table-speaking="true"\]\s*\{[\s\S]*?drop-shadow\(/,
-    );
-    assert.match(
-      styles,
-      /\.themeLight\.coffeeShell \.coffeeReplayPlayerNameplate\s*\{/,
-    );
     assert.match(
       source,
       /const compactCoffeeStage =\s*coffeeSessionPhase === "selecting" && coffeeConversation === null;/,
@@ -272,6 +307,10 @@ describe("Coffee player voice", () => {
     assert.match(
       styles,
       /\.coffeeReplayPlayerPotMotion\s*\{[\s\S]*?position:\s*fixed;/
+    );
+    assert.match(
+      styles,
+      /\.coffeeReplayPlayerSeat\s*\{[\s\S]*?pointer-events:\s*none;/,
     );
     assert.match(
       source,

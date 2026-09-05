@@ -11,6 +11,7 @@ import {
   COFFEE_NEAR_DESATURATED_SATURATION,
   coffeeDepartureChanceFromSocial,
   coffeeMoodSaturationFromSocial,
+  coffeeOrdinaryAutomaticCutInMoodSupportsInterruption,
   coffeeSocialSnapshotToPrismMoodState,
   coffeeSocialSnapshotIsNearDesaturated,
   createDefaultPrismMoodState,
@@ -29,6 +30,7 @@ test("interruption increases annoyance with progress-aware weighting", () => {
     { kind: "assistant_reveal", visibleTokenCount: 1, totalTokenCount: 30 },
     "2026-06-19T12:00:01.000Z"
   );
+
   const middle = applyPrismMoodInterruption(
     base,
     { kind: "assistant_reveal", visibleTokenCount: 15, totalTokenCount: 30 },
@@ -42,6 +44,54 @@ test("interruption increases annoyance with progress-aware weighting", () => {
   assert.ok(early.annoyance > base.annoyance);
   assert.ok(middle.annoyance > early.annoyance);
   assert.ok(middle.annoyance > late.annoyance);
+});
+
+test("ordinary Coffee cut-ins require an explicit compatible current mood", () => {
+  assert.equal(coffeeOrdinaryAutomaticCutInMoodSupportsInterruption(undefined), false);
+  assert.equal(
+    coffeeOrdinaryAutomaticCutInMoodSupportsInterruption({
+      disposition: 0.67,
+      engagement: 0.765,
+      valuesFriction: 0.365,
+      restraint: 0.65,
+      leavePressure: 0.04,
+    }),
+    false,
+    "the neutral, restrained mood from the reviewed session must not cut in",
+  );
+  assert.equal(
+    coffeeOrdinaryAutomaticCutInMoodSupportsInterruption({
+      disposition: 0.42,
+      engagement: 0.86,
+      valuesFriction: 0.78,
+      restraint: 0.28,
+      leavePressure: 0.12,
+    }),
+    true,
+    "an engaged, irritated bot may cut in",
+  );
+  assert.equal(
+    coffeeOrdinaryAutomaticCutInMoodSupportsInterruption({
+      disposition: 0.9,
+      engagement: 0.9,
+      valuesFriction: 0.08,
+      restraint: 0.22,
+      leavePressure: 0.04,
+    }),
+    true,
+    "an unusually eager joyful bot may cut in",
+  );
+  assert.equal(
+    coffeeOrdinaryAutomaticCutInMoodSupportsInterruption({
+      disposition: 0.3,
+      engagement: 0.9,
+      valuesFriction: 0.9,
+      restraint: 0.2,
+      leavePressure: 0.72,
+    }),
+    false,
+    "a bot withdrawing from the table must not turn that pressure into a cut-in",
+  );
 });
 
 test("pending reply cancel is mood-neutral before visible text", () => {

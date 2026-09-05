@@ -27,7 +27,9 @@ describe("shared bot ambient presence rig", () => {
 
   it("uses a contact core, broad color spill, and compositor-only motion", () => {
     assert.match(css, /\.botAmbientUnderglow::before\s*\{[\s\S]*rgba\(255, 255, 255, 0\.28\)[\s\S]*var\(--bot-ambient-color\)/);
-    assert.match(css, /\.botAmbientUnderglow::after\s*\{[\s\S]*radial-gradient[\s\S]*mix-blend-mode:\s*screen\s*;/);
+    assert.match(css, /--bot-light-glow-blend-mode:\s*hard-light\s*;/);
+    assert.match(css, /\.botAmbientUnderglow::after\s*\{[\s\S]*radial-gradient[\s\S]*mix-blend-mode:\s*var\(--bot-light-glow-blend-mode,\s*hard-light\)\s*;/);
+    assert.match(css, /\.botAmbientSpeakingPulse\s*\{[\s\S]*mix-blend-mode:\s*var\(--bot-light-glow-blend-mode,\s*hard-light\)\s*;/);
     assert.match(css, /@keyframes botAmbientHoverDrift[\s\S]*transform:/);
     assert.match(css, /@keyframes botAmbientUnderglowBreathe[\s\S]*opacity:[\s\S]*transform:/);
     assert.doesNotMatch(css, /@keyframes botAmbient(?:HoverDrift|UnderglowBreathe)[\s\S]{0,800}(?:filter|box-shadow):/);
@@ -45,8 +47,19 @@ describe("shared bot ambient presence rig", () => {
 
   it("attenuates Light mode and keeps Reduced Motion static", () => {
     assert.match(css, /\.botAmbientPresenceRig\[data-theme="light"\]\s*\{[\s\S]*--bot-ambient-underglow-rest-opacity:\s*0\.12\s*;[\s\S]*--bot-ambient-speaking-high-opacity:\s*0\.042\s*;/);
-    assert.match(css, /data-theme="light"[\s\S]*\.botAmbientSpeakingPulse[\s\S]*mix-blend-mode:\s*multiply\s*;/);
+    assert.doesNotMatch(css, /data-theme="light"[\s\S]{0,1200}\.botAmbientSpeakingPulse[\s\S]{0,400}mix-blend-mode:\s*multiply\s*;/);
     assert.match(css, /@media \(prefers-reduced-motion:\s*reduce\)[\s\S]*\.botAmbientPresenceBody[\s\S]*animation:\s*none\s*;[\s\S]*\.botAmbientPresenceRig\[data-talking="true"\] \.botAmbientSpeakingPulse[\s\S]*opacity:\s*var\(--bot-ambient-speaking-mid-opacity\)\s*;/);
+  });
+
+  it("disables the portable underglow inside Signal's authored Studio set", () => {
+    assert.match(
+      css,
+      /\.signalBotPresencePlate \.botAmbientUnderglow\s*\{[\s\S]*?display:\s*none\s*;[\s\S]*?\}/,
+    );
+    assert.doesNotMatch(
+      css,
+      /(?:^|\n)\.botAmbientUnderglow\s*\{[^}]*display:\s*none\s*;/,
+    );
   });
 
   it("wires only the intended immersive avatar surfaces", () => {
@@ -55,8 +68,7 @@ describe("shared bot ambient presence rig", () => {
     assert.match(pageSource, /scheduleKey=\{`zen-live-/);
     assert.match(pageSource, /scheduleKey=\{`waiting-room-/);
     assert.match(pageSource, /scheduleKey=\{`coffee-replay-player-/);
-    assert.match(pageSource, /scheduleKey=\{`coffee-live-/);
-    assert.match(pageSource, /scheduleKey=\{`botcast-/);
+    assert.match(pageSource, /scheduleKey:\s*`botcast-/);
     assert.match(pageSource, /data-avatar-customizer-preview="true"[\s\S]*<BotAmbientPresenceRig/);
     assert.doesNotMatch(
       pageSource,

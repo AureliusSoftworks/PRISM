@@ -5,7 +5,7 @@ import sharp from "sharp";
 import { GROUP_ROOM_WALLPAPER_IMAGE_PURPOSE } from "@localai/shared";
 import {
   BOT_PROFILE_PICTURE_IMAGE_PURPOSE,
-  GALLERY_EXCLUDED_PURPOSE_SQL,
+  GENERAL_IMAGE_LIBRARY_SQL,
   botProfilePictureImageBelongsToBot,
   clearBotProfilePictureReference,
   deleteBotProfilePictureImageIfOwned,
@@ -27,6 +27,7 @@ function createAvatarDb(): DatabaseSync {
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL,
       bot_id TEXT,
+      origin TEXT NOT NULL DEFAULT 'images_panel',
       purpose TEXT,
       local_rel_path TEXT
     );
@@ -173,7 +174,7 @@ describe("bot profile picture ownership", () => {
 });
 
 describe("bot profile picture gallery filtering", () => {
-  it("excludes profile pictures and Zen wallpapers while keeping reusable group-room art manageable", () => {
+  it("uses a positive general-image classification instead of leaking other asset kinds", () => {
     const db = createAvatarDb();
     seedImage(db, "avatar", "user-1", "bot-1", BOT_PROFILE_PICTURE_IMAGE_PURPOSE);
     seedImage(db, "gallery", "user-1", null, "gallery");
@@ -189,20 +190,20 @@ describe("bot profile picture gallery filtering", () => {
     );
 
     const listed = db
-      .prepare(`SELECT id FROM images WHERE user_id = ? AND ${GALLERY_EXCLUDED_PURPOSE_SQL} ORDER BY id`)
+      .prepare(`SELECT id FROM images WHERE user_id = ? AND ${GENERAL_IMAGE_LIBRARY_SQL} ORDER BY id`)
       .all("user-1") as Array<{ id: string }>;
     assert.deepEqual(
       listed.map((row) => row.id),
-      ["gallery", "group-room-wallpaper", "legacy", "other-upload"]
+      ["gallery", "legacy"]
     );
 
-    db.prepare(`DELETE FROM images WHERE user_id = ? AND ${GALLERY_EXCLUDED_PURPOSE_SQL}`).run("user-1");
+    db.prepare(`DELETE FROM images WHERE user_id = ? AND ${GENERAL_IMAGE_LIBRARY_SQL}`).run("user-1");
     const remaining = db
       .prepare("SELECT id FROM images ORDER BY id")
       .all() as Array<{ id: string }>;
     assert.deepEqual(
       remaining.map((row) => row.id),
-      ["avatar", "wallpaper"]
+      ["avatar", "group-room-wallpaper", "other-upload", "wallpaper"]
     );
   });
 });

@@ -146,6 +146,10 @@ const CHAT_REVEAL_TOKEN_CACHE_MIN_LENGTH = 80;
 const CHAT_REVEAL_TOKEN_CACHE_LIMIT = 96;
 const chatRevealTokenCache = new Map<string, string[]>();
 
+export function clearChatRevealTokenCache(): void {
+  chatRevealTokenCache.clear();
+}
+
 export function tokenizeChatRevealText(text: string): string[] {
   if (text.length >= CHAT_REVEAL_TOKEN_CACHE_MIN_LENGTH) {
     const cached = chatRevealTokenCache.get(text);

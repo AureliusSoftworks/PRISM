@@ -232,6 +232,166 @@ export function hslToHex(h: number, s: number, l: number): string {
 }
 
 /**
+ * Canonicalize a stored bot color to the fully saturated hue used by the
+ * hue-and-lightness Shell picker. Hue and HSL lightness are preserved; only saturation
+ * is raised to 100%. Non-hex legacy CSS values are returned trimmed so this
+ * storage migration never turns an unreadable custom value into a new color.
+ */
+export function fullySaturateBotColor(color: string): string {
+  const trimmed = color.trim();
+  if (!/^#[0-9a-fA-F]{6}$/u.test(trimmed)) return trimmed;
+  const { h, l } = hexToHsl(trimmed);
+  return hslToHex(h, 100, l);
+}
+
+/** The semantic default used when a surface has no valid bot primary color. */
+export const DEFAULT_BOT_IDENTITY_COLOR = "#7c6cff";
+
+/** Hue offset for the stable analogous Atmosphere accent. */
+export const BOT_AUTO_ACCENT_HUE_OFFSET_DEGREES = 52;
+
+/** Shortest distance around the hue circle, in degrees (0–180). */
+export function circularHueDistanceDeg(a: number, b: number): number {
+  const ah = ((a % 360) + 360) % 360;
+  const bh = ((b % 360) + 360) % 360;
+  const delta = Math.abs(ah - bh);
+  return Math.min(delta, 360 - delta);
+}
+
+/** Hue 180° across the wheel from `hue`. */
+export function complementaryHueDeg(hue: number): number {
+  return (((hue % 360) + 360) % 360 + 180) % 360;
+}
+
+/**
+ * Honest identity hue in degrees, or null when the value has no usable
+ * chromatic hue (invalid hex, missing, or near-gray).
+ */
+export function botIdentityHueDeg(color: unknown): number | null {
+  if (typeof color !== "string") return null;
+  const trimmed = color.trim();
+  if (!/^#[0-9a-fA-F]{6}$/u.test(trimmed)) return null;
+  const { h, s } = hexToHsl(trimmed);
+  if (s < 8) return null;
+  return ((h % 360) + 360) % 360;
+}
+
+/**
+ * Normalize a portable bot identity color. Identity colors are deliberately
+ * stricter than legacy CSS presentation values: only six-digit hex can cross
+ * storage/export boundaries, and every accepted color is fully saturated.
+ */
+export function normalizeBotIdentityColor(
+  value: unknown,
+): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  if (!/^#[0-9a-fA-F]{6}$/u.test(trimmed)) return null;
+  return fullySaturateBotColor(trimmed).toLowerCase();
+}
+
+/** One saved bot color and its relative contribution to a Foundry blend. */
+export interface WeightedBotIdentityColor {
+  color: unknown;
+  weight: unknown;
+}
+
+/**
+ * Blend canonical bot identity colors for Bot Foundry inspiration.
+ *
+ * Hue lives on a circle, so this averages its unit-vector representation
+ * instead of treating 0° and 360° as opposite ends of a line. Lightness is
+ * averaged independently, then the result is returned through the normal
+ * fully-saturated identity-color path. Invalid, achromatic legacy, missing,
+ * and zero-weight entries do not participate. A perfectly neutral result has
+ * no honest hue in PRISM's saturated identity storage, so it returns null and
+ * lets the caller retain its existing color rather than inventing one.
+ */
+export function blendWeightedBotIdentityColors(
+  values: Iterable<WeightedBotIdentityColor>,
+): string | null {
+  let totalWeight = 0;
+  let hueX = 0;
+  let hueY = 0;
+  let lightness = 0;
+
+  for (const value of values) {
+    if (typeof value.color !== "string" || typeof value.weight !== "number") {
+      continue;
+    }
+    const color = value.color.trim();
+    const weight = value.weight;
+    if (
+      !/^#[0-9a-fA-F]{6}$/u.test(color) ||
+      !Number.isFinite(weight) ||
+      weight <= 0
+    ) {
+      continue;
+    }
+
+    const { h, s, l } = hexToHsl(color);
+    // Do not turn an achromatic legacy value into an arbitrary red source.
+    if (s < 0.5) continue;
+    const angle = (h * Math.PI) / 180;
+    hueX += Math.cos(angle) * weight;
+    hueY += Math.sin(angle) * weight;
+    lightness += l * weight;
+    totalWeight += weight;
+  }
+
+  if (totalWeight <= 0) return null;
+  const magnitude = Math.hypot(hueX, hueY);
+  if (magnitude <= totalWeight * 1e-9) return null;
+
+  const hue = ((Math.atan2(hueY, hueX) * 180) / Math.PI + 360) % 360;
+  return normalizeBotIdentityColor(
+    hslToHex(hue, 100, lightness / totalWeight),
+  );
+}
+
+/**
+ * Resolve the environmental companion color for one bot.
+ *
+ * Explicit valid accents win. Auto (`null`, missing, or an invalid legacy
+ * value) rotates the valid primary hue by +52 degrees while preserving its
+ * HSL lightness and full saturation. No id or device-local seed participates,
+ * so the result is stable across exports, clones, and reinstalls.
+ */
+export function resolveBotAccentColor(
+  primaryColor: unknown,
+  accentColor: unknown,
+  fallbackColor: unknown = DEFAULT_BOT_IDENTITY_COLOR,
+): string {
+  const explicit = normalizeBotIdentityColor(accentColor);
+  if (explicit) return explicit;
+
+  const primary = normalizeBotIdentityColor(primaryColor);
+  if (primary) {
+    const { h, l } = hexToHsl(primary);
+    return hslToHex(
+      (h + BOT_AUTO_ACCENT_HUE_OFFSET_DEGREES) % 360,
+      100,
+      l,
+    ).toLowerCase();
+  }
+
+  if (
+    typeof fallbackColor === "string" &&
+    /^#[0-9a-fA-F]{6}$/u.test(fallbackColor.trim())
+  ) {
+    const trimmedFallback = fallbackColor.trim().toLowerCase();
+    const fallbackHsl = hexToHsl(trimmedFallback);
+    // Existing neutral surface fallbacks intentionally stay neutral. Chromatic
+    // fallbacks use the same canonical full-saturation identity treatment.
+    return fallbackHsl.s === 0
+      ? trimmedFallback
+      : normalizeBotIdentityColor(trimmedFallback) ?? DEFAULT_BOT_IDENTITY_COLOR;
+  }
+
+  return DEFAULT_BOT_IDENTITY_COLOR;
+}
+
+/**
  * HSL-lightness range the app's accent color picker is allowed to produce.
  * Clamping both ends (not just one) means bot colors never go dark enough
  * to vanish into the dark-mode shell nor pale enough to wash out against
@@ -284,17 +444,16 @@ const YELLOW_HUE_MAX = 75;
  * "dark colors get a little brighter, bright colors get a little darker"
  * in the user's mental model, with saturation preserved.
  *
- * If you retune these, bump the `.colorSquare` overlay alpha in
- * `apps/web/src/app/page.module.css` in lockstep: the visible gradient is
- * what-you-see = what-you-pick, so the overlay alpha must equal
- * `(50 - MIN_DARK) / 50 = (MAX_DARK - 50) / 50`.
+ * If you retune these, also confirm the Shell hue-strip midpoint and
+ * render-time clamps in `apps/web/src/app/page.tsx` still agree — new
+ * picks pin to the band midpoint; older accents still clamp into band.
  */
 export const ACCENT_LIGHTNESS_MIN_DARK = 38;
 export const ACCENT_LIGHTNESS_MAX_DARK = 62;
 
 /**
  * Resolve which `[min, max]` HSL-lightness band applies for the given
- * theme. Factored out so the picker UI, the CSS overlay math, and the
+ * theme. Factored out so the hue-strip midpoint, random seeds, and the
  * render-time clamp all agree on the same answer for any theme the app
  * renders in. An unknown / omitted theme falls back to the light-mode
  * band, which is the historical default.
@@ -317,10 +476,10 @@ export function accentLightnessBand(
  * This is the one-stop normalizer for any surface that paints a user-
  * chosen bot color as an accent (bot card bar, glyph tile, message
  * bubble, shell --accent triad). Instead of pinning every accent to a
- * single "shadeless" 50% lightness (which erases the subtle shade
- * variation users express through the picker), we keep whatever shade
- * they picked — as long as it's inside the safe band for the active
- * theme.
+ * single "shadeless" 50% lightness (which erases subtle shade left in
+ * older saved accents and random seeds), we keep whatever shade they
+ * already have — as long as it's inside the safe band for the active
+ * theme. The Shell picker authors hue and lightness independently.
  *
  * Colors already inside the band pass through unchanged, so the function
  * is idempotent per theme. Note that a round-trip through the dark-mode

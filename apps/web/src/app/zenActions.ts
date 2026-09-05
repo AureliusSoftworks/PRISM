@@ -2,7 +2,9 @@ import {
   extractStageDirectionCues,
   extractStageDirections,
   type StageDirectionCue,
+  type StageDirectionParseOptions,
 } from "./botMention.ts";
+import type { ZenStageActionPayload } from "@localai/shared";
 
 export type ZenActionMotion = "default" | "glance" | "nod" | "breath" | "tap" | "settle";
 
@@ -28,18 +30,30 @@ export const ZEN_ACTION_REVEAL_LEAD_DISPLAY_LENGTH = 48;
 export const ZEN_ACTION_TEXT_LAG_MS = 320;
 const zenActionPresentationCache = new Map<string, ZenActionPresentation>();
 
+export function clearZenActionPresentationCache(): void {
+  zenActionPresentationCache.clear();
+}
+
+export function sentenceCaseActionText(action: string): string {
+  return action
+    .toLocaleLowerCase()
+    .replace(/\p{L}/u, (letter) => letter.toLocaleUpperCase());
+}
+
+export const sentenceCaseZenActionText = sentenceCaseActionText;
+
 export function normalizeZenActionText(action: string): string {
   let normalized = action.replace(/\s+/g, " ").trim();
   normalized = normalized.replace(/^\*+|\*+$/gu, "").trim();
   normalized = normalized.replace(/^[("'\u201c\u2018]+|[)"'\u201d\u2019]+$/gu, "").trim();
   normalized = normalized.replace(/[.!?\u2026;:,]+$/u, "").trim();
   if (Array.from(normalized).length <= MAX_ZEN_ACTION_DISPLAY_LENGTH) {
-    return normalized;
+    return sentenceCaseZenActionText(normalized);
   }
-  return `${Array.from(normalized)
+  return sentenceCaseZenActionText(`${Array.from(normalized)
     .slice(0, MAX_ZEN_ACTION_DISPLAY_LENGTH - 3)
     .join("")
-    .trimEnd()}...`;
+    .trimEnd()}...`);
 }
 
 export function classifyZenActionMotion(action: string): ZenActionMotion {
@@ -84,18 +98,25 @@ function normalizeZenActionCue(cue: StageDirectionCue, index: number): ZenAction
   };
 }
 
-export function resolveZenActionPresentation(text: string): ZenActionPresentation {
+export function resolveZenActionPresentation(
+  text: string,
+  options: StageDirectionParseOptions = {},
+): ZenActionPresentation {
+  const inferUnmarkedActions = options.inferUnmarkedActions !== false;
+  const cacheKey = `${inferUnmarkedActions ? "inferred" : "explicit"}:${text}`;
   if (text.length >= ZEN_ACTION_PRESENTATION_CACHE_MIN_LENGTH) {
-    const cached = zenActionPresentationCache.get(text);
+    const cached = zenActionPresentationCache.get(cacheKey);
     if (cached) {
-      zenActionPresentationCache.delete(text);
-      zenActionPresentationCache.set(text, cached);
+      zenActionPresentationCache.delete(cacheKey);
+      zenActionPresentationCache.set(cacheKey, cached);
       return cached;
     }
   }
   const cues: ZenActionCue[] = [];
   let previousActionKey: string | null = null;
-  for (const [index, cue] of extractStageDirectionCues(text).entries()) {
+  for (const [index, cue] of extractStageDirectionCues(text, {
+    inferUnmarkedActions,
+  }).entries()) {
     const normalizedCue = normalizeZenActionCue(cue, index);
     if (!normalizedCue) continue;
     const actionKey = zenActionKey(normalizedCue.action);
@@ -112,7 +133,7 @@ export function resolveZenActionPresentation(text: string): ZenActionPresentatio
       actionOnly: false,
     };
     if (text.length >= ZEN_ACTION_PRESENTATION_CACHE_MIN_LENGTH) {
-      zenActionPresentationCache.set(text, presentation);
+      zenActionPresentationCache.set(cacheKey, presentation);
       while (zenActionPresentationCache.size > ZEN_ACTION_PRESENTATION_CACHE_LIMIT) {
         const oldestKey = zenActionPresentationCache.keys().next().value;
         if (typeof oldestKey !== "string") break;
@@ -122,7 +143,9 @@ export function resolveZenActionPresentation(text: string): ZenActionPresentatio
     return presentation;
   }
 
-  const { mainText } = extractStageDirections(text);
+  const { mainText } = extractStageDirections(text, {
+    inferUnmarkedActions,
+  });
   const presentation = {
     mainText,
     cues,
@@ -130,7 +153,7 @@ export function resolveZenActionPresentation(text: string): ZenActionPresentatio
     actionOnly: mainText.trim().length === 0,
   };
   if (text.length >= ZEN_ACTION_PRESENTATION_CACHE_MIN_LENGTH) {
-    zenActionPresentationCache.set(text, presentation);
+    zenActionPresentationCache.set(cacheKey, presentation);
     while (zenActionPresentationCache.size > ZEN_ACTION_PRESENTATION_CACHE_LIMIT) {
       const oldestKey = zenActionPresentationCache.keys().next().value;
       if (typeof oldestKey !== "string") break;
@@ -138,6 +161,40 @@ export function resolveZenActionPresentation(text: string): ZenActionPresentatio
     }
   }
   return presentation;
+}
+
+/**
+ * Uses the server's canonical Zen action when available, retaining inline parsing
+ * for messages created before action metadata existed.
+ */
+export function resolveZenActionPresentationFromMessage(args: {
+  content: string;
+  zenStageAction?: ZenStageActionPayload;
+  inferUnmarkedActions?: boolean;
+}): ZenActionPresentation {
+  const metadataAction = args.zenStageAction?.action
+    ? normalizeZenActionText(args.zenStageAction.action)
+    : "";
+  if (!metadataAction) {
+    return resolveZenActionPresentation(args.content, {
+      inferUnmarkedActions: args.inferUnmarkedActions,
+    });
+  }
+
+  return {
+    mainText: args.content,
+    cues: [
+      {
+        action: metadataAction,
+        revealAtDisplayLength: 0,
+        displayAtDisplayLength: 0,
+        motion: classifyZenActionMotion(metadataAction),
+        key: `metadata:${zenActionKey(metadataAction)}`,
+      },
+    ],
+    hasActions: true,
+    actionOnly: args.content.trim().length === 0,
+  };
 }
 
 export function resolveCurrentZenActionCue(
@@ -167,14 +224,14 @@ export function resolveCanvasZenActionCue(
 
 export function resolveZenActionPreview(text: string): ZenActionCue | null {
   const trimmed = text.trim();
-  if (!trimmed || /^[!/]/u.test(trimmed)) return null;
+  if (!trimmed || /^[!/$?]/u.test(trimmed)) return null;
   const presentation = resolveZenActionPresentation(trimmed);
   return presentation.cues[0] ?? null;
 }
 
 export function resolveLatestZenActionPreview(text: string): ZenActionCue | null {
   const trimmed = text.trim();
-  if (!trimmed || /^[!/]/u.test(trimmed)) return null;
+  if (!trimmed || /^[!/$?]/u.test(trimmed)) return null;
   const presentation = resolveZenActionPresentation(trimmed);
   return presentation.cues[presentation.cues.length - 1] ?? null;
 }

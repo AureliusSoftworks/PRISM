@@ -3,7 +3,11 @@ import type { ContinuityProducerVersions } from "./continuityVersion.js";
 
 export type SlateProjectPhase = "shape" | "draft" | "refine";
 export type SlateProseMode = "auto" | "online" | "offline";
-export type SlateAiProvider = "local" | "openai" | "anthropic";
+export type SlateAiProvider =
+  | "local"
+  | "ollama_cloud"
+  | "openai"
+  | "anthropic";
 
 export interface SlateDeliberationHemisphereConfig {
   /** Null means inherit the project prose route. */
@@ -179,7 +183,7 @@ export interface SlateRevision {
   originalText: string;
   proposedText: string;
   status: SlateRevisionStatus;
-  provider: "local" | "openai" | "anthropic";
+  provider: SlateAiProvider;
   model: string;
   createdAt: string;
   resolvedAt: string | null;
@@ -227,7 +231,7 @@ export interface SlateProjectDetail extends SlateProjectSummary {
   manuscript: string;
   direction: string;
   lockedRanges: SlateLockedRange[];
-  lastProvider: "local" | "openai" | "anthropic" | null;
+  lastProvider: SlateAiProvider | null;
   lastModel: string | null;
   proseMode: SlateProseMode;
   proseModel: string | null;
@@ -519,6 +523,7 @@ export type SlateContinuitySourceKind =
   | "import"
   | "story_snapshot"
   | "rehearsal_discovery"
+  | "source_shelf"
   | "review_direction";
 export type SlateContinuityAuthority = "human" | "ai" | "procedural";
 export type SlateContinuityEpistemicStatus =
@@ -582,7 +587,7 @@ export interface SlateContinuitySourceAnchor {
 
 export interface SlateContinuityProvenance {
   authority: SlateContinuityAuthority;
-  provider: "local" | "openai" | "anthropic" | null;
+  provider: SlateAiProvider | null;
   model: string | null;
   producerVersions: ContinuityProducerVersions;
   createdAt: string;

@@ -208,7 +208,11 @@ export function EulaAgreementDialog({
 
 export function EulaStandalone(): React.JSX.Element {
   return (
-    <main className={styles.standalonePage}>
+    <main
+      className={styles.standalonePage}
+      data-prism-legal-surface="eula"
+      data-prism-document-theme-surface="true"
+    >
       <div className={styles.standaloneShell}>
         <header className={styles.standaloneHeader}>
           <div>

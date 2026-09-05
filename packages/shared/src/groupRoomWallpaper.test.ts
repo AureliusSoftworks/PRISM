@@ -29,7 +29,7 @@ test("group-room wallpaper request contract carries only group identity referenc
 
 test("group-room wallpaper request bounds match saved Bot Group limits", () => {
   assert.equal(GROUP_ROOM_WALLPAPER_MEMBER_COUNT_MIN, 2);
-  assert.equal(GROUP_ROOM_WALLPAPER_MEMBER_COUNT_MAX, 24);
+  assert.equal(GROUP_ROOM_WALLPAPER_MEMBER_COUNT_MAX, 100);
   assert.equal(GROUP_ROOM_WALLPAPER_GROUP_NAME_MAX_LENGTH, 80);
   assert.equal(GROUP_ROOM_WALLPAPER_GROUP_DESCRIPTION_MAX_LENGTH, 500);
 });

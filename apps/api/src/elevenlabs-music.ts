@@ -1,9 +1,17 @@
 import {
   BOTCAST_ELEVENLABS_INTRO_DURATION_MS,
+  BOTCAST_ELEVENLABS_OUTDENT_DURATION_MS,
   type SignalMusicProfile,
 } from "@localai/shared";
+import { normalizeSignalGenerationKeywords } from "./signal-generation-keywords.ts";
+import { refractionSignal } from "./refraction-cancellation.ts";
 
 export const SIGNAL_ELEVENLABS_MUSIC_MODEL = "music_v2";
+export const COFFEE_ELEVENLABS_MUSIC_MODEL = "music_v2";
+export const COFFEE_SOUNDTRACK_DURATION_MS = 90_000;
+export const COFFEE_SOUNDTRACK_MAX_BYTES = 12 * 1024 * 1024;
+export const MANSION_SOUNDTRACK_DURATION_MS = 120_000;
+export const MANSION_SOUNDTRACK_MAX_BYTES = 16 * 1024 * 1024;
 const SIGNAL_INTRO_AUDIO_MAX_BYTES = 4 * 1024 * 1024;
 
 export class ElevenLabsMusicError extends Error {
@@ -17,9 +25,9 @@ export class ElevenLabsMusicError extends Error {
 }
 
 const SIGNAL_IDENT_ARTICULATION_VARIANTS = [
-  "close dry articulation with strong negative space",
-  "unequal note lengths and one pronounced dynamic contrast",
-  "one sharp rhythmic interruption inside an otherwise restrained phrase",
+  "a clear memorable melodic contour with purposeful negative space",
+  "unequal note lengths, one expressive dynamic swell, and a singable contour",
+  "one rhythmic surprise inside a coherent two-phrase melody",
 ] as const;
 
 export type SignalElevenLabsMusicCompositionPlan = {
@@ -32,11 +40,21 @@ export type SignalElevenLabsMusicCompositionPlan = {
   }>;
 };
 
+function signalMotifFingerprint(profile: SignalMusicProfile): string {
+  return `four-note host signature at relative semitone steps ${profile.motifIntervals.join(
+    ", ",
+  )}`;
+}
+
 export function buildSignalElevenLabsMusicCompositionPlan(args: {
   profile: SignalMusicProfile;
   seed: string;
+  keywords?: readonly string[];
 }): SignalElevenLabsMusicCompositionPlan {
   const recipe = args.profile;
+  const producerKeywordStyles = normalizeSignalGenerationKeywords(
+    args.keywords,
+  ).map((keyword) => `producer keyword influence: ${keyword}`);
   const temperamentNegativeStyles =
     recipe.temperament === "commanding" && recipe.palette === "cinematic"
     ? [
@@ -82,6 +100,9 @@ export function buildSignalElevenLabsMusicCompositionPlan(args: {
         duration_ms: halfDurationMs,
         positive_styles: [
           "wholly original instrumental interview-podcast ident",
+          `emotional core: ${recipe.emotionalCore}`,
+          `signature contradiction: ${recipe.signatureContradiction}`,
+          recipe.sonicWorld,
           recipe.lead,
           recipe.support,
           recipe.pulse,
@@ -89,8 +110,13 @@ export function buildSignalElevenLabsMusicCompositionPlan(args: {
           `${recipe.tempoBpm} BPM`,
           `${recipe.register} register`,
           recipe.motifDirection,
+          recipe.motifGesture,
+          `harmonic language: ${recipe.harmonicLanguage.replaceAll("-", " ")}`,
+          signalMotifFingerprint(recipe),
           recipe.openingForm,
-          "foreground phrase begins immediately and dominates the clip",
+          ...producerKeywordStyles,
+          "compact genuinely melodic theme with a memorable original motif",
+          "foreground melody begins immediately and dominates the clip",
         ],
         negative_styles: [
           ...sharedNegativeStyles,
@@ -106,16 +132,96 @@ export function buildSignalElevenLabsMusicCompositionPlan(args: {
         duration_ms: halfDurationMs,
         positive_styles: [
           "instrumental continuation of the same podcast ident",
+          `preserve the emotional contradiction: ${recipe.signatureContradiction}`,
+          recipe.sonicWorld,
           recipe.developmentForm,
           recipe.motifDirection,
+          signalMotifFingerprint(recipe),
           recipe.endingDirection,
+          ...producerKeywordStyles,
+          "answering phrase clearly develops the opening motif",
           "foreground melody remains unmistakable through the final note",
+          "complete cadence lands before the clip ends, followed by a brief natural release",
         ],
         negative_styles: [
           ...sharedNegativeStyles,
           ...temperamentNegativeStyles,
           ...recipe.avoidStyles,
-          "sustained ending",
+          "unresolved hanging ending",
+          "long reverb tail",
+        ],
+        context_adherence: "high",
+      },
+    ],
+  };
+}
+
+/** Creates the host's paired closing signature, never a generic exit sting. */
+export function buildSignalElevenLabsOutdentCompositionPlan(args: {
+  profile: SignalMusicProfile;
+  seed: string;
+  keywords?: readonly string[];
+}): SignalElevenLabsMusicCompositionPlan {
+  const recipe = args.profile;
+  const producerKeywordStyles = normalizeSignalGenerationKeywords(
+    args.keywords,
+  ).map((keyword) => `producer keyword influence: ${keyword}`);
+  const articulation = SIGNAL_IDENT_ARTICULATION_VARIANTS[recipe.variant];
+  const sharedNegativeStyles = [
+    "ambient",
+    "ambient pad",
+    "pad-only",
+    "soundscape",
+    "background underscore",
+    "wash",
+    "single sustained chord",
+    "one-chord sting",
+    "drone",
+    "static harmony",
+    "vocals",
+    "speech",
+    "whispers",
+    "lyrics",
+    "artist imitation",
+    "recognizable copyrighted melody",
+    "applause",
+    "crowd",
+    ...recipe.avoidStyles,
+  ];
+  return {
+    chunks: [
+      {
+        text: "[Paired closing recall and final sign-off]",
+        duration_ms: BOTCAST_ELEVENLABS_OUTDENT_DURATION_MS,
+        positive_styles: [
+          "wholly original instrumental interview-podcast closing outdent",
+          `emotional core: ${recipe.emotionalCore}`,
+          `signature contradiction: ${recipe.signatureContradiction}`,
+          recipe.sonicWorld,
+          recipe.lead,
+          recipe.support,
+          recipe.pulse,
+          articulation,
+          `${recipe.tempoBpm} BPM`,
+          `${recipe.register} register`,
+          recipe.motifDirection,
+          recipe.motifGesture,
+          `harmonic language: ${recipe.harmonicLanguage.replaceAll("-", " ")}`,
+          signalMotifFingerprint(recipe),
+          "begin immediately with a concise, clearly recognizable recall of the opening host signature",
+          "same instrumental identity and production language as its paired opening ident",
+          ...producerKeywordStyles,
+          recipe.endingDirection,
+          "compress the host signature into a distinct final answer",
+          "complete cadence lands before the clip ends, followed by a brief natural release",
+        ],
+        negative_styles: [
+          ...sharedNegativeStyles,
+          "new unrelated theme",
+          "generic exit sting",
+          "generic resolving chime",
+          "unresolved hanging ending",
+          "fade in",
           "fade out",
           "long reverb tail",
         ],
@@ -125,8 +231,11 @@ export function buildSignalElevenLabsMusicCompositionPlan(args: {
   };
 }
 
-async function musicError(response: Response): Promise<ElevenLabsMusicError> {
-  let detail = "ElevenLabs could not compose the Signal intro.";
+async function musicError(
+  response: Response,
+  fallback = "ElevenLabs could not compose the Signal music identity.",
+): Promise<ElevenLabsMusicError> {
+  let detail = fallback;
   try {
     const payload = await response.json() as Record<string, unknown>;
     const nested = payload.detail && typeof payload.detail === "object"
@@ -146,7 +255,7 @@ async function musicError(response: Response): Promise<ElevenLabsMusicError> {
   return new ElevenLabsMusicError(response.status, detail);
 }
 
-export async function requestSignalElevenLabsIntroMusic(args: {
+export async function requestSignalElevenLabsMusic(args: {
   apiKey: string;
   compositionPlan: SignalElevenLabsMusicCompositionPlan;
   signal?: AbortSignal;
@@ -157,7 +266,7 @@ export async function requestSignalElevenLabsIntroMusic(args: {
     "https://api.elevenlabs.io/v1/music?output_format=mp3_48000_192",
     {
       method: "POST",
-      signal: args.signal,
+      signal: refractionSignal(args.signal),
       headers: {
         "content-type": "application/json",
         "xi-api-key": args.apiKey,
@@ -171,18 +280,85 @@ export async function requestSignalElevenLabsIntroMusic(args: {
   if (!response.ok) throw await musicError(response);
   const announcedLength = Number(response.headers.get("content-length") ?? 0);
   if (Number.isFinite(announcedLength) && announcedLength > SIGNAL_INTRO_AUDIO_MAX_BYTES) {
-    throw new ElevenLabsMusicError(502, "ElevenLabs returned an oversized Signal intro.");
+    throw new ElevenLabsMusicError(502, "ElevenLabs returned oversized Signal music.");
   }
   const audioBytes = Buffer.from(await response.arrayBuffer());
   if (audioBytes.length === 0) {
-    throw new ElevenLabsMusicError(502, "ElevenLabs returned an empty Signal intro.");
+    throw new ElevenLabsMusicError(502, "ElevenLabs returned empty Signal music.");
   }
   if (audioBytes.length > SIGNAL_INTRO_AUDIO_MAX_BYTES) {
-    throw new ElevenLabsMusicError(502, "ElevenLabs returned an oversized Signal intro.");
+    throw new ElevenLabsMusicError(502, "ElevenLabs returned oversized Signal music.");
   }
   const contentType = response.headers.get("content-type")?.split(";")[0]?.trim();
   if (!contentType?.startsWith("audio/")) {
-    throw new ElevenLabsMusicError(502, "ElevenLabs returned an invalid Signal intro format.");
+    throw new ElevenLabsMusicError(502, "ElevenLabs returned invalid Signal music.");
+  }
+  return {
+    audioBytes,
+    contentType,
+    requestId: response.headers.get("request-id"),
+  };
+}
+
+/** Shared Music v2 prompt path for cached Coffee group beds. */
+export async function requestCoffeeGroupElevenLabsMusic(args: {
+  apiKey: string;
+  prompt: string;
+  durationMs?: number;
+  maxBytes?: number;
+  unavailableMessage?: string;
+  signal?: AbortSignal;
+  fetchImpl?: typeof fetch;
+}): Promise<{ audioBytes: Buffer; contentType: string; requestId: string | null }> {
+  const durationMs = Math.max(3_000, Math.min(600_000, args.durationMs ?? COFFEE_SOUNDTRACK_DURATION_MS));
+  const maxBytes = Math.max(1, args.maxBytes ?? COFFEE_SOUNDTRACK_MAX_BYTES);
+  const response = await (args.fetchImpl ?? fetch)(
+    "https://api.elevenlabs.io/v1/music?output_format=mp3_48000_192",
+    {
+      method: "POST",
+      signal: refractionSignal(args.signal),
+      headers: {
+        "content-type": "application/json",
+        "xi-api-key": args.apiKey,
+      },
+      body: JSON.stringify({
+        prompt: args.prompt,
+        model_id: COFFEE_ELEVENLABS_MUSIC_MODEL,
+        music_length_ms: durationMs,
+        force_instrumental: true,
+      }),
+    },
+  );
+  if (!response.ok) {
+    throw await musicError(
+      response,
+      args.unavailableMessage ?? "ElevenLabs Music is unavailable; bundled Coffee Jazz is playing.",
+    );
+  }
+  const announcedLength = Number(response.headers.get("content-length") ?? 0);
+  if (
+    Number.isFinite(announcedLength) &&
+    announcedLength > maxBytes
+  ) {
+    throw new ElevenLabsMusicError(
+      502,
+      "ElevenLabs returned oversized music.",
+    );
+  }
+  const audioBytes = Buffer.from(await response.arrayBuffer());
+  const contentType = response.headers
+    .get("content-type")
+    ?.split(";")[0]
+    ?.trim();
+  if (
+    audioBytes.length === 0 ||
+    audioBytes.length > maxBytes ||
+    !contentType?.startsWith("audio/")
+  ) {
+    throw new ElevenLabsMusicError(
+      502,
+      "ElevenLabs returned invalid music.",
+    );
   }
   return {
     audioBytes,

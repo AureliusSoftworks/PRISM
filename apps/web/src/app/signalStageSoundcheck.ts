@@ -2,6 +2,8 @@ import type { BotcastMessage } from "@localai/shared";
 
 export const SIGNAL_STAGE_SOUNDCHECK_MESSAGE_PREFIX =
   "signal-stage-soundcheck:";
+export const DEBATE_STAGE_SOUNDCHECK_MESSAGE_PREFIX =
+  "debate-stage-soundcheck:";
 
 const SIGNAL_STAGE_SOUNDCHECK_EXCHANGES = [
   {
@@ -80,8 +82,11 @@ export function signalStageSoundcheckMessages(args: {
 export function signalStageSoundcheckMessageIsEphemeral(
   message: Pick<BotcastMessage, "id" | "episodeId">,
 ): boolean {
-  return (
-    message.id.startsWith(SIGNAL_STAGE_SOUNDCHECK_MESSAGE_PREFIX) &&
-    message.episodeId.startsWith(SIGNAL_STAGE_SOUNDCHECK_MESSAGE_PREFIX)
+  return [
+    SIGNAL_STAGE_SOUNDCHECK_MESSAGE_PREFIX,
+    DEBATE_STAGE_SOUNDCHECK_MESSAGE_PREFIX,
+  ].some(
+    (prefix) =>
+      message.id.startsWith(prefix) && message.episodeId.startsWith(prefix),
   );
 }

@@ -16,14 +16,14 @@ describe("universal voice selector", () => {
     assert.match(pageSource, /className=\{styles\.voiceModeSelector\}/);
     assert.match(
       pageSource,
-      /<span>Voice<\/span> <span aria-hidden="true">·<\/span> <strong>\{voiceModeDisplayName\(currentChoice\)\}<\/strong>/,
+      /<span>Speech Type<\/span> <span aria-hidden="true">·<\/span> <strong>\{currentDisplayName\}<\/strong>/,
     );
-    assert.match(pageSource, /VOICE_PLAYBACK_CHOICES\.map\(\(choice\) =>/);
-    assert.match(pageSource, /role="radiogroup" aria-label="Voice mode"/);
     assert.match(
       pageSource,
-      /role="radio" aria-checked=\{choice === currentChoice\}/,
+      /VOICE_PLAYBACK_CHOICES\.filter\( \(choice\) => choice !== "premium" \|\| !premiumLocalOnly, \)\.map\(\(choice\): PrismMenuEntry =>/,
     );
+    assert.match(pageSource, /kind: "radio", group: "voice-mode"/);
+    assert.match(pageSource, /`Speech Type: \$\{currentDisplayName\}`/);
     assert.doesNotMatch(pageSource, /styles\.voiceHeaderButton/);
   });
 
@@ -67,7 +67,7 @@ describe("universal voice selector", () => {
   it("lets Signal change the next line without cutting off the live mic", () => {
     assert.match(
       pageSource,
-      /tutorialTarget: "botcast-voice-mode"/,
+      /tutorialTarget: options\.voiceTutorialTarget \?\? "botcast-voice-mode"/,
     );
     assert.match(
       pageSource,
@@ -75,8 +75,11 @@ describe("universal voice selector", () => {
     );
   });
 
-  it("moves the same five choices into the constrained tools menu", () => {
-    assert.match(pageSource, /VOICE_PLAYBACK_CHOICES\.map\(\(choice\): PrismMenuEntry => \(\{/);
+  it("moves the available choices into the constrained tools menu", () => {
+    assert.match(
+      pageSource,
+      /VOICE_PLAYBACK_CHOICES\.filter\( \(choice\) => choice !== "premium" \|\| !premiumLocalOnly, \)\.map\(\(choice\): PrismMenuEntry => \{/,
+    );
     assert.match(pageSource, /kind: "radio"/);
     assert.match(pageSource, /group: "voice-mode"/);
     assert.match(
@@ -86,20 +89,90 @@ describe("universal voice selector", () => {
     assert.match(pageSource, /Settings → Keys to use Premium/);
   });
 
-  it("keeps the selector in the header without repeating it in the Zen hero", () => {
+  it("removes Premium from the menu while LOCAL is active", () => {
+    const selectorSource = pageSource.slice(
+      pageSource.indexOf("const renderVoiceModeSelector ="),
+      pageSource.indexOf("const renderHeaderModelPicker ="),
+    );
     assert.match(
-      pageSource,
-      /const renderZenSplashControls[\s\S]*?showVoiceSelector: false/,
+      selectorSource,
+      /VOICE_PLAYBACK_CHOICES\.filter\( \(choice\) => choice !== "premium" \|\| !premiumLocalOnly/,
     );
-
-    const chatHeader = pageSource.slice(
-      pageSource.indexOf('className={styles.chatHeader}'),
-      pageSource.indexOf("{!chatLikeSurface && view !== \"chat\" ?"),
+    assert.match(
+      selectorSource,
+      /const optionDisabled = disabled \|\| \(choice === "premium" && premiumUnavailable\)/,
     );
-    assert.match(chatHeader, /renderVoiceModeSelector\(\)/);
+    assert.doesNotMatch(selectorSource, /Switch response routing to AUTO or ONLINE/);
   });
 
-  it("snapshots the five-choice selection when each spoken surface starts an utterance", () => {
+  it("keeps the selector in the header without repeating it in the Zen hero", () => {
+    const zenSplashControls = pageSource.slice(
+      pageSource.indexOf("const renderZenSplashControls ="),
+      pageSource.indexOf("return (", pageSource.indexOf("const renderZenSplashControls =")),
+    );
+    assert.doesNotMatch(zenSplashControls, /renderVoiceModeSelector/);
+
+    const zenHeader = pageSource.slice(
+      pageSource.indexOf('renderSharedAppletNavbar("Chat tools"'),
+      pageSource.indexOf("renderZenMemoryToasts()"),
+    );
+    assert.match(zenHeader, /renderHeaderModelPicker\(/);
+    const headerModelPicker = pageSource.slice(
+      pageSource.indexOf("const renderHeaderModelPicker ="),
+      pageSource.indexOf("const renderImagesPanelModelPicker ="),
+    );
+    assert.match(
+      headerModelPicker,
+      /const showVoiceSelector = options\.showVoiceSelector \?\? true/,
+    );
+    assert.match(headerModelPicker, /renderVoiceModeSelector\(/);
+  });
+
+  it("locks every Speech Type mutation path for the active Chat or Zen turn", () => {
+    const selectionHandler = pageSource.slice(
+      pageSource.indexOf("async function selectGlobalVoiceChoice"),
+      pageSource.indexOf("async function saveVoiceSettings"),
+    );
+    assert.match(
+      selectionHandler,
+      /if \(chatTurnVoiceSelectionRef\.current\)/,
+    );
+    assert.match(
+      selectionHandler,
+      /showLocalCommandToast\( "Speech Type is locked", "Wait for the current reply to finish before changing how Prism speaks\."/,
+    );
+    assert.match(
+      pageSource,
+      /chatTurnVoiceSelection !== null \|\| !settings/,
+    );
+    assert.match(pageSource, /data-chat-turn-voice-locked=/);
+    assert.match(
+      pageSource,
+      /Speech Type is locked until this reply has been fully received and presented\./,
+    );
+
+    const editStart = pageSource.indexOf("async function performMessageEdit");
+    const editEnd = pageSource.indexOf("function requestMessageEdit");
+    const editSource = pageSource.slice(editStart, editEnd);
+    const editFreezeIndex = editSource.indexOf(
+      "freezeChatTurnVoiceSelection()",
+    );
+    assert.ok(editStart >= 0 && editEnd > editStart);
+    assert.ok(editFreezeIndex >= 0);
+    assert.ok(editFreezeIndex < editSource.indexOf("setPendingReply(true)"));
+    assert.ok(editFreezeIndex < editSource.indexOf("buildChatRequestBody"));
+
+    assert.doesNotMatch(
+      pageSource,
+      /if \(!chatEphemeralMode \|\| !detail\?\.id\) \{ chatMessageFirstSeenAtRef\.current\.clear\(\)/,
+    );
+    assert.match(
+      pageSource,
+      /if \(!chatAssistantTypingMechanicsActive \|\| !detail\?\.id\) \{ chatMessageFirstSeenAtRef\.current\.clear\(\)/,
+    );
+  });
+
+  it("snapshots the four-choice selection when each spoken surface starts an utterance", () => {
     assert.match(
       pageSource,
       /const voiceSelection = voicePlaybackSelectionRef\.current; if \(!detail\)/,
@@ -135,7 +208,7 @@ describe("Coffee voice authorization", () => {
   it("preserves the authorized media lane when Coffee begins playback", () => {
     assert.match(
       pageSource,
-      /function stopVoicePlaybackPreservingPreparedMode\(mode: VoiceMode\).*?preservePreparedMedia: mode === "bottish" \|\| mode === "babble".*?preservePreparedMedia: mode === "english"/,
+      /function handoffVoicePlaybackPreservingPreparedMode\(mode: VoiceMode\).*?preservePreparedMedia: mode === "bottish" \|\| mode === "babble".*?preserveCompletedTails: true.*?preservePreparedMedia: mode === "english"/,
     );
     for (const [handler, nextHandler] of [
       [
@@ -153,7 +226,7 @@ describe("Coffee voice authorization", () => {
       );
       assert.match(
         source,
-        /stopVoicePlaybackPreservingPreparedMode\(settings\.voiceMode\)/,
+        /handoffVoicePlaybackPreservingPreparedMode\(voiceSelection\.voiceMode\)/,
       );
     }
     const replayEffect = pageSource.slice(
@@ -162,7 +235,7 @@ describe("Coffee voice authorization", () => {
     );
     assert.match(
       replayEffect,
-      /stopVoicePlaybackPreservingPreparedMode\(voiceSelection\.voiceMode\)/,
+      /handoffVoicePlaybackPreservingPreparedMode\(voiceSelection\.voiceMode\)/,
     );
   });
 

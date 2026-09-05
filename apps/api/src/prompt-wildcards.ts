@@ -1,8 +1,11 @@
 import { randomInt } from "node:crypto";
+import type { DatabaseSync } from "node:sqlite";
 import {
   getBuiltInPromptWildcardSlot,
   isDisabledPromptWildcardToken,
+  isPassthroughBuiltInPromptWildcardKey,
   parseBuiltInPromptWildcardReference,
+  contextualBuiltInPromptWildcardValue,
   type PromptShortcutWildcardReplacement,
 } from "@localai/shared";
 import type { GenerateOptions, LlmProvider, ProviderMessage } from "./providers.ts";
@@ -24,6 +27,7 @@ const PROMPT_WILDCARD_GENERIC_FALLBACK_VALUES = [
   "restless",
   "luminous",
 ] as const;
+export const PROMPT_BOT_WILDCARD_EMPTY_FALLBACK = "your mom";
 
 function randomScriptedValue(values: readonly string[]): string | null {
   if (values.length === 0) return null;
@@ -38,9 +42,12 @@ export function generateScriptedPromptWildcardValue(
     typeof keyOrSlot === "string" ? keyOrSlot : keyOrSlot.key
   );
   if (!key) return null;
+  if (key === "BOT") return PROMPT_BOT_WILDCARD_EMPTY_FALLBACK;
   if (key === "NUM") {
     return String(randomInt(1, 11));
   }
+  const contextualValue = contextualBuiltInPromptWildcardValue(key);
+  if (contextualValue) return contextualValue;
   const values = SCRIPTED_PROMPT_WILDCARD_VALUES[key];
   if (!values || values.length === 0) return null;
   const availableValues =
@@ -149,6 +156,21 @@ export interface PromptBotWildcardCandidate {
   name: string;
 }
 
+export function promptBotWildcardCandidates(
+  db: DatabaseSync,
+  userId: string,
+): PromptBotWildcardCandidate[] {
+  return db
+    .prepare(
+      `SELECT id, name
+         FROM bots
+        WHERE user_id = ?
+          AND chat_enabled = 1
+        ORDER BY created_at ASC, id ASC`,
+    )
+    .all(userId) as unknown as PromptBotWildcardCandidate[];
+}
+
 function formatPromptBotMention(candidate: PromptBotWildcardCandidate): string {
   const label = candidate.name.replace(/\\/g, "\\\\").replace(/\]/g, "\\]");
   return `[${label}](prism-bot://${encodeURIComponent(candidate.id)})`;
@@ -181,7 +203,17 @@ export function resolvePromptBotWildcards(args: {
       return true;
     });
   if (candidates.length === 0) {
-    return applyPromptWildcardValues(args.prompt, new Map(), args.existingReplacements);
+    const fallbackValues = new Map(
+      occurrences.map((occurrence) => [
+        occurrence.requestKey,
+        PROMPT_BOT_WILDCARD_EMPTY_FALLBACK,
+      ]),
+    );
+    return applyPromptWildcardValues(
+      args.prompt,
+      fallbackValues,
+      args.existingReplacements,
+    );
   }
 
   const receiverBotId = args.receiverBotId?.trim() || null;
@@ -448,6 +480,11 @@ function scriptedPromptWildcardValuesForOccurrences(
   for (const occurrence of occurrences) {
     if (values.has(occurrence.requestKey)) continue;
     if (!getBuiltInPromptWildcardSlot(occurrence.key)) continue;
+    if (isPassthroughBuiltInPromptWildcardKey(occurrence.key)) {
+      // Leftover `{VAR}` must never reach the model; treat as empty capture.
+      values.set(occurrence.requestKey, "");
+      continue;
+    }
     if (occurrence.reference && isNounPairWildcardKey(occurrence.key)) {
       let pairIndex = nounPairIndexesByReference.get(occurrence.reference);
       if (pairIndex === undefined) {
@@ -645,14 +682,14 @@ export function applyPromptWildcardValues(
     resolved += prompt.slice(segmentStart, segmentEnd);
     preserveSegmentReplacements(segmentStart, segmentEnd, resolvedSegmentStart);
     const value = values.get(occurrence.requestKey);
-    if (value) {
+    if (values.has(occurrence.requestKey)) {
       const start = resolved.length;
-      resolved += value;
+      resolved += value ?? "";
       replacements.push({
         key: occurrence.key,
-        value,
+        value: value ?? "",
         start,
-        end: start + value.length,
+        end: start + (value ?? "").length,
         source: "wildcard",
       });
     } else {
@@ -672,16 +709,58 @@ export function applyPromptWildcardValues(
   };
 }
 
+/**
+ * Resolve every wildcard that has a local scripted implementation without
+ * invoking a provider. Unknown/custom slots remain authored and can be handed
+ * to the explicit model-resolution step later.
+ */
+export function resolvePromptWildcardsScripted(args: {
+  prompt: string;
+  botCandidates?: readonly PromptBotWildcardCandidate[];
+  existingReplacements?: readonly PromptShortcutWildcardReplacement[];
+}): PromptWildcardResolution {
+  const botResolution = resolvePromptBotWildcards({
+    prompt: args.prompt,
+    candidates: args.botCandidates ?? [],
+    existingReplacements: args.existingReplacements,
+  });
+  const normalized = normalizeNounPluralShorthandPrompt(
+    botResolution.prompt,
+    botResolution.replacements,
+  );
+  const occurrences = promptWildcardOccurrences(normalized.prompt);
+  if (occurrences.length === 0) {
+    return {
+      prompt: normalized.prompt,
+      replacements: normalizePromptShortcutReplacementRangesForPrompt(
+        normalized.prompt,
+        normalized.existingReplacements
+      ),
+    };
+  }
+  return applyPromptWildcardValues(
+    normalized.prompt,
+    scriptedPromptWildcardValuesForOccurrences(occurrences),
+    normalized.existingReplacements
+  );
+}
+
 export async function resolvePromptWildcardsWithModel(args: {
   prompt: string;
   provider: LlmProvider;
   generationOverrides: GenerateOptions;
+  botCandidates?: readonly PromptBotWildcardCandidate[];
   existingReplacements?: readonly PromptShortcutWildcardReplacement[];
   signal?: AbortSignal;
 }): Promise<PromptWildcardResolution> {
+  const botResolution = resolvePromptBotWildcards({
+    prompt: args.prompt,
+    candidates: args.botCandidates ?? [],
+    existingReplacements: args.existingReplacements,
+  });
   const normalized = normalizeNounPluralShorthandPrompt(
-    args.prompt,
-    args.existingReplacements
+    botResolution.prompt,
+    botResolution.replacements,
   );
   const prompt = normalized.prompt;
   const existingReplacements = normalized.existingReplacements;
@@ -753,11 +832,8 @@ export async function resolvePromptWildcardsWithModel(args: {
       new Map([...scriptedValues, ...fallbackValues, ...values]),
       existingReplacements
     );
-  } catch (error) {
-    console.warn(
-      "[prompt-wildcards] filling prompt wildcards with local fallbacks:",
-      error instanceof Error ? error.message : error
-    );
+  } catch {
+    console.warn("[prompt-wildcards] using local wildcard fallbacks.");
     return applyPromptWildcardValues(
       prompt,
       fillMissingPromptWildcardValues(scriptedValues, modelOccurrences),

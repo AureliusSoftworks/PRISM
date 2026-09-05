@@ -4,23 +4,107 @@ import {
   ANTHROPIC_DEFAULT_MODEL,
   anthropicModelUsesFixedDefaultSampling,
   buildModelCatalog,
+  refreshModelCatalog,
   checkAnthropicApiKeyStatus,
   checkDualOllamaWorkloadStatus,
   checkLocalModelHostStatus,
   checkOpenAiApiKeyStatus,
   embedTextLocal,
+  encodeDirectOllamaCloudModelId,
   getAuxiliaryProvider,
   AnthropicProvider,
   LocalModelRequestError,
   LocalOllamaProvider,
+  OllamaCloudProvider,
   OpenAiProvider,
+  ProviderTurboUnavailableError,
   openAiModelUsesMaxCompletionTokens,
   openAiModelUsesFixedDefaultTemperature,
+  openAiReasoningAwareCompletionTokenLimit,
+  onlineModelSupportsImageInput,
+  isOllamaCloudModelId,
+  isOllamaCloudModelReference,
+  providerModelSupportsImageInput,
   readOpenAiErrorMessage,
+  resetLocalThinkingCapabilityCacheForTests,
   resetModelCatalogCacheForTests,
   SECONDARY_OLLAMA_MODEL_PREFIX,
   selectProvider,
+  stripLeadingChatRoleMarker,
 } from "../providers.ts";
+
+describe("provider image input", () => {
+  const originalFetch = globalThis.fetch;
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+    resetLocalThinkingCapabilityCacheForTests();
+  });
+
+  it("gates online families conservatively", () => {
+    assert.equal(onlineModelSupportsImageInput("openai", "gpt-5.2"), true);
+    assert.equal(onlineModelSupportsImageInput("openai", "o3"), true);
+    assert.equal(
+      onlineModelSupportsImageInput("anthropic", "claude-sonnet-4-5"),
+      true,
+    );
+    assert.equal(onlineModelSupportsImageInput("openai", "text-only-x"), false);
+  });
+
+  it("probes Ollama vision capability without contacting an online host", async () => {
+    const requestedUrls: string[] = [];
+    globalThis.fetch = (async (input: string | URL | Request) => {
+      requestedUrls.push(String(input));
+      return new Response(JSON.stringify({ capabilities: ["vision"] }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }) as typeof fetch;
+
+    assert.equal(await providerModelSupportsImageInput("local", "llava"), true);
+    assert.equal(requestedUrls.length, 1);
+    assert.match(requestedUrls[0]!, /^http:\/\/(?:localhost|127\.0\.0\.1):11434\/api\/show$/u);
+  });
+
+  it("sends OpenAI image content in the provider-native message shape", async () => {
+    let requestBody: Record<string, unknown> = {};
+    globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
+      requestBody = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+      return new Response(
+        JSON.stringify({ choices: [{ message: { content: "I can see it." } }] }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    }) as typeof fetch;
+
+    const response = await new OpenAiProvider({ apiKey: "sk-test" }).generateResponse(
+      [
+        {
+          role: "user",
+          content: "Discuss this image.",
+          images: [{ mimeType: "image/png", data: "cG5n" }],
+        },
+      ],
+      { model: "gpt-5.2", allowFinalLocalFallback: false },
+    );
+
+    assert.equal(response, "I can see it.");
+    assert.deepEqual(requestBody.messages, [
+      {
+        role: "user",
+        content: [
+          { type: "text", text: "Discuss this image." },
+          {
+            type: "image_url",
+            image_url: {
+              url: "data:image/png;base64,cG5n",
+              detail: "auto",
+            },
+          },
+        ],
+      },
+    ]);
+  });
+});
 
 /**
  * These tests pin the LOCAL privacy invariant: when a user (or bot, or
@@ -29,7 +113,28 @@ import {
  * If this test ever needs to be weakened, think hard — it's the thing
  * keeping the "LOCAL" badge honest.
  */
+describe("stripLeadingChatRoleMarker", () => {
+  it("removes a leading chat-role line without touching later prose", () => {
+    assert.equal(
+      stripLeadingChatRoleMarker("assistant\n\nHello there."),
+      "Hello there."
+    );
+    assert.equal(stripLeadingChatRoleMarker("assistant"), "");
+    assert.equal(
+      stripLeadingChatRoleMarker("The assistant helped."),
+      "The assistant helped."
+    );
+  });
+});
+
 describe("selectProvider", () => {
+  it("recognizes both current Ollama Cloud id conventions", () => {
+    assert.equal(isOllamaCloudModelId("minimax-m2.5:cloud"), true);
+    assert.equal(isOllamaCloudModelId("gpt-oss:120b-cloud"), true);
+    assert.equal(isOllamaCloudModelId("qwen3:8b"), false);
+    assert.equal(isOllamaCloudModelId("cloudy-local"), false);
+  });
+
   describe("LOCAL mode invariant", () => {
     it("returns LocalOllamaProvider when preferredProvider is 'local'", () => {
       const provider = selectProvider("local");
@@ -79,6 +184,127 @@ describe("selectProvider", () => {
       const provider = selectProvider("openai", "sk-test-key");
       assert.ok(provider instanceof OpenAiProvider);
       assert.equal(provider.name, "openai");
+    });
+  });
+
+  describe("OLLAMA CLOUD mode", () => {
+    it("uses the signed-in local daemon without credentials", () => {
+      const provider = selectProvider("ollama_cloud");
+      assert.ok(provider instanceof OllamaCloudProvider);
+      assert.equal(provider.name, "ollama_cloud");
+    });
+
+    it("sends bearer auth directly to the fixed Ollama Cloud API", async () => {
+      const originalFetch = globalThis.fetch;
+      const requestedUrls: string[] = [];
+      const authorizations: string[] = [];
+      let requestedBody: Record<string, unknown> = {};
+      globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+        const requestedUrl = String(input);
+        requestedUrls.push(requestedUrl);
+        authorizations.push(new Headers(init?.headers).get("authorization") ?? "");
+        if (requestedUrl.endsWith("/api/show")) {
+          assert.deepEqual(JSON.parse(String(init?.body)), { model: "gpt-oss" });
+          return Response.json({ capabilities: ["completion", "thinking"] });
+        }
+        requestedBody = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+        return Response.json({ message: { content: "cloud ok" } });
+      }) as typeof fetch;
+      try {
+        const provider = selectProvider(
+          "ollama_cloud",
+          undefined,
+          undefined,
+          undefined,
+          "ollama-test-key",
+        );
+        const result = await provider.generateResponse(
+          [{ role: "user", content: "hello" }],
+          {
+            model: encodeDirectOllamaCloudModelId("gpt-oss"),
+            allowFinalLocalFallback: false,
+            usagePurpose: "chat_reply",
+            maxTokens: 512,
+          },
+        );
+        assert.equal(result, "cloud ok");
+        assert.deepEqual(requestedUrls, [
+          "https://ollama.com/api/show",
+          "https://ollama.com/api/chat",
+        ]);
+        assert.deepEqual(authorizations, [
+          "Bearer ollama-test-key",
+          "Bearer ollama-test-key",
+        ]);
+        assert.equal(requestedBody.think, "medium");
+        assert.equal(
+          (requestedBody.options as { num_predict?: number }).num_predict,
+          512 + 1_024,
+        );
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+    });
+
+    it("sends a tiered GPT-OSS payload through the signed-in daemon", async () => {
+      const originalFetch = globalThis.fetch;
+      const requestedUrls: string[] = [];
+      let requestedBody: Record<string, unknown> = {};
+      globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+        const url = String(input);
+        requestedUrls.push(url);
+        if (url.endsWith("/api/show")) {
+          assert.deepEqual(JSON.parse(String(init?.body)), {
+            model: "gpt-oss:120b-cloud",
+          });
+          return Response.json({ capabilities: ["completion", "thinking"] });
+        }
+        requestedBody = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+        return Response.json({ message: { content: "daemon cloud ok" } });
+      }) as typeof fetch;
+      try {
+        const result = await selectProvider("ollama_cloud").generateResponse(
+          [{ role: "user", content: "hello" }],
+          {
+            model: "gpt-oss:120b-cloud",
+            allowFinalLocalFallback: false,
+            usagePurpose: "chat_reply",
+            reasoningEffort: "xhigh",
+          },
+        );
+        assert.equal(result, "daemon cloud ok");
+        assert.equal(requestedUrls.length, 2);
+        assert.ok(requestedUrls[0]?.endsWith("/api/show"));
+        assert.ok(requestedUrls[1]?.endsWith("/api/chat"));
+        assert.equal(requestedBody.model, "gpt-oss:120b-cloud");
+        assert.equal(requestedBody.think, "high");
+        assert.equal(typeof requestedBody.think, "string");
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+    });
+
+    it("rejects a direct Cloud ref from LOCAL before any request", async () => {
+      let fetchCount = 0;
+      const originalFetch = globalThis.fetch;
+      globalThis.fetch = (async () => {
+        fetchCount += 1;
+        return Response.json({ message: { content: "unexpected" } });
+      }) as typeof fetch;
+      try {
+        await assert.rejects(
+          () =>
+            selectProvider("local", undefined, undefined, undefined, "secret")
+              .generateResponse([{ role: "user", content: "hello" }], {
+                model: encodeDirectOllamaCloudModelId("qwen3.5"),
+                allowFinalLocalFallback: false,
+              }),
+          LocalModelRequestError,
+        );
+        assert.equal(fetchCount, 0);
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
     });
   });
 
@@ -246,6 +472,7 @@ describe("buildModelCatalog", () => {
 
   beforeEach(() => {
     resetModelCatalogCacheForTests();
+    resetLocalThinkingCapabilityCacheForTests();
   });
 
   afterEach(() => {
@@ -265,20 +492,90 @@ describe("buildModelCatalog", () => {
   });
 
   it("caches discovery for the API process lifetime", async () => {
-    let fetchCount = 0;
-    globalThis.fetch = (async () => {
-      fetchCount += 1;
+    let tagsFetchCount = 0;
+    globalThis.fetch = (async (input: string | URL | Request) => {
+      if (String(input).endsWith("/api/tags")) tagsFetchCount += 1;
       return new Response(JSON.stringify({ models: [{ name: "llama3.2" }] }), {
         status: 200,
         headers: { "content-type": "application/json" },
       });
     }) as typeof fetch;
 
-    const first = await buildModelCatalog(undefined);
-    const second = await buildModelCatalog(undefined);
+    const first = await buildModelCatalog(
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      "owner-a",
+    );
+    const second = await buildModelCatalog(
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      "owner-a",
+    );
 
-    assert.equal(fetchCount, 1);
+    assert.equal(tagsFetchCount, 1);
     assert.equal(second, first);
+  });
+
+  it("never shares a cached catalog object across owners", async () => {
+    let tagsFetchCount = 0;
+    globalThis.fetch = (async (input: string | URL | Request) => {
+      if (String(input).endsWith("/api/tags")) tagsFetchCount += 1;
+      return Response.json({ models: [{ name: "llama3.2" }] });
+    }) as typeof fetch;
+
+    const ownerA = await buildModelCatalog(
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      "owner-a",
+    );
+    const ownerB = await buildModelCatalog(
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      "owner-b",
+    );
+
+    assert.equal(tagsFetchCount, 2);
+    assert.notEqual(ownerA, ownerB);
+    assert.notEqual(ownerA.local, ownerB.local);
+  });
+
+  it("re-discovers models when explicitly refreshed", async () => {
+    let fetchCount = 0;
+    globalThis.fetch = (async (input: string | URL | Request) => {
+      const isCatalogProbe = String(input).includes("/api/tags");
+      if (isCatalogProbe) fetchCount += 1;
+      return new Response(JSON.stringify({ models: [{ name: `model-${fetchCount}` }] }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }) as typeof fetch;
+
+    const first = await buildModelCatalog(
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      "owner-a",
+    );
+    const refreshed = await refreshModelCatalog(
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      "owner-a",
+    );
+
+    assert.ok(first.local.some((model) => model.id === "model-1"));
+    assert.ok(refreshed.local.some((model) => model.id === "model-2"));
+    assert.equal(fetchCount, 2);
   });
 
   it("keeps fallback defaults available when keyed discovery is unavailable", async () => {
@@ -314,6 +611,10 @@ describe("buildModelCatalog", () => {
     assert.equal(
       catalog.online.find((model) => model.id === "claude-haiku-4-5")?.label,
       "Haiku 4.5"
+    );
+    assert.equal(
+      catalog.online.find((model) => model.id === "claude-mythos-5")?.label,
+      "Mythos 5",
     );
     assert.ok(!catalog.online.some((model) => model.id === "claude-3-5-haiku-latest"));
   });
@@ -385,6 +686,142 @@ describe("buildModelCatalog", () => {
     assert.ok(catalog.online.some((model) => model.id === "o5-mini"));
     assert.ok(!catalog.online.some((model) => model.id === "text-embedding-3-small"));
     assert.ok(!catalog.online.some((model) => model.id === "dall-e-3"));
+  });
+
+  it("classifies Ollama Cloud ids as ONLINE instead of LOCAL", async () => {
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("/api/tags")) {
+        return Response.json({
+          models: [
+            { name: "llama3.2" },
+            { name: "minimax-m2.5:cloud" },
+            { name: "gpt-oss:120b-cloud" },
+          ],
+        });
+      }
+      if (url.endsWith("/api/show")) {
+        const body = JSON.parse(String(init?.body ?? "{}")) as { model?: string };
+        return Response.json({
+          capabilities: ["minimax-m2.5:cloud", "gpt-oss:120b-cloud"].includes(
+            body.model ?? "",
+          )
+            ? ["completion", "thinking"]
+            : ["completion"],
+        });
+      }
+      return new Response("unexpected", { status: 404 });
+    }) as typeof fetch;
+
+    const catalog = await buildModelCatalog(undefined);
+
+    assert.deepEqual(
+      catalog.local.map((model) => model.id).filter(isOllamaCloudModelId),
+      [],
+    );
+    const cloud = catalog.online.filter(
+      (model) => model.provider === "ollama_cloud",
+    );
+    assert.deepEqual(
+      cloud.map((model) => model.id),
+      ["minimax-m2.5:cloud", "gpt-oss:120b-cloud"],
+    );
+    assert.equal(
+      cloud.find((model) => model.id === "gpt-oss:120b-cloud")?.thinking,
+      true,
+    );
+    assert.equal(
+      cloud.find((model) => model.id === "minimax-m2.5:cloud")?.thinking,
+      true,
+    );
+    assert.ok(cloud.every((model) => model.executionClass === "online"));
+    assert.ok(cloud.every((model) => model.supportsStructuredOutput === false));
+    assert.ok(cloud.every((model) => model.hostLabel === "Ollama Cloud"));
+  });
+
+  it("merges authenticated unsuffixed direct models without colliding with LOCAL", async () => {
+    const authorizations: string[] = [];
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      if (url === "https://ollama.com/api/tags") {
+        authorizations.push(new Headers(init?.headers).get("authorization") ?? "");
+        return Response.json({ models: [{ name: "gpt-oss" }] });
+      }
+      if (url === "https://ollama.com/api/show") {
+        authorizations.push(new Headers(init?.headers).get("authorization") ?? "");
+        assert.deepEqual(JSON.parse(String(init?.body)), { model: "gpt-oss" });
+        return Response.json({ capabilities: ["completion", "thinking"] });
+      }
+      if (url.includes("/api/tags")) {
+        return Response.json({ models: [{ name: "qwen3.5" }] });
+      }
+      return new Response("unexpected", { status: 404 });
+    }) as typeof fetch;
+
+    const catalog = await buildModelCatalog(
+      undefined,
+      undefined,
+      undefined,
+      "ollama-test-key",
+    );
+    const directId = encodeDirectOllamaCloudModelId("gpt-oss");
+    assert.ok(catalog.local.some((model) => model.id === "qwen3.5"));
+    assert.ok(
+      catalog.online.some(
+        (model) => model.id === directId && model.provider === "ollama_cloud",
+      ),
+    );
+    assert.equal(
+      catalog.online.find((model) => model.id === directId)?.thinking,
+      true,
+    );
+    assert.equal(isOllamaCloudModelReference(directId), true);
+    assert.deepEqual(authorizations, [
+      "Bearer ollama-test-key",
+      "Bearer ollama-test-key",
+    ]);
+  });
+
+  it("uses the narrow Cloud family fallback only when show discovery fails", async () => {
+    let denyCapability = true;
+    globalThis.fetch = (async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.endsWith("/api/tags")) {
+        return Response.json({
+          models: [
+            { name: "gpt-oss:120b-cloud" },
+            { name: "unsupported:cloud" },
+          ],
+        });
+      }
+      if (url.endsWith("/api/show")) {
+        return denyCapability
+          ? Response.json({ capabilities: ["completion"] })
+          : new Response("unavailable", { status: 503 });
+      }
+      return new Response("unexpected", { status: 404 });
+    }) as typeof fetch;
+
+    const authoritative = await buildModelCatalog(undefined);
+    assert.equal(
+      authoritative.online.find((model) => model.id === "gpt-oss:120b-cloud")
+        ?.thinking,
+      undefined,
+    );
+    resetModelCatalogCacheForTests();
+    resetLocalThinkingCapabilityCacheForTests();
+    denyCapability = false;
+    const fallback = await buildModelCatalog(undefined);
+    assert.equal(
+      fallback.online.find((model) => model.id === "gpt-oss:120b-cloud")
+        ?.thinking,
+      true,
+    );
+    assert.equal(
+      fallback.online.find((model) => model.id === "unsupported:cloud")
+        ?.thinking,
+      undefined,
+    );
   });
 
   it("collapses Anthropic Haiku alias and snapshot ids into one picker entry", async () => {
@@ -540,24 +977,31 @@ describe("LocalOllamaProvider secondary routing", () => {
     assert.equal(requestedBody.think, false);
   });
 
-  it("never contacts a public paired host for a LOCAL request", async () => {
-    let fetchCalls = 0;
-    globalThis.fetch = (async () => {
-      fetchCalls += 1;
-      throw new Error("public host must not be contacted");
+  it("recovers from an unsafe paired-host choice through the primary llama3.2 failsafe", async () => {
+    const requestedUrls: string[] = [];
+    let requestedBody: Record<string, unknown> = {};
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      requestedUrls.push(String(input));
+      requestedBody = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+      return new Response(
+        JSON.stringify({ message: { content: "safe local recovery" } }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
     }) as typeof fetch;
 
     const provider = new LocalOllamaProvider({
       secondaryOllamaHost: "https://public.example:11434",
     });
-    await assert.rejects(
-      () => provider.generateResponse(
-        [{ role: "user", content: "private manuscript" }],
-        { model: `${SECONDARY_OLLAMA_MODEL_PREFIX}mistral:latest` },
-      ),
-      /Paired Ollama host must be on the private network/,
+    const response = await provider.generateResponse(
+      [{ role: "user", content: "private manuscript" }],
+      { model: `${SECONDARY_OLLAMA_MODEL_PREFIX}mistral:latest` },
     );
-    assert.equal(fetchCalls, 0);
+
+    assert.equal(response, "safe local recovery");
+    assert.equal(requestedUrls.length, 1);
+    assert.ok(requestedUrls[0]?.endsWith("/api/chat"));
+    assert.ok(!requestedUrls[0]?.startsWith("https://public.example"));
+    assert.equal(requestedBody.model, "llama3.2");
   });
 
   it("does not probe a public paired host during status or model discovery", async () => {
@@ -603,6 +1047,169 @@ describe("LocalOllamaProvider secondary routing", () => {
     });
     assert.equal(requestedBody.think, false);
     assert.equal(response, "final answer via thinking field");
+  });
+
+  it("enables native thinking for chat replies on thinking-capable models", async () => {
+    resetLocalThinkingCapabilityCacheForTests();
+    let chatBody: Record<string, unknown> = {};
+    let showProbes = 0;
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/api/show")) {
+        showProbes += 1;
+        return new Response(
+          JSON.stringify({ capabilities: ["completion", "thinking"] }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      chatBody = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+      return new Response(
+        JSON.stringify({
+          message: { content: "the answer", thinking: "private chain of thought" },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    }) as typeof fetch;
+
+    const provider = new LocalOllamaProvider();
+    const collected: string[] = [];
+    // Unset effort on a chat reply is the Minimal default: thinking turns on.
+    const response = await provider.generateResponse(
+      [{ role: "user", content: "hi" }],
+      {
+        model: "deepseek-r1:1.5b",
+        usagePurpose: "chat_reply",
+        maxTokens: 512,
+        onNativeThinking: (thinking) => collected.push(thinking),
+      }
+    );
+    assert.equal(showProbes, 1);
+    assert.equal(chatBody.think, true);
+    assert.equal(
+      (chatBody.options as { num_predict?: number } | undefined)?.num_predict,
+      512 + 1_024,
+    );
+    // Thinking turns pin the persona at the recency seam so the model's
+    // trained assistant identity cannot steamroll the authored character.
+    const outbound = chatBody.messages as Array<{
+      role: string;
+      content: string;
+    }>;
+    assert.equal(outbound.at(-1)?.role, "system");
+    assert.match(
+      outbound.at(-1)?.content ?? "",
+      /stay fully in the character[\s\S]*never name your model/u,
+    );
+    assert.equal(response, "the answer");
+    assert.deepEqual(collected, ["private chain of thought"]);
+  });
+
+  it("maps every GPT-OSS effort stop to a valid native think level", async () => {
+    resetLocalThinkingCapabilityCacheForTests();
+    const chatBodies: Array<Record<string, unknown>> = [];
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      if (String(input).endsWith("/api/show")) {
+        return Response.json({ capabilities: ["completion", "thinking"] });
+      }
+      chatBodies.push(
+        JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>,
+      );
+      return Response.json({ message: { content: "ok" } });
+    }) as typeof fetch;
+
+    const provider = new LocalOllamaProvider();
+    for (const reasoningEffort of [
+      undefined,
+      "none",
+      "minimal",
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+    ] as const) {
+      await provider.generateResponse([{ role: "user", content: "hi" }], {
+        model: "gpt-oss:latest",
+        usagePurpose: "chat_reply",
+        ...(reasoningEffort ? { reasoningEffort } : {}),
+      });
+    }
+    assert.deepEqual(
+      chatBodies.map((body) => body.think),
+      ["medium", "low", "low", "low", "medium", "high", "high"],
+    );
+    assert.ok(chatBodies.every((body) => typeof body.think === "string"));
+  });
+
+  it("keeps think off for Effort None, private passes, and structured output", async () => {
+    resetLocalThinkingCapabilityCacheForTests();
+    const chatBodies: Array<Record<string, unknown>> = [];
+    let showProbes = 0;
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/api/show")) {
+        showProbes += 1;
+        return new Response(
+          JSON.stringify({ capabilities: ["completion", "thinking"] }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      chatBodies.push(JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>);
+      return new Response(
+        JSON.stringify({ message: { content: "ok" } }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    }) as typeof fetch;
+
+    const provider = new LocalOllamaProvider();
+    await provider.generateResponse([{ role: "user", content: "hi" }], {
+      model: "deepseek-r1:8b",
+      usagePurpose: "chat_reply",
+      reasoningEffort: "none",
+    });
+    await provider.generateResponse([{ role: "user", content: "hi" }], {
+      model: "deepseek-r1:8b",
+      usagePurpose: "psychic_planning",
+      reasoningEffort: "high",
+    });
+    await provider.generateResponse([{ role: "user", content: "hi" }], {
+      model: "deepseek-r1:8b",
+      usagePurpose: "chat_reply",
+      reasoningEffort: "high",
+      jsonMode: true,
+    });
+    assert.deepEqual(
+      chatBodies.map((body) => body.think),
+      [false, false, false],
+    );
+    // None of these were eligible, so the capability probe never ran.
+    assert.equal(showProbes, 0);
+  });
+
+  it("keeps think off when the model does not report the thinking capability", async () => {
+    resetLocalThinkingCapabilityCacheForTests();
+    let chatBody: Record<string, unknown> = {};
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/api/show")) {
+        return new Response(
+          JSON.stringify({ capabilities: ["completion"] }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      chatBody = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+      return new Response(
+        JSON.stringify({ message: { content: "plain reply" } }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    }) as typeof fetch;
+
+    const provider = new LocalOllamaProvider();
+    const response = await provider.generateResponse(
+      [{ role: "user", content: "hi" }],
+      { model: "llama3.2", usagePurpose: "chat_reply", reasoningEffort: "high" }
+    );
+    assert.equal(chatBody.think, false);
+    assert.equal(response, "plain reply");
   });
 
   it("asks Ollama for JSON object output when jsonMode is enabled", async () => {
@@ -668,17 +1275,24 @@ describe("LocalOllamaProvider secondary routing", () => {
     );
   });
 
-  it("does not silently route stale secondary model ids to the primary host", async () => {
+  it("uses the bundled failsafe instead of treating a stale secondary id as the primary model", async () => {
+    let requestedBody: Record<string, unknown> = {};
+    globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
+      requestedBody = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+      return new Response(
+        JSON.stringify({ message: { content: "fallback ok" } }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    }) as typeof fetch;
     const provider = new LocalOllamaProvider();
 
-    await assert.rejects(
-      () =>
-        provider.generateResponse(
-          [{ role: "user", content: "hi" }],
-          { model: `${SECONDARY_OLLAMA_MODEL_PREFIX}mistral:latest` }
-        ),
-      /Paired Ollama host is not configured/
+    const response = await provider.generateResponse(
+      [{ role: "user", content: "hi" }],
+      { model: `${SECONDARY_OLLAMA_MODEL_PREFIX}mistral:latest` }
     );
+
+    assert.equal(response, "fallback ok");
+    assert.equal(requestedBody.model, "llama3.2");
   });
 
   it("does not automatically route to the secondary host when dual routing is off", async () => {
@@ -871,6 +1485,147 @@ describe("local request diagnostics", () => {
   });
 });
 
+describe("final local Ollama response fallback", () => {
+  const originalFetch = globalThis.fetch;
+  const originalConsoleError = console.error;
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+    console.error = originalConsoleError;
+  });
+
+  it("recovers an OpenAI failure with one primary-host llama3.2 response", async () => {
+    const requests: Array<{ url: string; model: string }> = [];
+    const diagnosticLines: string[] = [];
+    console.error = (...values: unknown[]) => {
+      diagnosticLines.push(values.map(String).join(" "));
+    };
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+      requests.push({ url: String(input), model: String(body.model) });
+      if (String(input).includes("api.openai.com")) {
+        return new Response(JSON.stringify({
+          error: { message: "owner-a-provider-detail-canary" },
+        }), {
+          status: 503,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      return new Response(JSON.stringify({ message: { content: "local recovery" } }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }) as typeof fetch;
+
+    const response = await new OpenAiProvider({ apiKey: "sk-test" }).generateResponse(
+      [{ role: "user", content: "hi" }],
+      { model: "gpt-4o-mini" },
+    );
+
+    assert.equal(response, "local recovery");
+    assert.deepEqual(requests.map((request) => request.model), ["gpt-4o-mini", "llama3.2"]);
+    assert.match(requests[1]?.url ?? "", /\/api\/chat$/);
+    assert.doesNotMatch(requests[1]?.url ?? "", /api\.openai\.com/);
+    assert.doesNotMatch(diagnosticLines.join("\n"), /owner-a-provider-detail-canary/u);
+    assert.doesNotMatch(diagnosticLines.join("\n"), /gpt-4o-mini/u);
+  });
+
+  it("preserves the primary error when the one llama3.2 recovery attempt also fails", async () => {
+    const requestedModels: string[] = [];
+    globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+      requestedModels.push(String(body.model));
+      return new Response(
+        requestedModels.length === 1
+          ? JSON.stringify({ error: "model 'missing' not found" })
+          : "Ollama is unavailable",
+        { status: requestedModels.length === 1 ? 404 : 503 },
+      );
+    }) as typeof fetch;
+
+    await assert.rejects(
+      () => new LocalOllamaProvider().generateResponse(
+        [{ role: "user", content: "hi" }],
+        { model: "missing" },
+      ),
+      (error: unknown) => {
+        assert.ok(error instanceof LocalModelRequestError);
+        assert.equal(error.kind, "model_unavailable");
+        assert.equal(error.status, 404);
+        return true;
+      },
+    );
+    assert.deepEqual(requestedModels, ["missing", "llama3.2"]);
+  });
+
+  it("does not make a fallback request after a successful primary response", async () => {
+    const requestedModels: string[] = [];
+    globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+      requestedModels.push(String(body.model));
+      return new Response(JSON.stringify({ message: { content: "primary reply" } }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }) as typeof fetch;
+
+    const response = await new LocalOllamaProvider().generateResponse(
+      [{ role: "user", content: "hi" }],
+      { model: "mistral:latest" },
+    );
+
+    assert.equal(response, "primary reply");
+    assert.deepEqual(requestedModels, ["mistral:latest"]);
+  });
+
+  it("does not retry llama3.2 with itself when the final model fails", async () => {
+    const requestedModels: string[] = [];
+    globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+      requestedModels.push(String(body.model));
+      return new Response("Ollama is unavailable", { status: 503 });
+    }) as typeof fetch;
+
+    await assert.rejects(
+      () => new LocalOllamaProvider().generateResponse(
+        [{ role: "user", content: "hi" }],
+        { model: "llama3.2" },
+      ),
+      LocalModelRequestError,
+    );
+    assert.deepEqual(requestedModels, ["llama3.2"]);
+  });
+
+  it("preserves cancellation instead of hiding it behind the primary error", async () => {
+    let requestCount = 0;
+    console.error = () => {};
+    globalThis.fetch = (async () => {
+      requestCount += 1;
+      if (requestCount === 1) {
+        return new Response(JSON.stringify({ error: { message: "primary unavailable" } }), {
+          status: 503,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      const error = new Error("stopped");
+      error.name = "AbortError";
+      throw error;
+    }) as typeof fetch;
+
+    await assert.rejects(
+      () => new OpenAiProvider({ apiKey: "sk-test" }).generateResponse(
+        [{ role: "user", content: "hi" }],
+      ),
+      (error: unknown) => {
+        assert.ok(error instanceof Error);
+        assert.equal(error.name, "AbortError");
+        return true;
+      },
+    );
+    assert.equal(requestCount, 2);
+  });
+});
+
 describe("system-owned local lanes", () => {
   const originalFetch = globalThis.fetch;
 
@@ -897,7 +1652,10 @@ describe("system-owned local lanes", () => {
     assert.equal(response, "aux ok");
     assert.equal(provider.name, "local");
     assert.equal(requestedBody.model, "llama3.2");
+    assert.equal(requestedBody.keep_alive, -1);
     assert.equal(requestedBody.think, false);
+    assert.equal("context" in requestedBody, false);
+    assert.equal("prompt" in requestedBody, false);
     assert.deepEqual(requestedBody.options, { temperature: 0.2, num_predict: 40 });
   });
 
@@ -919,6 +1677,98 @@ describe("system-owned local lanes", () => {
     });
     assert.equal(requestedBody.model, "mistral:latest");
     assert.equal(provider.diagnosticModel, "mistral:latest");
+    assert.equal(requestedBody.keep_alive, -1);
+  });
+
+  it("uses an explicit Cloud background model only in ONLINE mode", async () => {
+    const requests: Array<Record<string, unknown>> = [];
+    globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
+      requests.push(JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>);
+      return Response.json({ message: { content: "aux ok" } });
+    }) as typeof fetch;
+
+    const local = getAuxiliaryProvider("minimax-m2.5:cloud", {
+      onlineEnabled: false,
+    });
+    await local.generateResponse([{ role: "user", content: "title" }]);
+    assert.equal(local.name, "local");
+    assert.equal(requests.at(-1)?.model, "llama3.2");
+    assert.equal(requests.at(-1)?.keep_alive, -1);
+
+    const online = getAuxiliaryProvider("minimax-m2.5:cloud", {
+      onlineEnabled: true,
+    });
+    await online.generateResponse([{ role: "user", content: "title" }]);
+    assert.equal(online.name, "ollama_cloud");
+    assert.equal(requests.at(-1)?.model, "minimax-m2.5:cloud");
+    assert.equal("keep_alive" in (requests.at(-1) ?? {}), false);
+
+    await online.generateResponse([{ role: "user", content: "json" }], {
+      jsonMode: true,
+    });
+    assert.equal(requests.at(-1)?.model, "llama3.2");
+    assert.equal(requests.at(-1)?.format, "json");
+    assert.equal(requests.at(-1)?.keep_alive, -1);
+  });
+
+  it("falls back to the local auxiliary model when Cloud auxiliary auth fails", async () => {
+    const requests: Array<Record<string, unknown>> = [];
+    globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+      requests.push(body);
+      if (requests.length === 1) {
+        return Response.json({ error: "unauthorized" }, { status: 401 });
+      }
+      return Response.json({ message: { content: "local recovery" } });
+    }) as typeof fetch;
+
+    const provider = getAuxiliaryProvider("minimax-m2.5:cloud", {
+      onlineEnabled: true,
+    });
+    const response = await provider.generateResponse([{ role: "user", content: "infer" }]);
+
+    assert.equal(response, "local recovery");
+    assert.equal(requests[0]?.model, "minimax-m2.5:cloud");
+    assert.equal(requests[1]?.model, "llama3.2");
+    assert.equal(requests[1]?.keep_alive, -1);
+  });
+
+  it("blocks a Cloud id from the LOCAL provider before any request", async () => {
+    let fetchCount = 0;
+    globalThis.fetch = (async () => {
+      fetchCount += 1;
+      return Response.json({ message: { content: "unexpected" } });
+    }) as typeof fetch;
+
+    await assert.rejects(
+      () =>
+        new LocalOllamaProvider().generateResponse(
+          [{ role: "user", content: "hello" }],
+          {
+            model: "minimax-m2.5:cloud",
+            allowFinalLocalFallback: false,
+          },
+        ),
+      LocalModelRequestError,
+    );
+    assert.equal(fetchCount, 0);
+  });
+
+  it("keeps ordinary foreground local generation on the ten-minute residency policy", async () => {
+    let requestedBody: Record<string, unknown> = {};
+    globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
+      requestedBody = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+      return new Response(JSON.stringify({ message: { content: "foreground ok" } }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }) as typeof fetch;
+
+    await new LocalOllamaProvider().generateResponse([
+      { role: "user", content: "hello" },
+    ]);
+
+    assert.equal(requestedBody.keep_alive, "10m");
   });
 
   it("passes advanced sampler knobs to Ollama options", async () => {
@@ -1117,6 +1967,30 @@ describe("openAiModelUsesMaxCompletionTokens", () => {
   });
 });
 
+describe("openAiReasoningAwareCompletionTokenLimit", () => {
+  it("keeps authored visible-reply capacity separate from hidden reasoning", () => {
+    assert.equal(
+      openAiReasoningAwareCompletionTokenLimit("gpt-5.6-sol", 2_000, "xhigh"),
+      4_048,
+    );
+    assert.equal(
+      openAiReasoningAwareCompletionTokenLimit("gpt-5.6-sol", 2_000, "max"),
+      6_096,
+    );
+  });
+
+  it("does not add headroom when the provider has no requested reasoning effort", () => {
+    assert.equal(
+      openAiReasoningAwareCompletionTokenLimit("gpt-4o-mini", 2_000, "xhigh"),
+      2_000,
+    );
+    assert.equal(
+      openAiReasoningAwareCompletionTokenLimit("gpt-5.6-sol", 2_000, "none"),
+      2_000,
+    );
+  });
+});
+
 describe("OpenAiProvider request shape", () => {
   const originalFetch = globalThis.fetch;
 
@@ -1162,6 +2036,27 @@ describe("OpenAiProvider request shape", () => {
 
     assert.equal(body.max_completion_tokens, 2000);
     assert.equal(body.max_tokens, undefined);
+  });
+
+  it("adds completion headroom for GPT-5.6 XHigh reasoning", async () => {
+    let body: Record<string, unknown> = {};
+    globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
+      body = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+      return new Response(
+        JSON.stringify({ choices: [{ message: { content: "ok" } }] }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    }) as typeof fetch;
+
+    const provider = new OpenAiProvider({ apiKey: "sk-test" });
+    await provider.generateResponse([{ role: "user", content: "hi" }], {
+      model: "gpt-5.6-sol",
+      maxTokens: 2_000,
+      reasoningEffort: "xhigh",
+    });
+
+    assert.equal(body.max_completion_tokens, 4_048);
+    assert.equal(body.reasoning_effort, "xhigh");
   });
 
   it("omits temperature for o-series models even when a custom value is set", async () => {
@@ -1244,7 +2139,62 @@ describe("OpenAiProvider request shape", () => {
     assert.equal(body.reasoning_effort, "high");
   });
 
-  it("omits reasoning_effort for auto and unsupported models", async () => {
+  it("sends native max only to compatible GPT-5.6 models", async () => {
+    const bodies: Array<Record<string, unknown>> = [];
+    globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
+      bodies.push(JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>);
+      return new Response(
+        JSON.stringify({ choices: [{ message: { content: "ok" } }] }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    }) as typeof fetch;
+
+    const provider = new OpenAiProvider({ apiKey: "sk-test" });
+    await provider.generateResponse([{ role: "user", content: "hi" }], {
+      model: "gpt-5.6-sol",
+      reasoningEffort: "max",
+      turbo: true,
+    });
+    await provider.generateResponse([{ role: "user", content: "hi" }], {
+      model: "gpt-5.5",
+      reasoningEffort: "max",
+    });
+
+    assert.equal(bodies[0]?.reasoning_effort, "max");
+    assert.equal(bodies[0]?.service_tier, "priority");
+    assert.equal("reasoning_effort" in (bodies[1] ?? {}), false);
+  });
+
+  it("sends Priority processing only when Turbo is enabled on a supported model", async () => {
+    const bodies: Array<Record<string, unknown>> = [];
+    globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
+      bodies.push(JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>);
+      return new Response(
+        JSON.stringify({ choices: [{ message: { content: "ok" } }] }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    }) as typeof fetch;
+
+    const provider = new OpenAiProvider({ apiKey: "sk-test" });
+    await provider.generateResponse([{ role: "user", content: "hi" }], {
+      model: "gpt-5.6-sol",
+      turbo: true,
+    });
+    await provider.generateResponse([{ role: "user", content: "hi" }], {
+      model: "gpt-5.6-sol",
+      turbo: false,
+    });
+    await provider.generateResponse([{ role: "user", content: "hi" }], {
+      model: "gpt-5.5-pro",
+      turbo: true,
+    });
+
+    assert.equal(bodies[0]?.service_tier, "priority");
+    assert.equal("service_tier" in (bodies[1] ?? {}), false);
+    assert.equal("service_tier" in (bodies[2] ?? {}), false);
+  });
+
+  it("omits reasoning_effort for auto and unsupported models but sends GPT-5.6 Minimal", async () => {
     const bodies: Array<Record<string, unknown>> = [];
     globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
       bodies.push(JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>);
@@ -1263,46 +2213,54 @@ describe("OpenAiProvider request shape", () => {
       model: "gpt-4o-mini",
       reasoningEffort: "high",
     });
+    await provider.generateResponse([{ role: "user", content: "hi" }], {
+      model: "gpt-5.6-sol",
+      reasoningEffort: "minimal",
+    });
+    await provider.generateResponse([{ role: "user", content: "hi" }], {
+      model: "gpt-5.6-sol",
+      reasoningEffort: "low",
+    });
 
     assert.equal("reasoning_effort" in (bodies[0] ?? {}), false);
     assert.equal("reasoning_effort" in (bodies[1] ?? {}), false);
+    assert.equal(bodies[2]?.reasoning_effort, "minimal");
+    assert.equal(bodies[3]?.reasoning_effort, "low");
   });
 
-  it("retries once without reasoning_effort when OpenAI rejects it", async () => {
-    const originalConsoleWarn = console.warn;
+  it("surfaces an unsupported reasoning effort without silently retrying", async () => {
+    const originalConsoleError = console.error;
     const bodies: Array<Record<string, unknown>> = [];
-    console.warn = () => {};
+    console.error = () => {};
     try {
       globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
         bodies.push(JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>);
-        if (bodies.length === 1) {
-          return new Response(
-            JSON.stringify({
-              error: {
-                message: "Unknown parameter: 'reasoning_effort'.",
-              },
-            }),
-            { status: 400, headers: { "content-type": "application/json" } }
-          );
-        }
         return new Response(
-          JSON.stringify({ choices: [{ message: { content: "ok" } }] }),
-          { status: 200, headers: { "content-type": "application/json" } }
+          JSON.stringify({
+            error: {
+              message: "Unknown parameter: 'reasoning_effort'.",
+            },
+          }),
+          { status: 400, headers: { "content-type": "application/json" } }
         );
       }) as typeof fetch;
 
       const provider = new OpenAiProvider({ apiKey: "sk-test" });
-      const response = await provider.generateResponse([{ role: "user", content: "hi" }], {
-        model: "gpt-5.4",
-        reasoningEffort: "xhigh",
-      });
-
-      assert.equal(response, "ok");
-      assert.equal(bodies.length, 2);
-      assert.equal(bodies[0]?.reasoning_effort, "xhigh");
-      assert.equal("reasoning_effort" in (bodies[1] ?? {}), false);
+      await assert.rejects(
+        () =>
+          provider.generateResponse([{ role: "user", content: "hi" }], {
+            model: "gpt-5.4",
+            reasoningEffort: "xhigh",
+          }),
+        /rejected the selected xhigh reasoning effort.*Choose a supported effort/iu,
+      );
+      const reasoningBodies = bodies.filter(
+        (body) => body.model === "gpt-5.4",
+      );
+      assert.equal(reasoningBodies.length, 1);
+      assert.equal(reasoningBodies[0]?.reasoning_effort, "xhigh");
     } finally {
-      console.warn = originalConsoleWarn;
+      console.error = originalConsoleError;
     }
   });
 
@@ -1452,12 +2410,114 @@ describe("AnthropicProvider request shape", () => {
       model: "claude-sonnet-4-6",
       reasoningEffort: "xhigh",
     });
+    await provider.generateResponse([{ role: "user", content: "hi" }], {
+      model: "claude-opus-4-8",
+      reasoningEffort: "max",
+    });
 
     assert.deepEqual(bodies.map((body) => body.output_config), [
       { effort: "xhigh" },
       { effort: "low" },
+      { effort: "high" },
       { effort: "max" },
     ]);
+  });
+
+  it("sends Anthropic Fast mode and requires provider confirmation", async () => {
+    let body: Record<string, unknown> = {};
+    let headers = new Headers();
+    globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
+      body = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+      headers = new Headers(init?.headers);
+      return new Response(
+        JSON.stringify({
+          content: [{ type: "text", text: "fast ok" }],
+          usage: { input_tokens: 3, output_tokens: 2, speed: "fast" },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    }) as typeof fetch;
+
+    const response = await new AnthropicProvider({ apiKey: "sk-ant-test" }).generateResponse(
+      [{ role: "user", content: "hi" }],
+      { model: "claude-opus-4-8", turbo: true },
+    );
+
+    assert.equal(response, "fast ok");
+    assert.equal(body.speed, "fast");
+    assert.equal(headers.get("anthropic-beta"), "fast-mode-2026-02-01");
+  });
+
+  it("does not send Fast mode to ineligible Claude models", async () => {
+    let body: Record<string, unknown> = {};
+    let headers = new Headers();
+    globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
+      body = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+      headers = new Headers(init?.headers);
+      return new Response(
+        JSON.stringify({ content: [{ type: "text", text: "standard ok" }] }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    }) as typeof fetch;
+
+    await new AnthropicProvider({ apiKey: "sk-ant-test" }).generateResponse(
+      [{ role: "user", content: "hi" }],
+      { model: "claude-sonnet-5", turbo: true },
+    );
+
+    assert.equal("speed" in body, false);
+    assert.equal(headers.has("anthropic-beta"), false);
+  });
+
+  it("surfaces unconfirmed Fast responses without standard or local fallback", async () => {
+    const requestedUrls: string[] = [];
+    globalThis.fetch = (async (input: string | URL | Request) => {
+      requestedUrls.push(String(input));
+      return new Response(
+        JSON.stringify({
+          content: [{ type: "text", text: "not confirmed" }],
+          usage: { input_tokens: 3, output_tokens: 2, speed: "standard" },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    }) as typeof fetch;
+
+    await assert.rejects(
+      () => new AnthropicProvider({ apiKey: "sk-ant-test" }).generateResponse(
+        [{ role: "user", content: "hi" }],
+        { model: "claude-opus-5", turbo: true },
+      ),
+      (error: unknown) =>
+        error instanceof ProviderTurboUnavailableError &&
+        error.kind === "unverified_response",
+    );
+    assert.deepEqual(requestedUrls, ["https://api.anthropic.com/v1/messages"]);
+  });
+
+  it("surfaces Fast access and capacity failures without local fallback", async () => {
+    for (const [status, kind] of [
+      [403, "access_or_model"],
+      [529, "capacity"],
+    ] as const) {
+      const requestedUrls: string[] = [];
+      globalThis.fetch = (async (input: string | URL | Request) => {
+        requestedUrls.push(String(input));
+        return new Response(
+          JSON.stringify({ error: { message: `Fast failure ${status}` } }),
+          { status, headers: { "content-type": "application/json" } },
+        );
+      }) as typeof fetch;
+
+      await assert.rejects(
+        () => new AnthropicProvider({ apiKey: "sk-ant-test" }).generateResponse(
+          [{ role: "user", content: "hi" }],
+          { model: "claude-opus-4-8", turbo: true },
+        ),
+        (error: unknown) =>
+          error instanceof ProviderTurboUnavailableError && error.kind === kind,
+      );
+      assert.deepEqual(requestedUrls, ["https://api.anthropic.com/v1/messages"]);
+    }
   });
 
   it("omits Anthropic effort for auto and unsupported models", async () => {
@@ -1573,6 +2633,26 @@ describe("OpenAiProvider error surfacing", () => {
       () => provider.generateResponse([{ role: "user", content: "hi" }]),
       /OpenAI request failed \(429\): Rate limit exceeded/
     );
+  });
+
+  it("does not cross into the bundled local fallback when the caller owns recovery", async () => {
+    const requestedUrls: string[] = [];
+    globalThis.fetch = (async (input: string | URL | Request) => {
+      requestedUrls.push(String(input));
+      return new Response("Provider unavailable", { status: 503 });
+    }) as typeof fetch;
+
+    const provider = new OpenAiProvider({ apiKey: "sk-test" });
+    await assert.rejects(
+      () =>
+        provider.generateResponse([{ role: "user", content: "hi" }], {
+          allowFinalLocalFallback: false,
+        }),
+      /OpenAI request failed \(503\)/u,
+    );
+
+    assert.equal(requestedUrls.length, 1);
+    assert.equal(requestedUrls[0], "https://api.openai.com/v1/chat/completions");
   });
 
 });

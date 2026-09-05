@@ -1,0 +1,297 @@
+import { describe, it } from "node:test";
+import assert from "node:assert/strict";
+import { DatabaseSync } from "node:sqlite";
+import { initializeDatabase } from "../db.ts";
+import {
+  findModelReasoningEffortPreference,
+  listModelReasoningEffortPreferences,
+  normalizeModelEffortProvider,
+  resetModelReasoningEffortPreferences,
+  setModelReasoningEffortPreference,
+} from "../model-effort-preferences.ts";
+import {
+  findModelTurboPreference,
+  listModelTurboPreferences,
+  resetModelTurboPreferences,
+  setModelTurboPreference,
+} from "../model-turbo-preferences.ts";
+import { AUTO_MODEL_TURBO_PREFERENCE_ID } from "@localai/shared";
+import {
+  allModelReasoningEffortCursorHash,
+  resolveUserModelReasoningEffort,
+} from "../model-effort-runtime.ts";
+
+function createTestDatabase(): DatabaseSync {
+  const db = initializeDatabase(new DatabaseSync(":memory:"));
+  db.prepare(
+    `INSERT INTO users (
+      id, email, display_name, password_hash, password_salt,
+      wrapped_user_key, wrapped_user_key_iv, wrapped_user_key_tag,
+      created_at, last_active_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    "user-1",
+    "one@example.com",
+    "One",
+    "hash",
+    "salt",
+    "key",
+    "iv",
+    "tag",
+    "2026-08-01T00:00:00.000Z",
+    "2026-08-01T00:00:00.000Z",
+  );
+  db.prepare(
+    `INSERT INTO users (
+      id, email, display_name, password_hash, password_salt,
+      wrapped_user_key, wrapped_user_key_iv, wrapped_user_key_tag,
+      created_at, last_active_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    "user-2",
+    "two@example.com",
+    "Two",
+    "hash",
+    "salt",
+    "key",
+    "iv",
+    "tag",
+    "2026-08-01T00:00:00.000Z",
+    "2026-08-01T00:00:00.000Z",
+  );
+  return db;
+}
+
+describe("model effort preferences", () => {
+  it("accepts Ollama Cloud as a persisted effort provider", () => {
+    assert.equal(normalizeModelEffortProvider("ollama_cloud"), "ollama_cloud");
+    const db = createTestDatabase();
+    setModelReasoningEffortPreference(db, {
+      userId: "user-1",
+      provider: "ollama_cloud",
+      modelId: "ollama-cloud-direct:kimi-k2.7-code:cloud",
+      effort: "minimal",
+    });
+    assert.equal(
+      findModelReasoningEffortPreference(
+        db,
+        "user-1",
+        "ollama_cloud",
+        "ollama-cloud-direct:kimi-k2.7-code:cloud",
+      ),
+      "minimal",
+    );
+  });
+
+  it("persists Turbo only for supported online models", () => {
+    const db = createTestDatabase();
+    setModelTurboPreference(db, {
+      userId: "user-1",
+      provider: "openai",
+      modelId: "gpt-5.6-sol",
+      turbo: true,
+      updatedAt: "2026-08-01T00:00:00.000Z",
+    });
+    assert.equal(
+      findModelTurboPreference(db, "user-1", "openai", "gpt-5.6-sol"),
+      true,
+    );
+    assert.deepEqual(
+      listModelTurboPreferences(db, "user-1").map(
+        ({ provider, modelId, turbo }) => ({ provider, modelId, turbo }),
+      ),
+      [{ provider: "openai", modelId: "gpt-5.6-sol", turbo: true }],
+    );
+    setModelTurboPreference(db, {
+      userId: "user-1",
+      provider: "anthropic",
+      modelId: "claude-opus-4-8",
+      turbo: true,
+    });
+    assert.equal(
+      findModelTurboPreference(
+        db,
+        "user-1",
+        "anthropic",
+        "claude-opus-4-8",
+      ),
+      true,
+    );
+    assert.throws(
+      () => setModelTurboPreference(db, {
+        userId: "user-1",
+        provider: "anthropic",
+        modelId: "claude-sonnet-5",
+        turbo: true,
+      }),
+      /Turbo is unavailable/u,
+    );
+    assert.equal(resetModelTurboPreferences(db, "user-1"), 2);
+    assert.deepEqual(listModelTurboPreferences(db, "user-1"), []);
+  });
+
+  it("persists contextual Auto Turbo without turning Auto into a fixed model", () => {
+    const db = createTestDatabase();
+    setModelTurboPreference(db, {
+      userId: "user-1",
+      provider: "openai",
+      modelId: AUTO_MODEL_TURBO_PREFERENCE_ID,
+      turbo: true,
+    });
+    assert.equal(
+      findModelTurboPreference(
+        db,
+        "user-1",
+        "openai",
+        AUTO_MODEL_TURBO_PREFERENCE_ID,
+      ),
+      true,
+    );
+  });
+
+  it("upserts exact provider/model preferences and deletes Default", () => {
+    const db = createTestDatabase();
+    setModelReasoningEffortPreference(db, {
+      userId: "user-1",
+      provider: "local",
+      modelId: "ollama-secondary:qwen3:9b",
+      effort: "medium",
+      updatedAt: "2026-08-01T00:00:00.000Z",
+    });
+    setModelReasoningEffortPreference(db, {
+      userId: "user-1",
+      provider: "openai",
+      modelId: "gpt-5.6-sol",
+      effort: "high",
+      updatedAt: "2026-08-01T00:00:01.000Z",
+    });
+    assert.equal(
+      findModelReasoningEffortPreference(
+        db,
+        "user-1",
+        "local",
+        "ollama-secondary:qwen3:9b",
+      ),
+      "medium",
+    );
+    assert.deepEqual(
+      listModelReasoningEffortPreferences(db, "user-1").map(
+        ({ provider, modelId, effort }) => ({ provider, modelId, effort }),
+      ),
+      [
+        {
+          provider: "local",
+          modelId: "ollama-secondary:qwen3:9b",
+          effort: "medium",
+        },
+        { provider: "openai", modelId: "gpt-5.6-sol", effort: "high" },
+      ],
+    );
+    setModelReasoningEffortPreference(db, {
+      userId: "user-1",
+      provider: "openai",
+      modelId: "gpt-5.6-sol",
+      effort: null,
+    });
+    assert.equal(
+      findModelReasoningEffortPreference(
+        db,
+        "user-1",
+        "openai",
+        "gpt-5.6-sol",
+      ),
+      null,
+    );
+  });
+
+  it("isolates users and resets only the requested account", () => {
+    const db = createTestDatabase();
+    for (const userId of ["user-1", "user-2"]) {
+      setModelReasoningEffortPreference(db, {
+        userId,
+        provider: "openai",
+        modelId: "gpt-5.6-sol",
+        effort: "high",
+      });
+    }
+    assert.equal(resetModelReasoningEffortPreferences(db, "user-1"), 1);
+    assert.deepEqual(listModelReasoningEffortPreferences(db, "user-1"), []);
+    assert.equal(listModelReasoningEffortPreferences(db, "user-2").length, 1);
+  });
+
+  it("keeps a supported GPT-5.6 Minimal preference", () => {
+    const db = createTestDatabase();
+    setModelReasoningEffortPreference(db, {
+      userId: "user-1",
+      provider: "openai",
+      modelId: "gpt-5.6-sol",
+      effort: "minimal",
+    });
+
+    assert.equal(
+      findModelReasoningEffortPreference(
+        db,
+        "user-1",
+        "openai",
+        "gpt-5.6-sol",
+      ),
+      "minimal",
+    );
+    assert.equal(
+      resolveUserModelReasoningEffort(db, {
+        userId: "user-1",
+        provider: "openai",
+        modelId: "gpt-5.6-sol",
+      }),
+      "minimal",
+    );
+  });
+
+  it("persists simulated preferences for non-native online models and native effort", () => {
+    const db = createTestDatabase();
+    const before = allModelReasoningEffortCursorHash(db, "user-1");
+    setModelReasoningEffortPreference(db, {
+      userId: "user-1",
+      provider: "local",
+      modelId: "qwen3:9b",
+      effort: "high",
+    });
+    assert.equal(
+      resolveUserModelReasoningEffort(db, {
+        userId: "user-1",
+        provider: "local",
+        modelId: "qwen3:9b",
+      }),
+      "high",
+    );
+    setModelReasoningEffortPreference(db, {
+      userId: "user-1",
+      provider: "openai",
+      modelId: "gpt-4o",
+      effort: "medium",
+    });
+    assert.equal(
+      resolveUserModelReasoningEffort(db, {
+        userId: "user-1",
+        provider: "openai",
+        modelId: "gpt-4o",
+      }),
+      "medium",
+    );
+    setModelReasoningEffortPreference(db, {
+      userId: "user-1",
+      provider: "openai",
+      modelId: "gpt-5.6-sol",
+      effort: "high",
+    });
+    assert.equal(
+      resolveUserModelReasoningEffort(db, {
+        userId: "user-1",
+        provider: "openai",
+        modelId: "gpt-5.6-sol",
+      }),
+      "high",
+    );
+    assert.notEqual(allModelReasoningEffortCursorHash(db, "user-1"), before);
+  });
+});

@@ -1,0 +1,624 @@
+import assert from "node:assert/strict";
+import { describe, it } from "node:test";
+import type {
+  ReplayManifestV1,
+  ReplayVoiceTakeRecordV1,
+} from "@localai/shared";
+import {
+  REPLAY_PREMIUM_DIALOGUE_MAX_CHARACTERS,
+  ReplayStudioCutEligibilityError,
+  classifyReplayVoiceQuality,
+  generateReplayPremiumSegment,
+  planReplayPremiumSegments,
+} from "../replay-premium.ts";
+import { resetElevenLabsPronunciationDictionaryCacheForTests } from
+  "../elevenlabs-pronunciation-dictionaries.ts";
+
+function fixture(lines: Array<{
+  id: string;
+  speakerId: string;
+  speakerName: string;
+  voiceId: string;
+  text: string;
+  moodKey?: "neutral" | "warm";
+}>): { manifest: ReplayManifestV1; takes: ReplayVoiceTakeRecordV1[] } {
+  const now = "2026-07-22T00:00:00.000Z";
+  return {
+    manifest: {
+      v: 1,
+      surface: "signal",
+      sourceId: "episode-1",
+      title: "Premium fixture",
+      createdAt: now,
+      completedAt: now,
+      privacyMode: "online",
+      participants: lines.map((line, index) => ({
+        id: line.speakerId,
+        name: line.speakerName,
+        kind: "bot",
+        role: index % 2 === 0 ? "host" : "guest",
+        color: null,
+        glyph: null,
+        seatIndex: index,
+        visible: true,
+      })),
+      utterances: lines.map((line, index) => ({
+        id: line.id,
+        sourceMessageId: line.id,
+        speakerId: line.speakerId,
+        speakerRole: index % 2 === 0 ? "host" : "guest",
+        text: line.text,
+        spokenText: line.text,
+        moodKey: line.moodKey ?? "neutral",
+        audible: true,
+        visible: true,
+        createdAt: now,
+      })),
+      events: [],
+      visual: { theme: "dark", accentColor: null, atmosphereImageUrl: null },
+    },
+    takes: lines.map((line, index) => ({
+      id: `take-${line.id}`,
+      recordingId: "recording-1",
+      status: "captured",
+      audioUrl: null,
+      audioContentType: null,
+      audioSizeBytes: null,
+      createdAt: now,
+      updatedAt: now,
+      snapshot: {
+        v: 1,
+        sourceKey: line.id,
+        sourceMessageId: line.id,
+        sourceEventId: null,
+        speakerId: line.speakerId,
+        speakerName: line.speakerName,
+        spokenText: line.text,
+        performanceText: null,
+        mode: "english",
+        requestedEngine: "elevenlabs",
+        resolvedEngine: "elevenlabs",
+        profile: {
+          v: 1,
+          baseVoiceId: `base-${index}`,
+          pitch: 0,
+          warmth: 0,
+          pace: 0,
+          lilt: 0,
+          elevenLabsVoiceId: line.voiceId,
+        },
+        moodKey: line.moodKey ?? "neutral",
+        effectsEnabled: true,
+        gain: 1,
+        stereoPan: 0,
+        channel: "primary",
+        seed: `${line.speakerId}:${line.id}`,
+        audible: true,
+        durationMs: 1_000,
+        alignment: null,
+      },
+    })),
+  };
+}
+
+describe("Signal Premium voice planning", () => {
+  it("classifies the actual captured engine instead of configured voice intent", () => {
+    const { manifest, takes } = fixture([
+      { id: "one", speakerId: "host", speakerName: "Host", voiceId: "host-voice", text: "Welcome." },
+      { id: "two", speakerId: "guest", speakerName: "Guest", voiceId: "guest-voice", text: "Thanks." },
+    ]);
+    for (const take of takes) take.audioUrl = `/takes/${take.id}`;
+    assert.equal(classifyReplayVoiceQuality(manifest, takes).status, "premium");
+
+    takes[0]!.snapshot.resolvedEngine = "builtin-local-fallback";
+    assert.deepEqual(classifyReplayVoiceQuality(manifest, takes), {
+      status: "repairable",
+      recommendedAction: "repair",
+      totalLineCount: 2,
+      premiumLineCount: 1,
+      fallbackLineCount: 1,
+      standardLineCount: 0,
+      targetLineCount: 1,
+      targetCharacterEstimate: 8,
+      blockedReason: null,
+    });
+
+    takes[0]!.snapshot.requestedEngine = "builtin";
+    takes[0]!.snapshot.resolvedEngine = "builtin";
+    assert.equal(classifyReplayVoiceQuality(manifest, takes).status, "upgradeable");
+    assert.equal(
+      classifyReplayVoiceQuality(manifest, takes).recommendedAction,
+      "upgrade",
+    );
+  });
+
+  it("counts multiple fallbacks, mixed intentional styles, missing takes, and silence", () => {
+    const { manifest, takes } = fixture([
+      { id: "fallback-one", speakerId: "host", speakerName: "Host", voiceId: "host-voice", text: "First." },
+      { id: "fallback-two", speakerId: "guest", speakerName: "Guest", voiceId: "guest-voice", text: "Second." },
+      { id: "standard", speakerId: "host", speakerName: "Host", voiceId: "host-voice", text: "Third." },
+      { id: "premium", speakerId: "guest", speakerName: "Guest", voiceId: "guest-voice", text: "Fourth." },
+    ]);
+    for (const take of takes) take.audioUrl = `/takes/${take.id}`;
+    takes[0]!.snapshot.resolvedEngine = "builtin-provider-fallback";
+    takes[1]!.snapshot.resolvedEngine = "builtin-local-fallback";
+    takes[2]!.snapshot.requestedEngine = "builtin";
+    takes[2]!.snapshot.resolvedEngine = "builtin";
+
+    assert.deepEqual(classifyReplayVoiceQuality(manifest, takes), {
+      status: "upgradeable",
+      recommendedAction: "upgrade",
+      totalLineCount: 4,
+      premiumLineCount: 1,
+      fallbackLineCount: 2,
+      standardLineCount: 1,
+      targetLineCount: 3,
+      targetCharacterEstimate: 19,
+      blockedReason: null,
+    });
+
+    assert.equal(
+      classifyReplayVoiceQuality(manifest, takes.slice(1)).status,
+      "original_only",
+    );
+    takes[0]!.snapshot.resolvedEngine = null;
+    assert.match(
+      classifyReplayVoiceQuality(manifest, takes).blockedReason ?? "",
+      /missing reliable recorded voice provenance/u,
+    );
+    for (const utterance of manifest.utterances) utterance.audible = false;
+    assert.deepEqual(classifyReplayVoiceQuality(manifest, takes), {
+      status: "original_only",
+      recommendedAction: null,
+      totalLineCount: 0,
+      premiumLineCount: 0,
+      fallbackLineCount: 0,
+      standardLineCount: 0,
+      targetLineCount: 0,
+      targetCharacterEstimate: 0,
+      blockedReason: "This replay has no audible dialogue.",
+    });
+  });
+
+  it("blocks selective production when reusable Premium audio or a target voice is missing", () => {
+    const { manifest, takes } = fixture([
+      { id: "one", speakerId: "host", speakerName: "Host", voiceId: "host-voice", text: "Welcome." },
+      { id: "two", speakerId: "guest", speakerName: "Guest", voiceId: "guest-voice", text: "Thanks." },
+    ]);
+    takes[0]!.snapshot.resolvedEngine = "builtin-local-fallback";
+    takes[0]!.audioUrl = "/takes/one";
+    assert.match(
+      classifyReplayVoiceQuality(manifest, takes).blockedReason ?? "",
+      /successful Premium lines are missing reusable captured takes/u,
+    );
+    takes[1]!.audioUrl = "/takes/two";
+    takes[0]!.snapshot.profile = {
+      ...takes[0]!.snapshot.profile,
+      elevenLabsVoiceId: null,
+    };
+    assert.match(
+      classifyReplayVoiceQuality(manifest, takes).blockedReason ?? "",
+      /needs a saved ElevenLabs voice/u,
+    );
+  });
+
+  it("plans only fallback lines for repair and only non-Premium lines for upgrade", () => {
+    const { manifest, takes } = fixture([
+      { id: "fallback", speakerId: "host", speakerName: "Host", voiceId: "host-voice", text: "Fallback." },
+      { id: "premium", speakerId: "guest", speakerName: "Guest", voiceId: "guest-voice", text: "Premium." },
+      { id: "standard", speakerId: "host", speakerName: "Host", voiceId: "host-voice", text: "Standard." },
+    ]);
+    takes[0]!.snapshot.resolvedEngine = "builtin-local-fallback";
+    takes[2]!.snapshot.requestedEngine = "builtin";
+    takes[2]!.snapshot.resolvedEngine = "builtin";
+    takes[1]!.snapshot.profile = {
+      ...takes[1]!.snapshot.profile,
+      elevenLabsVoiceId: null,
+    };
+    assert.deepEqual(
+      planReplayPremiumSegments(manifest, takes, "repair", "repair").flatMap(
+        (segment) => segment.inputs.map((input) => input.sourceMessageId),
+      ),
+      ["fallback"],
+    );
+    assert.deepEqual(
+      planReplayPremiumSegments(manifest, takes, "upgrade", "upgrade").flatMap(
+        (segment) => segment.inputs.map((input) => input.sourceMessageId),
+      ),
+      ["fallback", "standard"],
+    );
+  });
+
+  it("regenerates and bills only the first fallback when later Premium lines succeeded", async () => {
+    const { manifest, takes } = fixture([
+      { id: "first", speakerId: "host", speakerName: "Host", voiceId: "host-voice", text: "Fallback first." },
+      { id: "second", speakerId: "guest", speakerName: "Guest", voiceId: "guest-voice", text: "Premium second." },
+      { id: "third", speakerId: "host", speakerName: "Host", voiceId: "host-voice", text: "Premium third." },
+    ]);
+    for (const take of takes) take.audioUrl = `/takes/${take.id}`;
+    takes[0]!.snapshot.resolvedEngine = "builtin-provider-fallback";
+    const segments = planReplayPremiumSegments(
+      manifest,
+      takes,
+      "first-fallback",
+      "repair",
+    );
+    const requests: string[] = [];
+    let characterCost = 0;
+    for (const segment of segments) {
+      const generated = await generateReplayPremiumSegment({
+        segment,
+        apiKey: "test-key",
+        fetchImpl: async (_input, init) => {
+          const body = JSON.parse(String(init?.body)) as { text: string };
+          requests.push(body.text);
+          return new Response(JSON.stringify({
+            audio_base64: Buffer.from("fallback-audio").toString("base64"),
+            normalized_alignment: {
+              characters: [..."Fallback first."],
+              character_start_times_seconds: Array.from(
+                { length: 15 },
+                (_, index) => index * 0.05,
+              ),
+              character_end_times_seconds: Array.from(
+                { length: 15 },
+                (_, index) => (index + 1) * 0.05,
+              ),
+            },
+          }), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          });
+        },
+      });
+      characterCost += generated.characterCost;
+    }
+    assert.deepEqual(
+      segments.flatMap((segment) =>
+        segment.inputs.map((input) => input.sourceMessageId),
+      ),
+      ["first"],
+    );
+    assert.deepEqual(requests, ["Fallback first."]);
+    assert.equal(characterCost, Array.from("Fallback first.").length);
+  });
+
+  it("reports every speaker whose audible line lacks a saved voice snapshot", () => {
+    const { manifest } = fixture([
+      { id: "one", speakerId: "host", speakerName: "Host", voiceId: "host-voice", text: "Welcome." },
+      { id: "two", speakerId: "guest", speakerName: "Guest", voiceId: "guest-voice", text: "Thanks." },
+    ]);
+
+    assert.throws(
+      () => planReplayPremiumSegments(manifest, []),
+      (error) => {
+        assert.ok(error instanceof ReplayStudioCutEligibilityError);
+        assert.equal(
+          error.message,
+          "Host and Guest need an audible saved replay voice snapshot before Premium audio can be created.",
+        );
+        assert.deepEqual(error.missingSpeakers, ["Host", "Guest"]);
+        return true;
+      },
+    );
+  });
+
+  it("blocks a partial Studio Cut instead of silently omitting an audible line", () => {
+    const { manifest, takes } = fixture([
+      { id: "one", speakerId: "host", speakerName: "Host", voiceId: "host-voice", text: "Welcome." },
+      { id: "two", speakerId: "guest", speakerName: "Guest", voiceId: "guest-voice", text: "Thanks." },
+    ]);
+
+    assert.throws(
+      () => planReplayPremiumSegments(manifest, takes.slice(0, 1)),
+      (error) => {
+        assert.ok(error instanceof ReplayStudioCutEligibilityError);
+        assert.equal(
+          error.message,
+          "Guest needs an audible saved replay voice snapshot before Premium audio can be created.",
+        );
+        assert.deepEqual(error.missingSpeakers, ["Guest"]);
+        return true;
+      },
+    );
+  });
+
+  it("reserves the no-dialogue state for a genuinely silent replay", () => {
+    const { manifest } = fixture([
+      { id: "one", speakerId: "host", speakerName: "Host", voiceId: "host-voice", text: "Silent." },
+    ]);
+    manifest.utterances[0]!.audible = false;
+
+    assert.deepEqual(planReplayPremiumSegments(manifest, []), []);
+  });
+
+  it("reports every audible speaker who lacks an ElevenLabs voice", () => {
+    const { manifest, takes } = fixture([
+      { id: "one", speakerId: "host", speakerName: "Host", voiceId: "host-voice", text: "Welcome." },
+      { id: "two", speakerId: "guest", speakerName: "Guest", voiceId: "guest-voice", text: "Thanks." },
+    ]);
+    for (const take of takes) {
+      take.snapshot.profile = {
+        ...take.snapshot.profile,
+        elevenLabsVoiceId: null,
+      };
+    }
+
+    assert.throws(
+      () => planReplayPremiumSegments(manifest, takes),
+      (error) => {
+        assert.ok(error instanceof ReplayStudioCutEligibilityError);
+        assert.equal(
+          error.message,
+          "Host and Guest need an ElevenLabs voice before Premium audio can be created.",
+        );
+        assert.deepEqual(error.missingSpeakers, ["Host", "Guest"]);
+        return true;
+      },
+    );
+  });
+
+  it("batches distinct actors into exact message-boundary Dialogue chunks", () => {
+    const line = "x".repeat(980);
+    const { manifest, takes } = fixture([
+      { id: "one", speakerId: "rick", speakerName: "Rick", voiceId: "rick-voice", text: line },
+      { id: "two", speakerId: "morty", speakerName: "Morty", voiceId: "morty-voice", text: line },
+      { id: "three", speakerId: "rick", speakerName: "Rick", voiceId: "rick-voice", text: line },
+    ]);
+    const segments = planReplayPremiumSegments(manifest, takes);
+    assert.equal(segments.length, 2);
+    assert.equal(segments[0]?.strategy, "dialogue");
+    assert.deepEqual(
+      segments.flatMap((segment) => segment.inputs.map((input) => input.text)),
+      [line, line, line],
+    );
+    assert.ok(
+      segments.every(
+        (segment) =>
+          segment.inputs.reduce((sum, input) => sum + Array.from(input.text).length, 0) <=
+          REPLAY_PREMIUM_DIALOGUE_MAX_CHARACTERS,
+      ),
+    );
+  });
+
+  it("isolates bots that share one actor and preserves stable per-bot seeds", () => {
+    const { manifest, takes } = fixture([
+      { id: "one", speakerId: "rick", speakerName: "Rick", voiceId: "shared-actor", text: "Listen, Morty." },
+      { id: "two", speakerId: "morty", speakerName: "Morty", voiceId: "shared-actor", text: "Aw geez." },
+    ]);
+    const first = planReplayPremiumSegments(manifest, takes);
+    const second = planReplayPremiumSegments(manifest, takes);
+    assert.deepEqual(first.map((segment) => segment.strategy), ["isolated_tts", "isolated_tts"]);
+    assert.deepEqual(first.map((segment) => segment.inputHash), second.map((segment) => segment.inputHash));
+    assert.notDeepEqual(
+      first.map((segment) => segment.inputHash),
+      planReplayPremiumSegments(manifest, takes, "another-take").map(
+        (segment) => segment.inputHash,
+      ),
+    );
+  });
+
+  it("keeps single-actor runs as complete per-message TTS segments", () => {
+    const { manifest, takes } = fixture([
+      { id: "one", speakerId: "host", speakerName: "Host", voiceId: "host-voice", text: "First." },
+      { id: "two", speakerId: "host", speakerName: "Host", voiceId: "host-voice", text: "Second." },
+    ]);
+    const segments = planReplayPremiumSegments(manifest, takes);
+    assert.deepEqual(
+      segments.map((segment) => ({
+        strategy: segment.strategy,
+        messages: segment.inputs.map((input) => input.sourceMessageId),
+      })),
+      [
+        { strategy: "isolated_tts", messages: ["one"] },
+        { strategy: "isolated_tts", messages: ["two"] },
+      ],
+    );
+  });
+
+  it("records phonology provenance without coupling replay identity to the remote cache", async () => {
+    resetElevenLabsPronunciationDictionaryCacheForTests();
+    const { manifest, takes } = fixture([{
+      id: "accent-line",
+      speakerId: "host",
+      speakerName: "Host",
+      voiceId: "selected-replay-voice",
+      text: "When the white wizard leaves.",
+    }]);
+    takes[0]!.snapshot.profile = {
+      ...takes[0]!.snapshot.profile,
+      premiumPronunciationEnabled: true,
+      accentDefinitionId: "northern-german-influenced-english",
+    };
+    const segment = planReplayPremiumSegments(manifest, takes, "stable-replay")[0]!;
+    const inputHash = segment.inputHash;
+    const providerBodies: Record<string, unknown>[] = [];
+    const generated = await generateReplayPremiumSegment({
+      segment,
+      apiKey: "test-key",
+      tenantId: "replay-tenant",
+      fetchImpl: (async (input, init) => {
+        const url = String(input);
+        const body = typeof init?.body === "string"
+          ? JSON.parse(init.body) as Record<string, unknown>
+          : {};
+        if (url.includes("page_size=100")) {
+          return Response.json({ pronunciation_dictionaries: [] });
+        }
+        if (url.endsWith("/add-from-rules")) {
+          return Response.json({ id: "remote-dictionary", version_id: "remote-v1" });
+        }
+        providerBodies.push(body);
+        const characters = Array.from(String(body.text));
+        return Response.json({
+          audio_base64: Buffer.from("accent-audio").toString("base64"),
+          normalized_alignment: {
+            characters,
+            character_start_times_seconds: characters.map((_, index) => index * 0.01),
+            character_end_times_seconds: characters.map((_, index) => (index + 1) * 0.01),
+          },
+        }, { headers: { "content-type": "application/json" } });
+      }) as typeof fetch,
+    });
+    assert.match(
+      providerBodies[0]?.text as string,
+      /^\[Northern German accent\] When the white wizard leaves\.$/u,
+    );
+    assert.deepEqual(
+      providerBodies[0]?.pronunciation_dictionary_locators,
+      [{ pronunciation_dictionary_id: "remote-dictionary", version_id: "remote-v1" }],
+    );
+    assert.deepEqual(generated.timings[0]?.premiumPhonology, {
+      planSha256: generated.timings[0]?.premiumPhonology?.planSha256,
+      rulesetVersion: generated.timings[0]?.premiumPhonology?.rulesetVersion,
+      rulesetSha256: generated.timings[0]?.premiumPhonology?.rulesetSha256,
+      model: "eleven_v3",
+      direction: "Northern German accent",
+      gateEnabled: true,
+      fallback: "dictionary",
+    });
+    assert.match(
+      generated.timings[0]?.premiumPhonology?.planSha256 ?? "",
+      /^[a-f0-9]{64}$/u,
+    );
+    assert.equal(
+      "locatorVersionId" in (generated.timings[0]?.premiumPhonology ?? {}),
+      false,
+    );
+
+    resetElevenLabsPronunciationDictionaryCacheForTests();
+    assert.equal(
+      planReplayPremiumSegments(manifest, takes, "stable-replay")[0]?.inputHash,
+      inputHash,
+    );
+  });
+
+  it("sanitizes isolated shared-actor text and uses distinct stable bot seeds", async () => {
+    const { manifest, takes } = fixture([
+      { id: "one", speakerId: "rick", speakerName: "Rick", voiceId: "shared-actor", text: "Listen, Morty.", moodKey: "warm" },
+      { id: "two", speakerId: "morty", speakerName: "Morty", voiceId: "shared-actor", text: "Aw geez.", moodKey: "warm" },
+    ]);
+    takes[0]!.snapshot.performanceText = "[walks to the microphone] Listen, Morty.";
+    takes[0]!.snapshot.profile = {
+      ...takes[0]!.snapshot.profile,
+      elevenLabsDirection: "dry",
+    };
+    const segments = planReplayPremiumSegments(manifest, takes);
+    const requests: Array<{ text: string; model_id: string; seed: number }> = [];
+    for (const segment of segments) {
+      await generateReplayPremiumSegment({
+        segment,
+        apiKey: "test-key",
+        fetchImpl: async (_input, init) => {
+          const body = JSON.parse(String(init?.body)) as {
+            text: string;
+            model_id: string;
+            seed: number;
+          };
+          requests.push(body);
+          return new Response(JSON.stringify({
+            audio_base64: Buffer.from("isolated-audio").toString("base64"),
+          }), { status: 200, headers: { "content-type": "application/json" } });
+        },
+      });
+    }
+    assert.doesNotMatch(requests[0]?.text ?? "", /walks to the microphone/u);
+    assert.match(requests[0]?.text ?? "", /^\[dry\] \[warmly\] Listen, Morty\.$/u);
+    assert.equal(requests[0]?.model_id, "eleven_v3");
+    assert.notEqual(requests[0]?.seed, requests[1]?.seed);
+    const repeatedSeeds: number[] = [];
+    for (const segment of segments) {
+      await generateReplayPremiumSegment({
+        segment,
+        apiKey: "test-key",
+        fetchImpl: async (_input, init) => {
+          const body = JSON.parse(String(init?.body)) as { seed: number };
+          repeatedSeeds.push(body.seed);
+          return new Response(JSON.stringify({
+            audio_base64: Buffer.from("isolated-audio").toString("base64"),
+          }), { status: 200, headers: { "content-type": "application/json" } });
+        },
+      });
+    }
+    assert.deepEqual(requests.map((request) => request.seed), repeatedSeeds);
+  });
+
+  it("keeps neutral untagged and adds only sparse saved mood direction", () => {
+    const { manifest, takes } = fixture([
+      { id: "one", speakerId: "a", speakerName: "A", voiceId: "voice-a", text: "Exact *emphasis* remains.", moodKey: "neutral" },
+      { id: "two", speakerId: "b", speakerName: "B", voiceId: "voice-b", text: "Warm line.", moodKey: "warm" },
+    ]);
+    const inputs = planReplayPremiumSegments(manifest, takes).flatMap((segment) => segment.inputs);
+    assert.equal(inputs[0]?.text, "Exact *emphasis* remains.");
+    assert.match(inputs[1]?.text ?? "", /^\[[^\]]+\] Warm line\.$/u);
+  });
+
+  it("maps Dialogue timestamp segments back to saved message IDs", async () => {
+    const { manifest, takes } = fixture([
+      { id: "one", speakerId: "a", speakerName: "A", voiceId: "voice-a", text: "Hello." },
+      { id: "two", speakerId: "b", speakerName: "B", voiceId: "voice-b", text: "Hi." },
+    ]);
+    const segment = planReplayPremiumSegments(manifest, takes)[0]!;
+    const generated = await generateReplayPremiumSegment({
+      segment,
+      apiKey: "test-key",
+      fetchImpl: async (_input, init) => {
+        const body = JSON.parse(String(init?.body)) as { inputs: Array<{ text: string }> };
+        assert.deepEqual(body.inputs.map((input) => input.text), ["Hello.", "Hi."]);
+        return new Response(JSON.stringify({
+          audio_base64: Buffer.from("premium-audio").toString("base64"),
+          voice_segments: [
+            {
+              dialogue_input_index: 0,
+              start_time_seconds: 0,
+              end_time_seconds: 0.7,
+              character_start_index: 0,
+              character_end_index: 6,
+            },
+            {
+              dialogue_input_index: 1,
+              start_time_seconds: 0.7,
+              end_time_seconds: 1.2,
+              character_start_index: 6,
+              character_end_index: 9,
+            },
+          ],
+          normalized_alignment: {
+            characters: [..."Hello.Hi."],
+            character_start_times_seconds: [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.7, 0.8, 0.9],
+            character_end_times_seconds: [0.1, 0.2, 0.3, 0.4, 0.5, 0.7, 0.8, 0.9, 1.2],
+          },
+        }), {
+          status: 200,
+          headers: {
+            "content-type": "application/json",
+            "character-cost": "11",
+          },
+        });
+      },
+    });
+    assert.deepEqual(generated.timings, [
+      {
+        sourceMessageId: "one",
+        startMs: 0,
+        endMs: 700,
+        alignment: {
+          characters: [..."Hello."],
+          characterStartTimesSeconds: [0, 0.1, 0.2, 0.3, 0.4, 0.5],
+          characterEndTimesSeconds: [0.1, 0.2, 0.3, 0.4, 0.5, 0.7],
+        },
+      },
+      {
+        sourceMessageId: "two",
+        startMs: 700,
+        endMs: 1_200,
+        alignment: {
+          characters: [..."Hi."],
+          characterStartTimesSeconds: [0.7, 0.8, 0.9],
+          characterEndTimesSeconds: [0.8, 0.9, 1.2],
+        },
+      },
+    ]);
+    assert.equal(generated.characterCost, 11);
+  });
+});

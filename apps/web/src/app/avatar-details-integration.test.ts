@@ -19,8 +19,20 @@ const maskCss = readFileSync(
   new URL("./avatar-details-mask.module.css", import.meta.url),
   "utf8",
 );
+const glowSource = readFileSync(
+  new URL("./avatar-details-glow.ts", import.meta.url),
+  "utf8",
+);
 const editorCss = readFileSync(
   new URL("./avatar-details-editor.module.css", import.meta.url),
+  "utf8",
+);
+const phosphorGlyphSource = readFileSync(
+  new URL("./PhosphorPixelGlyph.tsx", import.meta.url),
+  "utf8",
+);
+const avatarDetailsSource = readFileSync(
+  new URL("./avatar-details.ts", import.meta.url),
   "utf8",
 );
 
@@ -40,15 +52,67 @@ describe("Avatar Details Studio integration", () => {
     assert.doesNotMatch(pageSource, /prismAvatarDetailsPaneEnabled/);
   });
 
-  it("keeps the recipe local until Apply and guards dirty tab or close navigation", () => {
+  it("commits completed ink gestures into the Studio draft without a nested Apply boundary", () => {
     assert.match(editorSource, /const \[working, setWorking\]/);
-    assert.match(editorSource, /onApply\(next\)/);
+    assert.match(editorSource, /if \(autoCommit\)/);
+    assert.match(editorSource, /onApply\(cloneAvatarDetails\(next\)\)/);
     assert.match(editorSource, /beforeunload/);
+    assert.match(pageSource, /layout="foundry"/);
+    assert.match(pageSource, /autoCommit/);
+    assert.match(editorSource, /layout === "panel" \? <footer/);
+    assert.doesNotMatch(pageSource, /Apply avatar details\?/);
+  });
+
+  it("keeps authored custom eyes and the editor guide on their raster masks", () => {
     assert.match(
-      pageSource,
-      /detailsEditorRef\.current\?\.hasDirtyChanges\(\)/,
+      pageCss,
+      /\.zenLiveBotPresencePlate\[data-avatar-full-scale-identity="canonical"\][\s\S]*?\.zenLiveBotPresenceFaceGlyph\[data-face-eye-character\][\s\S]*?\[data-coffee-plate-emoji-part="eyes"\][\s\S]*?\[data-crt-glyph-layer="true"\]\[data-crt-pixel-mask-ready="true"\]::before\s*\{[\s\S]*?-webkit-mask-image:\s*var\(--crt-phosphor-pixel-mask\);[\s\S]*?mask-image:\s*var\(--crt-phosphor-pixel-mask\);/u,
     );
-    assert.match(pageSource, /Apply avatar details\?/);
+    assert.match(
+      pageCss,
+      /\.zenLiveBotPresencePlate\[data-avatar-full-scale-identity="canonical"\][\s\S]*?\.zenLiveBotPresenceFaceGlyph\[data-face-eye-character\][\s\S]*?\[data-coffee-plate-emoji-part="eyes"\][\s\S]*?\[data-crt-glyph-layer="true"\]\[data-crt-pixel-mask-ready="true"\]\s*\{[\s\S]*?--zen-live-bot-glyph-compositor-glow-filter:\s*opacity\(1\);/u,
+      "completed custom-eye wrappers must stay neutral instead of filtering their transparent glyph boxes",
+    );
+    assert.match(
+      pageCss,
+      /\[data-crt-pixel-mask-emission="true"\][\s\S]*?filter:\s*blur\(var\(--crt-glyph-beam-softness\)\)\s*var\(--crt-face-glow-filter\)[\s\S]*?\[data-crt-pixel-mask-emission-source="true"\][\s\S]*?mask-image:\s*var\(--crt-phosphor-pixel-mask\)/u,
+      "custom eyes must emit from an unmasked outer compositor fed by their exact raster mask",
+    );
+    assert.match(
+      phosphorGlyphSource,
+      /data-crt-pixel-mask-emission="true"[\s\S]*data-crt-pixel-mask-emission-content=\{content\}[\s\S]*data-crt-pixel-mask-emission-source="true"/u,
+      "the shared raster glyph must expose the alpha-safe nested emission surface",
+    );
+    assert.match(
+      pageCss,
+      /data-theme="light"[\s\S]*?data-crt-pixel-mask-emission="true"\]::before[\s\S]*?content:\s*attr\(data-crt-pixel-mask-emission-content\)[\s\S]*?data-crt-pixel-mask-emission-source="true"\][\s\S]*?display:\s*none/u,
+      "Light full avatars must use the mouth-style real glyph halo source while retaining the raster mask for visible eye geometry",
+    );
+    assert.match(
+      editorSource,
+      /data-avatar-details-face-guide="true"[\s\S]*?<CoffeeSeatPlateEmoji/u,
+    );
+    assert.match(
+      editorCss,
+      /\.faceGuideGlyph[\s\S]*?\[data-crt-pixel-mask-ready="true"\]::before\s*\{[\s\S]*?-webkit-mask-image:\s*var\(--crt-phosphor-pixel-mask\);[\s\S]*?mask-image:\s*var\(--crt-phosphor-pixel-mask\);/u,
+    );
+  });
+
+  it("refracts a prompt into one editable, undoable Ink draft without autosaving", () => {
+    assert.match(editorSource, /<strong>Refract Ink<\/strong>/u);
+    assert.match(editorSource, /aria-label="Ink direction"/u);
+    assert.match(editorSource, /onGenerateInk\?:/u);
+    assert.match(editorSource, /const sourceKey = avatarDetailsKey\(workingRef\.current\)/u);
+    assert.match(editorSource, /avatarDetailsKey\(workingRef\.current\) !== sourceKey/u);
+    assert.match(editorSource, /commitMutation\(generated\)/u);
+    assert.match(editorSource, /Undo restores your previous Ink/u);
+    assert.match(editorCss, /\.inkRefract\s*\{[^}]*grid-area:\s*refract/u);
+    assert.match(
+      editorCss,
+      /\.editor\[data-editor-layout="foundry"\] \.paintSection\s*\{[\s\S]*grid-template-areas:\s*"header"\s*"refract"\s*"tools"/u,
+    );
+    assert.match(pageSource, /"\/api\/bots\/generate-avatar-details-ink"/u);
+    assert.match(pageSource, /onGenerateAvatarDetailsInk=\{generateAvatarDetailsInk\}/u);
   });
 
   it("routes Studio undo and redo to Ink before falling back to the avatar draft", () => {
@@ -67,21 +131,50 @@ describe("Avatar Details Studio integration", () => {
     );
   });
 
-  it("keeps Details focused on screen ink without accessory preset controls", () => {
+  it("equips searchable user-authored stamps that flatten into editable ink", () => {
     assert.match(editorSource, /<strong>Screen editor<\/strong>/);
+    assert.match(editorSource, /Shell-scaled preview/);
+    assert.match(editorSource, /<strong>Stamps<\/strong>/);
+    assert.match(editorSource, /aria-label="Search stamps"/);
+    assert.match(editorSource, /filterAvatarDetailInkTemplates\(/);
+    assert.match(editorSource, /No stamps match/);
+    assert.match(editorSource, /aria-label="Save current ink as a stamp"/);
+    assert.match(editorSource, /createAvatarDetailInkTemplate\(/);
+    assert.match(editorSource, /applyAvatarDetailInkTemplate\(/);
+    assert.match(editorSource, /saveEncryptedAvatarDetailInkTemplates\(/);
+    assert.match(editorSource, /data-avatar-details-stamp-preview="true"/);
+    assert.match(editorSource, /data-stamp-equipped="true"/);
+    assert.match(editorSource, /aria-label="Make stamp smaller"/);
+    assert.match(editorSource, /aria-label="Make stamp larger"/);
+    assert.match(editorSource, /handleCanvasWheel/);
+    assert.match(editorSource, /event\.key === "Enter"/);
+    assert.match(editorSource, /event\.key === "Escape"/);
+    assert.match(editorSource, /Use Move if you want to reposition it/);
+    assert.match(editorSource, /setEquippedStampPosition/);
+    assert.match(editorSource, /commitEquippedStamp/);
+    assert.match(editorSource, /cancelEquippedStamp/);
+    assert.match(editorSource, /Convert to ink/);
     assert.doesNotMatch(editorSource, /AVATAR_DETAIL_STAMP_DEFINITIONS/);
-    assert.doesNotMatch(editorSource, /AvatarStampAdjustments/);
-    assert.doesNotMatch(editorSource, /Round glasses|Facial hair|Marking/);
+    assert.doesNotMatch(editorSource, /toggleAvatarDetailStamp\(/);
+    assert.doesNotMatch(editorSource, /removeAvatarDetailStamp\(/);
+    assert.doesNotMatch(editorSource, /Round glasses/);
+    assert.doesNotMatch(editorSource, /Handlebar/);
     assert.doesNotMatch(editorSource, /Reset details/);
     assert.match(editorSource, /avatarDetailsWithPaintColorMap\(/);
+    assert.match(editorSource, /aria-label="Randomize ink recipe"/);
+    assert.match(pageSource, /templateOwnerId=\{avatarInkTemplateOwnerId\}/);
+    assert.match(pageSource, /avatarInkTemplateOwnerId=\{user\?\.id \?\? "local"\}/);
+    assert.match(pageSource, /label=\{`\$\{equippedInkStamp\.name\} position`\}/);
+    assert.match(pageSource, /onEquippedStampChange=\{\(stamp\) =>/);
   });
 
   it("uses compact icon tools without losing labels or selected state", () => {
     for (const [label, tooltip] of [
       ["Brush tool", "Brush"],
-      ["Eraser tool", "Eraser"],
+      ["Paint bucket tool", "Paint bucket"],
       ["Line tool", "Line"],
       ["Circle tool", "Circle"],
+      ["Vertical symmetry tool", "Vertical symmetry"],
       ["Move ink tool", "Move ink"],
     ]) {
       assert.match(
@@ -91,34 +184,137 @@ describe("Avatar Details Studio integration", () => {
         ),
       );
     }
+    assert.doesNotMatch(editorSource, /aria-label="Eraser tool"/);
+    assert.doesNotMatch(editorSource, /setPaintMode\("eraser"\)/);
     assert.match(editorSource, /aria-pressed=\{paintMode === "brush"\}/u);
     assert.match(
       editorCss,
-      /\.segmentedControl\s*\{[\s\S]*grid-template-columns:\s*repeat\(5, minmax\(32px, 1fr\)\)/,
+      /\.segmentedControl\s*\{[\s\S]*grid-template-columns:\s*repeat\(6, minmax\(32px, 1fr\)\)/,
     );
     assert.match(editorSource, /<Brush size=\{15\} aria-hidden="true" \/>\s*<\/button>/);
     assert.doesNotMatch(editorSource, /<Brush[^>]+\/>\s*Brush/u);
   });
 
-  it("uses red, blue, and green ink roles instead of visibility toggles", () => {
+  it("mirrors drawing tools across a visible vertical center guide", () => {
+    assert.match(
+      editorSource,
+      /const \[symmetryEnabled, setSymmetryEnabled\] = useState\(false\)/,
+    );
+    assert.match(editorSource, /aria-label="Vertical symmetry tool"/);
+    assert.match(editorSource, /aria-pressed=\{symmetryEnabled\}/);
+    assert.match(editorSource, /setSymmetryEnabled\(\(enabled\) => !enabled\)/);
+    assert.match(
+      editorSource,
+      /symmetrizeAvatarDetailsGridPoints\(points, symmetryAxisX\)/,
+    );
+    assert.match(
+      editorSource,
+      /symmetrizeAvatarDetailsGridPoints\(\[point\], symmetryAxisX\)/,
+    );
+    assert.match(editorSource, /data-visible=\{symmetryEnabled \? "true" : "false"\}/);
+    assert.match(editorSource, /Vertical symmetry is on at column/);
+    assert.match(editorSource, /role="slider"/);
+    assert.match(editorSource, /aria-label="Vertical symmetry axis"/);
+    assert.match(editorSource, /onPointerDown=\{beginSymmetryAxisDrag\}/);
+    assert.match(editorSource, /onKeyDown=\{handleSymmetryAxisKeyDown\}/);
+    assert.match(editorSource, /styles\.symmetryHandleTop/);
+    assert.match(editorSource, /styles\.symmetryHandleBottom/);
+    assert.match(
+      editorCss,
+      /\.symmetryGuide\s*\{[\s\S]*top:\s*13\.28125%;[\s\S]*bottom:\s*22\.65625%;[\s\S]*left:\s*var\(--avatar-details-symmetry-axis-left, 50%\)/,
+    );
+    assert.match(editorCss, /\.symmetryHandleTop\s*\{[^}]*top:\s*7px/);
+    assert.match(editorCss, /\.symmetryHandleBottom\s*\{[^}]*bottom:\s*7px/);
+    assert.match(
+      editorCss,
+      /\.symmetryGuide\[data-visible="true"\]\s*\{[^}]*opacity:\s*0\.72/,
+    );
+  });
+
+  it("captures cursor-anchored Ink camera zoom over the portaled CRT canvas", () => {
+    assert.match(
+      pageSource,
+      /stage\.addEventListener\("wheel", handleCapturedWheel, \{[\s\S]*capture:\s*true,[\s\S]*passive:\s*false/,
+    );
+    assert.match(
+      pageSource,
+      /target\?\.closest\('\[data-tool="stamp"\]'\)/,
+    );
+    assert.match(pageSource, /zoomBotAvatarFoundryViewportAtAnchor\(/);
+    assert.match(
+      pageSource,
+      /stage\.removeEventListener\("wheel", handleCapturedWheel, true\)/,
+    );
+  });
+
+  it("adds white Erase beside the three semantic ink roles", () => {
     assert.doesNotMatch(editorSource, /type="checkbox"/);
     assert.doesNotMatch(editorSource, /Hide ink while/);
     assert.match(editorSource, /label: "Blink ink"/);
     assert.match(editorSource, /label: "Speech ink"/);
     assert.match(editorSource, /label: "Effect ink"/);
-    assert.match(editorSource, /Hides while talking or sipping\./);
-    assert.match(editorSource, /role="radiogroup"/);
-    assert.match(editorSource, /role="radio"/);
+    assert.match(editorSource, /role: "erase"/);
+    assert.match(editorSource, /label: "Erase"/);
+    assert.match(editorSource, /Removes ink with any drawing tool\./);
     assert.match(
       editorSource,
-      /AVATAR_DETAILS_INK_ROLE_COLORS\[option\.role\]/,
+      /Uses its own animation below; Default hides while talking or sipping\./,
     );
     assert.match(
       editorSource,
-      /every ink color becomes its normalized bot color/,
+      /role=\{paintMode === "move" \? "group" : "radiogroup"\}/,
+    );
+    assert.match(editorSource, /role=\{paintMode === "move" \? undefined : "radio"\}/);
+    assert.match(
+      editorSource,
+      /option\.role === "erase"[\s\S]*\? "#ffffff"[\s\S]*AVATAR_DETAILS_INK_ROLE_COLORS\[option\.role\]/,
+    );
+    assert.match(
+      editorSource,
+      /Painted ink becomes the bot color\. Erase writes transparency\./,
     );
     assert.match(editorCss, /\.inkRoleOptions/);
     assert.match(editorCss, /\.runtimeColorNote/);
+  });
+
+  it("turns the Move palette into multi-select layers with Auto hit-testing", () => {
+    assert.match(
+      editorSource,
+      /moveAvatarDetailsPaintColorMap\([\s\S]*stroke\.moveSelection/,
+    );
+    assert.match(
+      editorSource,
+      /const \[moveInkTarget, setMoveInkTarget\][\s\S]*useState<AvatarDetailsMoveTarget>\("auto"\)/,
+    );
+    assert.match(
+      editorSource,
+      /avatarDetailsMoveSelectionAt\(beforeColorMap, point\)/,
+    );
+    assert.match(
+      editorSource,
+      /selectedMoveInkRoles\.includes\(option\.role\)/,
+    );
+    assert.match(editorSource, /toggleMoveInkRole\(option\.role\)/);
+    assert.match(editorSource, /aria-pressed=/);
+    assert.match(editorSource, /isMoveAuto \? "Auto" : option\.label/);
+    assert.match(
+      editorSource,
+      /Moves whichever ink layer the drag begins on\./,
+    );
+    assert.match(
+      editorSource,
+      /Select one or more layers, or let Auto pick what you grab\./,
+    );
+    assert.match(
+      editorSource,
+      /Selected layers move together\. Auto moves the layer under your pointer\./,
+    );
+    assert.doesNotMatch(editorSource, /Moves every ink type together\./);
+    assert.doesNotMatch(editorSource, /Choose one ink layer, or All\./);
+    assert.match(
+      editorCss,
+      /\.inkRoleOptions\[data-move-selection="true"\][\s\S]*button\[data-ink-role="auto"\][\s\S]*\.inkRoleSwatch[\s\S]*conic-gradient/,
+    );
   });
 
   it("renders a frozen, toggleable face guide beneath the canonical editor canvas", () => {
@@ -136,36 +332,63 @@ describe("Avatar Details Studio integration", () => {
     );
     assert.match(
       editorSource,
-      /const guideInk = theme === "light" \? "#050608" : "#ffffff"/,
+      /const AVATAR_DETAILS_FACE_GUIDE_INK = "#ffffff"/,
+    );
+    assert.match(
+      editorSource,
+      /const guideInk = AVATAR_DETAILS_FACE_GUIDE_INK/,
+    );
+    assert.doesNotMatch(editorSource, /const guideInk = normalizedAccentColor/);
+    assert.match(
+      editorSource,
+      /"--zen-live-bot-face-ink": guideInk,[\s\S]*?"--zen-live-bot-face-crt-border-color": guideInk,[\s\S]*?"--coffee-bot-color": guideInk,[\s\S]*?"--coffee-seat-emotion-color": guideInk,/,
+    );
+    assert.match(
+      editorSource,
+      /title="The face guide stays white so ink label colors read true"/,
     );
     assert.match(
       editorCss,
-      /\.editor\[data-editor-theme="light"\] \.canvasFrame\s*\{[\s\S]*?background-color:\s*#ffffff/,
+      /\.editor\[data-editor-theme="light"\] \.canvasFrame\s*\{[\s\S]*?background-color:\s*#050608/,
     );
-    assert.match(editorSource, /BOT_AVATAR_DETAILS_FACE_PLACEMENT\.yPct/);
+    assert.match(editorSource, /const guideValue = 255/);
+    assert.match(
+      editorSource,
+      /\.\.\.BOT_AVATAR_DETAILS_FACE_REGISTRATION_STYLE/,
+    );
     assert.match(
       pageSource,
       /"--coffee-plate-emoji-face-scale-y": BOT_AVATAR_CANONICAL_FACE_SCALE_Y/,
     );
-    assert.match(pageSource, /"--avatar-details-scale-x": "1"/);
+    assert.match(pageSource, /"--avatar-details-facing-scale-x": "1"/);
+    assert.doesNotMatch(pageSource, /"--avatar-details-scale-x"/);
     assert.match(editorSource, /data-avatar-details-writable-guide="true"/);
     assert.match(editorSource, /avatarDetailsWritablePixel\(x, y\)/);
     assert.match(editorSource, /rasterizeAvatarDetailsSemanticRgba\(/);
     assert.match(editorSource, /className=\{styles\.canvasViewport\}/);
-    assert.match(editorCss, /\.canvasViewport[\s\S]*transform:\s*scale\(1\.36\)/);
-    assert.match(editorSource, /const AVATAR_DETAILS_EDITOR_ZOOM = 1\.36/);
     assert.match(
       editorSource,
-      /BOT_AVATAR_DETAILS_FACE_GLYPH_FRAME_RATIO \* AVATAR_DETAILS_EDITOR_ZOOM \* 100/,
+      /className=\{styles\.canvasViewport\}\s+style=\{inkApertureStyle\}/,
+    );
+    assert.match(editorCss, /\.canvasViewport[\s\S]*transform:\s*scale\(1\.36\)/);
+    assert.match(
+      editorCss,
+      /\.canvasViewport\s*\{[\s\S]*--zen-live-bot-body-frame-size:\s*100cqw/,
     );
     const faceGuideIndex = editorSource.indexOf(
       "data-avatar-details-face-guide=\"true\"",
     );
     const zoomedCanvasIndex = editorSource.indexOf(
-      "<div className={styles.canvasViewport}>",
+      "className={styles.canvasViewport}",
     );
     assert.ok(faceGuideIndex > 0);
-    assert.ok(zoomedCanvasIndex > faceGuideIndex);
+    assert.ok(zoomedCanvasIndex > 0);
+    assert.ok(faceGuideIndex > zoomedCanvasIndex);
+    assert.doesNotMatch(editorSource, /zoomedFaceYPct/);
+    assert.match(
+      editorSource,
+      /"--coffee-plate-emoji-nudge-y": "clamp\(-5px, -2\.6%, -2px\)"/,
+    );
   });
 
   it("keeps the editable face guide crisp instead of compositing the live CRT glow", () => {
@@ -181,6 +404,19 @@ describe("Avatar Details Studio integration", () => {
       editorCss,
       /\.faceGuideGlyph \[data-crt-glyph-layer="true"\]::before,[\s\S]*::after\s*\{[\s\S]*content:\s*none !important;[\s\S]*display:\s*none !important;/,
     );
+  });
+
+  it("uses Preview's exact quantized glyph silhouette in the face guide", () => {
+    assert.match(
+      editorSource,
+      /<CoffeeSeatPlateEmoji[\s\S]*?enabled=\{false\}[\s\S]*?pixelated/,
+    );
+    assert.match(editorCss, /data-crt-pixel-mask-ready="true"/);
+    assert.match(
+      editorCss,
+      /-webkit-mask-image:\s*var\(--crt-phosphor-pixel-mask\)/,
+    );
+    assert.match(editorCss, /filter:\s*none\s*!important/);
   });
 
   it("gives Details a larger canvas and a dedicated wide Studio layout", () => {
@@ -210,11 +446,11 @@ describe("Avatar Details Studio integration", () => {
     );
     assert.doesNotMatch(
       pageCss,
-      /\.botAvatarCustomizerBody[^{]*data-active-control-tab[^}]*\.botAvatarControlStack\s*\{[\s\S]*overflow-y:\s*hidden/,
+      /\.botAvatarCustomizerBody[^{]*data-active-control-tab[^}]*\.botAvatarControlStack\s*\{[^}]*overflow-y:\s*hidden/,
     );
     assert.match(
       editorSource,
-      /ref=\{canvasRef\}[\s\S]*?width=\{AVATAR_DETAILS_CANVAS_SIZE\}[\s\S]*?height=\{AVATAR_DETAILS_CANVAS_SIZE\}/,
+      /ref=\{canvasRef\}[\s\S]*?width=\{PHOSPHOR_FACE_CANONICAL_SCREEN_SIZE_PX\}[\s\S]*?height=\{PHOSPHOR_FACE_CANONICAL_SCREEN_SIZE_PX\}/,
     );
   });
 
@@ -254,26 +490,133 @@ describe("Avatar Details Studio integration", () => {
     assert.match(editorSource, /flushPreview\(workingRef\.current\)/);
   });
 
-  it("unmounts the large avatar throughout Details editing until explicitly rendered", () => {
+  it("mounts the lightweight canvas directly inside the canonical CRT", () => {
     assert.match(
       pageSource,
-      /const \[detailsAvatarPreviewVisible, setDetailsAvatarPreviewVisible\] =\s*useState\(false\)/,
+      /avatarStudioPreviewScreenMode: "off" | "synthesis" | "live" | "editing" =[\\s\\S]*activeControlTab === "details" && !inkLivePreview\s*\?\s*"editing"\s*:\s*"live"/,
     );
     assert.match(
       pageSource,
-      /activeControlTab === "details" &&\s*!detailsAvatarPreviewVisible[\s\S]*<BotAvatarDeferredPreviewPanel/,
+      /screenMode=\{avatarStudioPreviewScreenMode\}/,
     );
-    assert.match(pageSource, />\s*Render current avatar\s*<\/button>/);
-    assert.match(pageSource, /data-avatar-preview-deferred="true"/);
     assert.match(
       pageSource,
-      /onEditStart=\{\(\) => setDetailsAvatarPreviewVisible\(false\)\}/,
+      /className=\{styles\.botAvatarFoundryInkMount\}/,
     );
-    assert.match(editorSource, /onEditStart\?\.\(\);[\s\S]*pointerGridPoint/);
-    assert.match(pageCss, /\.botAvatarDeferredPreviewPrompt/);
+    assert.match(editorSource, /createPortal\(canvasEditor, canvasPortalTarget\)/);
+    assert.match(editorSource, /data-foundry-canvas=/);
+    assert.match(editorSource, /data-avatar-details-pixel-grid="true"/);
+    assert.match(
+      pageSource,
+      /data-avatar-details-grid-visible=\{[\s\S]*?foundryCameraEditable &&[\s\S]*?botAvatarFoundryPixelGridVisible\(foundryViewport\.zoom\)/,
+    );
+    assert.match(
+      pageSource,
+      /botAvatarFoundryPixelGridVisible\(normalized\.zoom\)[\s\S]*?stage\.setAttribute\("data-avatar-details-grid-visible", "true"\)[\s\S]*?stage\.removeAttribute\("data-avatar-details-grid-visible"\)/,
+    );
+    assert.match(
+      editorCss,
+      /--avatar-details-cell-size:\s*calc\(100% \/ 128\)[\s\S]*?\.pixelGrid\s*\{[\s\S]*?background-size:[\s\S]*?var\(--avatar-details-cell-size\)[\s\S]*?opacity:\s*0;[\s\S]*?pointer-events:\s*none/,
+    );
+    assert.match(
+      editorCss,
+      /\[data-avatar-details-grid-visible="true"\] \.pixelGrid\s*\{[\s\S]*?opacity:\s*0\.42/,
+    );
+    assert.match(
+      editorCss,
+      /\[data-avatar-details-grid-visible="true"\] \.canvas[\s\S]*?filter:\s*none !important/,
+    );
+    assert.match(editorSource, /resamplePhosphorRgbaForPresentation\(/);
+    assert.match(editorSource, /inkResampleMode/);
+    assert.match(
+      editorSource,
+      /data-avatar-details-grid-visible="true"/,
+    );
+    assert.match(maskSource, /pixelPerfectInk/);
+    assert.match(maskSource, /resamplePhosphorRgbaForPresentation\(/);
+    assert.match(
+      maskCss,
+      /\.motionPlane\[data-avatar-details-pixel-perfect="true"\] \.raster\s*\{[\s\S]*?filter:\s*none/,
+    );
+    assert.match(
+      pageCss,
+      /data-avatar-details-grid-visible="true"\][\s\S]*?\[data-avatar-details-emission\][\s\S]*?filter:\s*none !important/,
+    );
+    assert.match(
+      pageSource,
+      /pixelPerfectInk=\{screenMode === "editing"\}/,
+    );
+    assert.match(
+      pageSource,
+      /data-avatar-ink-authoring=\{[\s\S]*?screenMode === "editing" \? "true" : undefined/,
+    );
+    assert.match(editorSource, /autoCommit[\s\S]*?pixelPerfectInk/);
+    assert.match(editorSource, /pixelated[\s\S]*?hardPixels/);
+    assert.match(
+      phosphorGlyphSource,
+      /binaryAlpha \? thresholdPhosphorPixelAlpha\(sampledAlpha\) : sampledAlpha/,
+    );
+    assert.match(
+      editorCss,
+      /\.pixelGrid\s*\{[\s\S]*?clip-path:\s*inset\(13\.28125% 0 22\.65625% 0\)/,
+    );
+    assert.match(
+      pageCss,
+      /\.zenLiveBotPresenceBody\[data-screen-mode="editing"\]::after\s*\{[\s\S]*?content:\s*none;[\s\S]*?display:\s*none;/,
+    );
+    assert.match(
+      pageCss,
+      /data-avatar-ink-authoring="true"\][\s\S]*?\.botAvatarStudioMiniPreview[\s\S]*?lowerScreen[\s\S]*?::before\s*\{[\s\S]*?content:\s*none;[\s\S]*?display:\s*none;/,
+    );
+    assert.match(
+      pageCss,
+      /\.zenLiveBotPresenceFaceEmissionMask\[data-screen-mode="editing"\][\s\S]*?--crt-beam-softness:\s*0px;[\s\S]*?animation:\s*none !important/,
+    );
+    assert.match(
+      editorCss,
+      /\.canvasFrame\[data-foundry-canvas="true"\] \.canvasViewport\s*\{[\s\S]*?transform:\s*none;[\s\S]*?transform-origin:\s*center;/,
+    );
+    assert.match(pageSource, /runtimeEffectsEnabled=\{screenMode === "live"\}/);
+    assert.match(
+      pageCss,
+      /\.botAvatarCustomizerBody\[data-camera-mode="ink"\][\s\S]*?\.botAvatarFoundryCameraRig\[data-spatial-camera-rig="true"\]\s*\{[\s\S]*?transform:\s*translate3d\([\s\S]*?calc\(-11vw \+ var\(--foundry-pan-x, 0px\)\),[\s\S]*?calc\(10dvh \+ var\(--foundry-pan-y, 0px\)\),[\s\S]*?0[\s\S]*?\)\s*scale\(1\.78\) scale\(var\(--foundry-user-zoom, 1\)\)/,
+    );
+    assert.doesNotMatch(pageSource, /Render current avatar/);
   });
 
-  it("offers straight lines, circles, and whole-illustration dragging without hotkeys", () => {
+  it("keeps foundry ink interactive and synchronized with Studio history", () => {
+    assert.match(
+      pageCss,
+      /\.zenLiveBotPresencePlate \.botAvatarFoundryInkMount,[\s\S]*?\.zenLiveBotPresencePlate \.botAvatarFoundryInkMount \*[\s\S]*?pointer-events:\s*auto/,
+    );
+    assert.match(
+      pageCss,
+      /\.botAvatarCustomizerBody\[data-camera-mode="ink"\][\s\S]*?\.botAvatarFoundryNode\s*\{[\s\S]*?pointer-events:\s*none/,
+    );
+    assert.match(
+      editorSource,
+      /!autoCommit \|\|[\s\S]*?pointerStrokeRef\.current \|\|[\s\S]*?avatarDetailsEqual\(workingRef\.current, normalizedSource\)[\s\S]*?resetHistory\(\);[\s\S]*?updateWorking\(cloneAvatarDetails\(normalizedSource\)\)/,
+    );
+    assert.match(
+      editorSource,
+      /onPointerUp=\{finishPointerStroke\}[\s\S]*?onPointerCancel=\{finishPointerStroke\}/,
+    );
+    assert.doesNotMatch(
+      editorSource,
+      /onPointerCancel=\{\(event\) => \{[\s\S]*?updateWorking\(stroke\.before\)/,
+    );
+    assert.match(
+      pageSource,
+      /onAvatarDetailsApply=\{\(next\) => \{[\s\S]*?pushBotAvatarUndoSnapshot\(\);[\s\S]*?setNewBotAvatarDetails\(normalized\);/,
+    );
+    assert.doesNotMatch(
+      pageSource,
+      /pushBotAvatarUndoSnapshot\("avatar-details"\)/,
+    );
+  });
+
+  it("offers bucket recoloring, shapes, and semantic-layer dragging without hotkeys", () => {
+    assert.match(editorSource, /aria-label="Paint bucket tool"/u);
     assert.match(editorSource, /aria-label="Line tool"/u);
     assert.match(editorSource, /aria-label="Circle tool"/u);
     assert.match(editorSource, /aria-label="Move ink tool"/u);
@@ -282,43 +625,34 @@ describe("Avatar Details Studio integration", () => {
       /interpolateAvatarDetailsGridLine\(stroke\.startPoint, edge\)/,
     );
     assert.match(editorSource, /avatarDetailsCirclePoints\(/);
+    assert.match(editorSource, /recolorAvatarDetailsPaintColorRegion\(/);
+    assert.match(editorSource, /inkRole === "erase"/);
     assert.match(editorSource, /moveAvatarDetailsPaintColorMap\(/);
+    assert.match(editorSource, /setPaintMode\("bucket"\)/);
     assert.match(editorSource, /setPaintMode\("circle"\)/);
     assert.match(editorSource, /setPaintMode\("move"\)/);
-    assert.match(editorSource, /data-tool=\{paintMode\}/);
+    assert.match(
+      editorSource,
+      /data-tool=\{(?:equippedTemplate \? "stamp" : )?paintMode\}/,
+    );
     assert.match(
       editorCss,
       /\.inputSurface\[data-tool="move"\][\s\S]*cursor:\s*grab/,
     );
-    assert.doesNotMatch(editorSource, /onKeyDown=\{handleCanvasKeyDown\}/);
     assert.doesNotMatch(editorSource, /Keyboard: B\/E\/C\/M/);
     assert.doesNotMatch(editorCss, /\.keyboardHelp|\.keyboardCursor/);
   });
 
-  it("guards Studio saves and waits for applied Details state before persisting", () => {
+  it("persists ink only through the top-level Studio save", () => {
     assert.match(
       pageSource,
       /className=\{styles\.botAvatarCustomizerSaveButton\}[\s\S]*onClick=\{\(\) => requestStudioSave\(\)\}/,
     );
-    assert.match(pageSource, /openDetailsLeavePrompt\(\{ kind: "save" \}\)/);
-    assert.match(pageSource, /await detailsEditorRef\.current\?\.apply\(\)/);
-    assert.match(
-      pageSource,
-      /if \(!applied\)[\s\S]*setDetailsLeaveRequest\(null\)[\s\S]*continueDetailsNavigation\(request\)/,
-    );
-    assert.match(
-      pageSource,
-      /setPendingDetailsSaveKey\(avatarDetailsKey\(avatarDetailsPreview\)\)/,
-    );
-    assert.match(
-      pageSource,
-      /avatarDetailsKey\(avatarDetails\) !== pendingDetailsSaveKey/,
-    );
-    assert.match(pageSource, /Apply avatar details before saving\?/);
-    assert.doesNotMatch(
-      pageSource,
-      /className=\{styles\.botAvatarCustomizerSaveButton\}[\s\S]{0,240}onClick=\{\(\) => void onSave\(\)\}/,
-    );
+    assert.match(pageSource, /const requestStudioSave =/);
+    assert.match(pageSource, /void onSave\(\);/);
+    assert.doesNotMatch(pageSource, /openDetailsLeavePrompt/);
+    assert.doesNotMatch(pageSource, /pendingDetailsSaveKey/);
+    assert.doesNotMatch(pageSource, /Apply avatar details before saving\?/);
   });
 
   it("keeps draft, create, clone, edit, and save state wired", () => {
@@ -331,20 +665,17 @@ describe("Avatar Details Studio integration", () => {
     );
     assert.match(
       pageSource,
-      /pushBotAvatarUndoSnapshot\("avatar-details"\);[\s\S]*setNewBotAvatarDetails\(normalized\);/,
+      /pushBotAvatarUndoSnapshot\(\);[\s\S]*setNewBotAvatarDetails\(normalized\);/,
+    );
+    assert.doesNotMatch(pageSource, /persistBotAvatarDetails/);
+    assert.match(
+      pageSource,
+      /async function saveBot\([\s\S]*avatarDetails: newBotAvatarDetails/,
     );
     assert.match(
       pageSource,
-      /if \(editingBotId\) \{[\s\S]*await persistBotAvatarDetails\([\s\S]*editingBotId,[\s\S]*normalized/,
+      /async function createBot\([\s\S]*avatarDetails: newBotAvatarDetails/,
     );
-    const persistenceSource = pageSource.slice(
-      pageSource.indexOf("async function persistBotAvatarDetails("),
-      pageSource.indexOf("async function flushBotVoiceAutosaveQueue("),
-    );
-    assert.match(persistenceSource, /method: "PATCH"/);
-    assert.match(persistenceSource, /JSON\.stringify\(\{ avatarDetails: details \}\)/);
-    assert.match(persistenceSource, /avatarDetails: details/);
-    assert.match(persistenceSource, /replaceBotRowById/);
 
     const cloneSource = pageSource.slice(
       pageSource.indexOf("async function cloneBot("),
@@ -388,53 +719,132 @@ describe("Avatar Details shared mannequin rendering", () => {
     );
     assert.match(maskSource, /<canvas/);
     assert.match(maskSource, /useLayoutEffect/);
-    assert.match(maskSource, /context\.putImageData\(glowImageData, 0, 0\)/);
+    assert.match(
+      maskSource,
+      /glowContext\.putImageData\(glowImageData, 0, 0\)/,
+    );
     assert.match(
       maskSource,
       /coreContext\.putImageData\(coreImageData, 0, 0\)/,
     );
     assert.doesNotMatch(maskSource, /toBlob|createObjectURL|maskState/);
+    assert.match(maskSource, /resamplePhosphorRgbaForPresentation\(/);
     assert.match(
       maskSource,
-      /data-avatar-details-rendering="nearest-neighbor"/,
+      /const resampleMode =[\s\S]*?pixelPerfectInk \|\| crispPresentation \? "nearest" : "coverage"/,
+    );
+    assert.match(
+      maskSource,
+      /data-avatar-details-rendering=\{[\s\S]*?crispPresentation[\s\S]*?rasterSize === AVATAR_DETAILS_CANVAS_SIZE[\s\S]*?"nearest-neighbor"[\s\S]*?: "coverage-sampled"/,
+    );
+    assert.equal(
+      (pageSource.match(/crispPresentation=\{theme === "light"\}/g) ?? []).length,
+      4,
+      "only the four canonical full-screen Ink planes should harden resampling in Light mode",
     );
     assert.match(maskCss, /image-rendering: pixelated/);
     assert.match(maskCss, /\.behindFace\s*\{[\s\S]*z-index:\s*5/);
     assert.match(maskCss, /\.aboveFace\s*\{[\s\S]*z-index:\s*7/);
-    assert.match(maskSource, /data-avatar-details-depth=\{depth\}/);
-    assert.doesNotMatch(maskSource, /className=\{styles\.group\}/);
+    assert.match(maskCss, /\.lightPlane\s*\{[\s\S]*z-index:\s*4/);
+    assert.match(
+      maskSource,
+      /className=\{`\$\{styles\.motionPlane\} \$\{styles\.lightPlane\}/,
+    );
+    assert.match(
+      maskSource,
+      /detailLevel !== "audience" && exteriorGlow \? \([\s\S]*data-avatar-details-emission="glow"/,
+    );
+    assert.match(
+      maskSource,
+      /detailLevel === "full" &&[\s\S]*talking &&[\s\S]*speechMotionActive/,
+    );
+    assert.match(
+      maskCss,
+      /\.motionPlane\[data-avatar-details-render-detail="reduced"\]\s*\{[^}]*animation:\s*none !important/u,
+    );
+    assert.match(
+      maskCss,
+      /\.glowPlane\[data-avatar-details-render-detail="reduced"\]\s*\{[^}]*--avatar-details-glow-opacity:\s*0\.28/u,
+    );
+    assert.match(maskSource, /"data-avatar-details-depth": depth/);
+    assert.match(maskSource, /data-avatar-details-motion-group="true"/);
     assert.match(
       pageCss,
       /\.zenLiveBotPresenceFaceRig[\s\S]*z-index: 6/,
     );
     assert.match(pageCss, /\.botFaceCrtGrimeLayer[\s\S]*z-index: 8/);
-    assert.match(maskSource, /data-avatar-details-emission="halo"/);
-    assert.match(maskSource, /data-avatar-details-emission="bloom"/);
+    assert.match(maskSource, /data-avatar-details-emission="glow"/);
     assert.match(maskSource, /data-avatar-details-emission="core"/);
+    assert.doesNotMatch(maskSource, /data-avatar-details-emission="halo"/);
+    assert.doesNotMatch(maskSource, /data-avatar-details-emission="bloom"/);
     assert.match(
       maskCss,
-      /--avatar-details-phosphor-glow-color:\s*var\(\s*--crt-face-edge-color,\s*currentColor\s*\)/,
+      /--avatar-details-phosphor-glow-color:\s*var\(\s*--zen-live-bot-shared-phosphor-glow-color,\s*var\(\s*--crt-face-edge-color,\s*currentColor\s*\)\s*\)/,
     );
-    assert.match(
+    assert.doesNotMatch(
       maskSource,
       /\["--avatar-details-phosphor-glow-color" as string\]: normalizedColor/,
     );
-    assert.match(maskCss, /\.halo[\s\S]*mix-blend-mode: screen/);
-    assert.match(maskCss, /\.halo[\s\S]*opacity:\s*1/);
+    assert.match(
+      pageCss,
+      /\.zenLiveBotPresenceFaceEmissionMask\s*\{[\s\S]*?--zen-live-bot-shared-phosphor-glow-color:[\s\S]*?--zen-live-bot-shared-phosphor-glow-filter:/,
+    );
     assert.match(
       maskCss,
-      /\.halo[\s\S]*0 0 6px[\s\S]*0 0 12px[\s\S]*0 0 21px/,
+      /\.glow\s*\{[\s\S]*?--zen-live-bot-shared-phosphor-glow-filter/,
     );
-    assert.match(maskCss, /\.bloom[\s\S]*opacity:\s*1/);
+    assert.ok(
+      (pageCss.match(/--crt-face-glow-filter:\s*var\(--zen-live-bot-shared-phosphor-glow-filter\)/gu) ?? [])
+        .length >= 2,
+      "idle and talking face states must consume the same phosphor glow contract as Ink",
+    );
+    assert.match(maskCss, /\.glowPlane[\s\S]*mix-blend-mode: screen/);
     assert.match(
       maskCss,
-      /\.bloom[\s\S]*0 0 0\.72px[\s\S]*0 0 1\.5px[\s\S]*0 0 3px[\s\S]*0 0 6px[\s\S]*0 0 12px[\s\S]*0 0 21px/,
+      /\.glowPlane\s*\{[^}]*--avatar-details-glow-opacity:\s*1[^}]*--zen-live-bot-crt-shared-flicker-opacity/,
     );
+    assert.match(
+      maskCss,
+      /\.glow\s*\{[\s\S]*--zen-live-bot-crt-shared-flicker-brightness-scale[\s\S]*--zen-live-bot-crt-shared-flicker-contrast-scale[\s\S]*--bot-phosphor-halo-contact-radius[\s\S]*--bot-phosphor-halo-tight-radius[\s\S]*--bot-phosphor-halo-near-radius[\s\S]*82%[\s\S]*--bot-phosphor-halo-mid-radius[\s\S]*58%[\s\S]*--bot-phosphor-halo-far-radius[\s\S]*36%[\s\S]*--bot-phosphor-halo-ambient-radius[\s\S]*22%/,
+    );
+    assert.equal((maskCss.match(/drop-shadow\(/gu) ?? []).length, 8);
     assert.match(maskSource, /avatarDetailsPhosphorCoreRgba\(pixels\)/);
-    assert.match(maskCss, /\.core[\s\S]*opacity:\s*1[\s\S]*drop-shadow/);
+    assert.match(maskSource, /coreColor = "phosphor"/);
+    assert.match(
+      maskSource,
+      /coreColor === "ink" \? pixels : avatarDetailsPhosphorCoreRgba\(pixels\)/,
+    );
+    assert.match(
+      maskCss,
+      /\.corePlane\s*\{[^}]*--zen-live-bot-crt-shared-flicker-opacity[^}]*mix-blend-mode:\s*normal[\s\S]*\.core\s*\{[^}]*filter:\s*none/,
+    );
+    assert.match(maskSource, /avatarDetailsExteriorGlowRaster\(/);
+    assert.match(maskSource, /avatarDetailsCropRgbaRaster\(/);
+    assert.match(maskSource, /className=\{`\$\{styles\.raster\} \$\{styles\.croppedRaster\}/);
+    assert.match(maskSource, /width=\{exteriorGlow\.bounds\.width\}/);
+    assert.match(maskSource, /width=\{coreRaster\.bounds\.width\}/);
+    assert.match(maskSource, /style=\{rasterBoundsStyle\(coreRaster\.bounds\)\}/);
+    assert.match(glowSource, /Eight-way connectivity/);
+    assert.match(glowSource, /exterior\[nextY \* normalizedWidth \+ nextX\]/);
+    assert.match(
+      pageCss,
+      /\.zenLiveBotPresenceBody\[data-render-detail="full"\][\s\S]*> \.zenLiveBotPresenceFaceEmissionMask[\s\S]*animation:\s*zenLiveBotCrtFaceFlicker 11\.7s linear infinite/,
+    );
+    assert.match(
+      pageCss,
+      /@keyframes zenLiveBotCrtFaceFlicker[\s\S]*--zen-live-bot-crt-shared-flicker-opacity:[\s\S]*--zen-live-bot-crt-shared-flicker-brightness-scale:[\s\S]*--zen-live-bot-crt-shared-flicker-contrast-scale:/,
+    );
+    assert.match(
+      pageCss,
+      /@media \(prefers-reduced-motion:\s*reduce\)[\s\S]*\.zenLiveBotPresenceBody\[data-render-detail="full"\][\s\S]*> \.zenLiveBotPresenceFaceEmissionMask[\s\S]*animation:\s*none !important/,
+    );
+    assert.doesNotMatch(
+      pageCss,
+      /\.zenLiveBotPresenceFaceEmissionMask \[data-avatar-details-emission\][^{]*\{[^}]*zenLiveBotCrtFaceFlicker/,
+    );
   });
 
-  it("mirrors authored screen ink and yields to full-screen face effects", () => {
+  it("keeps authored screen coordinates canonical and yields to full-screen face effects", () => {
     assert.match(pageSource, /avatarDetails=\{avatarDetailsPreview\}/);
     assert.match(
       pageSource,
@@ -442,19 +852,121 @@ describe("Avatar Details shared mannequin rendering", () => {
     );
     assert.match(
       pageSource,
-      /avatarDetails=\{resolveBotAvatarDetails\(bot\)\}/,
+      /avatarDetails=\{\s*playerJudgePrism \? null : botSnapshot\.avatarDetails\s*\}/,
     );
     assert.match(
       maskCss,
-      /scaleX\(var\(--avatar-details-scale-x, 1\)\)[\s\S]*scaleX\(var\(--avatar-details-facing-scale-x, 1\)\)/,
+      /transform:[\s\S]*scaleX\(var\(--avatar-details-facing-scale-x, 1\)\)/,
+    );
+    assert.doesNotMatch(
+      maskCss,
+      /--avatar-details-(?:offset|scale-x|facing-offset)|--zen-live-bot-(?:ink-offset|face-thumbnail)/,
+    );
+    assert.match(
+      editorCss,
+      /\.screenBoundary,\s*\.canvas,\s*\.stampPreview,\s*\.pixelGrid,\s*\.symmetryGuide,\s*\.inputSurface\s*\{[\s\S]*transform:\s*scale\(var\(--avatar-details-ink-aperture-scale, 1\)\);[\s\S]*transform-origin:\s*center;/,
+    );
+    assert.doesNotMatch(pageCss, /--coffee-speaker-gaze-face-shift-x/);
+    assert.doesNotMatch(
+      pageCss,
+      /\.coffeeSeat \.zenLiveBotPresenceFaceRig/,
     );
     assert.match(
       pageCss,
-      /\.zenLiveBotPresenceFaceRig[\s\S]*scaleX\(var\(--zen-live-bot-face-layer-scale-x, 1\)\)/,
+      /\.zenLiveBotPresenceScreenContentRig\s*\{[^}]*--avatar-details-facing-scale-x:\s*1;[^}]*--zen-live-bot-face-layer-scale-x:\s*1;[^}]*transform:\s*scaleX\(var\(--zen-live-bot-screen-facing-scale-x, 1\)\)/,
+    );
+    const screenContentRigRule = pageCss.match(
+      /\.zenLiveBotPresenceScreenContentRig\s*\{[^}]*\}/,
+    )?.[0];
+    assert.ok(screenContentRigRule);
+    assert.doesNotMatch(
+      screenContentRigRule,
+      /--avatar-details-facing-offset-y\s*:/,
+      "the shared rig may mirror Ink but must never translate it",
     );
     assert.match(
       pageSource,
-      /\["--coffee-plate-emoji-face-scale-y" as string\]:\s*BOT_AVATAR_CANONICAL_FACE_SCALE_Y[\s\S]*\["--zen-live-bot-face-layer-scale-x" as string\]:\s*showQuestionMark\s*\? "1"\s*:\s*"var\(--avatar-details-facing-scale-x, 1\)"/,
+      /const resolvedFacing = facing \?\? botAvatarFacingFromFaceScaleY\(faceScaleY\);[\s\S]*const screenFacingScaleX = showQuestionMark\s*\? "1"\s*:\s*botAvatarScreenFacingScaleX\(resolvedFacing\)/,
+    );
+    assert.equal(
+      [
+        ...pageSource.matchAll(
+          /className=\{styles\.zenLiveBotPresenceScreenContentRig\}[\s\S]{0,280}\["--zen-live-bot-screen-facing-scale-x" as string\]:\s*screenFacingScaleX/g,
+        ),
+      ].length,
+      2,
+      "both full and optimized screens must resolve facing on the shared face-and-ink rig",
+    );
+    assert.match(
+      pageSource,
+      /data-zen-live-bot-screen-content-rig="true"[\s\S]{0,900}depth="behind-face"[\s\S]*data-zen-live-bot-face-rig="true"[\s\S]*depth="above-face"/,
+    );
+    assert.match(pageSource, /faceScaleY\?:\s*string \| number/);
+    const compactFallbackSource = pageSource.slice(
+      pageSource.indexOf("function FullAvatarCompactFallback"),
+      pageSource.indexOf("function ZenLiveBotMannequin"),
+    );
+    assert.match(
+      compactFallbackSource,
+      /faceScaleY = BOT_AVATAR_CANONICAL_FACE_SCALE_Y,[\s\S]*const resolvedFacing = facing \?\? botAvatarFacingFromFaceScaleY\(faceScaleY\);/,
+    );
+    assert.match(compactFallbackSource, /facing=\{resolvedFacing\}/);
+    const mannequinSource = pageSource.slice(
+      pageSource.indexOf("function ZenLiveBotMannequin"),
+      pageSource.indexOf("function BotHubVoicePreviewAvatarPlate"),
+    );
+    assert.match(
+      mannequinSource,
+      /faceScaleY = BOT_AVATAR_CANONICAL_FACE_SCALE_Y,[\s\S]*const resolvedFacing = facing \?\? botAvatarFacingFromFaceScaleY\(faceScaleY\);[\s\S]*\.\.\.botAvatarFaceFacingStyle\(resolvedFacing\)/,
+    );
+    const mannequinCalls = [
+      ...pageSource.matchAll(/<ZenLiveBotMannequin\b[\s\S]*?\/>/gu),
+    ];
+    assert.ok(mannequinCalls.length > 0);
+    for (const [mannequinCall] of mannequinCalls) {
+      if (/\.\.\.[A-Za-z0-9]*mannequinProps/i.test(mannequinCall)) {
+        continue;
+      }
+      assert.match(
+        mannequinCall,
+        /\b(?:facing|faceScaleY)=\{/,
+        "every full-avatar surface must pass explicit facing or legacy orientation into the shared face-and-ink rig",
+      );
+    }
+    assert.equal(
+      [...pageSource.matchAll(/data-avatar-face-coordinate-source="studio"/g)]
+        .length,
+      2,
+    );
+    assert.match(
+      pageSource,
+      /data-avatar-face-coordinate-source="studio"[\s\S]*?<CoffeeSeatPlateEmoji[\s\S]{0,220}\bpixelated\b/,
+    );
+    assert.equal(
+      [
+        ...pageSource.matchAll(
+          /data-avatar-canonical-screen-size=\{[\s\S]{0,80}?PHOSPHOR_FACE_CANONICAL_SCREEN_SIZE_PX[\s\S]{0,20}?\}/g,
+        ),
+      ].length,
+      2,
+      "both full-size mannequin branches must rasterize on the shared dense phosphor plane",
+    );
+    assert.equal(
+      [
+        ...pageSource.matchAll(
+          /rasterSize=\{PHOSPHOR_FACE_CANONICAL_SCREEN_SIZE_PX\}/g,
+        ),
+      ].length,
+      4,
+      "both Ink depth planes in both mannequin branches must use the shared dense phosphor plane",
+    );
+    assert.match(
+      editorSource,
+      /className=\{styles\.canvasViewport\}[\s\S]{0,180}data-avatar-canonical-screen-size=\{[\s\S]{0,80}?PHOSPHOR_FACE_CANONICAL_SCREEN_SIZE_PX[\s\S]{0,20}?\}/,
+    );
+    assert.match(
+      editorSource,
+      /resamplePhosphorRgbaForPresentation\([\s\S]{0,260}?PHOSPHOR_FACE_CANONICAL_SCREEN_SIZE_PX/,
     );
     assert.doesNotMatch(maskCss, /--coffee-plate-emoji-face-scale-y/);
     assert.match(
@@ -466,24 +978,55 @@ describe("Avatar Details shared mannequin rendering", () => {
       /\["--avatar-details-facing-scale-x" as string\]:\s*botAvatarDetailsFacingScaleX\(coffeePlateFaceScaleY\)/,
     );
     assert.match(pageSource, /"--avatar-details-facing-scale-x": "1"/);
+    assert.doesNotMatch(pageSource, /--avatar-details-facing-offset-y/);
     assert.match(
-      pageSource,
-      /avatarDetailsHasVisuals\(\s*avatarDetails,\s*\)[\s\S]*BOT_AVATAR_DETAILS_FACE_REGISTRATION_STYLE/,
+      avatarDetailsSource,
+      /pixelRole[\s\S]{0,520}depth !== "behind-face"/,
     );
     assert.match(
       pageSource,
-      /className=\{styles\.zenLiveBotPresenceBody\}[\s\S]{0,220}style=\{avatarDetailsFaceRegistrationStyle\}/,
+      /const hasAvatarDetailsVisuals = avatarDetailsHasVisuals\(avatarDetails\);[\s\S]*botAvatarFaceRegistrationStyle\(\s*hasAvatarDetailsVisuals,\s*\)/,
     );
     assert.match(
       pageSource,
-      /!thinkingSpinnerActive && !showQuestionMark \? \([\s\S]*?<AvatarDetailsMask[\s\S]*?\) : null/,
+      /data-avatar-face-coordinate-source="studio"[\s\S]{0,240}style=\{presenceBodyStyle\}/,
     );
-    assert.match(pageSource, /avatarDetailsColor=\{normalizeAccentForTheme\(/);
+    assert.match(
+      pageSource,
+      /data-avatar-details-visuals=\{[\s\S]{0,100}hasAvatarDetailsVisuals \? "true" : undefined/,
+    );
+    assert.match(
+      pageSource,
+      /<AvatarDetailsMask[\s\S]{0,180}detailLevel=\{avatarDetailsDetailLevel\}/,
+    );
+    assert.doesNotMatch(
+      pageSource,
+      /ZEN_LIVE_BOT_FACE_INK_OFFSET_Y|\binkOffsetY=/,
+      "live Zen must not nudge the Studio-authored face and ink coordinate space",
+    );
+    assert.match(
+      pageSource,
+      /\{directionIndependentThinkingScreen \?\? \([\s\S]*?data-zen-live-bot-screen-content-rig="true"/,
+    );
   });
 
-  it("hides only the matching semantic ink for blink, talking, and sipping", () => {
+  it("keeps Default Speech ink hidden and animates it independently from Mouth", () => {
     assert.match(pageSource, /blinkPhase=\{avatarDetailsBlinkPhase\}/);
     assert.match(pageSource, /talking=\{inkTalking \?\? isTalking\}/);
+    assert.match(pageSource, /speechMotionActive=\{isTalking\}/);
+    assert.doesNotMatch(pageSource, /defaultRestingMouthCharacter/);
+    assert.match(pageSource, /faceMouthCharacter=\{faceStyle\.mouthCharacter\}/);
+    assert.match(pageSource, /mouthShape=\{displayedMouthShape\}/);
+    assert.doesNotMatch(maskSource, /mouthAnimation/);
+    assert.match(
+      editorSource,
+      /<strong>Speech ink animation<\/strong>[\s\S]*Independent from Mouth animation\./,
+    );
+    assert.match(
+      editorSource,
+      /value=\{working\.screen\.speechInkAnimation \?\? "none"\}/,
+    );
+    assert.match(editorSource, /avatarDetailsWithSpeechInkAnimation\(/);
     assert.match(
       pageSource,
       /onBlinkPhaseChange=\{handleAvatarDetailsBlinkPhaseChange\}/,
@@ -496,16 +1039,86 @@ describe("Avatar Details shared mannequin rendering", () => {
       maskSource,
       /blinking: blinkPhase === "closed"/,
     );
-    assert.match(maskSource, /talking,\s*\},\s*depth,\s*\),/);
+    assert.match(maskSource, /speechInkVisible: speechMotion \? false : speechInkVisible/);
     assert.doesNotMatch(maskSource, /AvatarDetailsRoleLayer/);
-    assert.doesNotMatch(maskSource, /data-avatar-details-ink-role/);
     assert.match(
-      pageSource,
-      /inkTalking=\{[\s\S]*?isTableTypingThisSeat \|\|[\s\S]*?seatSipPresentation\.active[\s\S]*?\}/,
+      maskSource,
+      /normalizedDetails\.screen\.speechInkAnimation \?\? "none"/,
+    );
+    assert.match(
+      maskSource,
+      /detailLevel === "full" &&[\s\S]*talking &&[\s\S]*speechMotionActive &&[\s\S]*speechInkAnimation !== "none"/,
+    );
+    assert.match(
+      maskSource,
+      /rasterizeAvatarDetailsRgba\([\s\S]*?"talking",[\s\S]*?depth/,
+    );
+    assert.match(maskSource, /data-avatar-details-ink-role/);
+    assert.match(maskSource, /data-avatar-details-ink-motion/);
+    assert.match(
+      maskCss,
+      /\.speechMotion\s*\{[^}]*transition:\s*none\s*;/,
+      "Animated Speech ink must snap with the live mouth instead of tweening between poses",
+    );
+    assert.match(maskCss, /\.speechMotion\[data-avatar-details-ink-motion="pulsate"\]/);
+    assert.match(maskCss, /--bot-face-mouth-pulse-scale-x/);
+    assert.match(
+      maskCss,
+      /\.speechMotion\[data-avatar-details-ink-role="speech"\]\[data-avatar-details-ink-motion="flicker"\]/,
+    );
+    assert.doesNotMatch(
+      maskCss,
+      /--bot-face-mouth-speech-opacity/,
+      "Speech ink Flicker must not borrow Mouth animation opacity",
+    );
+    assert.match(
+      maskCss,
+      /@keyframes avatarDetailsSpeechInkFlicker[\s\S]*opacity:\s*0/,
+    );
+    assert.match(
+      maskCss,
+      /@keyframes avatarDetailsSpeechInkFlicker[\s\S]*0%,\s*30%,\s*44%,\s*70%,\s*89%,\s*100%\s*\{\s*opacity:\s*1[\s\S]*31%,\s*43%,\s*71%,\s*88%\s*\{\s*opacity:\s*0/,
+      "Flicker must alternate visible and transparent lens beats",
+    );
+    assert.match(
+      maskSource,
+      /inkRole="speech"[\s\S]{0,160}motion=\{speechMotion\}/,
+    );
+    assert.match(maskCss, /\.speechMotion\[data-avatar-details-ink-motion="wobble"\]/);
+    assert.match(maskSource, /avatarDetailsSpeechMotionOrigin\(/);
+    assert.match(
+      maskSource,
+      /avatarDetailsSpeechMotionOrigin\(completeSpeechPixels\)/,
+    );
+    assert.match(
+      maskSource,
+      /completeSpeechPixels[\s\S]*?"talking",[\s\S]*?"all"/,
+    );
+    assert.match(
+      maskCss,
+      /translateX\(calc\(var\(--avatar-details-speech-origin-x, 50%\) - 50%\)\)/,
+    );
+    assert.match(
+      maskCss,
+      /translateY\(calc\(50% - var\(--avatar-details-speech-origin-y, 50%\)\)\)/,
+    );
+    assert.match(maskCss, /--bot-face-mouth-speech-wobble/);
+    assert.match(
+      pageCss,
+      /\[data-avatar-details-motion-group\]\[data-avatar-details-ink-motion="spin"\][\s\S]*avatarDetailsSpeechInkSpin[\s\S]*steps\(4,\s*end\)/,
+      "Speech ink spin must use the same four discrete orientations as the mouth",
+    );
+    assert.match(
+      pageCss,
+      /\.zenLiveBotPresenceFaceEmissionMask[\s\S]*\)\[data-talking="true"\][\s\S]*--bot-face-mouth-pulse-scale-x/,
     );
     assert.match(
       pageSource,
-      /inkTalking=\{avatarState\.talking \|\| sipPresentation\.active\}/,
+      /inkTalking=\{[\s\S]*?seatMouthActive \|\|[\s\S]*?seatSipMouthTreatmentActive \|\|[\s\S]*?emptyCupAttemptFrowning[\s\S]*?\}/,
+    );
+    assert.match(
+      pageSource,
+      /inkTalking:\s*signalMannequinTalking\s*\|\|\s*signalMannequinSipMouthTreatmentActive/,
     );
   });
 });

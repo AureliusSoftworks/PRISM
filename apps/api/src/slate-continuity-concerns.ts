@@ -54,6 +54,7 @@ const WORLD_RULE_PREDICATES = new Set([
 interface ProjectRow {
   id: string;
   series_id: string;
+  active_generation: number;
 }
 
 interface SectionRow {
@@ -217,8 +218,19 @@ function projectForUser(
 ): ProjectRow {
   const row = db
     .prepare(
-      `SELECT id, series_id FROM slate_projects
-        WHERE id = ? AND user_id = ?`,
+      `SELECT projects.id, projects.series_id,
+              CASE
+                WHEN series.continuity_active_generation > 0
+                  THEN series.continuity_active_generation
+                WHEN projects.continuity_active_generation > 0
+                  THEN projects.continuity_active_generation
+                ELSE 0
+              END AS active_generation
+         FROM slate_projects AS projects
+         JOIN slate_series AS series
+           ON series.id = projects.series_id
+          AND series.user_id = projects.user_id
+        WHERE projects.id = ? AND projects.user_id = ?`,
     )
     .get(projectId, userId) as ProjectRow | undefined;
   if (!row?.series_id) throw new Error("Slate project not found.");
@@ -295,13 +307,14 @@ function entitiesForSeries(
   db: DatabaseSync,
   userId: string,
   seriesId: string,
+  generation: number,
 ): Map<string, EntityRow> {
   const rows = db
     .prepare(
       `SELECT id, kind, canonical_name FROM slate_continuity_entities
-        WHERE user_id = ? AND series_id = ?`,
+        WHERE user_id = ? AND series_id = ? AND generation = ?`,
     )
-    .all(userId, seriesId) as unknown as EntityRow[];
+    .all(userId, seriesId, generation) as unknown as EntityRow[];
   return new Map(rows.map((row) => [row.id, row]));
 }
 
@@ -355,17 +368,23 @@ function factConflictCandidates(
               claims.confidence, claims.anchors_json, claims.source_id
          FROM slate_continuity_claims AS claims
         WHERE claims.user_id = ? AND claims.series_id = ?
+          AND claims.generation = ?
           AND claims.epistemic_status = 'fact'
           AND claims.confidence >= 0.75
           AND NOT EXISTS (
             SELECT 1 FROM slate_continuity_claims AS replacement
              WHERE replacement.user_id = claims.user_id
                AND replacement.series_id = claims.series_id
+               AND replacement.generation = claims.generation
                AND replacement.supersedes_claim_id = claims.id
           )
         ORDER BY claims.id ASC`,
     )
-    .all(userId, project.series_id) as unknown as ClaimRow[];
+    .all(
+      userId,
+      project.series_id,
+      project.active_generation,
+    ) as unknown as ClaimRow[];
   const groups = new Map<
     string,
     { kind: SlateContinuityConcernKind; subject: EntityRow; claims: ClaimRow[] }
@@ -413,6 +432,7 @@ function factConflictCandidates(
     );
     const semanticKey = [
       project.id,
+      project.active_generation,
       group.kind,
       group.subject.id,
       normalized(predicate),
@@ -452,12 +472,16 @@ function locationImpossibilityCandidates(
               participant_entity_ids_json, location_entity_id, anchors_json,
               source_id
          FROM slate_continuity_events
-        WHERE user_id = ? AND series_id = ?
+        WHERE user_id = ? AND series_id = ? AND generation = ?
           AND chronology_key IS NOT NULL AND TRIM(chronology_key) <> ''
           AND location_entity_id IS NOT NULL
         ORDER BY chronology_key ASC, id ASC`,
     )
-    .all(userId, project.series_id) as unknown as EventRow[];
+    .all(
+      userId,
+      project.series_id,
+      project.active_generation,
+    ) as unknown as EventRow[];
   const groups = new Map<string, EventRow[]>();
   const exactAnchorsByEventId = new Map<
     string,
@@ -507,6 +531,7 @@ function locationImpossibilityCandidates(
     result.push({
       id: stableConcernId([
         project.id,
+        project.active_generation,
         "timeline_impossibility",
         chronologyKey,
         participantId,
@@ -543,12 +568,18 @@ function relationshipConflictCandidates(
           AND sources.user_id = relationships.user_id
           AND sources.series_id = relationships.series_id
         WHERE relationships.user_id = ? AND relationships.series_id = ?
+          AND relationships.generation = ?
           AND relationships.epistemic_status = 'fact'
           AND sources.project_id = ?
           AND sources.section_id IS NOT NULL
         ORDER BY relationships.id ASC`,
     )
-    .all(userId, project.series_id, project.id) as unknown as RelationshipRow[];
+    .all(
+      userId,
+      project.series_id,
+      project.active_generation,
+      project.id,
+    ) as unknown as RelationshipRow[];
   const groups = new Map<
     string,
     { rows: RelationshipRow[]; anchorsById: Map<string, SlateContinuitySourceAnchor[]> }
@@ -599,6 +630,7 @@ function relationshipConflictCandidates(
     result.push({
       id: stableConcernId([
         project.id,
+        project.active_generation,
         "relationship_conflict",
         first.source_section_id,
         first.from_entity_id,
@@ -656,6 +688,9 @@ function knowledgeLeakCandidates(
            ON claims.id = knowledge.claim_id
           AND claims.user_id = knowledge.user_id
         WHERE knowledge.user_id = ? AND knowledge.series_id = ?
+          AND knowledge.generation = ?
+          AND learned.generation = knowledge.generation
+          AND claims.generation = knowledge.generation
           AND knowledge.status = 'knows'
           AND knowledge.learned_event_id IS NOT NULL
           AND claims.epistemic_status = 'fact'
@@ -667,6 +702,7 @@ function knowledgeLeakCandidates(
           AND NOT EXISTS (
             SELECT 1 FROM slate_continuity_claims AS replacement
              WHERE replacement.user_id = claims.user_id
+               AND replacement.generation = claims.generation
                AND replacement.supersedes_claim_id = claims.id
           )
         ORDER BY knowledge.id ASC`,
@@ -674,6 +710,7 @@ function knowledgeLeakCandidates(
     .all(
       userId,
       project.series_id,
+      project.active_generation,
       project.id,
       project.id,
       project.id,
@@ -705,6 +742,7 @@ function knowledgeLeakCandidates(
     result.push({
       id: stableConcernId([
         project.id,
+        project.active_generation,
         "knowledge_leak",
         row.character_entity_id,
         row.claim_id,
@@ -750,10 +788,15 @@ function dueThreadCandidates(
            ON due.id = threads.due_section_id
           AND due.user_id = threads.user_id
         WHERE threads.user_id = ? AND threads.series_id = ?
+          AND threads.generation = ?
           AND threads.status IN ('open', 'due')
         ORDER BY threads.id ASC`,
     )
-    .all(userId, project.series_id) as unknown as ThreadRow[];
+    .all(
+      userId,
+      project.series_id,
+      project.active_generation,
+    ) as unknown as ThreadRow[];
   const result: ConcernCandidate[] = [];
   for (const row of rows) {
     const reachedPlannedDueSection =
@@ -775,7 +818,12 @@ function dueThreadCandidates(
         ? "at the book milestone"
         : `at the act milestone “${stage.title}”`;
     result.push({
-      id: stableConcernId([project.id, "due_thread", row.id]),
+      id: stableConcernId([
+        project.id,
+        project.active_generation,
+        "due_thread",
+        row.id,
+      ]),
       kind: "due_thread",
       severity: "note",
       summary: `A story thread is due: ${row.label}`,
@@ -801,9 +849,14 @@ function upsertCandidate(
     .prepare(
       `SELECT status, anchors_json, claim_ids_json
          FROM slate_continuity_concerns
-        WHERE id = ? AND user_id = ? AND series_id = ?`,
+        WHERE id = ? AND user_id = ? AND series_id = ? AND generation = ?`,
     )
-    .get(candidate.id, userId, project.series_id) as
+    .get(
+      candidate.id,
+      userId,
+      project.series_id,
+      project.active_generation,
+    ) as
     | ExistingConcernRow
     | undefined;
   const versions = JSON.stringify(currentContinuityProducerVersions());
@@ -813,8 +866,8 @@ function upsertCandidate(
         (id, user_id, series_id, project_id, section_id, scope_kind, kind,
          severity, status, summary, explanation, claim_ids_json, anchors_json,
          recommended_resolution, resolution_json, producer_versions_json,
-         created_at, resolved_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, ?, ?, ?, ?, NULL, ?, ?, NULL)`,
+         generation, created_at, resolved_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, ?, ?, ?, ?, NULL, ?, ?, ?, NULL)`,
     ).run(
       candidate.id,
       userId,
@@ -830,6 +883,7 @@ function upsertCandidate(
       JSON.stringify(candidate.anchors),
       candidate.recommendedResolution,
       versions,
+      project.active_generation,
       now,
     );
     return { inserted: true, preserved: false };
@@ -849,7 +903,7 @@ function upsertCandidate(
             severity = ?, summary = ?, explanation = ?, claim_ids_json = ?,
             anchors_json = ?, recommended_resolution = ?,
             producer_versions_json = ?
-      WHERE id = ? AND user_id = ? AND series_id = ?`,
+      WHERE id = ? AND user_id = ? AND series_id = ? AND generation = ?`,
   ).run(
     project.id,
     stage?.id ?? null,
@@ -865,6 +919,7 @@ function upsertCandidate(
     candidate.id,
     userId,
     project.series_id,
+    project.active_generation,
   );
   return {
     inserted: false,
@@ -886,11 +941,21 @@ function resolveObsoleteOpenConcerns(
         .prepare(
           `SELECT id FROM slate_continuity_threads
             WHERE user_id = ? AND series_id = ?
+              AND generation = ?
               AND status IN ('open', 'due')`,
         )
-        .all(userId, project.series_id) as Array<{ id: string }>
+        .all(
+          userId,
+          project.series_id,
+          project.active_generation,
+        ) as Array<{ id: string }>
     ).map((thread) =>
-      stableConcernId([project.id, "due_thread", thread.id]),
+      stableConcernId([
+        project.id,
+        project.active_generation,
+        "due_thread",
+        thread.id,
+      ]),
     ),
   );
   const open = db
@@ -898,9 +963,15 @@ function resolveObsoleteOpenConcerns(
       `SELECT id, kind, anchors_json
          FROM slate_continuity_concerns
         WHERE user_id = ? AND series_id = ? AND project_id = ?
+          AND generation = ?
           AND status = 'open'`,
     )
-    .all(userId, project.series_id, project.id) as unknown as Array<{
+    .all(
+      userId,
+      project.series_id,
+      project.id,
+      project.active_generation,
+    ) as unknown as Array<{
     id: string;
     kind: SlateContinuityConcernKind;
     anchors_json: string;
@@ -908,7 +979,8 @@ function resolveObsoleteOpenConcerns(
   const resolve = db.prepare(
     `UPDATE slate_continuity_concerns
         SET status = 'resolved', resolved_at = ?, resolution_json = ?
-      WHERE id = ? AND user_id = ? AND series_id = ? AND status = 'open'`,
+      WHERE id = ? AND user_id = ? AND series_id = ? AND generation = ?
+        AND status = 'open'`,
   );
   for (const concern of open) {
     if (detectedIds.has(concern.id)) continue;
@@ -930,6 +1002,7 @@ function resolveObsoleteOpenConcerns(
       concern.id,
       userId,
       project.series_id,
+      project.active_generation,
     );
   }
 }
@@ -952,11 +1025,17 @@ export function detectAndPersistSlateContinuityConcernsInTransaction(
     projectId,
     options.currentSectionId,
   );
-  const entities = entitiesForSeries(db, userId, project.series_id);
+  const entities = entitiesForSeries(
+    db,
+    userId,
+    project.series_id,
+    project.active_generation,
+  );
   const anchorResolver = new SlateContinuityCurrentCanonResolver(
     db,
     userId,
     project.series_id,
+    project.active_generation,
   );
   const candidates = [
     ...factConflictCandidates(

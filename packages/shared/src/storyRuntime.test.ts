@@ -59,6 +59,8 @@ function validEpisode(): StoryEpisodeManifest {
         title: "First Projection",
         locationId: "atrium",
         narration: "The atrium brightens.",
+        audienceBotIds: ["bot-a", "bot-a", "bot-b"],
+        annoyanceTargetBotId: "bot-b",
         spritePose: "idle",
         choices: [
           { id: "go-archive", label: "Enter the archive.", targetSceneId: "scene-2", revealLocationIds: ["archive"] },
@@ -145,6 +147,8 @@ describe("story runtime", () => {
     assert.equal(episode.themeId, "prism_default");
     assert.equal(episode.scenes.length, 8);
     assert.equal(episode.locations[0]?.discovered, true);
+    assert.deepEqual(episode.scenes[0]?.audienceBotIds, ["bot-a", "bot-b"]);
+    assert.equal(episode.scenes[0]?.annoyanceTargetBotId, "bot-b");
   });
 
   it("rejects missing scene references", () => {

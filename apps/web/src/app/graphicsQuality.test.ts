@@ -19,7 +19,7 @@ describe("player graphics quality", () => {
     assert.equal(prismSceneQualityCeilingForGraphicsQuality("low"), "minimal");
   });
 
-  it("keeps High adaptive, caps Medium at balanced, and pins Low to minimal", () => {
+  it("pins High, Medium, and Low until the player changes the setting", () => {
     const high = new PrismAdaptiveQualityController(0, "full");
     const medium = new PrismAdaptiveQualityController(0, "balanced");
     const low = new PrismAdaptiveQualityController(0, "minimal");

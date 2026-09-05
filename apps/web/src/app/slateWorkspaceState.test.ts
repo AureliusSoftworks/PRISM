@@ -26,6 +26,7 @@ import {
   slateProjectSourceIsReady,
   slateProjectSparkForCreation,
   slateProjectTitleForCreation,
+  slateCanvasUpdateMatchesActiveSection,
 } from "./slateWorkspaceState.ts";
 
 const structure: SlateStructureItem[] = ["one", "two", "three"].map((id) => ({
@@ -86,6 +87,30 @@ describe("Slate workspace state", () => {
     );
     assert.equal(slateProjectTitleForCreation(""), "Untitled Story");
     assert.equal(slateProjectTitleForCreation("  My Book  "), "My Book");
+  });
+
+  it("rejects stale canvas updates from the empty pre-section editor", () => {
+    assert.equal(
+      slateCanvasUpdateMatchesActiveSection({
+        activeSectionId: "imported-section",
+        documentKey: "no-section",
+      }),
+      false,
+    );
+    assert.equal(
+      slateCanvasUpdateMatchesActiveSection({
+        activeSectionId: "second-section",
+        documentKey: "first-section",
+      }),
+      false,
+    );
+    assert.equal(
+      slateCanvasUpdateMatchesActiveSection({
+        activeSectionId: "imported-section",
+        documentKey: "imported-section",
+      }),
+      true,
+    );
   });
 
   it("turns one natural-language direction into the internal revision action", () => {
@@ -274,6 +299,46 @@ describe("Slate workspace state", () => {
     assert.equal(merged.proseLength, 16);
   });
 
+  it("treats rich-document formatting as autosave state without changing prose", () => {
+    const base = {
+      id: "section",
+      prose: "A quiet line.",
+      lockedRanges: [],
+      document: {
+        type: "doc",
+        content: [
+          {
+            type: "paragraph",
+            attrs: { blockId: "block-1" },
+            content: [{ type: "text", text: "A quiet line." }],
+          },
+        ],
+      },
+    };
+    const emphasized = {
+      ...base,
+      document: {
+        ...base.document,
+        content: [
+          {
+            ...base.document.content[0],
+            content: [
+              {
+                type: "text",
+                text: "A quiet line.",
+                marks: [{ type: "italic" }],
+              },
+            ],
+          },
+        ],
+      },
+    };
+    assert.notEqual(
+      slateSectionEditableFingerprint(base),
+      slateSectionEditableFingerprint(emphasized),
+    );
+  });
+
   it("translates focused-section selections to legacy manuscript offsets", () => {
     const section = (id: string, prose: string): SlateSectionDetail => ({
       id,
@@ -300,6 +365,31 @@ describe("Slate workspace state", () => {
     assert.deepEqual(
       slateProjectOffsetsForSectionSelection(sections, "two", 2, 8),
       { start: 21, end: 27 },
+    );
+
+    const importedSections = [
+      {
+        ...section("import-one", "Chapter One\n\nFirst.\n\n"),
+        kind: "imported" as const,
+      },
+      {
+        ...section("import-two", "Chapter Two\n\nSecond."),
+        kind: "imported" as const,
+      },
+    ];
+    assert.deepEqual(
+      slateProjectOffsetsForSectionSelection(
+        importedSections,
+        "import-two",
+        0,
+        "Chapter Two".length,
+      ),
+      {
+        start: importedSections[0]!.prose.length,
+        end:
+          importedSections[0]!.prose.length +
+          "Chapter Two".length,
+      },
     );
   });
 

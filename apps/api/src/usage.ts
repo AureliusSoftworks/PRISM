@@ -5,6 +5,7 @@ import type {
   UsageBreakdownItem,
   UsageEventType,
   UsagePrivacyScope,
+  UsageProviderFilter,
   UsageProviderName,
   UsagePurpose,
   UsageRange,
@@ -12,7 +13,10 @@ import type {
   UsageResponse,
   UsageTokenCountSource,
   UsageTotals,
+  UsageTripMeter,
 } from "@localai/shared";
+import { currentPrismGenerationWorkContext } from "./generation-work.ts";
+import { sealDeveloperTranscriptPayloadV1 } from "./developer-transcript-vault.ts";
 
 type UsageMode = "zen" | "sandbox" | "coffee" | "story" | "system" | string | null;
 
@@ -27,6 +31,10 @@ interface UsageSession {
   messageId?: string | null;
   botId?: string | null;
   developerSequence: number;
+  /** Exact request-only prompt blocks omitted from durable developer traces. */
+  diagnosticRedactions: string[];
+  /** Request-scoped owner key. Never shared across owners or persisted. */
+  userKey?: Buffer;
 }
 
 export interface UsageSessionInput {
@@ -39,6 +47,7 @@ export interface UsageSessionInput {
   messageId?: string | null;
   botId?: string | null;
   requestId?: string;
+  userKey?: Buffer;
 }
 
 export interface UsageTextEventInput {
@@ -94,6 +103,13 @@ export interface UsageImageEventInput {
 }
 
 const usageStorage = new AsyncLocalStorage<UsageSession>();
+let ownerKeyResolver: ((userId: string) => Buffer) | undefined;
+
+export function setUsageOwnerKeyResolver(
+  resolver: ((userId: string) => Buffer) | undefined,
+): void {
+  ownerKeyResolver = resolver;
+}
 
 const ONLINE_PROVIDERS = new Set<UsageProviderName>(["openai", "anthropic"]);
 
@@ -110,6 +126,11 @@ type TextPrice = {
   note: string;
 };
 
+export interface RoutingTextPrice {
+  inputUsdPerMillion: number;
+  outputUsdPerMillion: number;
+}
+
 type ImagePrice = {
   outputUsdPerMillion: number;
   source: "builtin";
@@ -117,6 +138,12 @@ type ImagePrice = {
 };
 
 const TEXT_PRICING: Record<string, TextPrice> = {
+  "gpt-6-astra": {
+    inputUsdPerMillion: 10,
+    outputUsdPerMillion: 50,
+    source: "builtin",
+    note: "Estimated OpenAI API text pricing catalog.",
+  },
   "gpt-5.6-sol": {
     inputUsdPerMillion: 5,
     outputUsdPerMillion: 30,
@@ -333,6 +360,12 @@ const TEXT_PRICING: Record<string, TextPrice> = {
     source: "builtin",
     note: "Estimated Anthropic API text pricing catalog.",
   },
+  "claude-mythos-5": {
+    inputUsdPerMillion: 10,
+    outputUsdPerMillion: 50,
+    source: "builtin",
+    note: "Estimated Anthropic API text pricing catalog.",
+  },
   "claude-haiku-4-5": {
     inputUsdPerMillion: 1,
     outputUsdPerMillion: 5,
@@ -426,6 +459,21 @@ type UsageRecentRow = {
   image_quality: string | null;
   cost_micro_usd: number | null;
   pricing_snapshot_json: string | null;
+  workflow: string | null;
+  workflow_stage: string | null;
+  work_role: string | null;
+  work_cache_hit: number | null;
+  work_fallback_reason: string | null;
+  work_context_tokens_kept_local: number | null;
+};
+
+type UsageLocalFirstRow = {
+  workflow: string | null;
+  workflow_stage: string | null;
+  assisted_operation_count: number | null;
+  local_tokens: number | null;
+  online_tokens: number | null;
+  context_tokens_kept_local: number | null;
 };
 
 function normalizeUsagePurpose(value: string | null | undefined): UsagePurpose {
@@ -435,12 +483,23 @@ function normalizeUsagePurpose(value: string | null | undefined): UsagePurpose {
     case "chat_fallback":
     case "chat_web_search_followup":
     case "conversation_title":
+    case "botcast_brand":
+    case "botcast_show_chat":
+    case "botcast_review":
+    case "botcast_turn":
+    case "bot_generation":
     case "coffee_turn":
     case "coffee_router":
     case "coffee_summary":
     case "composer_cleanup":
+    case "debate_generation":
+    case "debate_synopsis":
+    case "debate_debrief":
+    case "flight_recorder_summary":
     case "embedding":
     case "image_generation":
+    case "bot_profile_picture":
+    case "group-room-wallpaper":
     case "image_prompt":
     case "memory_inference":
     case "memory_summary":
@@ -448,15 +507,90 @@ function normalizeUsagePurpose(value: string | null | undefined): UsagePurpose {
     case "psychic_planning":
     case "slate_deliberation":
     case "slate_draft":
+    case "slate_project_chat":
     case "slate_revision":
     case "slate_shape":
+    case "slate_transcript_story":
+    case "slate_title_suggestion":
     case "story_generation":
+    case "voice_preview":
     case "zen_live_action":
     case "system_unlabeled":
       return value;
     default:
       return "system_unlabeled";
   }
+}
+
+const USAGE_PURPOSE_LABELS: Record<UsagePurpose, string> = {
+  chat_reply: "Chat Reply",
+  chat_boundary: "Chat Boundary",
+  chat_fallback: "Chat Fallback",
+  chat_web_search_followup: "Chat Web Search Followup",
+  conversation_title: "Conversation Title",
+  botcast_brand: "Signal Brand",
+  botcast_show_chat: "Signal Show Chat",
+  botcast_review: "Signal Review",
+  botcast_turn: "Signal Turn",
+  bot_generation: "Bot Generation",
+  coffee_turn: "Coffee Turn",
+  coffee_router: "Coffee Router",
+  coffee_summary: "Coffee Summary",
+  composer_cleanup: "Composer Cleanup",
+  debate_generation: "Debate Generation",
+  debate_synopsis: "Debate Synopsis",
+  debate_debrief: "Debate Debrief",
+  flight_recorder_summary: "Flight Recorder Summary",
+  embedding: "Embedding",
+  image_generation: "Image Generation",
+  bot_profile_picture: "Bot Profile Picture",
+  "group-room-wallpaper": "Group Room Wallpaper",
+  image_prompt: "Image Prompt",
+  memory_inference: "Memory Inference",
+  memory_summary: "Memory Summary",
+  prompt_wildcard: "Prompt Wildcard",
+  psychic_planning: "Psychic Planning",
+  slate_deliberation: "Slate Deliberation",
+  slate_draft: "Slate Draft",
+  slate_project_chat: "Slate Project Chat",
+  slate_revision: "Slate Revision",
+  slate_shape: "Slate Shape",
+  slate_transcript_story: "Slate Transcript Story",
+  slate_title_suggestion: "Slate Title Suggestion",
+  story_generation: "Story Generation",
+  voice_preview: "Voice Preview",
+  zen_live_action: "Zen Live Action",
+  system_unlabeled: "System Unlabeled",
+};
+
+function purposeLabel(purpose: UsagePurpose): string {
+  return USAGE_PURPOSE_LABELS[purpose];
+}
+
+/**
+ * Older builds collapsed several real purposes to system_unlabeled at write
+ * time. Re-home those rows by surface so Usage Settings can show Signal /
+ * Debate / Bot Generation instead of one opaque bucket.
+ */
+export function repairMisnormalizedUsagePurposes(db: DatabaseSync): number {
+  const repairs: Array<{ purpose: UsagePurpose; surface: string }> = [
+    { purpose: "botcast_turn", surface: "signal" },
+    { purpose: "bot_generation", surface: "bots" },
+    { purpose: "debate_generation", surface: "debate" },
+  ];
+  let changed = 0;
+  for (const repair of repairs) {
+    const result = db
+      .prepare(
+        `UPDATE usage_events
+         SET purpose = ?
+         WHERE purpose = 'system_unlabeled'
+           AND surface = ?`,
+      )
+      .run(repair.purpose, repair.surface);
+    changed += Number(result.changes ?? 0);
+  }
+  return changed;
 }
 
 function normalizeProvider(value: string | null | undefined): UsageProviderName {
@@ -503,13 +637,6 @@ function providerLabel(provider: UsageProviderName): string {
   return "Unknown";
 }
 
-function purposeLabel(purpose: UsagePurpose): string {
-  return purpose
-    .split("_")
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-    .join(" ");
-}
-
 function priceForTextModel(provider: UsageProviderName, model: string): TextPrice | null {
   if (!ONLINE_PROVIDERS.has(provider)) return null;
   const normalized = model.trim().toLowerCase();
@@ -527,6 +654,20 @@ function priceForTextModel(provider: UsageProviderName, model: string): TextPric
     return TEXT_PRICING["claude-haiku-4-5"] ?? null;
   }
   return null;
+}
+
+/** Shared source of truth for contextual routing and usage-cost reporting. */
+export function routingTextPriceForModel(
+  provider: UsageProviderName,
+  model: string,
+): RoutingTextPrice | null {
+  const price = priceForTextModel(provider, model);
+  return price
+    ? {
+        inputUsdPerMillion: price.inputUsdPerMillion,
+        outputUsdPerMillion: price.outputUsdPerMillion,
+      }
+    : null;
 }
 
 function priceForImageModel(provider: UsageProviderName, model: string): ImagePrice | null {
@@ -623,11 +764,29 @@ function currentSession(): UsageSession | undefined {
   return usageStorage.getStore();
 }
 
-function safeDiagnosticJson(value: unknown): string {
+const REQUEST_SCOPED_CONTEXT_REDACTION =
+  "[Request-scoped Prism surface context omitted]";
+
+function safeDiagnosticJson(
+  value: unknown,
+  diagnosticRedactions: readonly string[] = [],
+): string {
   const seen = new WeakSet<object>();
   try {
     return JSON.stringify(value, (_key, item: unknown) => {
       if (typeof item === "bigint") return item.toString();
+      if (typeof item === "string") {
+        return diagnosticRedactions.reduce(
+          (redacted, requestOnlyText) =>
+            requestOnlyText.length > 0
+              ? redacted.replaceAll(
+                  requestOnlyText,
+                  REQUEST_SCOPED_CONTEXT_REDACTION,
+                )
+              : redacted,
+          item,
+        );
+      }
       if (typeof item !== "object" || item === null) return item;
       if (seen.has(item)) return "[Circular]";
       seen.add(item);
@@ -659,7 +818,29 @@ export function recordDeveloperTranscriptEvent(args: DeveloperTranscriptEventInp
     ...(args.usage ? { usage: args.usage } : {}),
     ...(args.fallback === true ? { fallback: true } : {}),
   };
+  const eventId = randomUUID();
+  const resolvedUserKey = session.userKey ?? ownerKeyResolver?.(session.userId);
+  const ownsResolvedKey = Boolean(
+    resolvedUserKey && resolvedUserKey !== session.userKey,
+  );
   try {
+    const payloadJson = resolvedUserKey
+      ? sealDeveloperTranscriptPayloadV1({
+          userId: session.userId,
+          eventId,
+          payloadJson: safeDiagnosticJson(payload, session.diagnosticRedactions),
+          userKey: resolvedUserKey,
+        })
+      : safeDiagnosticJson({
+          contentOmitted: true,
+          streaming: args.streaming === true,
+          failed: Boolean(args.error),
+          ...(typeof args.durationMs === "number" && Number.isFinite(args.durationMs)
+            ? { durationMs: Math.max(0, args.durationMs) }
+            : {}),
+          ...(args.usage ? { usage: args.usage } : {}),
+          ...(args.fallback === true ? { fallback: true } : {}),
+        });
     session.db
       .prepare(
         `INSERT INTO developer_transcript_events (
@@ -668,7 +849,7 @@ export function recordDeveloperTranscriptEvent(args: DeveloperTranscriptEventInp
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .run(
-        randomUUID(),
+        eventId,
         session.userId,
         sessionLinkedValue(session, session.conversationId),
         sessionLinkedValue(session, session.messageId),
@@ -679,14 +860,15 @@ export function recordDeveloperTranscriptEvent(args: DeveloperTranscriptEventInp
         args.purpose.trim() || "system_unlabeled",
         args.provider?.trim() || null,
         args.model?.trim() || null,
-        safeDiagnosticJson(payload),
+        payloadJson,
         args.createdAt ?? new Date().toISOString()
       );
-  } catch (error) {
-    console.warn(
-      "[developer-transcript] failed to record event:",
-      error instanceof Error ? error.message : error
-    );
+  } catch {
+    console.warn("[developer-transcript] failed to record encrypted event.");
+  } finally {
+    if (resolvedUserKey && ownsResolvedKey) {
+      resolvedUserKey.fill(0);
+    }
   }
 }
 
@@ -730,6 +912,14 @@ function insertUsageEvent(
   });
   const createdAt = args.createdAt ?? new Date().toISOString();
   const durationMs = nullableInt(args.durationMs);
+  const generationWork = currentPrismGenerationWorkContext();
+  const contextTokensKeptLocal = generationWork
+    ? Math.max(
+        0,
+        (generationWork.sourceTokenEstimate ?? 0) -
+          (generationWork.exportedTokenEstimate ?? 0),
+      )
+    : null;
   try {
     session.db
       .prepare(
@@ -739,8 +929,11 @@ function insertUsageEvent(
           input_tokens, output_tokens, total_tokens, cached_input_tokens,
           image_count, image_size, image_quality,
           duration_ms, load_duration_ms, prompt_duration_ms, completion_duration_ms,
-          token_count_source, cost_micro_usd, pricing_snapshot_json, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          token_count_source, cost_micro_usd, pricing_snapshot_json,
+          workflow, workflow_stage, work_role, work_execution_lane,
+          work_output_class, work_cache_hit, work_fallback_reason,
+          work_context_tokens_kept_local, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .run(
         randomUUID(),
@@ -770,10 +963,18 @@ function insertUsageEvent(
         args.tokenCountSource,
         costMicroUsd,
         snapshot,
+        generationWork?.workflow ?? null,
+        generationWork?.stage ?? null,
+        generationWork?.role ?? null,
+        generationWork?.executionLane ?? null,
+        generationWork?.outputClass ?? null,
+        generationWork ? 0 : null,
+        generationWork?.fallbackReason ? "recovery" : null,
+        contextTokensKeptLocal,
         createdAt
       );
-  } catch (error) {
-    console.warn("[usage] failed to record usage event:", error instanceof Error ? error.message : error);
+  } catch {
+    console.warn("[usage] failed to record content-free usage event.");
   }
 }
 
@@ -789,6 +990,10 @@ export function enterUsageSession(input: UsageSessionInput): void {
 }
 
 function createUsageSession(input: UsageSessionInput): UsageSession {
+  const parent = currentSession();
+  const userKey =
+    input.userKey ??
+    (parent?.userId === input.userId ? parent.userKey : undefined);
   const session: UsageSession = {
     db: input.db,
     userId: input.userId,
@@ -796,12 +1001,27 @@ function createUsageSession(input: UsageSessionInput): UsageSession {
     privacyScope: input.privacyScope ?? "normal",
     surface: input.surface,
     developerSequence: 0,
+    diagnosticRedactions: [],
+    ...(userKey ? { userKey } : {}),
     ...(input.mode !== undefined ? { mode: input.mode } : {}),
     ...(input.conversationId !== undefined ? { conversationId: input.conversationId } : {}),
     ...(input.messageId !== undefined ? { messageId: input.messageId } : {}),
     ...(input.botId !== undefined ? { botId: input.botId } : {}),
   };
   return session;
+}
+
+/**
+ * Keep a prompt-only context block available to the provider while omitting
+ * it from durable developer transcript events and their exports.
+ */
+export function registerUsageDiagnosticRedaction(value: string): void {
+  const session = currentSession();
+  const normalized = value.trim();
+  if (!session || !normalized || session.diagnosticRedactions.includes(value)) {
+    return;
+  }
+  session.diagnosticRedactions.push(value);
 }
 
 export function patchUsageSession(
@@ -844,11 +1064,8 @@ export function patchUsageSession(
          WHERE user_id = ? AND request_id = ?`
       )
       .run(conversationId, messageId, botId, session.userId, session.requestId);
-  } catch (error) {
-    console.warn(
-      "[usage] failed to patch persisted request linkage:",
-      error instanceof Error ? error.message : error
-    );
+  } catch {
+    console.warn("[usage] failed to patch persisted request linkage.");
   }
 }
 
@@ -898,11 +1115,8 @@ export function attachUsageEventsToMessage(args: {
         session.userId,
         session.requestId
       );
-  } catch (error) {
-    console.warn(
-      "[usage] failed to attach usage events:",
-      error instanceof Error ? error.message : error
-    );
+  } catch {
+    console.warn("[usage] failed to attach usage events.");
   }
 }
 
@@ -1000,6 +1214,7 @@ function baseWhere(args: {
   userId: string;
   rangeStart: string | null;
   conversationId?: string | null;
+  providers?: UsageProviderName[] | null;
 }): { where: string; params: string[] } {
   const clauses = ["user_id = ?"];
   const params: string[] = [args.userId];
@@ -1010,6 +1225,16 @@ function baseWhere(args: {
   if (args.conversationId) {
     clauses.push("conversation_id = ?");
     params.push(args.conversationId);
+  }
+  const providers = (args.providers ?? []).filter(Boolean);
+  if (providers.length === 1) {
+    clauses.push("provider = ?");
+    params.push(providers[0]!);
+  } else if (providers.length > 1) {
+    clauses.push(
+      `provider IN (${providers.map(() => "?").join(", ")})`,
+    );
+    params.push(...providers);
   }
   return {
     where: clauses.join(" AND "),
@@ -1093,7 +1318,141 @@ function recentFromRow(row: UsageRecentRow): UsageRecentEvent {
     estimatedCostMicroUsd: row.cost_micro_usd,
     costEstimated: row.cost_micro_usd !== null,
     unpriced: ONLINE_PROVIDERS.has(provider) && row.cost_micro_usd === null,
+    workflow: row.workflow,
+    workflowStage: row.workflow_stage,
+    workRole:
+      row.work_role === "prepare" ||
+      row.work_role === "connective" ||
+      row.work_role === "audit" ||
+      row.work_role === "author" ||
+      row.work_role === "repair"
+        ? row.work_role
+        : null,
+    workCacheHit:
+      row.work_cache_hit === null ? null : row.work_cache_hit === 1,
+    fallbackReason: row.work_fallback_reason,
+    contextTokensKeptLocal: row.work_context_tokens_kept_local,
   };
+}
+
+function aggregateOnlineTripSince(args: {
+  db: DatabaseSync;
+  userId: string;
+  startedAt: string;
+}): { onlineTokens: number; estimatedCostMicroUsd: number } {
+  const row = args.db
+    .prepare(
+      `SELECT
+         COALESCE(SUM(CASE WHEN provider IN ('openai', 'anthropic') THEN COALESCE(total_tokens, 0) ELSE 0 END), 0) AS online_tokens,
+         COALESCE(SUM(CASE WHEN provider IN ('openai', 'anthropic') THEN COALESCE(cost_micro_usd, 0) ELSE 0 END), 0) AS estimated_cost_micro_usd
+       FROM usage_events
+       WHERE user_id = ?
+         AND created_at >= ?`,
+    )
+    .get(args.userId, args.startedAt) as
+    | { online_tokens: number; estimated_cost_micro_usd: number }
+    | undefined;
+  return {
+    onlineTokens: Number(row?.online_tokens ?? 0),
+    estimatedCostMicroUsd: Number(row?.estimated_cost_micro_usd ?? 0),
+  };
+}
+
+interface UsageTripUserRow {
+  usage_trip_enabled: number | null;
+  usage_trip_started_at: string | null;
+  usage_trip_frozen_online_tokens: number | null;
+  usage_trip_frozen_cost_micro_usd: number | null;
+}
+
+function readUsageTripUserRow(
+  db: DatabaseSync,
+  userId: string,
+): UsageTripUserRow | undefined {
+  return db
+    .prepare(
+      `SELECT usage_trip_enabled, usage_trip_started_at,
+              usage_trip_frozen_online_tokens, usage_trip_frozen_cost_micro_usd
+       FROM users WHERE id = ?`,
+    )
+    .get(userId) as UsageTripUserRow | undefined;
+}
+
+/** Account-wide online-token trip meter for the Usage panel. */
+export function getUsageTripMeter(args: {
+  db: DatabaseSync;
+  userId: string;
+}): UsageTripMeter {
+  const row = readUsageTripUserRow(args.db, args.userId);
+  const enabled = Number(row?.usage_trip_enabled ?? 0) === 1;
+  const startedAt = row?.usage_trip_started_at ?? null;
+  if (enabled && startedAt) {
+    const live = aggregateOnlineTripSince({
+      db: args.db,
+      userId: args.userId,
+      startedAt,
+    });
+    return {
+      enabled: true,
+      startedAt,
+      onlineTokens: live.onlineTokens,
+      estimatedCostMicroUsd: live.estimatedCostMicroUsd,
+      frozen: false,
+    };
+  }
+  const frozenTokens = Math.max(
+    0,
+    Number(row?.usage_trip_frozen_online_tokens ?? 0),
+  );
+  const frozenCost = Math.max(
+    0,
+    Number(row?.usage_trip_frozen_cost_micro_usd ?? 0),
+  );
+  return {
+    enabled: false,
+    startedAt,
+    onlineTokens: frozenTokens,
+    estimatedCostMicroUsd: frozenCost,
+    frozen: Boolean(startedAt) || frozenTokens > 0 || frozenCost > 0,
+  };
+}
+
+/**
+ * Start a fresh trip (reset to 0) or freeze the current trip total.
+ * Lifetime usage history is never deleted.
+ */
+export function setUsageTripEnabled(args: {
+  db: DatabaseSync;
+  userId: string;
+  enabled: boolean;
+  now?: Date;
+}): UsageTripMeter {
+  const nowIso = (args.now ?? new Date()).toISOString();
+  if (args.enabled) {
+    args.db
+      .prepare(
+        `UPDATE users
+         SET usage_trip_enabled = 1,
+             usage_trip_started_at = ?,
+             usage_trip_frozen_online_tokens = 0,
+             usage_trip_frozen_cost_micro_usd = 0
+         WHERE id = ?`,
+      )
+      .run(nowIso, args.userId);
+    return getUsageTripMeter({ db: args.db, userId: args.userId });
+  }
+
+  const current = getUsageTripMeter({ db: args.db, userId: args.userId });
+  args.db
+    .prepare(
+      `UPDATE users
+       SET usage_trip_enabled = 0,
+           usage_trip_frozen_online_tokens = ?,
+           usage_trip_frozen_cost_micro_usd = ?
+       WHERE id = ?`,
+    )
+    .run(current.onlineTokens, current.estimatedCostMicroUsd, args.userId);
+  return getUsageTripMeter({ db: args.db, userId: args.userId });
 }
 
 export function getUsageReport(args: {
@@ -1101,14 +1460,21 @@ export function getUsageReport(args: {
   userId: string;
   range: UsageRange;
   conversationId?: string | null;
+  /** Optional provider filter. `"local"` includes local + ollama + comfyui. */
+  provider?: UsageProviderFilter | null;
 }): UsageResponse {
+  // Re-home historical rows that older builds collapsed to system_unlabeled.
+  repairMisnormalizedUsagePurposes(args.db);
   const now = new Date();
   const rangeStart = rangeStartFor(args.range, now);
   const conversationId = args.conversationId?.trim() || null;
+  const providerFilter = parseUsageProviderFilter(args.provider);
+  const providers = providersForUsageFilter(providerFilter);
   const { where, params } = baseWhere({
     userId: args.userId,
     rangeStart,
     conversationId,
+    providers,
   });
   const totals = totalsFromRow(
     args.db.prepare(`SELECT ${aggregateSelect()} FROM usage_events WHERE ${where}`).get(
@@ -1152,7 +1518,9 @@ export function getUsageReport(args: {
     .prepare(
       `SELECT id, created_at, surface, mode, purpose, provider, model, event_type,
               input_tokens, output_tokens, total_tokens, token_count_source,
-              image_count, image_size, image_quality, cost_micro_usd, pricing_snapshot_json
+              image_count, image_size, image_quality, cost_micro_usd, pricing_snapshot_json,
+              workflow, workflow_stage, work_role, work_cache_hit,
+              work_fallback_reason, work_context_tokens_kept_local
        FROM usage_events
        WHERE ${where} AND privacy_scope != 'private'
        ORDER BY created_at DESC
@@ -1160,6 +1528,47 @@ export function getUsageReport(args: {
     )
     .all(...params)
     .map((row) => recentFromRow(row as UsageRecentRow));
+  const localFirstRows = args.db
+    .prepare(
+      `SELECT workflow, workflow_stage,
+              COUNT(*) AS assisted_operation_count,
+              COALESCE(SUM(CASE WHEN provider IN ('local', 'ollama', 'comfyui') THEN COALESCE(total_tokens, 0) ELSE 0 END), 0) AS local_tokens,
+              COALESCE(SUM(CASE WHEN provider IN ('openai', 'anthropic') THEN COALESCE(total_tokens, 0) ELSE 0 END), 0) AS online_tokens,
+              COALESCE(SUM(COALESCE(work_context_tokens_kept_local, 0)), 0) AS context_tokens_kept_local
+         FROM usage_events
+        WHERE ${where} AND workflow IS NOT NULL
+        GROUP BY workflow, workflow_stage
+        ORDER BY assisted_operation_count DESC, context_tokens_kept_local DESC
+        LIMIT 24`,
+    )
+    .all(...params) as unknown as UsageLocalFirstRow[];
+  const localFirst = {
+    localTokens: totals.localTokens,
+    onlineTokens: totals.onlineTokens,
+    assistedOperationCount: localFirstRows.reduce(
+      (sum, row) => sum + Number(row.assisted_operation_count ?? 0),
+      0,
+    ),
+    estimatedContextTokensKeptLocal: localFirstRows.reduce(
+      (sum, row) => sum + Number(row.context_tokens_kept_local ?? 0),
+      0,
+    ),
+    byAppletStage: localFirstRows.map((row) => {
+      const workflow = row.workflow?.trim() || "system";
+      const stage = row.workflow_stage?.trim() || "generation";
+      return {
+        key: `${workflow}:${stage}`,
+        workflow,
+        stage,
+        assistedOperationCount: Number(row.assisted_operation_count ?? 0),
+        localTokens: Number(row.local_tokens ?? 0),
+        onlineTokens: Number(row.online_tokens ?? 0),
+        estimatedContextTokensKeptLocal: Number(
+          row.context_tokens_kept_local ?? 0,
+        ),
+      };
+    }),
+  };
   const tracking = args.db
     .prepare("SELECT MIN(created_at) AS started_at FROM usage_events WHERE user_id = ?")
     .get(args.userId) as { started_at: string | null } | undefined;
@@ -1201,11 +1610,38 @@ export function getUsageReport(args: {
     byProvider,
     byModel,
     byPurpose,
+    localFirst,
     recentEvents,
     trackingStartedAt,
     hasUntrackedHistory: Boolean(historyRow?.found),
     conversationScoped: Boolean(conversationId),
+    providerFilter,
+    trip: getUsageTripMeter({ db: args.db, userId: args.userId }),
   };
+}
+
+export function providersForUsageFilter(
+  filter: UsageProviderFilter,
+): UsageProviderName[] | null {
+  if (filter === "all") return null;
+  if (filter === "local") return ["local", "ollama", "comfyui"];
+  return [filter];
+}
+
+export function parseUsageProviderFilter(
+  value: string | null | undefined,
+): UsageProviderFilter {
+  if (
+    value === "local" ||
+    value === "openai" ||
+    value === "anthropic" ||
+    value === "ollama" ||
+    value === "comfyui" ||
+    value === "unknown"
+  ) {
+    return value;
+  }
+  return "all";
 }
 
 export function parseUsageRange(value: string | null | undefined): UsageRange {

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -91,7 +91,11 @@ for (const entry of manifest.bots) {
     delete document.bot.audioVoiceProfileOverride;
     writeFileSync(botJsonPath, `${JSON.stringify(document, null, 2)}\n`);
     const rebuilt = join(scratch, basename(bundlePath));
-    execFileSync("zip", ["-X", "-q", rebuilt, "bot.json", "memories.json"], { cwd: scratch });
+    const zipEntries = ["bot.json"];
+    if (existsSync(join(scratch, "memories.json"))) {
+      zipEntries.push("memories.json");
+    }
+    execFileSync("zip", ["-X", "-q", rebuilt, ...zipEntries], { cwd: scratch });
     execFileSync("cp", [rebuilt, bundlePath]);
   } finally {
     rmSync(scratch, { recursive: true, force: true });

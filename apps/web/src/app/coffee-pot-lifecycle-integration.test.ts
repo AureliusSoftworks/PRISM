@@ -40,3 +40,19 @@ test("equipped pots support click, cancel, Escape, and phase cleanup", () => {
     /coffeePotDragRuntimeRef\.current = null;[\s\S]*clearCoffeeCupTopOffFillAnimation\(\);[\s\S]*setCoffeePotDrag\(null\);/,
   );
 });
+
+test("pot equip skips cup hit-testing and moves without full React position updates", () => {
+  assert.match(pageSource, /commitCoffeePotDragState\(nextDrag, \{ forceReactUpdate: true \}\)/);
+  assert.match(
+    pageSource,
+    /\/\/ Skip cup hit-testing on tray grab[\s\S]*commitCoffeePotDragState\(nextDrag, \{ forceReactUpdate: true \}\)/,
+  );
+  assert.match(
+    pageSource,
+    /Position updates go straight to the DOM[\s\S]*commitCoffeePotDragState\(nextDrag\)/,
+  );
+  assert.match(pageSource, /ref=\{coffeePotDragElementRef\}/);
+  assert.match(pageSource, /applyCoffeePotDragElementPosition/);
+  assert.match(pageSource, /coffeePotCupHitTestCacheRef/);
+  assert.match(pageSource, /nowMs - cache\.measuredAtMs < 200/);
+});

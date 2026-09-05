@@ -65,6 +65,17 @@ export function chatScrollShouldStartFollow(
 }
 
 /**
+ * An explicit outgoing turn temporarily centers its user row, so the viewport
+ * may no longer be near the native bottom when the assistant reply arrives.
+ * Follow that fresh reply unless the reader has taken manual ownership.
+ */
+export function chatScrollShouldStartFreshReplyFollow(
+  options: Pick<ChatScrollFollowOptions, "userOwnsViewport">,
+): boolean {
+  return !options.userOwnsViewport;
+}
+
+/**
  * Preserve the current bottom gap across streamed growth, message insertion,
  * deletion, and font reflow. Returning null leaves a user-owned viewport
  * completely untouched.

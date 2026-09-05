@@ -135,6 +135,39 @@ describe("BotAvatarDetailsV1", () => {
     );
   });
 
+  it("persists Speech ink animation independently and canonicalizes Default", () => {
+    for (const speechInkAnimation of [
+      "pulsate",
+      "spin",
+      "flicker",
+      "wobble",
+    ] as const) {
+      assert.equal(
+        parseBotAvatarDetailsV1({
+          ...details(),
+          screen: { ...details().screen, speechInkAnimation },
+        }).screen.speechInkAnimation,
+        speechInkAnimation
+      );
+    }
+
+    assert.deepEqual(
+      parseBotAvatarDetailsV1({
+        ...details(),
+        screen: { ...details().screen, speechInkAnimation: "none" },
+      }),
+      details()
+    );
+    assert.throws(
+      () =>
+        parseBotAvatarDetailsV1({
+          ...details(),
+          screen: { ...details().screen, speechInkAnimation: "bounce" },
+        }),
+      /speechInkAnimation must be one of none, pulsate, spin, flicker, wobble/i
+    );
+  });
+
   it("rejects invalid ink visibility settings and unknown screen keys", () => {
     assert.throws(
       () =>

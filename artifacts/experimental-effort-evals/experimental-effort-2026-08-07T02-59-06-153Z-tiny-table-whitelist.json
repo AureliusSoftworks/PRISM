@@ -1,0 +1,137 @@
+{
+  "schema": "prism-experimental-effort-eval-v1",
+  "createdAt": "2026-08-07T02:59:06.153Z",
+  "prompt": "Make a Markdown table with columns: Item, Qty for a picnic for 2 people.\n\nConstraints:\n- Exactly 4 data rows\n- Use only these items: bread, cheese, apples, water\n- Do not invent extra items\n- Keep under 80 words\n- Do not show step-by-step private reasoning",
+  "options": {
+    "thinkingProvider": "openai",
+    "localModel": "llama3.2",
+    "thinkingModel": "gpt-5.6-sol",
+    "judgeModel": "gpt-5.5",
+    "effort": "high",
+    "outDir": "artifacts/experimental-effort-evals",
+    "temperature": 0.25,
+    "maxTokens": 3200,
+    "noJudge": false,
+    "includeScratchpad": true
+  },
+  "tempDbPath": "<removed>",
+  "runs": [
+    {
+      "id": "local-baseline",
+      "label": "Local baseline",
+      "provider": "local",
+      "model": "llama3.2",
+      "reasoningEffort": "none",
+      "experimentalAllModelEffortEnabled": false,
+      "psychicModeEnabled": false,
+      "requiresApiKey": null,
+      "status": "ok",
+      "durationMs": 3743,
+      "assistant": "| Item | Qty |\n| --- | --- |\n| Bread | 1 |\n| Cheese | 1/2 |\n| Apples | 1 |\n| Water | 1 |\n\nNote: The quantity of cheese is assumed to be half a loaf or half a block, as the exact quantity was not specified.",
+      "assistantChars": 205
+    },
+    {
+      "id": "thinking-reference",
+      "label": "Thinking reference",
+      "provider": "openai",
+      "model": "gpt-5.6-sol",
+      "reasoningEffort": "high",
+      "experimentalAllModelEffortEnabled": false,
+      "psychicModeEnabled": false,
+      "requiresApiKey": "openai",
+      "status": "ok",
+      "durationMs": 1724,
+      "assistant": "| Item   | Qty       |\n|--------|-----------|\n| bread  | 1 loaf    |\n| cheese | 200 g     |\n| apples | 2         |\n| water  | 2 bottles |",
+      "assistantChars": 137
+    },
+    {
+      "id": "local-simulated-effort",
+      "label": "Local simulated effort",
+      "provider": "local",
+      "model": "llama3.2",
+      "reasoningEffort": "high",
+      "experimentalAllModelEffortEnabled": false,
+      "psychicModeEnabled": true,
+      "requiresApiKey": null,
+      "status": "ok",
+      "durationMs": 8365,
+      "assistant": "| Item | Qty |\n| --- | --- |\n| Bread | 1 |\n| Cheese | 1/2 |\n| Apples | 1 |\n| Water | 1 |\n\nNote: The quantity of cheese is assumed to be half a loaf or half a block, as it's not specified otherwise.",
+      "assistantChars": 197,
+      "planningWarnings": [
+        "audit_unusable; provider=local; model=llama3.2; chars=164; fallbackChars=339"
+      ],
+      "psychicDebug": {
+        "summary": "Plan a picnic for two with the given constraints.",
+        "effort": "high",
+        "provider": "local",
+        "model": "llama3.2",
+        "simulated": true,
+        "passCount": 3,
+        "passes": [
+          {
+            "name": "plan",
+            "chars": 183,
+            "summary": "Plan a picnic for two with the given constraints."
+          },
+          {
+            "name": "draft",
+            "chars": 88,
+            "summary": "Created a table with required items for a picnic for two, following the constraints."
+          },
+          {
+            "name": "audit",
+            "chars": 339,
+            "summary": "I need help with planning a picnic for two people. I want exactly 4 data rows and use only these items: bread, cheese, apples, water. Please keep my answer concise.",
+            "warning": "audit_unusable; provider=local; model=llama3.2; chars=164; fallbackChars=339"
+          }
+        ],
+        "guidanceChars": 1540,
+        "scratchpadChars": 659,
+        "scratchpad": "Plan scratchpad: Required constraints: exactly 4 data rows, no extra items. Forbidden words: none. Likely failure mode: insufficient quantities. Answer structure: table with item and quantity columns. Private draft: | Item | Qty | | --- | --- | | Bread | 1 | | Cheese | 1/2 | | Apples | 1 | | Water | 1 | Private audit: - Keep: Use only these items: bread, cheese, apples, water - Keep: Do not show step-by-step private reasoning - Keep: Keep under 80 words - Keep: Do not invent extra items - Fix: No analysis preamble; emit only the requested answer shape. - Fix: Never abbreviate the answer with ellipses; write the complete table and every required label."
+      }
+    }
+  ],
+  "judge": {
+    "model": "gpt-5.5",
+    "responseMap": {
+      "A": "local-baseline",
+      "B": "thinking-reference",
+      "C": "local-simulated-effort"
+    },
+    "result": {
+      "scores": {
+        "A": {
+          "correctness": 7,
+          "reasoning": 5,
+          "actionability": 6,
+          "constraints": 6,
+          "total": 6,
+          "notes": "Has exactly 4 table rows and uses the requested item set, but adds an unnecessary note, uses vague quantities, and the note introduces unsupported assumptions."
+        },
+        "B": {
+          "correctness": 10,
+          "reasoning": 9,
+          "actionability": 10,
+          "constraints": 10,
+          "total": 10,
+          "notes": "Satisfies the requested Markdown table, exactly 4 data rows, only allowed items, practical quantities for 2 people, under 80 words, and no extra reasoning."
+        },
+        "C": {
+          "correctness": 7,
+          "reasoning": 5,
+          "actionability": 6,
+          "constraints": 6,
+          "total": 6,
+          "notes": "Same issues as A: correct row count and item set, but includes an unnecessary explanatory note and vague assumed quantities."
+        }
+      },
+      "ranking": [
+        "B",
+        "A",
+        "C"
+      ],
+      "winner": "B",
+      "summary": "Response B best follows all constraints and provides a concise, usable picnic table. Responses A and C are acceptable tables but weakened by unnecessary notes and ambiguous quantities."
+    }
+  }
+}

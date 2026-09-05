@@ -24,6 +24,7 @@ function createTestDb(): DatabaseSync {
       user_id TEXT NOT NULL,
       conversation_id TEXT,
       bot_id TEXT,
+      target_bot_id TEXT,
       ciphertext TEXT NOT NULL,
       iv TEXT NOT NULL,
       tag TEXT NOT NULL,
@@ -86,6 +87,7 @@ function insertMemory(
     id: string;
     userId?: string;
     botId: string | null;
+    targetBotId?: string | null;
     text: string;
     source?: "direct" | "inferred" | "compiled" | "about_you";
     category?: "general" | "user" | "bot_relation";
@@ -99,13 +101,14 @@ function insertMemory(
   const encrypted = encryptJson({ text: args.text }, USER_KEY);
   db.prepare(
     `INSERT INTO memories (
-       id, user_id, conversation_id, bot_id, ciphertext, iv, tag, confidence,
+       id, user_id, conversation_id, bot_id, target_bot_id, ciphertext, iv, tag, confidence,
        category, tier, durability, source, certainty, source_message_ids, created_at
-     ) VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+     ) VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     args.id,
     args.userId ?? "user-1",
     args.botId,
+    args.targetBotId ?? null,
     encrypted.ciphertext,
     encrypted.iv,
     encrypted.tag,
@@ -116,7 +119,7 @@ function insertMemory(
     args.source ?? "direct",
     args.certainty ?? args.confidence ?? 0.8,
     JSON.stringify(["m-1"]),
-    args.createdAt ?? `2026-01-01T00:00:0${args.id.slice(-1)}.000Z`
+    args.createdAt ?? `2026-08-11T00:00:0${args.id.slice(-1)}.000Z`
   );
 }
 
@@ -198,6 +201,40 @@ describe("loadBotMemoryPanelPayload", () => {
         }),
       /Conversation not found/
     );
+  });
+
+  it("shows a directed Signal memory only in the remembering bot's panel", () => {
+    const db = createTestDb();
+    insertMemory(db, {
+      id: "mem-pair",
+      botId: "bot-1",
+      targetBotId: "bot-2",
+      text: "Aster completed a Signal episode with Beryl about interruption etiquette.",
+      category: "bot_relation",
+      tier: "long_term",
+      confidence: 0.98,
+      durability: 0.95,
+    });
+
+    const sourcePanel = loadBotMemoryPanelPayload({
+      db,
+      userId: "user-1",
+      userKey: USER_KEY,
+      botId: "bot-1",
+    });
+    const targetPanel = loadBotMemoryPanelPayload({
+      db,
+      userId: "user-1",
+      userKey: USER_KEY,
+      botId: "bot-2",
+    });
+
+    assert.deepEqual(sourcePanel.memories.map((memory) => memory.id), [
+      "mem-pair",
+    ]);
+    assert.equal(sourcePanel.counts.byCategory.bot_relation, 1);
+    assert.equal(sourcePanel.counts.byTier.long_term, 1);
+    assert.equal(targetPanel.counts.total, 0);
   });
 
   it("returns durable bot opinion and only the matching conversation opinion", () => {

@@ -8,6 +8,7 @@ function show(overrides: Partial<BotcastShow> = {}): BotcastShow {
   return {
     id: "show-1",
     hostBotId: "host-1",
+    hasActiveHost: true,
     name: "Signal Test",
     premise: "A test show.",
     hostingStyle: "curious",
@@ -21,6 +22,7 @@ function show(overrides: Partial<BotcastShow> = {}): BotcastShow {
       imageUrl: "/night.png",
     } as BotcastShow["nightAtmosphere"],
     studioLayout: {} as BotcastShow["studioLayout"],
+    cameraFraming: {} as BotcastShow["cameraFraming"],
     voiceLevelsByBotId: {},
     atmosphereMix: {} as BotcastShow["atmosphereMix"],
     logo: { imageUrl: "/logo.png" } as BotcastShow["logo"],
@@ -28,6 +30,10 @@ function show(overrides: Partial<BotcastShow> = {}): BotcastShow {
     atmosphereAudio: {
       source: "elevenlabs",
     } as BotcastShow["atmosphereAudio"],
+    musicIdentity: {} as BotcastShow["musicIdentity"],
+    hostRecoveryQuestions: [],
+    studioLighting: {} as BotcastShow["studioLighting"],
+    studioGlowTuning: {} as BotcastShow["studioGlowTuning"],
     createdAt: "2026-01-01T00:00:00.000Z",
     updatedAt: "2026-01-01T00:00:00.000Z",
     episodeCount: 0,

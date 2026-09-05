@@ -1,6 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
+  coffeeInterruptionTranscriptSegments,
   coffeeInterruptionReactionCandidates,
   pickCoffeeInterruptionReaction,
   type CoffeeReactionStyle,
@@ -9,7 +10,15 @@ import {
 
 describe("Coffee interruption reactions", () => {
   it("provides more than eighty reviewed style/tone/outcome combinations", () => {
-    const styles: CoffeeReactionStyle[] = ["neutral", "warm", "concise", "playful", "formal"];
+    const styles: CoffeeReactionStyle[] = [
+      "neutral",
+      "warm",
+      "concise",
+      "playful",
+      "formal",
+      "reflective",
+      "direct",
+    ];
     const tones: CoffeeReactionTone[] = ["surprised", "annoyed", "firm", "wounded"];
     const outcomes = ["react", "yield", "resume"] as const;
     const lines = new Set(
@@ -42,5 +51,99 @@ describe("Coffee interruption reactions", () => {
       seed: "turn-1",
       avoid: [first],
     }), first);
+  });
+
+  it("projects only audible bot-to-bot pause cues in speaker order", () => {
+    const segments = coffeeInterruptionTranscriptSegments({
+      sourceMessageId: "pause-1",
+      sourceContent: "...",
+      interruption: {
+        kind: "botInterruptsBot",
+        interruptedBotId: "speaker",
+        interrupterBotId: "interrupter",
+        pauseBeat: true,
+        interrupterCue: "Hold on.",
+        interruptedSpeakerCue: "... sure. Go ahead.",
+        reactionText: "This normal reply must not be duplicated.",
+        socialConsequences: [],
+      },
+    });
+
+    assert.deepEqual(segments, [
+      {
+        id: "pause-1:coffee-interruption:interrupter",
+        sourceMessageId: "pause-1",
+        kind: "interrupterCue",
+        speakerBotId: "interrupter",
+        text: "Hold on.",
+        sequence: 0,
+      },
+      {
+        id: "pause-1:coffee-interruption:interrupted",
+        sourceMessageId: "pause-1",
+        kind: "interruptedSpeakerCue",
+        speakerBotId: "speaker",
+        text: "... sure. Go ahead.",
+        sequence: 1,
+      },
+    ]);
+    assert.equal(
+      segments.some((segment) =>
+        segment.text.includes("normal reply"),
+      ),
+      false,
+    );
+  });
+
+  it("prefers Power-projected gibberish without exposing canned English", () => {
+    const segments = coffeeInterruptionTranscriptSegments({
+      sourceMessageId: "pause-mumbled",
+      sourceContent: "...",
+      interruption: {
+        kind: "botInterruptsBot",
+        interruptedBotId: "speaker",
+        interrupterBotId: "interrupter",
+        pauseBeat: true,
+        publicInterrupterCue: "Mrahguh.",
+        interrupterCueSpeechEffect: "speech_obfuscation",
+        publicInterruptedSpeakerCue: "... yuhm nahsh.",
+        interruptedSpeakerCueSpeechEffect: "speech_obfuscation",
+        socialConsequences: [],
+      },
+    });
+    assert.deepEqual(
+      segments.map((segment) => segment.text),
+      ["Mrahguh.", "... yuhm nahsh."],
+    );
+  });
+
+  it("rejects actions, non-bot interruptions, and malformed carriers", () => {
+    assert.deepEqual(
+      coffeeInterruptionTranscriptSegments({
+        sourceMessageId: "pause-gesture",
+        sourceContent: "*raises a finger*",
+        interruption: {
+          kind: "playerInterruptsBot",
+          interruptedBotId: "speaker",
+          pauseBeat: true,
+          reactionText: "I was not done.",
+          socialConsequences: [],
+        },
+      }),
+      [],
+    );
+    assert.deepEqual(
+      coffeeInterruptionTranscriptSegments({
+        sourceMessageId: "pause-malformed",
+        sourceContent: "...",
+        interruption: {
+          kind: "botInterruptsBot",
+          interruptedBotId: "speaker",
+          pauseBeat: true,
+          socialConsequences: [],
+        },
+      }),
+      [],
+    );
   });
 });

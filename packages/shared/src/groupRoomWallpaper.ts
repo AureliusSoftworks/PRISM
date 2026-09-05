@@ -1,9 +1,16 @@
 /** Image purpose used for saved Bot Group waiting-room atmosphere art. */
 export const GROUP_ROOM_WALLPAPER_IMAGE_PURPOSE = "group-room-wallpaper" as const;
 
-/** Saved Bot Groups require at least two members and cap at twenty-four. */
-export const GROUP_ROOM_WALLPAPER_MEMBER_COUNT_MIN = 2;
-export const GROUP_ROOM_WALLPAPER_MEMBER_COUNT_MAX = 24;
+import {
+  BOT_LIBRARY_GROUP_MEMBER_MAX,
+  BOT_LIBRARY_GROUP_MEMBER_MIN,
+} from "./libraryGroup.ts";
+
+/** Room generation accepts the complete saved Library group roster. */
+export const GROUP_ROOM_WALLPAPER_MEMBER_COUNT_MIN =
+  BOT_LIBRARY_GROUP_MEMBER_MIN;
+export const GROUP_ROOM_WALLPAPER_MEMBER_COUNT_MAX =
+  BOT_LIBRARY_GROUP_MEMBER_MAX;
 
 /** Bounds shared by the client request and the server-side validator. */
 export const GROUP_ROOM_WALLPAPER_GROUP_NAME_MAX_LENGTH = 80;

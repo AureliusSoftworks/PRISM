@@ -4,6 +4,7 @@ import { describe, it } from "node:test";
 
 import {
   chatScrollIsNearBottom,
+  chatScrollShouldStartFreshReplyFollow,
   chatScrollShouldStartFollow,
   chatScrollTopAfterLayoutChange,
   chatScrollUserOwnsViewportAfterNativeScroll,
@@ -79,6 +80,23 @@ describe("Product Chat scroll follow", () => {
     );
   });
 
+  it("follows a fresh second reply from the intentionally centered user row", () => {
+    const centeredOutgoingTurn = metrics(900, 2_200);
+    assert.equal(chatScrollIsNearBottom(centeredOutgoingTurn), false);
+    assert.equal(
+      chatScrollShouldStartFreshReplyFollow({
+        userOwnsViewport: false,
+      }),
+      true,
+    );
+    assert.equal(
+      chatScrollShouldStartFreshReplyFollow({
+        userOwnsViewport: true,
+      }),
+      false,
+    );
+  });
+
   it("stays stable through rapid deletion followed by insertion", () => {
     const before = metrics(880, 1_500);
     const afterDeletion = metrics(480, 1_100);
@@ -138,6 +156,17 @@ describe("Product Chat scroll follow", () => {
     assert.match(
       rawPageSource,
       /reconcileChatScrollAfterLayoutChange\(detail\.id\)/,
+    );
+  });
+
+  it("uses fresh-reply follow semantics for the reveal loop and delayed re-arm", () => {
+    assert.equal(
+      (
+        rawPageSource.match(
+          /chatScrollShouldStartFreshReplyFollow\(\{/g,
+        ) ?? []
+      ).length,
+      2,
     );
   });
 

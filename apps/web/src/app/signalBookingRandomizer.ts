@@ -29,3 +29,18 @@ export function randomSignalEpisodeGuestId(args: {
     random,
   );
 }
+
+/**
+ * A bot captured directly with Wield remains the booking anchor even when the
+ * suggestion response proposes a different guest. Ordinary random bookings
+ * still accept the provider's coherent guest choice.
+ */
+export function resolvedSignalBookingGuestId(args: {
+  anchoredGuestId?: string;
+  suggestedGuestId?: string;
+  requestedGuestId: string;
+}): string {
+  return (
+    args.anchoredGuestId ?? args.suggestedGuestId ?? args.requestedGuestId
+  );
+}

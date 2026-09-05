@@ -14,21 +14,31 @@ const pageCss = readFileSync(
 ).replace(/\s+/gu, " ");
 
 describe("Coffee group dashboard composer routing", () => {
-  it("renders a Start Session action instead of an editable composer", () => {
+  it("routes group home through the compact Table Setup desk and one footer", () => {
+    assert.match(pageSource, /<h2>Table Setup<\/h2>/);
+    assert.match(pageSource, /Set the table/);
+    assert.match(pageSource, /← Back to group/);
+    assert.match(pageSource, /coffeeTableSetupFooter/);
+    assert.match(pageSource, /coffeeTableSetupPrimaryButton/);
+    assert.match(pageSource, /coffeeTableGuestSummary/);
+    assert.match(pageSource, /coffeeTableTopicSummary/);
+    assert.match(pageSource, /coffeeTableVisitSummary/);
+    assert.match(pageSource, /coffeeTablePresetSummary/);
+    assert.match(pageSource, /more needed/);
+    assert.equal(
+      (
+        pageSource.match(
+          /onClick=\{\(\) => void startCoffeeSessionFromSelectedSetup\(\)\}/g,
+        ) ?? []
+      ).length,
+      1,
+    );
     assert.match(
       pageSource,
-      /coffeeSessionPhase === "selecting" && !conversationActive && coffeeSelectedGroup !== null/,
+      /coffeeSelectedGroup !== null\s*\? null\s*:\s*coffeeChromePolicy\.reviewActive/,
     );
-    assert.match(pageSource, /data-coffee-group-start-composer="true"/);
-    assert.match(
-      pageSource,
-      /`Start session with \$\{coffeeGroupStartCount\}`/,
-    );
-    assert.match(pageSource, /void startCoffeeSessionFromSelectedSetup\(\);/);
-    assert.match(
-      pageSource,
-      /coffeeGroupStartComposerVisible\s*\? renderCoffeeGroupStartComposer\(\)/,
-    );
+    assert.doesNotMatch(pageSource, /data-coffee-group-start-composer=/);
+    assert.doesNotMatch(pageSource, /SessionThresholdCard/);
   });
 
   it("keeps the typed topic composer behind an active Coffee conversation", () => {
@@ -42,6 +52,16 @@ describe("Coffee group dashboard composer routing", () => {
       /const coffeeComposerVisible =\s*conversationActive &&/,
     );
     assert.match(shellSetup, /coffeeSessionPhase === "topic"/);
+    // Serve still needs the Coffee topic composer; otherwise the shell falls
+    // through to coffee-global and hands the draft into Zen/chat.
+    assert.match(
+      shellSetup,
+      /coffeeSessionPhase === "topic" \|\| \(!coffeeIsServeExperience &&/,
+    );
+    assert.match(
+      pageSource,
+      /coffeeSessionPhase === "topic" \|\| coffeeSessionPhase === "arriving" \|\| coffeeSessionPhase === "live" \? null : renderShellComposer\(\{ variant: "coffee-global"/,
+    );
   });
 
   it("restores a recent session into an editable Coffee setup", () => {
@@ -55,10 +75,7 @@ describe("Coffee group dashboard composer routing", () => {
       pageSource,
       /setCoffeeExcludedBotIds\(new Set\(retry\.excludedBotIds\)\)/,
     );
-    assert.match(
-      pageSource,
-      /setCoffeeSelectedDurationMinutes\(retry\.durationMinutes\)/,
-    );
+    assert.match(pageSource, /setCoffeeSelectedDurationMinutes\(/);
     assert.match(pageSource, /setCoffeeSessionSettings\(retry\.settings\)/);
     assert.match(pageSource, /coffeeSettings: coffeeSessionSettings/);
     assert.match(pageSource, /deferTopicSelection: true/);
@@ -74,5 +91,46 @@ describe("Coffee group dashboard composer routing", () => {
     assert.match(pageCss, /\.coffeeRestoredSetupNotice \{/);
     assert.match(pageCss, /\.coffeeGroupRecentSessionRow \{/);
     assert.match(pageCss, /\.coffeeGroupRecentSessionReuse \{/);
+  });
+
+  it("exposes the Join or Serve choice and sends it with a group start", () => {
+    assert.match(pageSource, /coffeeExperienceModePicker/);
+    assert.match(pageSource, /Join for Coffee/);
+    assert.match(pageSource, /Serve Coffee/);
+    assert.match(
+      pageSource,
+      /experienceMode:\s*coffeeSelectedExperienceMode/,
+    );
+    assert.doesNotMatch(
+      pageSource,
+      /experienceMode:\s*isCoffeeExperienceMode\(\s*coffeeSessionSettings\.experienceMode/,
+      "stale settings must not override the visible Join or Serve choice",
+    );
+    assert.match(
+      pageSource,
+      /const coffeeExperienceAllowsPot = coffeeLiveExperienceMode === "serve"/,
+    );
+    assert.match(
+      pageSource,
+      /function coffeeExperienceModeForConversation\([\s\S]{0,500}coffeeSessionDurationMinutes === "number"[\s\S]{0,120}\? "serve"[\s\S]{0,80}: "join"/,
+      "legacy timed Serve sessions must resolve identically on the stage and composer dock",
+    );
+    assert.equal(
+      (pageSource.match(/coffeeExperienceModeForConversation\(coffeeConversation\)/g) ?? [])
+        .length,
+      2,
+    );
+    assert.match(
+      pageSource,
+      /const coffeePotComposerDockVisible =[\s\S]{0,260}coffeeExperienceAllowsPot/,
+    );
+    assert.match(
+      pageSource,
+      /!coffeeReplayActive &&\s*coffeeExperienceAllowsPot/,
+      "live Serve owns the pot while faithful replay keeps its separate dock",
+    );
+    assert.match(pageSource, /coffeeSelectedExperienceMode === "serve"/);
+    assert.match(pageSource, /coffeeSelectedExperienceMode === "join"/);
+    assert.match(pageCss, /\.coffeeExperienceModeField \{/);
   });
 });

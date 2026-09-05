@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 
 import {
   BOTCAST_PRODUCER_GUEST_ID,
+  createBotIdentityMirrorStateV1,
   type BotcastEpisode,
   type BotcastShow,
 } from "@localai/shared";
@@ -24,6 +25,7 @@ const episode: BotcastEpisode = {
   guestBotId: "guest-1",
   topic: "When helpful gets chaotic",
   producerBrief: "Find the exact moment assistance becomes control.",
+  guestBrief: "You already know which final decision was taken from you.",
   guestPresenceMode: "present",
   provider: "local",
   model: "primary-model",
@@ -174,6 +176,19 @@ const episode: BotcastEpisode = {
       id: "event-6",
       episodeId: "episode-1",
       sequence: 7,
+      kind: "session_clock_hold",
+      payload: {
+        holdId: "episode-1:run-2:1000",
+        reason: "foreground_generation",
+        durationMs: 30_000,
+        recovery: "preparation_timeout",
+      },
+      occurredAt: "2026-07-17T17:00:44.000Z",
+    },
+    {
+      id: "event-7",
+      episodeId: "episode-1",
+      sequence: 8,
       kind: "episode_completed",
       payload: { outcome: "completed", runtimeMs: 38_300 },
       occurredAt: "2026-07-17T17:01:00.000Z",
@@ -192,10 +207,15 @@ describe("Signal review transcript", () => {
     });
 
     assert.match(transcript, /^# PRISM Signal Review Transcript/u);
+    assert.match(transcript, /Review format: 2/u);
     assert.match(transcript, /Use \$signal-review/u);
     assert.match(
       transcript,
       /- Private producer brief: Find the exact moment/u,
+    );
+    assert.match(
+      transcript,
+      /- Private guest briefing: You already know which final decision/u,
     );
     assert.match(transcript, /- Host: Ada \(host-1\)/u);
     assert.match(transcript, /- Guest: Grace \(guest-1\)/u);
@@ -207,7 +227,12 @@ describe("Signal review transcript", () => {
     assert.match(transcript, /- Completed model warmup holds: 00:01\.250/u);
     assert.match(
       transcript,
-      /- Counts: 2 transcript turns \(2 with spoken content, 0 silence-only\), 2 segments, 7 production events/u,
+      /- Foreground recoveries after preparation timeout: 1/u,
+    );
+    assert.match(transcript, /- Live voice stall recoveries: 0/u);
+    assert.match(
+      transcript,
+      /- Counts: 2 transcript turns \(2 with spoken content, 0 silence-only\), 2 segments, 8 production events/u,
     );
     assert.match(transcript, /## Transcript/u);
     assert.match(transcript, /### Turn 01 \| 00:00\.000 \| Ada \(host\)/u);
@@ -217,10 +242,15 @@ describe("Signal review transcript", () => {
     );
     assert.match(
       transcript,
+      /- Generation: Auto → local\/fallback-model · Effort None · Recovered after 2 attempts/u,
+    );
+    assert.match(
+      transcript,
       /- AUTO recovery: \{"attempts":2,"recoveredFrom":"primary-model"\}/u,
     );
     assert.match(transcript, /- ONLINE retry: None recorded/u);
     assert.match(transcript, /- Immersive voice effect: yes/u);
+    assert.match(transcript, /- Live voice recovery: None recorded/u);
     assert.match(
       transcript,
       /    What did the help cost you\?\n    Be specific\./u,
@@ -243,7 +273,12 @@ describe("Signal review transcript", () => {
       /\| power_effect \| event event-power \| \{"occurredAtMs":0,"polarity":"negative","powerId":"power-intimidation","powerName":"Intimidation","sourceBotId":"guest-1","strength":"large","targetBotId":"host-1","trigger":"session_start","version":1\}/u,
     );
     assert.match(transcript, /\| camera_suggestion \| event event-5/u);
-    assert.match(transcript, /\| episode_completed \| event event-6/u);
+    assert.match(transcript, /\| episode_completed \| event event-7/u);
+    assert.match(transcript, /Recording diagnostics: unavailable/u);
+    assert.match(
+      transcript,
+      /recorded post-validation utterance; raw provider draft not preserved/u,
+    );
   });
 
   it("keeps a useful record when legacy turns lack matching utterance events", () => {
@@ -260,13 +295,180 @@ describe("Signal review transcript", () => {
       guest: { id: "guest-1", name: "Grace" },
     });
 
-    assert.match(transcript, /- Episode model: Provider default/u);
+    assert.match(transcript, /- Episode model: Auto/u);
     assert.match(transcript, /- Segment: unknown/u);
     assert.match(
       transcript,
       /- Turn routing: auto -> unknown -> provider default or unrecorded/u,
     );
     assert.match(transcript, /No production events were recorded\./u);
+  });
+
+  it("explains active Identity Crisis presentation without implying persona or voice replacement", () => {
+    const identityMirrorState = createBotIdentityMirrorStateV1({
+      surface: "signal",
+      holderBotId: "guest-1",
+      holderBotName: "Grace",
+      targetBotId: "host-1",
+      targetBotName: "Ada",
+      targetPersonaPrompt: "A patient interviewer.",
+      targetFace: {},
+      holderVoice: { v: 2, enabled: true, baseVoiceId: "voice-2" },
+      sourceMessageId: "message-1",
+      occurredAt: "2026-07-17T17:00:04.000Z",
+    });
+    const transcript = buildSignalReviewTranscript({
+      episode: {
+        ...episode,
+        events: [
+          episode.events[2]!,
+          {
+            id: "event-identity-mirror",
+            episodeId: episode.id,
+            sequence: 4,
+            kind: "power_effect",
+            payload: {
+              effect: "identity_mirror",
+              state: identityMirrorState,
+            },
+            occurredAt: "2026-07-17T17:00:04.000Z",
+          },
+          {
+            ...episode.events[4]!,
+            sequence: 5,
+          },
+        ],
+      },
+      show,
+      host: { id: "host-1", name: "Ada" },
+      guest: { id: "guest-1", name: "Grace" },
+    });
+
+    assert.match(
+      transcript,
+      /Active identity mirror: Grace is wearing Ada's public presentation; the holder's underlying persona and voice remain their own by design\./u,
+    );
+  });
+
+  it("exports bounded live voice recovery beside its canonical turn", () => {
+    const transcript = buildSignalReviewTranscript({
+      episode: {
+        ...episode,
+        events: [
+          ...episode.events,
+          {
+            id: "event-voice-recovery",
+            episodeId: episode.id,
+            sequence: 9,
+            kind: "voice_playback_recovery",
+            payload: {
+              v: 1,
+              messageId: "message-1",
+              reason: "progress_stalled",
+              elapsedMs: 120,
+              durationMs: 8_400,
+              outcome: "advanced_after_bounded_stop",
+            },
+            occurredAt: "2026-07-17T17:00:13.000Z",
+          },
+        ],
+      },
+      show,
+      host: { id: "host-1", name: "Ada" },
+      guest: { id: "guest-1", name: "Grace" },
+    });
+
+    assert.match(transcript, /- Live voice stall recoveries: 1/u);
+    assert.match(
+      transcript,
+      /- Live voice recovery: progress_stalled at 00:00\.120 \/ 00:08\.400 \(event event-voice-recovery\)/u,
+    );
+  });
+
+  it("exports accepted review provenance without hidden reviewer instructions", () => {
+    const transcript = buildSignalReviewTranscript({
+      episode: {
+        ...episode,
+        personaReview: {
+          reviewerBotId: "reviewer-1",
+          reviewerName: "Nia Cross",
+          rating: 3.5,
+          comment: "I wanted one more question about the cost.",
+          createdAt: "2026-07-17T17:02:00.000Z",
+          provenance: {
+            version: 1,
+            artifactHash: "artifact-hash",
+            reviewerSnapshotHash: "reviewer-hash",
+            reviewerSnapshot: { version: 1, reviewerId: "reviewer-1", reviewerName: "Nia Cross" },
+            rubricId: "signal.audience-pulse",
+            rubricVersion: 1,
+            provider: "local",
+            model: "review-model",
+            acceptedAt: "2026-07-17T17:02:00.000Z",
+            output: { rating: 3.5, comment: "I wanted one more question about the cost." },
+          },
+        },
+      },
+      show,
+      host: { id: "host-1", name: "Ada" },
+      guest: { id: "guest-1", name: "Grace" },
+    });
+
+    assert.match(transcript, /## Accepted Listener Review/u);
+    assert.match(transcript, /- Artifact hash: artifact-hash/u);
+    assert.match(transcript, /- Frozen reviewer: Nia Cross \(reviewer-1\); hash reviewer-hash/u);
+    assert.match(transcript, /- Rubric: signal\.audience-pulse v1/u);
+    assert.match(transcript, /- Review route: local -> review-model/u);
+    assert.doesNotMatch(transcript, /systemPrompt|skeptical listener/u);
+  });
+
+  it("records cue lifecycle without leaking private cue wording into review output", () => {
+    const privateDirection = "Say this exact private sentence to the guest.";
+    const transcript = buildSignalReviewTranscript({
+      episode: {
+        ...episode,
+        events: [
+          ...episode.events,
+          {
+            id: "cue-queued",
+            episodeId: episode.id,
+            sequence: 8,
+            kind: "producer_cue",
+            payload: {
+              cueId: "cue-private",
+              lifecycle: "queued",
+              kind: "ask_about",
+              directQuote: privateDirection,
+              delivery: "next_host_turn",
+              priority: "immediate",
+            },
+            occurredAt: "2026-07-17T17:01:01.000Z",
+          },
+          {
+            id: "cue-failed",
+            episodeId: episode.id,
+            sequence: 9,
+            kind: "producer_cue",
+            payload: {
+              cueId: "cue-private",
+              lifecycle: "failed",
+              failure: "privacy_validation",
+            },
+            occurredAt: "2026-07-17T17:01:02.000Z",
+          },
+        ],
+      },
+      show,
+      host: { id: "host-1", name: "Ada" },
+      guest: { id: "guest-1", name: "Grace" },
+    });
+
+    assert.match(transcript, /## Producer Cue Lifecycle/u);
+    assert.match(
+      transcript,
+      /Cue cue-private \| failed \| privacy_validation \| next_host_turn \| immediate/u,
+    );
+    assert.doesNotMatch(transcript, /Say this exact private sentence/u);
   });
 
   it("identifies Producer guest composer turns as human-authored", () => {
@@ -302,6 +504,10 @@ describe("Signal review transcript", () => {
     );
     assert.match(
       transcript,
+      /- Generation: Not model-generated \(human-authored\)\./u,
+    );
+    assert.match(
+      transcript,
       /- AUTO recovery: Not applicable \(human-authored\)/u,
     );
     assert.match(
@@ -319,6 +525,15 @@ describe("Signal review transcript", () => {
             ...episode.messages[0]!,
             content: "...",
             voicePerformanceText: null,
+            mutePerformance: {
+              v: 1,
+              name: "mutePerformance",
+              durationMs: 9_000,
+              periodCount: 9,
+              interrupted: false,
+              elapsedCue: "*9 seconds pass without an audible word.*",
+              reactionBeats: [],
+            },
           },
           episode.messages[1]!,
         ],
@@ -330,10 +545,14 @@ describe("Signal review transcript", () => {
 
     assert.match(
       transcript,
-      /- Counts: 2 transcript turns \(1 with spoken content, 1 silence-only\), 2 segments, 7 production events/u,
+      /- Counts: 2 transcript turns \(1 with spoken content, 1 silence-only\), 2 segments, 8 production events/u,
     );
     assert.doesNotMatch(transcript, /spoken turns/u);
     assert.doesNotMatch(transcript, /Spoken Transcript/u);
+    assert.match(
+      transcript,
+      /- Visible transcript:\n    \.{6}/u,
+    );
     assert.match(transcript, /Use the visible transcript for user-visible quality/u);
   });
 
@@ -384,6 +603,326 @@ describe("Signal review transcript", () => {
     assert.match(
       transcript,
       /- ONLINE retry: \{"attempts":\[\{"durationMs":410,"httpStatus":500,"model":"gpt-signal","outcome":"failed","provider":"openai","reason":"provider_error"\},\{"durationMs":220,"model":"gpt-signal","outcome":"succeeded","provider":"openai"\}\],"finalModel":"gpt-signal","finalProvider":"openai","strategy":"same_route_retry","v":1\}/u,
+    );
+  });
+
+  it("places repair provenance and silent thinking direction beside review evidence", () => {
+    const transcript = buildSignalReviewTranscript({
+      episode: {
+        ...episode,
+        events: episode.events.map((event) =>
+          event.id === "event-2"
+            ? {
+                ...event,
+                payload: {
+                  ...event.payload,
+                  utteranceRepair: {
+                    reason: "peer_label",
+                    fallbackKind: "host_follow_up",
+                  },
+                },
+              }
+            : event,
+        ),
+      },
+      show,
+      host: { id: "host-1", name: "Ada" },
+      guest: { id: "guest-1", name: "Grace" },
+      recordingEvidence: {
+        state: "recorded",
+        recordingId: "recording-1",
+        availability: "faithful",
+        status: "ready",
+        manifestVersion: 2,
+        audioDurationMs: 38_300,
+        timelineDurationMs: 38_300,
+        warningPresent: false,
+        warningDetail: null,
+        errorPresent: false,
+        errorDetail: null,
+        direction: [
+          {
+            sequence: 1,
+            atMs: 2_000,
+            endMs: 3_500,
+            kind: "thinking",
+            sourceMessageId: "message-1",
+            payload: {
+              participantId: "host",
+              botId: "host-1",
+              startMs: 2_000,
+              endMs: 3_500,
+              audible: false,
+              camera: "host",
+              segment: "opening",
+              followingMessageId: "message-1",
+              endReason: "completed",
+            },
+          },
+        ],
+      },
+    });
+
+    assert.match(
+      transcript,
+      /- Utterance repair: \{"fallbackKind":"host_follow_up","reason":"peer_label"\}/u,
+    );
+    assert.match(
+      transcript,
+      /recorded repaired\/fallback utterance; raw provider draft not preserved/u,
+    );
+    assert.match(transcript, /- Replay availability: faithful/u);
+    assert.match(
+      transcript,
+      /kind=thinking \| sourceMessageId=message-1 \| payload=.*"audible":false/u,
+    );
+    assert.match(transcript, /"followingMessageId":"message-1"/u);
+  });
+
+  it("annotates the interrupted turn and provenance for a producer host redirect", () => {
+    const transcript = buildSignalReviewTranscript({
+      episode: {
+        ...episode,
+        messages: [episode.messages[0]!],
+        events: [
+          episode.events[2]!,
+          {
+            id: "event-redirect",
+            episodeId: episode.id,
+            sequence: 4,
+            kind: "producer_cue",
+            payload: {
+              kind: "ask_about",
+              detail: "Ask what the first failure cost.",
+              delivery: "redirect_host",
+              audience: "host",
+              interruptedMessageId: "message-1",
+              pivotPerformance: {
+                v: 1,
+                cadence: "between_words",
+                transcriptMark: "ellipsis",
+                style: "throat_clear",
+                vocalFoley: "clears throat",
+              },
+            },
+            occurredAt: "2026-07-17T17:00:05.000Z",
+          },
+        ],
+        segments: [],
+      },
+      show,
+      host: { id: "host-1", name: "Ada" },
+      guest: { id: "guest-1", name: "Grace" },
+    });
+
+    assert.match(
+      transcript,
+      /- Producer interruption: redirect_host — ask_about \(ordinary; cut cadence: between_words; pivot style: throat_clear; vocal Foley: clears throat; event event-redirect\); this canonical turn contains only the audience-heard prefix/u,
+    );
+    assert.match(
+      transcript,
+      /- Event ID: event-redirect \| Delivery: redirect_host \| Priority: ordinary \| Kind: ask_about \| cut cadence: between_words; pivot style: throat_clear; vocal Foley: clears throat \| Interrupted message ID: message-1 \| Scheduled bridge: None \| Canonical interrupted message: yes/u,
+    );
+  });
+
+  it("annotates a canonical interrupt_guest prefix", () => {
+    const transcript = buildSignalReviewTranscript({
+      episode: {
+        ...episode,
+        messages: [episode.messages[1]!],
+        events: [
+          episode.events[4]!,
+          {
+            id: "event-guest-interrupt",
+            episodeId: episode.id,
+            sequence: 6,
+            kind: "producer_cue",
+            payload: {
+              kind: "press_harder",
+              delivery: "interrupt_guest",
+              audience: "host",
+              interruptedMessageId: "message-2",
+              interruptionBridgeLine: "Let me stop you there.",
+            },
+            occurredAt: "2026-07-17T17:00:13.000Z",
+          },
+        ],
+        segments: [],
+      },
+      show,
+      host: { id: "host-1", name: "Ada" },
+      guest: { id: "guest-1", name: "Grace" },
+    });
+
+    assert.match(
+      transcript,
+      /- Producer interruption: interrupt_guest — press_harder \(ordinary; event event-guest-interrupt\); this canonical turn contains only the audience-heard prefix/u,
+    );
+    assert.match(
+      transcript,
+      /Scheduled bridge: Let me stop you there\. \| Canonical interrupted message: yes/u,
+    );
+  });
+
+  it("records interrupt_guest provenance when no interrupted message is canonical", () => {
+    const transcript = buildSignalReviewTranscript({
+      episode: {
+        ...episode,
+        messages: [episode.messages[0]!],
+        events: [
+          episode.events[2]!,
+          {
+            id: "event-hidden-guest-interrupt",
+            episodeId: episode.id,
+            sequence: 4,
+            kind: "producer_cue",
+            payload: {
+              kind: "ask_about",
+              delivery: "interrupt_guest",
+              audience: "host",
+              interruptedMessageId: "cancelled-guest-draft",
+              interruptionBridgeLine: "Hold that thought.",
+            },
+            occurredAt: "2026-07-17T17:00:05.000Z",
+          },
+        ],
+        segments: [],
+      },
+      show,
+      host: { id: "host-1", name: "Ada" },
+      guest: { id: "guest-1", name: "Grace" },
+    });
+
+    assert.match(
+      transcript,
+      /- Event ID: event-hidden-guest-interrupt \| Delivery: interrupt_guest \| Priority: ordinary \| Kind: ask_about \| Interrupted message ID: cancelled-guest-draft \| Scheduled bridge: Hold that thought\. \| Canonical interrupted message: no/u,
+    );
+    assert.match(
+      transcript,
+      /Canonical interrupted message: no means no audience-heard prefix was persisted; it does not mean the producer handoff disappeared\./u,
+    );
+    assert.doesNotMatch(
+      transcript,
+      /Producer interruption: interrupt_guest — ask_about \(ordinary; event event-hidden-guest-interrupt\)/u,
+    );
+  });
+
+  it("renders an explicit audible-response fallback for missing and empty cue arrays", () => {
+    for (const presenceBeats of [undefined, []] as const) {
+      const transcript = buildSignalReviewTranscript({
+        episode,
+        show,
+        host: { id: "host-1", name: "Ada" },
+        guest: { id: "guest-1", name: "Grace" },
+        presenceBeats,
+      });
+      assert.match(
+        transcript,
+        /## Response cues \(heard only\)\n\nNo audible response cues\./u,
+      );
+    }
+  });
+
+  it("keeps saved interruption words in public transcript speech rather than stage actions", () => {
+    const transcript = buildSignalReviewTranscript({
+      episode: {
+        ...episode,
+        messages: [episode.messages[0]!],
+        events: [
+          {
+            id: "event-interruption",
+            episodeId: episode.id,
+            sequence: 1,
+            kind: "listener_reaction",
+            payload: {
+              plan: {
+                v: 1,
+                name: "listenerReaction",
+                speakerBotId: "host-1",
+                listenerBotId: "guest-1",
+                messageId: "message-1",
+                targetSource: "role",
+                visualAction: "lean_in",
+                spokenCue: "Hold on.",
+                interjectionAttempt: true,
+                floorOutcome: "yield",
+                interruptedSpeakerCue: "One second.",
+                interruptedSpeakerCuePlayback: "crosstalk",
+                targetProgress: 0.5,
+                seed: "interruption-seed",
+                cameraCutEligible: true,
+              },
+            },
+            occurredAt: "2026-07-17T17:00:05.000Z",
+          },
+        ],
+      },
+      show,
+      host: { id: "host-1", name: "Ada" },
+      guest: { id: "guest-1", name: "Grace" },
+    });
+
+    assert.match(
+      transcript,
+      /- Public reaction speech:\n    Grace: Hold on\./u,
+    );
+    assert.match(transcript, /- Stage action \(avatar only\):\n    \[none\]/u);
+  });
+
+  it("shows a legacy timed-Mute quip as heard reaction speech", () => {
+    const transcript = buildSignalReviewTranscript({
+      episode: {
+        ...episode,
+        messages: [{
+          ...episode.messages[1]!,
+          content: ".......... *10 seconds pass without an audible word.*",
+          mutePerformance: {
+            v: 1,
+            name: "mutePerformance",
+            durationMs: 10_000,
+            periodCount: 10,
+            interrupted: false,
+            elapsedCue: "*10 seconds pass without an audible word.*",
+            reactionBeats: [{
+              atMs: 5_500,
+              reactorBotId: "host-1",
+              kind: "audible_quip",
+              action: "tap_fingers",
+              quip: "Are you finished?",
+            }],
+          },
+        }],
+        events: [{
+          id: "event-mute-reaction",
+          episodeId: episode.id,
+          sequence: 1,
+          kind: "listener_reaction",
+          payload: {
+            source: "mute_performance",
+            messageId: "message-2",
+            speakerBotId: "guest-1",
+            listenerBotId: "host-1",
+            beat: {
+              atMs: 5_500,
+              reactorBotId: "host-1",
+              kind: "audible_quip",
+              action: "tap_fingers",
+              quip: "Are you finished?",
+            },
+          },
+          occurredAt: "2026-08-30T18:20:48.451Z",
+        }],
+        segments: [],
+      },
+      show,
+      host: { id: "host-1", name: "Rick" },
+      guest: { id: "guest-1", name: "Quiet Tim" },
+    });
+
+    assert.match(transcript, /- Visible transcript:\n    \.{6}/u);
+    assert.match(
+      transcript,
+      /- Public reaction speech:\n    Rick: Are you finished\?/u,
     );
   });
 });

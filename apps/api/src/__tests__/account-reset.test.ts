@@ -32,6 +32,7 @@ describe("restoreFactoryDefaultsInDatabase", () => {
     try {
       const db = createDatabase();
       seedResetFixture(db);
+      seedMysteryResetFixture(db);
 
       restoreFactoryDefaultsInDatabase(
         db,
@@ -42,6 +43,14 @@ describe("restoreFactoryDefaultsInDatabase", () => {
       for (const tableName of FACTORY_RESET_USER_DATA_TABLES) {
         assert.equal(countRows(db, tableName), 0, `${tableName} should be empty`);
       }
+      for (const tableName of [
+        "debate_mystery_cases",
+        "debate_mystery_actions",
+        "debate_mystery_notebooks",
+        "debate_mystery_notebook_revisions",
+      ]) {
+        assert.equal(countRows(db, tableName), 0, `${tableName} should be empty`);
+      }
 
       assert.equal(countRows(db, "sessions"), 1);
       assert.equal(countRows(db, "client_access_tokens"), 1);
@@ -50,18 +59,26 @@ describe("restoreFactoryDefaultsInDatabase", () => {
         .prepare(
           `
           SELECT
-            email, display_name, theme, graphics_quality, preferred_provider, ephemeral_chat_provider_preferences, preferred_image_provider, provider_locked,
-            auto_memory, auto_switch_model, auto_fallback_chain, hidden_bot_model_ids,
+            email, display_name, theme, graphics_quality, crt_focus, typography_scale, hub_atmosphere_enabled, startup_preference, preferred_provider, ephemeral_chat_provider_preferences, preferred_image_provider, provider_locked,
+            auto_memory, memory_learn_about_player, memory_learn_about_bots,
+            memory_acquisition_sensitivity, memory_short_term_days,
+            memory_long_term_threshold, memory_inferred_min_evidence,
+            memory_inferred_threshold, auto_switch_model, auto_fallback_chain,
+            online_auto_provider_bias, hidden_bot_model_ids,
+            hidden_global_picker_model_ids,
             hidden_comfyui_workflow_ids, model_visibility_defaults_version,
             preferred_local_model, preferred_online_model,
             lenient_local_fallback_model, lenient_local_image_fallback_model,
             secondary_ollama_host, experimental_dual_ollama_enabled,
             experimental_all_model_effort_enabled,
             coffee_experimental_table_angle_enabled,
+            debate_whodunnit_reuse_synthesized_exhibits,
             psychic_mode_enabled,
             comfyui_host, comfyui_workflows, preferred_local_image_model,
             preferred_openai_image_model, preferred_zen_wallpaper_local_image_model,
-            preferred_zen_wallpaper_openai_image_model, zen_wallpaper_opacity,
+            preferred_zen_wallpaper_openai_image_model,
+            preferred_home_atmosphere_image_model,
+            preferred_home_atmosphere_image_provider, zen_wallpaper_opacity,
             zen_wallpaper_text_mask_enabled, zen_wallpaper_grayscale_enabled,
             zen_wallpaper_blurred_edges_enabled,
             zen_wallpaper_style_notes,
@@ -81,17 +98,22 @@ describe("restoreFactoryDefaultsInDatabase", () => {
             prism_default_bot_face_eye_offset_x, prism_default_bot_face_eye_offset_y,
             prism_default_bot_face_eye_rotation_deg,
             prism_default_bot_face_eye_count,
+            prism_default_bot_face_eye_spacing,
             prism_default_bot_face_mouth_scale,
             prism_default_bot_face_mouth_offset_x, prism_default_bot_face_mouth_offset_y,
             prism_default_bot_face_mouth_rotation_deg,
             prism_default_bot_face_blink_bar,
             prism_default_bot_face_thinking_frames,
+            prism_default_bot_face_thinking_scale,
+            prism_default_bot_face_thinking_offset_x,
+            prism_default_bot_face_thinking_offset_y,
             prism_default_bot_temperature, prism_default_bot_max_tokens,
             prism_default_bot_top_p, prism_default_bot_top_k,
             prism_default_bot_repetition_penalty,
             prism_default_llm_model, prism_image_tool_llm_model,
             dev_memories_enabled, dev_memories_text, openai_key_ciphertext,
-            anthropic_key_ciphertext, elevenlabs_key_ciphertext,
+            anthropic_key_ciphertext, ollama_cloud_key_ciphertext,
+            elevenlabs_key_ciphertext,
             brave_search_key_ciphertext, last_active_at
           FROM users
           WHERE id = ?
@@ -104,14 +126,27 @@ describe("restoreFactoryDefaultsInDatabase", () => {
       assert.equal(user.display_name, "User One");
       assert.equal(user.theme, "system");
       assert.equal(user.graphics_quality, "high");
+      assert.equal(user.crt_focus, 50);
+      assert.equal(user.typography_scale, "standard");
+      assert.equal(user.hub_atmosphere_enabled, 1);
+      assert.equal(user.startup_preference, "home");
       assert.equal(user.preferred_provider, "local");
       assert.equal(user.ephemeral_chat_provider_preferences, "{}");
       assert.equal(user.preferred_image_provider, "local");
       assert.equal(user.provider_locked, 0);
       assert.equal(user.auto_memory, 1);
+      assert.equal(user.memory_learn_about_player, 1);
+      assert.equal(user.memory_learn_about_bots, 1);
+      assert.equal(user.memory_acquisition_sensitivity, "balanced");
+      assert.equal(user.memory_short_term_days, 30);
+      assert.equal(user.memory_long_term_threshold, 0.9);
+      assert.equal(user.memory_inferred_min_evidence, 3);
+      assert.equal(user.memory_inferred_threshold, 0.8);
       assert.equal(user.auto_switch_model, 0);
       assert.equal(user.auto_fallback_chain, null);
+      assert.equal(user.online_auto_provider_bias, 0);
       assert.equal(user.hidden_bot_model_ids, "[]");
+      assert.equal(user.hidden_global_picker_model_ids, "[]");
       assert.equal(user.hidden_comfyui_workflow_ids, "[]");
       assert.equal(user.model_visibility_defaults_version, 0);
       assert.equal(user.preferred_local_model, null);
@@ -122,6 +157,7 @@ describe("restoreFactoryDefaultsInDatabase", () => {
       assert.equal(user.experimental_dual_ollama_enabled, 0);
       assert.equal(user.experimental_all_model_effort_enabled, 0);
       assert.equal(user.coffee_experimental_table_angle_enabled, 0);
+      assert.equal(user.debate_whodunnit_reuse_synthesized_exhibits, 0);
       assert.equal(user.psychic_mode_enabled, 0);
       assert.equal(user.comfyui_host, null);
       assert.equal(user.comfyui_workflows, "[]");
@@ -129,6 +165,8 @@ describe("restoreFactoryDefaultsInDatabase", () => {
       assert.equal(user.preferred_openai_image_model, null);
       assert.equal(user.preferred_zen_wallpaper_local_image_model, null);
       assert.equal(user.preferred_zen_wallpaper_openai_image_model, null);
+      assert.equal(user.preferred_home_atmosphere_image_model, null);
+      assert.equal(user.preferred_home_atmosphere_image_provider, null);
       assert.equal(user.zen_wallpaper_opacity, DEFAULT_ZEN_WALLPAPER_OPACITY);
       assert.equal(
         user.zen_wallpaper_text_mask_enabled,
@@ -165,19 +203,23 @@ describe("restoreFactoryDefaultsInDatabase", () => {
       assert.equal(user.prism_default_bot_face_mouth_font, null);
       assert.equal(user.prism_default_bot_face_mouth_character, null);
       assert.equal(user.prism_default_bot_face_mouth_animation, null);
-      assert.equal(user.prism_default_bot_face_mouth_coffee_pucker, 0);
+      assert.equal(user.prism_default_bot_face_mouth_coffee_pucker, 1);
       assert.equal(user.prism_default_bot_face_font_weight, null);
       assert.equal(user.prism_default_bot_face_eye_scale, null);
       assert.equal(user.prism_default_bot_face_eye_offset_x, null);
       assert.equal(user.prism_default_bot_face_eye_offset_y, null);
       assert.equal(user.prism_default_bot_face_eye_rotation_deg, null);
       assert.equal(user.prism_default_bot_face_eye_count, 1);
+      assert.equal(user.prism_default_bot_face_eye_spacing, 0.36);
       assert.equal(user.prism_default_bot_face_mouth_scale, null);
       assert.equal(user.prism_default_bot_face_mouth_offset_x, null);
       assert.equal(user.prism_default_bot_face_mouth_offset_y, null);
       assert.equal(user.prism_default_bot_face_mouth_rotation_deg, null);
       assert.equal(user.prism_default_bot_face_blink_bar, null);
       assert.equal(user.prism_default_bot_face_thinking_frames, null);
+      assert.equal(user.prism_default_bot_face_thinking_scale, null);
+      assert.equal(user.prism_default_bot_face_thinking_offset_x, null);
+      assert.equal(user.prism_default_bot_face_thinking_offset_y, null);
       assert.equal(user.prism_default_bot_temperature, null);
       assert.equal(user.prism_default_bot_max_tokens, null);
       assert.equal(user.prism_default_bot_top_p, null);
@@ -189,6 +231,7 @@ describe("restoreFactoryDefaultsInDatabase", () => {
       assert.equal(user.dev_memories_text, "");
       assert.equal(user.openai_key_ciphertext, null);
       assert.equal(user.anthropic_key_ciphertext, null);
+      assert.equal(user.ollama_cloud_key_ciphertext, null);
       assert.equal(user.elevenlabs_key_ciphertext, null);
       assert.equal(user.brave_search_key_ciphertext, null);
       assert.equal(user.last_active_at, "2026-06-19T12:00:00.000Z");
@@ -230,14 +273,27 @@ function seedResetFixture(db: DatabaseSync): void {
     SET
       theme = 'dark',
       graphics_quality = 'low',
+      crt_focus = 90,
+      typography_scale = 'extra-large',
+      hub_atmosphere_enabled = 0,
+      startup_preference = 'slate',
       preferred_provider = 'openai',
       ephemeral_chat_provider_preferences = '{"coffee":"local","botcast":"online"}',
       preferred_image_provider = 'openai',
       provider_locked = 1,
       auto_memory = 0,
+      memory_learn_about_player = 0,
+      memory_learn_about_bots = 0,
+      memory_acquisition_sensitivity = 'curious',
+      memory_short_term_days = 2,
+      memory_long_term_threshold = 0.72,
+      memory_inferred_min_evidence = 8,
+      memory_inferred_threshold = 0.94,
       auto_switch_model = 1,
       auto_fallback_chain = '{"v":1,"fallbacks":[{"provider":"local","model":"fallback-a"},{"provider":"openai","model":"fallback-b"}]}',
+      online_auto_provider_bias = 0.75,
       hidden_bot_model_ids = '["model-a"]',
+      hidden_global_picker_model_ids = '["model-picker-hidden"]',
       hidden_comfyui_workflow_ids = '["workflow-a"]',
       model_visibility_defaults_version = 99,
       preferred_local_model = 'local-a',
@@ -248,6 +304,7 @@ function seedResetFixture(db: DatabaseSync): void {
       experimental_dual_ollama_enabled = 1,
       experimental_all_model_effort_enabled = 1,
       coffee_experimental_table_angle_enabled = 1,
+      debate_whodunnit_reuse_synthesized_exhibits = 1,
       psychic_mode_enabled = 1,
       comfyui_host = 'http://192.168.1.8:8188',
       comfyui_workflows = '[{"id":"workflow-a"}]',
@@ -255,6 +312,8 @@ function seedResetFixture(db: DatabaseSync): void {
       preferred_openai_image_model = 'openai-image-a',
       preferred_zen_wallpaper_local_image_model = 'wall-local-a',
       preferred_zen_wallpaper_openai_image_model = 'wall-openai-a',
+      preferred_home_atmosphere_image_model = 'home-model-a',
+      preferred_home_atmosphere_image_provider = 'openai',
       zen_wallpaper_opacity = 0.33,
       zen_wallpaper_text_mask_enabled = 0,
       zen_wallpaper_grayscale_enabled = 1,
@@ -283,12 +342,16 @@ function seedResetFixture(db: DatabaseSync): void {
       prism_default_bot_face_eye_offset_y = -0.08,
       prism_default_bot_face_eye_rotation_deg = -25,
       prism_default_bot_face_eye_count = 2,
+      prism_default_bot_face_eye_spacing = 0.52,
       prism_default_bot_face_mouth_scale = 1.25,
       prism_default_bot_face_mouth_offset_x = -0.04,
       prism_default_bot_face_mouth_offset_y = 0.06,
       prism_default_bot_face_mouth_rotation_deg = 35,
       prism_default_bot_face_blink_bar = '¦',
       prism_default_bot_face_thinking_frames = '["?","!","?","…"]',
+      prism_default_bot_face_thinking_scale = 1.2,
+      prism_default_bot_face_thinking_offset_x = -0.04,
+      prism_default_bot_face_thinking_offset_y = 0.08,
       prism_default_bot_temperature = 0.9,
       prism_default_bot_max_tokens = 1536,
       prism_default_bot_top_p = 0.8,
@@ -304,6 +367,9 @@ function seedResetFixture(db: DatabaseSync): void {
       anthropic_key_ciphertext = 'anthropic-cipher',
       anthropic_key_iv = 'anthropic-iv',
       anthropic_key_tag = 'anthropic-tag',
+      ollama_cloud_key_ciphertext = 'ollama-cloud-cipher',
+      ollama_cloud_key_iv = 'ollama-cloud-iv',
+      ollama_cloud_key_tag = 'ollama-cloud-tag',
       elevenlabs_key_ciphertext = 'eleven-cipher',
       elevenlabs_key_iv = 'eleven-iv',
       elevenlabs_key_tag = 'eleven-tag',
@@ -314,17 +380,30 @@ function seedResetFixture(db: DatabaseSync): void {
   `
   ).run("user-1");
 
-  db.prepare("INSERT INTO sessions (token, user_id, expires_at) VALUES (?, ?, ?)").run(
-    "session-1",
+  db.prepare(
+    "INSERT INTO sessions (token_hash, user_id, expires_at) VALUES (?, ?, ?)",
+  ).run(
+    "pst2_account-reset-fixture",
     "user-1",
     "2030-01-01T00:00:00.000Z"
   );
   db.prepare(
-    "INSERT INTO client_access_tokens (token, user_id, expires_at, created_at) VALUES (?, ?, ?, ?)"
+    "INSERT INTO client_access_tokens (token_hash, user_id, expires_at, created_at) VALUES (?, ?, ?, ?)"
   ).run(
-    "client-1",
+    "pct2_account-reset-fixture",
     "user-1",
     "2030-01-01T00:00:00.000Z",
+    "2026-01-01T00:00:00.000Z"
+  );
+  db.prepare(
+    `INSERT INTO image_asset_generation_preferences
+       (user_id, kind, provider, model, updated_at)
+     VALUES (?, ?, ?, ?, ?)`
+  ).run(
+    "user-1",
+    "slate_cover",
+    "openai",
+    "gpt-image-1.5",
     "2026-01-01T00:00:00.000Z"
   );
   db.prepare(
@@ -342,6 +421,16 @@ function seedResetFixture(db: DatabaseSync): void {
     "bot-1",
     "user-1",
     "Bot One",
+    "Prompt",
+    "2026-01-01T00:00:00.000Z",
+    "2026-01-01T00:00:00.000Z"
+  );
+  db.prepare(
+    "INSERT INTO bots (id, user_id, name, system_prompt, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)"
+  ).run(
+    "bot-2",
+    "user-1",
+    "Bot Two",
     "Prompt",
     "2026-01-01T00:00:00.000Z",
     "2026-01-01T00:00:00.000Z"
@@ -369,6 +458,18 @@ function seedResetFixture(db: DatabaseSync): void {
     "2026-01-01T00:00:00.000Z"
   );
   db.prepare(
+    `INSERT INTO applet_session_notes
+       (user_id, surface, session_id, body, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?)`
+  ).run(
+    "user-1",
+    "coffee",
+    "conversation-1",
+    "Remember this exchange.",
+    "2026-01-01T00:00:00.000Z",
+    "2026-01-01T00:00:00.000Z"
+  );
+  db.prepare(
     "INSERT INTO messages (id, conversation_id, user_id, role, content, bot_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)"
   ).run(
     "message-1",
@@ -392,6 +493,29 @@ function seedResetFixture(db: DatabaseSync): void {
     0.9,
     "2026-01-01T00:00:00.000Z"
   );
+  db.prepare(
+    `INSERT INTO memories
+      (id, user_id, conversation_id, bot_id, ciphertext, iv, tag, confidence,
+       source, lifecycle, created_at)
+     VALUES ('memory-derived', 'user-1', 'conversation-1', 'bot-1',
+             'ciphertext', 'iv', 'tag', 0.8, 'inferred', 'derived', ?)`,
+  ).run("2026-01-01T00:00:01.000Z");
+  db.prepare(
+    `INSERT INTO memory_evidence_links
+      (user_id, inferred_memory_id, evidence_memory_id, created_at)
+     VALUES ('user-1', 'memory-derived', 'memory-1', ?)`,
+  ).run("2026-01-01T00:00:01.000Z");
+  db.prepare(
+    `INSERT INTO memory_acquisition_receipts
+      (id, user_id, memory_id, learner_bot_id, conversation_id, kind, created_at)
+     VALUES ('receipt-1', 'user-1', 'memory-1', 'bot-1',
+             'conversation-1', 'player_memory', ?)`,
+  ).run("2026-01-01T00:00:01.000Z");
+  db.prepare(
+    `INSERT INTO memory_relationship_projections
+      (user_id, source_bot_id, target_bot_id, base_score, updated_at)
+     VALUES ('user-1', 'bot-1', 'bot-2', 72, ?)`,
+  ).run("2026-01-01T00:00:01.000Z");
   db.prepare(
     "INSERT INTO images (id, user_id, conversation_id, bot_id, prompt, url, provider, model, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
   ).run(
@@ -558,6 +682,42 @@ function countRows(db: DatabaseSync, tableName: string): number {
     .prepare(`SELECT COUNT(*) AS count FROM ${tableName} WHERE user_id = ?`)
     .get("user-1") as { count: number } | undefined;
   return row?.count ?? 0;
+}
+
+function seedMysteryResetFixture(db: DatabaseSync): void {
+  const now = "2026-08-20T20:00:00.000Z";
+  db.prepare(
+    `INSERT INTO debate_sessions
+      (id, user_id, revision, status, phase, step_key, player_role,
+       create_idempotency_key, motion, session_json, created_at, updated_at)
+     VALUES ('reset-mystery', 'user-1', 1, 'waiting_for_player', 'challenge',
+             'mystery_investigation', 'judge', 'reset-mystery-key',
+             'Whodunnit?', '{}', ?, ?)`,
+  ).run(now, now);
+  db.prepare(
+    `INSERT INTO debate_mystery_cases
+      (session_id, user_id, schema_version, generator_version, private_json,
+       content_hash, created_at, updated_at)
+     VALUES ('reset-mystery', 'user-1', 1, 1, '{}',
+             'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855', ?, ?)`,
+  ).run(now, now);
+  db.prepare(
+    `INSERT INTO debate_mystery_actions
+      (id, user_id, session_id, sequence, action_kind, occurred_at)
+     VALUES ('reset-mystery-action', 'user-1', 'reset-mystery', 1, 'travel', ?)`,
+  ).run(now);
+  db.prepare(
+    `INSERT INTO debate_mystery_notebooks
+      (session_id, user_id, revision, document_json, created_at, updated_at)
+     VALUES ('reset-mystery', 'user-1', 1, '{}', ?, ?)`,
+  ).run(now, now);
+  db.prepare(
+    `INSERT INTO debate_mystery_notebook_revisions
+      (id, user_id, session_id, revision, document_json, reason,
+       idempotency_key, created_at)
+     VALUES ('reset-mystery-note', 'user-1', 'reset-mystery', 1, '{}',
+             'import', 'reset-mystery-note-key', ?)`,
+  ).run(now);
 }
 
 function restoreEnv(name: string, value: string | undefined): void {

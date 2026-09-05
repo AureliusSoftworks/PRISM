@@ -13,12 +13,13 @@ describe("Coffee empty-cup behavior", () => {
     assert.match(pageSource, /coffeeEmptyCupAttemptState\(\{/u);
     assert.match(
       pageSource,
-      /const coffeeCupVisible =\s*!rosterPreviewSeat &&\s*seatIsFirmlySeated;/u,
+      /const coffeeCupVisible =\s*!rosterPreviewSeat &&\s*!seatLiveDeparting &&\s*seatIsFirmlySeated &&\s*!coffeeCupRefused;/u,
     );
     assert.match(
       pageSource,
       /data-cup-empty-attempt=\{\s*emptyCupAttemptActive \? "true" : undefined\s*\}/u,
     );
+    assert.match(pageSource, /!coffeeSkipEmptyCupVisual/u);
   });
 
   it("uses a short reach, returns the cup, and frowns after realization", () => {
@@ -26,6 +27,15 @@ describe("Coffee empty-cup behavior", () => {
     assert.match(cssSource, /--coffee-cup-empty-attempt-x:/u);
     assert.match(cssSource, /34%,\s*43%[\s\S]*coffee-cup-empty-attempt-x/u);
     assert.match(pageSource, /emptyCupAttemptFrowning[\s\S]*coffeeSeatPlateGlyph\("sad"\)/u);
+    assert.match(
+      pageSource,
+      /mouthCharacter: emptyCupAttemptFrowning\s*\? null[\s\S]*mouthRotationDeg: emptyCupAttemptFrowning\s*\? 0\s*: seatFaceStyle\.mouthRotationDeg/u,
+      "The generated plate frown must not inherit custom-mouth rotation",
+    );
+    assert.doesNotMatch(
+      pageSource,
+      /mouthCharacter: emptyCupAttemptFrowning\s*\? "\("/u,
+    );
   });
 
   it("finishes the client session after a server-directed group wrap", () => {
@@ -35,7 +45,14 @@ describe("Coffee empty-cup behavior", () => {
     );
     assert.match(
       pageSource,
-      /\/api\/coffee\/sessions\/\$\{encodeURIComponent\(sessionId\)\}\/depart/u,
+      /\/api\/coffee\/sessions\/\$\{encodeURIComponent\(sessionId\)\}\/synopsis/u,
     );
+    const finishStart = pageSource.indexOf("const finishCoffeeSession =");
+    const finishEnd = pageSource.indexOf(
+      "finishCoffeeSessionRef.current = finishCoffeeSession",
+      finishStart,
+    );
+    assert.ok(finishStart >= 0 && finishEnd > finishStart);
+    assert.doesNotMatch(pageSource.slice(finishStart, finishEnd), /\/depart/u);
   });
 });

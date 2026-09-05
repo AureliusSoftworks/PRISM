@@ -2,7 +2,14 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
-import type { ChatMessage, ReasoningEffort } from "@localai/shared";
+import {
+  simulatedPsychicPlanningMaxTokens,
+  withSimulatedEffortBudgetProfile,
+  type ChatMessage,
+  type ReasoningEffort,
+  type SimulatedEffortBudgetProfile,
+  type SimulatedEffortLadderProfile,
+} from "@localai/shared";
 
 const LADDER_EFFORTS = [
   "none",
@@ -12,15 +19,6 @@ const LADDER_EFFORTS = [
   "high",
   "xhigh",
 ] as const satisfies readonly ReasoningEffort[];
-
-const PLANNING_TOKEN_BUDGET: Record<(typeof LADDER_EFFORTS)[number], number> = {
-  none: 0,
-  minimal: 300,
-  low: 420,
-  medium: 560,
-  high: 720,
-  xhigh: 900,
-};
 
 interface LadderPrompt {
   id: string;
@@ -38,6 +36,9 @@ interface CliOptions {
   quick: boolean;
   includeScratchpad: boolean;
   keepDb: boolean;
+  budgetProfile: SimulatedEffortBudgetProfile;
+  /** Product-default lean ladder vs Settings experimental deep workshop. */
+  ladderProfile: SimulatedEffortLadderProfile;
 }
 
 interface ConstraintScore {
@@ -48,7 +49,17 @@ interface ConstraintScore {
 }
 
 interface PassDiagnostic {
-  name: "plan" | "draft" | "audit" | "revision";
+  name:
+    | "plan"
+    | "alternatives"
+    | "draft"
+    | "audit"
+    | "red_team"
+    | "constraint_lock"
+    | "revise_draft"
+    | "compliance_sweep"
+    | "synthesis"
+    | "revision";
   chars: number;
   warning?: string;
 }
@@ -174,6 +185,8 @@ const DEFAULT_OPTIONS: CliOptions = {
   quick: false,
   includeScratchpad: false,
   keepDb: false,
+  budgetProfile: "thrifty",
+  ladderProfile: "standard",
 };
 
 function printHelp(): void {
@@ -196,6 +209,8 @@ Options:
   --repeats <number>       Runs per prompt/effort. Default: ${DEFAULT_OPTIONS.repeats}; --quick defaults to 1.
   --temperature <number>   Final-answer temperature. Default: ${DEFAULT_OPTIONS.temperature}
   --max-tokens <number>    Max final-answer tokens. Default: ${DEFAULT_OPTIONS.maxTokens}
+  --budget-profile <id>    thrifty (default product budgets) or legacy (pre-thrifty A/B).
+  --ladder-profile <id>    standard (product-default lean passes) or deep (experimental workshop).
   --out-dir <path>         Where JSON/Markdown reports are written.
   --include-scratchpad     Include live-only simulated scratchpad in the JSON artifact.
   --keep-db                Keep the temporary SQLite DB for inspection.
@@ -243,6 +258,22 @@ function readCliOptions(argv: string[]): CliOptions | null {
       case "--out-dir":
         options.outDir = next();
         break;
+      case "--budget-profile": {
+        const profile = next().trim().toLowerCase();
+        if (profile !== "thrifty" && profile !== "legacy") {
+          throw new Error("--budget-profile must be thrifty or legacy.");
+        }
+        options.budgetProfile = profile;
+        break;
+      }
+      case "--ladder-profile": {
+        const profile = next().trim().toLowerCase();
+        if (profile !== "standard" && profile !== "deep") {
+          throw new Error("--ladder-profile must be standard or deep.");
+        }
+        options.ladderProfile = profile;
+        break;
+      }
       case "--include-scratchpad":
         options.includeScratchpad = true;
         break;
@@ -450,6 +481,8 @@ function redactedOptions(options: CliOptions): LadderReport["options"] {
     maxTokens: options.maxTokens,
     repeats: options.repeats,
     quick: options.quick,
+    budgetProfile: options.budgetProfile,
+    ladderProfile: options.ladderProfile,
     promptOverride: Boolean(options.prompt?.trim()),
     includeScratchpad: options.includeScratchpad,
   };
@@ -464,6 +497,8 @@ function markdownReport(report: LadderReport): string {
     "# Effort Ladder Eval",
     "",
     `Created: ${report.createdAt}`,
+    `Budget profile: ${report.options.budgetProfile}`,
+    `Ladder profile: ${report.options.ladderProfile}`,
     "",
     "## Prompts",
     "",
@@ -582,148 +617,166 @@ async function main(): Promise<void> {
   const options = readCliOptions(process.argv.slice(2));
   if (!options) return;
 
-  const prompts = selectedPrompts(options);
-  const createdAt = new Date().toISOString();
-  const outDir = resolve(options.outDir);
-  mkdirSync(outDir, { recursive: true });
-  const tempDir = mkdtempSync(join(tmpdir(), "prism-effort-ladder-"));
-  const dbPath = join(tempDir, "eval.db");
-  const previousDbPath = process.env.DB_PATH;
-  process.env.DB_PATH = dbPath;
+  await withSimulatedEffortBudgetProfile(options.budgetProfile, async () => {
+    const prompts = selectedPrompts(options);
+    const createdAt = new Date().toISOString();
+    const outDir = resolve(options.outDir);
+    mkdirSync(outDir, { recursive: true });
+    const tempDir = mkdtempSync(join(tmpdir(), "prism-effort-ladder-"));
+    const dbPath = join(tempDir, "eval.db");
+    const previousDbPath = process.env.DB_PATH;
+    process.env.DB_PATH = dbPath;
 
-  const userKey = Buffer.alloc(32, 9);
-  const userId = "eval-user";
-  let db: DatabaseSync | undefined;
+    const userKey = Buffer.alloc(32, 9);
+    const userId = "eval-user";
+    let db: DatabaseSync | undefined;
 
-  try {
-    const { createDatabase } = await import("../db.ts");
-    const { processChatMessage } = await import("../chat.ts");
-    db = createDatabase();
-    ensureEvalUser(db, userId);
+    try {
+      const { createDatabase } = await import("../db.ts");
+      const { processChatMessage } = await import("../chat.ts");
+      db = createDatabase();
+      ensureEvalUser(db, userId);
 
-    const runs: LadderRun[] = [];
-    for (const promptCase of prompts) {
-      for (let repeat = 1; repeat <= options.repeats; repeat += 1) {
-        for (const effort of LADDER_EFFORTS) {
-          const startedAt = Date.now();
-          try {
-            const result = await processChatMessage(db, userId, promptCase.prompt, userKey, {
-              preferredProvider: "local",
-              autoMemory: false,
-              incognito: true,
-              mode: "sandbox",
-              experimentalAllModelEffortEnabled: true,
-              psychicModeEnabled: false,
-              botOverrides: {
+      const runs: LadderRun[] = [];
+      for (const promptCase of prompts) {
+        for (let repeat = 1; repeat <= options.repeats; repeat += 1) {
+          for (const effort of LADDER_EFFORTS) {
+            const startedAt = Date.now();
+            try {
+              const result = await processChatMessage(db, userId, promptCase.prompt, userKey, {
+                preferredProvider: "local",
+                autoMemory: false,
+                incognito: true,
+                mode: "sandbox",
+                // Deep experimental ladder reuses this settings flag.
+                experimentalAllModelEffortEnabled:
+                  options.ladderProfile === "deep",
+                psychicModeEnabled: false,
+                botOverrides: {
+                  model: options.model,
+                  reasoningEffort: effort,
+                  temperature: options.temperature,
+                  maxTokens: options.maxTokens,
+                },
+              });
+              const assistant = lastAssistant(result.conversation.messages)?.content ?? "";
+              const scratchpad = result.psychicDebug?.scratchpad ?? "";
+              const planningWarnings =
+                result.backendEvents
+                  ?.filter((event) => event.message === "Psychic planning unavailable")
+                  .map((event) => event.detail?.trim())
+                  .filter((detail): detail is string => Boolean(detail)) ?? [];
+              runs.push({
+                effort,
                 model: options.model,
-                reasoningEffort: effort,
-                temperature: options.temperature,
-                maxTokens: options.maxTokens,
-              },
-            });
-            const assistant = lastAssistant(result.conversation.messages)?.content ?? "";
-            const scratchpad = result.psychicDebug?.scratchpad ?? "";
-            const planningWarnings =
-              result.backendEvents
-                ?.filter((event) => event.message === "Psychic planning unavailable")
-                .map((event) => event.detail?.trim())
-                .filter((detail): detail is string => Boolean(detail)) ?? [];
-            runs.push({
-              effort,
-              model: options.model,
-              promptId: promptCase.id,
-              promptTitle: promptCase.title,
-              repeat,
-              status: "ok",
-              durationMs: Date.now() - startedAt,
-              planningBudgetTokens: PLANNING_TOKEN_BUDGET[effort],
-              assistant,
-              assistantChars: assistant.length,
-              ...(result.psychicDebug?.summary
-                ? { psychicSummary: result.psychicDebug.summary }
-                : {}),
-              ...(result.psychicDebug
-                ? {
-                    passCount: result.psychicDebug.passCount ?? 0,
-                    passes: result.psychicDebug.passes,
-                    guidanceChars: result.psychicDebug.guidanceChars ?? 0,
-                    scratchpadChars: scratchpad.length,
-                    ...(options.includeScratchpad ? { scratchpad } : {}),
-                  }
-                : {
-                    passCount: 0,
-                    guidanceChars: 0,
-                    scratchpadChars: 0,
-                  }),
-              ...(planningWarnings.length > 0 ? { planningWarnings } : {}),
-              score: scoreAnswer(assistant),
-            });
-          } catch (error) {
-            runs.push({
-              effort,
-              model: options.model,
-              promptId: promptCase.id,
-              promptTitle: promptCase.title,
-              repeat,
-              status: "error",
-              durationMs: Date.now() - startedAt,
-              planningBudgetTokens: PLANNING_TOKEN_BUDGET[effort],
-              assistant: "",
-              assistantChars: 0,
-              passCount: 0,
-              guidanceChars: 0,
-              scratchpadChars: 0,
-              error: error instanceof Error ? error.message : String(error),
-            });
+                promptId: promptCase.id,
+                promptTitle: promptCase.title,
+                repeat,
+                status: "ok",
+                durationMs: Date.now() - startedAt,
+                planningBudgetTokens:
+                  effort === "none" ? 0 : simulatedPsychicPlanningMaxTokens(effort),
+                assistant,
+                assistantChars: assistant.length,
+                ...(result.psychicDebug?.summary
+                  ? { psychicSummary: result.psychicDebug.summary }
+                  : {}),
+                ...(result.psychicDebug
+                  ? {
+                      passCount: result.psychicDebug.passCount ?? 0,
+                      passes: result.psychicDebug.passes,
+                      guidanceChars: result.psychicDebug.guidanceChars ?? 0,
+                      scratchpadChars: scratchpad.length,
+                      ...(options.includeScratchpad ? { scratchpad } : {}),
+                    }
+                  : {
+                      passCount: 0,
+                      guidanceChars: 0,
+                      scratchpadChars: 0,
+                    }),
+                ...(planningWarnings.length > 0 ? { planningWarnings } : {}),
+                score: scoreAnswer(assistant),
+              });
+            } catch (error) {
+              runs.push({
+                effort,
+                model: options.model,
+                promptId: promptCase.id,
+                promptTitle: promptCase.title,
+                repeat,
+                status: "error",
+                durationMs: Date.now() - startedAt,
+                planningBudgetTokens:
+                  effort === "none" ? 0 : simulatedPsychicPlanningMaxTokens(effort),
+                assistant: "",
+                assistantChars: 0,
+                passCount: 0,
+                guidanceChars: 0,
+                scratchpadChars: 0,
+                error: error instanceof Error ? error.message : String(error),
+              });
+            }
+            const latest = runs[runs.length - 1];
+            if (latest) {
+              console.log(
+                `[${latest.promptId} r${latest.repeat} ${latest.effort}/${options.budgetProfile}/${options.ladderProfile}] ${latest.status} in ${latest.durationMs}ms; score=${
+                  latest.score ? `${latest.score.total}/${latest.score.max}` : "n/a"
+                }; passes=${latest.passCount ?? 0}; warnings=${
+                  latest.planningWarnings?.length ?? 0
+                }; scratchpad=${latest.scratchpadChars ?? 0}; guidance=${latest.guidanceChars ?? 0}`,
+              );
+            }
           }
         }
       }
-    }
 
-    const report: LadderReport = {
-      schema: "prism-effort-ladder-eval-v1",
-      createdAt,
-      prompts,
-      options: redactedOptions(options),
-      tempDbPath: options.keepDb ? dbPath : "<removed>",
-      summary: computeSummary(runs),
-      runs,
-    };
-    const baseName = reportFilename(createdAt);
-    const jsonPath = join(outDir, `${baseName}.json`);
-    const markdownPath = join(outDir, `${baseName}.md`);
-    writeFileSync(jsonPath, `${JSON.stringify(report, null, 2)}\n`, "utf8");
-    writeFileSync(markdownPath, markdownReport(report), "utf8");
+      const report: LadderReport = {
+        schema: "prism-effort-ladder-eval-v1",
+        createdAt,
+        prompts,
+        options: redactedOptions(options),
+        tempDbPath: options.keepDb ? dbPath : "<removed>",
+        summary: computeSummary(runs),
+        runs,
+      };
+      const baseName = reportFilename(createdAt);
+      const jsonPath = join(outDir, `${baseName}.json`);
+      const markdownPath = join(outDir, `${baseName}.md`);
+      writeFileSync(jsonPath, `${JSON.stringify(report, null, 2)}\n`, "utf8");
+      writeFileSync(markdownPath, markdownReport(report), "utf8");
 
-    console.log("Effort ladder eval complete.");
-    console.log(`JSON: ${jsonPath}`);
-    console.log(`Report: ${markdownPath}`);
-    for (const summary of report.summary) {
-      const score =
-        summary.averageScore === null
-          ? "n/a"
-          : `${summary.averageScore}/${summary.scoreMax ?? ""}`;
-      console.log(
-        `${summary.effort}: avgScore=${score}; medianLatency=${displayNumber(
-          summary.medianDurationMs,
-          "ms"
-        )}; avgPasses=${summary.averagePassCount}; warnings=${summary.warningCount}; scratchpad=${summary.averageScratchpadChars}; guidance=${summary.averageGuidanceChars}`
-      );
+      console.log("Effort ladder eval complete.");
+      console.log(`Budget profile: ${options.budgetProfile}`);
+      console.log(`Ladder profile: ${options.ladderProfile}`);
+      console.log(`JSON: ${jsonPath}`);
+      console.log(`Report: ${markdownPath}`);
+      for (const summary of report.summary) {
+        const score =
+          summary.averageScore === null
+            ? "n/a"
+            : `${summary.averageScore}/${summary.scoreMax ?? ""}`;
+        console.log(
+          `${summary.effort}: avgScore=${score}; medianLatency=${displayNumber(
+            summary.medianDurationMs,
+            "ms",
+          )}; avgPasses=${summary.averagePassCount}; warnings=${summary.warningCount}; scratchpad=${summary.averageScratchpadChars}; guidance=${summary.averageGuidanceChars}`,
+        );
+      }
+    } finally {
+      if (db) db.close();
+      if (previousDbPath === undefined) {
+        delete process.env.DB_PATH;
+      } else {
+        process.env.DB_PATH = previousDbPath;
+      }
+      if (!options.keepDb) {
+        rmSync(tempDir, { recursive: true, force: true });
+      }
     }
-  } finally {
-    if (db) db.close();
-    if (previousDbPath === undefined) {
-      delete process.env.DB_PATH;
-    } else {
-      process.env.DB_PATH = previousDbPath;
-    }
-    if (!options?.keepDb) {
-      rmSync(tempDir, { recursive: true, force: true });
-    }
-  }
+  });
 }
 
 main().catch((error) => {
-  console.error(error instanceof Error ? error.message : String(error));
+  console.error("Effort ladder evaluation failed.");
   process.exitCode = 1;
 });

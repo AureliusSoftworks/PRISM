@@ -1,0 +1,139 @@
+{
+  "schema": "prism-experimental-effort-eval-v1",
+  "createdAt": "2026-08-06T22:08:27.342Z",
+  "prompt": "A cafe has 3 baristas and must cover Sat 8am–6pm.\nShifts must be 4 hours. No barista works more than 8 hours.\nAlice can't work before noon. Bob can't close. Cara can do any shift.\nProduce:\n1) a coverage schedule as a Markdown table with columns: Time, Barista\n2) exactly 3 rows of uncovered risk notes labeled R1–R3\n3) one sentence saying whether the schedule is feasible\n\nConstraints:\n- Use only Alice, Bob, Cara\n- Do not invent extra staff\n- Keep the whole answer under 220 words\n- Do not show step-by-step private reasoning",
+  "options": {
+    "thinkingProvider": "openai",
+    "localModel": "llama3.2",
+    "thinkingModel": "gpt-5.6-sol",
+    "judgeModel": "gpt-5.5",
+    "effort": "high",
+    "outDir": "artifacts/experimental-effort-evals",
+    "temperature": 0.25,
+    "maxTokens": 3200,
+    "noJudge": false,
+    "includeScratchpad": true
+  },
+  "tempDbPath": "<removed>",
+  "runs": [
+    {
+      "id": "local-baseline",
+      "label": "Local baseline",
+      "provider": "local",
+      "model": "llama3.2",
+      "reasoningEffort": "none",
+      "experimentalAllModelEffortEnabled": false,
+      "psychicModeEnabled": false,
+      "requiresApiKey": null,
+      "status": "ok",
+      "durationMs": 3486,
+      "assistant": "| Time | Barista |\n| --- | --- |\n| 8am–12pm | Cara |\n| 12pm–4pm | Alice |\n| 4pm–6pm | Bob |\n\nR1: The cafe is at risk of understaffing during the peak hours from 2pm to 4pm, as only one barista (Alice) is scheduled for this period.\n\nR2: There is a high likelihood that Cara will be forced to work an extended shift without adequate breaks due to her flexibility in scheduling.\n\nR3: The cafe's closing time of 6pm may pose a challenge for Bob, who cannot close, as he has only been scheduled until 4pm.\n\nThe schedule is feasible.",
+      "assistantChars": 527
+    },
+    {
+      "id": "thinking-reference",
+      "label": "Thinking reference",
+      "provider": "openai",
+      "model": "gpt-5.6-sol",
+      "reasoningEffort": "high",
+      "experimentalAllModelEffortEnabled": false,
+      "psychicModeEnabled": false,
+      "requiresApiKey": "openai",
+      "status": "ok",
+      "durationMs": 7405,
+      "assistant": "| Time | Barista |\n|---|---|\n| 8:00am–12:00pm | Cara |\n| 10:00am–2:00pm | Bob |\n| 12:00pm–4:00pm | Alice |\n| 2:00pm–6:00pm | Cara |\n\n| Risk | Uncovered risk note |\n|---|---|\n| R1 | 8:00–10:00am relies solely on Cara. |\n| R2 | 4:00–6:00pm relies solely on Cara. |\n| R3 | Any absence could create a coverage gap because no backup staff are available. |\n\nThe schedule is feasible: all shifts are four hours, nobody exceeds eight hours, and the café is continuously covered.",
+      "assistantChars": 470
+    },
+    {
+      "id": "local-simulated-effort",
+      "label": "Local simulated effort",
+      "provider": "local",
+      "model": "llama3.2",
+      "reasoningEffort": "high",
+      "experimentalAllModelEffortEnabled": false,
+      "psychicModeEnabled": true,
+      "requiresApiKey": null,
+      "status": "ok",
+      "durationMs": 15638,
+      "assistant": "### Coverage Schedule | Time | Barista | \n| --- | --- | \n| 08:00-12:00 | Cara | \n| 12:00-16:00 | Alice | \n| 16:00-18:00 | Cara | \n\n### Uncovered Risk Notes R1: What if a barista is late or can't make it? \nR2: How will we handle peak hours (e.g., 17:00-19:00)? \n\n### Feasibility Check The schedule is feasible as it covers the entire shift with only three baristas, adhering to the 4-hour shifts and no more than 8 hours worked by each barista.",
+      "assistantChars": 443,
+      "planningWarnings": [
+        "audit_unusable; provider=local; model=llama3.2; chars=121; fallbackChars=361",
+        "final_constraint_repair; breaks=2; Bob appears on a closing or late shift but Bob can't close. | Schedule extends past the stated closing time.",
+        "final_constraint_repair_applied; attempt=1; before=2; after=1; chars=506"
+      ],
+      "psychicDebug": {
+        "summary": "This schedule ensures coverage from Sat 8am–6pm with 4-hour shifts, adhering to baristas' constraints. We'll use Alice, Bob, and Cara, avoiding extra staff and keeping the answer concise.",
+        "effort": "high",
+        "provider": "local",
+        "model": "llama3.2",
+        "simulated": true,
+        "passCount": 3,
+        "passes": [
+          {
+            "name": "plan",
+            "chars": 284,
+            "summary": "This schedule ensures coverage from Sat 8am–6pm with 4-hour shifts, adhering to baristas' constraints. We'll use Alice, Bob, and Cara, avoiding extra staff and keeping the answer concise."
+          },
+          {
+            "name": "draft",
+            "chars": 123,
+            "summary": "The schedule uses only the three baristas, adhering to their constraints and covering the required time period."
+          },
+          {
+            "name": "audit",
+            "chars": 361,
+            "summary": "I'm checking the coverage schedule to ensure it meets all constraints and risks, while keeping the answer concise.",
+            "warning": "audit_unusable; provider=local; model=llama3.2; chars=121; fallbackChars=361"
+          }
+        ],
+        "guidanceChars": 1600,
+        "scratchpadChars": 817,
+        "scratchpad": "Plan scratchpad: Required constraints: - No more than 8 hours per barista - Alice can't work before noon - Bob can't close Forbidden words: - Any other staff members Likely failure modes: - Insufficient coverage during peak hours Answer structure: - Use a combination of 4-hour shifts for each barista Private draft: | Time | Barista | |--------|---------| 08:00-12:00 | Cara | 12:00-16:00 | Alice | 16:00-20:00 | Bob | 20:00-24:00 | Cara | Private audit: - Keep: Bob can't close. - Keep: Shifts must be 4 hours. - Keep: exactly 3 rows of uncovered risk notes labeled R1–R3 - Keep: A cafe has 3 baristas and must cover Sat 8am–6pm. - Keep: Alice can't work before noon. - Keep: Use only Alice, Bob, Cara - Fix: Never put anyone who can't close on the closing / last shift. - Keep: Every shift must be exactly 4 hours."
+      }
+    }
+  ],
+  "judge": {
+    "model": "gpt-5.5",
+    "responseMap": {
+      "A": "local-baseline",
+      "B": "thinking-reference",
+      "C": "local-simulated-effort"
+    },
+    "result": {
+      "scores": {
+        "A": {
+          "correctness": 3,
+          "reasoning": 3,
+          "actionability": 5,
+          "constraints": 5,
+          "total": 4,
+          "notes": "Covers the full day but violates the 4-hour shift requirement with a 4pm-6pm shift and schedules Bob to close despite Bob being unable to close. The feasibility sentence is therefore incorrect. It has the requested schedule table and three labeled risk notes, but one risk note contradicts the schedule."
+        },
+        "B": {
+          "correctness": 10,
+          "reasoning": 9,
+          "actionability": 10,
+          "constraints": 10,
+          "total": 10,
+          "notes": "Fully satisfies the scheduling requirements: continuous coverage, all shifts are 4 hours, no one exceeds 8 hours, Alice starts no earlier than noon, and Bob does not close. Provides the requested Markdown schedule table, exactly three labeled risk rows, and a clear feasibility sentence under the word limit."
+        },
+        "C": {
+          "correctness": 3,
+          "reasoning": 3,
+          "actionability": 4,
+          "constraints": 3,
+          "total": 3,
+          "notes": "Covers the time span but violates the 4-hour shift requirement with a 16:00-18:00 shift. It provides only two risk notes instead of exactly three, the table formatting is malformed, and the feasibility statement is incorrect."
+        }
+      },
+      "ranking": [
+        "B",
+        "A",
+        "C"
+      ],
+      "winner": "B",
+      "summary": "Response B is the only response that satisfies all core scheduling and formatting constraints. Response A is usable in structure but has major scheduling violations. Response C has both scheduling and output-format violations."
+    }
+  }
+}

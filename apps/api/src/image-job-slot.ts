@@ -14,7 +14,11 @@ import {
   runAssistantSentImageGeneration,
   type AssistantSentImageUserPrefs,
 } from "./assistant-sent-image.ts";
-import { getAuxiliaryProvider, type LlmProvider } from "./providers.ts";
+import {
+  getAuxiliaryProvider,
+  type DualOllamaWorkloadOptions,
+  type LlmProvider,
+} from "./providers.ts";
 import { runWithUsageSession } from "./usage.ts";
 
 function resolveImageJobWallMs(): number {
@@ -40,9 +44,11 @@ class PerUserMutex {
       release = res;
     });
     this.tail = prev.then(() => gate);
-    return prev.then(() => fn()).finally(() => {
-      release();
-    });
+    return prev
+      .then(() => fn())
+      .finally(() => {
+        release();
+      });
   }
 }
 
@@ -62,7 +68,10 @@ export type ImageJobSource =
   | "images_panel"
   | "zen_wallpaper"
   | "signal_artwork"
-  | "slate_cover";
+  | "slate_cover"
+  | "slate_visual_bible"
+  | "debate_exhibit"
+  | "coffee_drink";
 
 export type RunningImageJob = {
   id: string;
@@ -75,42 +84,13 @@ export type RunningImageJob = {
   userMessage: string;
   source: ImageJobSource;
   requestedSize: string;
+  /** Optional client-owned id so UI cancel can dequeue even if HTTP abort is lost. */
+  clientRequestId: string | null;
   startedAt: string;
   abortController: AbortController;
 };
 
-const runningByUser = new Map<string, RunningImageJob>();
-const runningByJobId = new Map<string, RunningImageJob>();
-
-type CompletedImageJobPoll =
-  | { status: "succeeded"; messages: ChatMessage[] }
-  | { status: "failed"; error: string };
-
-type CompletedWithOwner = CompletedImageJobPoll & { userId: string };
-
-const completedWithOwner = new Map<string, CompletedWithOwner>();
-
-/** Stale read OK — used only for LLM prompt hints. */
-export function peekActiveImageJobForUser(userId: string): RunningImageJob | undefined {
-  return runningByUser.get(userId);
-}
-
-export function cancelActiveImageJobForConversation(
-  userId: string,
-  conversationId: string
-): string | null {
-  const job = runningByUser.get(userId);
-  if (!job || job.conversationId !== conversationId || job.source !== "chat_tool") {
-    return null;
-  }
-  job.abortController.abort();
-  runningByUser.delete(userId);
-  runningByJobId.delete(job.id);
-  completedWithOwner.delete(job.id);
-  return job.id;
-}
-
-export async function tryAcquireImageSlot(args: {
+type ImageSlotRequest = {
   userId: string;
   conversationId: string | null;
   botId: string | null;
@@ -120,39 +100,203 @@ export async function tryAcquireImageSlot(args: {
   userMessage: string;
   source: ImageJobSource;
   requestedSize?: string;
-}): Promise<{ ok: true; job: RunningImageJob } | { ok: false; busyJob: RunningImageJob }> {
+  clientRequestId?: string | null;
+  abortController?: AbortController;
+};
+
+type WaitingImageSlotRequest = {
+  args: ImageSlotRequest;
+  signal: AbortSignal;
+  resolve: (job: RunningImageJob) => void;
+  reject: (error: Error) => void;
+  onAbort: () => void;
+};
+
+const runningByUser = new Map<string, RunningImageJob>();
+const runningByJobId = new Map<string, RunningImageJob>();
+const waitingByUser = new Map<string, WaitingImageSlotRequest[]>();
+
+type CompletedImageJobPoll =
+  | { status: "succeeded"; messages: ChatMessage[] }
+  | { status: "failed"; error: string };
+
+type CompletedWithOwner = CompletedImageJobPoll & { userId: string };
+
+const completedWithOwner = new Map<string, CompletedWithOwner>();
+
+function createAbortError(): Error {
+  const error = new Error("Image generation was cancelled.");
+  error.name = "AbortError";
+  return error;
+}
+
+function normalizeClientRequestId(
+  value: string | null | undefined,
+): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed.slice(0, 160) : null;
+}
+
+function createRunningImageJob(args: ImageSlotRequest): RunningImageJob {
+  return {
+    id: randomUUID(),
+    userId: args.userId,
+    conversationId: args.conversationId,
+    botId: args.botId,
+    mode: args.mode,
+    incognito: args.incognito,
+    captionPrompt: args.captionPrompt.trim(),
+    userMessage: args.userMessage.trim(),
+    source: args.source,
+    requestedSize: args.requestedSize?.trim() || "1024x1024",
+    clientRequestId: normalizeClientRequestId(args.clientRequestId),
+    startedAt: new Date().toISOString(),
+    abortController: args.abortController ?? new AbortController(),
+  };
+}
+
+function waitingMatchesClientRequestId(
+  waiting: WaitingImageSlotRequest,
+  clientRequestId: string,
+): boolean {
+  return (
+    normalizeClientRequestId(waiting.args.clientRequestId) === clientRequestId
+  );
+}
+
+function installRunningImageJob(job: RunningImageJob): void {
+  runningByUser.set(job.userId, job);
+  runningByJobId.set(job.id, job);
+}
+
+function promoteNextWaitingImageSlot(userId: string): void {
+  const queue = waitingByUser.get(userId);
+  while (queue && queue.length > 0) {
+    const waiting = queue.shift()!;
+    waiting.signal.removeEventListener("abort", waiting.onAbort);
+    if (waiting.signal.aborted) {
+      waiting.reject(createAbortError());
+      continue;
+    }
+    const job = createRunningImageJob(waiting.args);
+    installRunningImageJob(job);
+    if (queue.length === 0) waitingByUser.delete(userId);
+    waiting.resolve(job);
+    return;
+  }
+  waitingByUser.delete(userId);
+}
+
+function releaseRunningImageJob(userId: string, jobId?: string): boolean {
+  const job = runningByUser.get(userId);
+  if (!job || (jobId && job.id !== jobId)) return false;
+  runningByUser.delete(userId);
+  runningByJobId.delete(job.id);
+  promoteNextWaitingImageSlot(userId);
+  return true;
+}
+
+/** Stale read OK — used only for LLM prompt hints. */
+export function peekActiveImageJobForUser(
+  userId: string,
+): RunningImageJob | undefined {
+  return runningByUser.get(userId);
+}
+
+export function cancelActiveImageJobForConversation(
+  userId: string,
+  conversationId: string,
+): string | null {
+  const job = runningByUser.get(userId);
+  if (
+    !job ||
+    job.conversationId !== conversationId ||
+    job.source !== "chat_tool"
+  ) {
+    return null;
+  }
+  job.abortController.abort();
+  runningByUser.delete(userId);
+  runningByJobId.delete(job.id);
+  completedWithOwner.delete(job.id);
+  void mutexFor(userId).runExclusive(() => {
+    promoteNextWaitingImageSlot(userId);
+  });
+  return job.id;
+}
+
+export async function tryAcquireImageSlot(
+  args: ImageSlotRequest,
+): Promise<
+  { ok: true; job: RunningImageJob } | { ok: false; busyJob: RunningImageJob }
+> {
   return mutexFor(args.userId).runExclusive(() => {
     const existing = runningByUser.get(args.userId);
     if (existing) {
       return { ok: false, busyJob: existing };
     }
-    const job: RunningImageJob = {
-      id: randomUUID(),
-      userId: args.userId,
-      conversationId: args.conversationId,
-      botId: args.botId,
-      mode: args.mode,
-      incognito: args.incognito,
-      captionPrompt: args.captionPrompt.trim(),
-      userMessage: args.userMessage.trim(),
-      source: args.source,
-      requestedSize: args.requestedSize?.trim() || "1024x1024",
-      startedAt: new Date().toISOString(),
-      abortController: new AbortController(),
-    };
-    runningByUser.set(args.userId, job);
-    runningByJobId.set(job.id, job);
+    const job = createRunningImageJob(args);
+    installRunningImageJob(job);
     return { ok: true, job };
+  });
+}
+
+/**
+ * FIFO acquisition for background work that can honestly remain queued.
+ * Cancelling the supplied signal removes a waiting request before it starts.
+ */
+export function waitForImageSlot(
+  args: ImageSlotRequest & { signal: AbortSignal },
+): Promise<RunningImageJob> {
+  if (args.signal.aborted) return Promise.reject(createAbortError());
+  return new Promise<RunningImageJob>((resolve, reject) => {
+    const waiting: WaitingImageSlotRequest = {
+      args,
+      signal: args.signal,
+      resolve,
+      reject,
+      onAbort: () => {
+        void mutexFor(args.userId).runExclusive(() => {
+          const queue = waitingByUser.get(args.userId);
+          if (!queue) return;
+          const index = queue.indexOf(waiting);
+          if (index < 0) return;
+          queue.splice(index, 1);
+          if (queue.length === 0) waitingByUser.delete(args.userId);
+          waiting.reject(createAbortError());
+        });
+      },
+    };
+    args.signal.addEventListener("abort", waiting.onAbort, { once: true });
+    void mutexFor(args.userId)
+      .runExclusive(() => {
+        if (args.signal.aborted) {
+          args.signal.removeEventListener("abort", waiting.onAbort);
+          waiting.reject(createAbortError());
+          return;
+        }
+        const existing = runningByUser.get(args.userId);
+        const queue = waitingByUser.get(args.userId);
+        if (!existing && (!queue || queue.length === 0)) {
+          args.signal.removeEventListener("abort", waiting.onAbort);
+          const job = createRunningImageJob(args);
+          installRunningImageJob(job);
+          waiting.resolve(job);
+          return;
+        }
+        waitingByUser.set(args.userId, [...(queue ?? []), waiting]);
+      })
+      .catch((error: unknown) => {
+        args.signal.removeEventListener("abort", waiting.onAbort);
+        reject(error instanceof Error ? error : new Error(String(error)));
+      });
   });
 }
 
 export async function releaseImageSlot(userId: string): Promise<void> {
   return mutexFor(userId).runExclusive(() => {
-    const job = runningByUser.get(userId);
-    if (job) {
-      runningByUser.delete(userId);
-      runningByJobId.delete(job.id);
-    }
+    releaseRunningImageJob(userId);
   });
 }
 
@@ -161,20 +305,101 @@ export async function releaseImageSlotIfOwned(
   jobId: string,
 ): Promise<boolean> {
   return mutexFor(userId).runExclusive(() => {
-    const job = runningByUser.get(userId);
-    if (!job || job.id !== jobId) return false;
-    runningByUser.delete(userId);
-    runningByJobId.delete(job.id);
-    return true;
+    return releaseRunningImageJob(userId, jobId);
   });
 }
 
-export async function finishImageJob(jobId: string, userId: string, result: CompletedImageJobPoll): Promise<void> {
+/**
+ * Cancel waiting or running image-slot work by the client request id used when
+ * the soft job was enqueued. Used when UI cancel aborts the browser fetch but
+ * the Next proxy may still hold the upstream wait open.
+ */
+export async function cancelImageSlotByClientRequestId(
+  userId: string,
+  clientRequestIdRaw: string,
+): Promise<"waiting" | "running" | "missing"> {
+  const clientRequestId = normalizeClientRequestId(clientRequestIdRaw);
+  if (!clientRequestId) return "missing";
+  return mutexFor(userId).runExclusive(() => {
+    const queue = waitingByUser.get(userId);
+    if (queue) {
+      const index = queue.findIndex((waiting) =>
+        waitingMatchesClientRequestId(waiting, clientRequestId),
+      );
+      if (index >= 0) {
+        const [waiting] = queue.splice(index, 1);
+        if (queue.length === 0) waitingByUser.delete(userId);
+        if (waiting) {
+          waiting.signal.removeEventListener("abort", waiting.onAbort);
+          waiting.args.abortController?.abort();
+          waiting.reject(createAbortError());
+        }
+        return "waiting";
+      }
+    }
+
+    const running = runningByUser.get(userId);
+    if (
+      running &&
+      running.userId === userId &&
+      running.clientRequestId === clientRequestId
+    ) {
+      running.abortController.abort();
+      releaseRunningImageJob(userId, running.id);
+      completedWithOwner.delete(running.id);
+      return "running";
+    }
+    return "missing";
+  });
+}
+
+/**
+ * Cancel every waiting or running debate-exhibit soft sprite for a user.
+ * Returns how many waiting entries were removed and whether a running job
+ * was aborted.
+ */
+export async function cancelDebateExhibitImageSlots(
+  userId: string,
+): Promise<{ waitingRemoved: number; runningCancelled: boolean }> {
+  return mutexFor(userId).runExclusive(() => {
+    let waitingRemoved = 0;
+    const queue = waitingByUser.get(userId);
+    if (queue) {
+      const kept: WaitingImageSlotRequest[] = [];
+      for (const waiting of queue) {
+        if (waiting.args.source !== "debate_exhibit") {
+          kept.push(waiting);
+          continue;
+        }
+        waiting.signal.removeEventListener("abort", waiting.onAbort);
+        waiting.args.abortController?.abort();
+        waiting.reject(createAbortError());
+        waitingRemoved += 1;
+      }
+      if (kept.length === 0) waitingByUser.delete(userId);
+      else waitingByUser.set(userId, kept);
+    }
+
+    const running = runningByUser.get(userId);
+    if (running && running.source === "debate_exhibit") {
+      running.abortController.abort();
+      releaseRunningImageJob(userId, running.id);
+      completedWithOwner.delete(running.id);
+      return { waitingRemoved, runningCancelled: true };
+    }
+    return { waitingRemoved, runningCancelled: false };
+  });
+}
+
+export async function finishImageJob(
+  jobId: string,
+  userId: string,
+  result: CompletedImageJobPoll,
+): Promise<void> {
   return mutexFor(userId).runExclusive(() => {
     const live = runningByUser.get(userId);
     if (!live || live.id !== jobId) return;
-    runningByUser.delete(userId);
-    runningByJobId.delete(jobId);
+    releaseRunningImageJob(userId, jobId);
     completedWithOwner.set(jobId, { ...result, userId });
   });
 }
@@ -185,7 +410,10 @@ export type ImageJobPollResponse =
   | { ok: true; status: "failed"; error: string }
   | { ok: false; error: "not_found" | "forbidden" };
 
-export function pollImageJobForUser(userId: string, jobId: string): ImageJobPollResponse {
+export function pollImageJobForUser(
+  userId: string,
+  jobId: string,
+): ImageJobPollResponse {
   const running = runningByJobId.get(jobId);
   if (running) {
     if (running.userId !== userId) return { ok: false, error: "forbidden" };
@@ -203,7 +431,7 @@ export function pollImageJobForUser(userId: string, jobId: string): ImageJobPoll
 }
 
 export function conversationIdForImageGeneration(
-  job: Pick<RunningImageJob, "conversationId" | "incognito">
+  job: Pick<RunningImageJob, "conversationId" | "incognito">,
 ): string | null {
   return job.incognito ? null : job.conversationId;
 }
@@ -228,7 +456,9 @@ function rowToChatMessage(row: MessageRow): ChatMessage {
     content: row.content,
     createdAt: row.created_at,
     provider:
-      row.provider === "local" || row.provider === "openai" ? row.provider : undefined,
+      row.provider === "local" || row.provider === "openai"
+        ? row.provider
+        : undefined,
     model: row.model ?? undefined,
     botName: row.bot_name ?? undefined,
     botColor: row.bot_color ?? undefined,
@@ -243,9 +473,13 @@ function rowToChatMessage(row: MessageRow): ChatMessage {
     ...base,
     content: assembled.content,
     ...(assembled.moodKey ? { moodKey: assembled.moodKey } : {}),
-    ...(assembled.moodConfidence !== undefined ? { moodConfidence: assembled.moodConfidence } : {}),
+    ...(assembled.moodConfidence !== undefined
+      ? { moodConfidence: assembled.moodConfidence }
+      : {}),
     ...(assembled.askQuestion ? { askQuestion: assembled.askQuestion } : {}),
-    ...(assembled.sentGeneratedImage ? { sentGeneratedImage: assembled.sentGeneratedImage } : {}),
+    ...(assembled.sentGeneratedImage
+      ? { sentGeneratedImage: assembled.sentGeneratedImage }
+      : {}),
     ...(assembled.coffeeAmbientAction
       ? { coffeeAmbientAction: assembled.coffeeAmbientAction }
       : {}),
@@ -255,7 +489,7 @@ function rowToChatMessage(row: MessageRow): ChatMessage {
 function fetchHydratedMessagesByIds(
   db: DatabaseSync,
   userId: string,
-  ids: readonly string[]
+  ids: readonly string[],
 ): ChatMessage[] {
   if (ids.length === 0) return [];
   const placeholders = ids.map(() => "?").join(", ");
@@ -264,9 +498,9 @@ function fetchHydratedMessagesByIds(
       `SELECT m.id, m.role, m.content, m.provider, m.model, m.tool_payload, m.created_at,
               b.name AS bot_name, b.color AS bot_color, b.glyph AS bot_glyph
          FROM messages m
-         LEFT JOIN bots b ON b.id = m.bot_id
+         LEFT JOIN bots b ON b.id = m.bot_id AND b.user_id = m.user_id
         WHERE m.user_id = ? AND m.id IN (${placeholders})
-        ORDER BY m.created_at ASC`
+        ORDER BY m.created_at ASC`,
     )
     .all(userId, ...ids) as MessageRow[];
   const byId = new Map(rows.map((r) => [r.id, r]));
@@ -317,7 +551,7 @@ async function inferImageReadyFollowUpText(args: {
         temperature: FOLLOW_UP_TEMPERATURE,
         maxTokens: FOLLOW_UP_MAX_TOKENS,
         usagePurpose: "image_prompt",
-      }
+      },
     );
     const line = raw.trim().replace(/\s+/g, " ");
     if (line.length > 0 && line.length < 1200) return line;
@@ -336,7 +570,10 @@ async function failJobWithDbNote(args: {
 }): Promise<void> {
   const { db, job, chatProviderName, chatModelUsed, errorUserLine } = args;
   if (!job.conversationId || job.incognito) {
-    await finishImageJob(job.id, job.userId, { status: "failed", error: errorUserLine });
+    await finishImageJob(job.id, job.userId, {
+      status: "failed",
+      error: errorUserLine,
+    });
     return;
   }
   const failId = randomId(12);
@@ -346,22 +583,35 @@ async function failJobWithDbNote(args: {
     try {
       db.prepare(
         `INSERT INTO messages (id, conversation_id, user_id, role, content, provider, model, bot_id, tool_payload, created_at)
-         VALUES (?, ?, ?, 'assistant', ?, ?, ?, ?, NULL, ?)`
-      ).run(failId, job.conversationId, job.userId, errorUserLine, chatProviderName, chatModelUsed, job.botId, ts);
-      db.prepare("UPDATE conversations SET updated_at = ? WHERE id = ? AND user_id = ?").run(
-        ts,
+         VALUES (?, ?, ?, 'assistant', ?, ?, ?, ?, NULL, ?)`,
+      ).run(
+        failId,
         job.conversationId,
-        job.userId
+        job.userId,
+        errorUserLine,
+        chatProviderName,
+        chatModelUsed,
+        job.botId,
+        ts,
       );
+      db.prepare(
+        "UPDATE conversations SET updated_at = ? WHERE id = ? AND user_id = ?",
+      ).run(ts, job.conversationId, job.userId);
       db.exec("COMMIT");
     } catch {
       db.exec("ROLLBACK");
       throw new Error("tx");
     }
     const hydrated = fetchHydratedMessagesByIds(db, job.userId, [failId]);
-    await finishImageJob(job.id, job.userId, { status: "succeeded", messages: hydrated });
+    await finishImageJob(job.id, job.userId, {
+      status: "succeeded",
+      messages: hydrated,
+    });
   } catch {
-    await finishImageJob(job.id, job.userId, { status: "failed", error: errorUserLine });
+    await finishImageJob(job.id, job.userId, {
+      status: "failed",
+      error: errorUserLine,
+    });
   }
 }
 
@@ -375,7 +625,9 @@ async function finishJobWithAssistantNote(args: {
   const { db, job, chatProviderName, chatModelUsed, content } = args;
   const ts = new Date().toISOString();
   const prov =
-    chatProviderName === "local" || chatProviderName === "openai" ? chatProviderName : undefined;
+    chatProviderName === "local" || chatProviderName === "openai"
+      ? chatProviderName
+      : undefined;
   if (!job.conversationId || job.incognito) {
     await finishImageJob(job.id, job.userId, {
       status: "succeeded",
@@ -399,7 +651,7 @@ async function finishJobWithAssistantNote(args: {
     try {
       db.prepare(
         `INSERT INTO messages (id, conversation_id, user_id, role, content, provider, model, bot_id, tool_payload, created_at)
-         VALUES (?, ?, ?, 'assistant', ?, ?, ?, ?, NULL, ?)`
+         VALUES (?, ?, ?, 'assistant', ?, ?, ?, ?, NULL, ?)`,
       ).run(
         noteId,
         job.conversationId,
@@ -408,20 +660,21 @@ async function finishJobWithAssistantNote(args: {
         chatProviderName,
         chatModelUsed,
         job.botId,
-        ts
-      );
-      db.prepare("UPDATE conversations SET updated_at = ? WHERE id = ? AND user_id = ?").run(
         ts,
-        job.conversationId,
-        job.userId
       );
+      db.prepare(
+        "UPDATE conversations SET updated_at = ? WHERE id = ? AND user_id = ?",
+      ).run(ts, job.conversationId, job.userId);
       db.exec("COMMIT");
     } catch {
       db.exec("ROLLBACK");
       throw new Error("tx");
     }
     const hydrated = fetchHydratedMessagesByIds(db, job.userId, [noteId]);
-    await finishImageJob(job.id, job.userId, { status: "succeeded", messages: hydrated });
+    await finishImageJob(job.id, job.userId, {
+      status: "succeeded",
+      messages: hydrated,
+    });
   } catch {
     await finishImageJob(job.id, job.userId, {
       status: "succeeded",
@@ -449,6 +702,7 @@ export function startChatImageBackgroundJob(args: {
   openAiApiKey: string | undefined;
   prefs: AssistantSentImageUserPrefs;
   prismDefaultLlmModel: string | null | undefined;
+  auxiliaryProviderOptions?: DualOllamaWorkloadOptions;
   chatModelUsed: string;
   chatProviderName: string;
   botName?: string;
@@ -461,6 +715,7 @@ export function startChatImageBackgroundJob(args: {
     openAiApiKey,
     prefs,
     prismDefaultLlmModel,
+    auxiliaryProviderOptions,
     chatModelUsed,
     chatProviderName,
     botName,
@@ -471,162 +726,181 @@ export function startChatImageBackgroundJob(args: {
     job.abortController.abort();
   }, IMAGE_JOB_WALL_MS);
 
-  void Promise.resolve(runWithUsageSession({
-    db,
-    userId: job.userId,
-    privacyScope: job.incognito ? "private" : "normal",
-    mode: job.mode,
-    surface: "chat_image",
-    conversationId: job.conversationId,
-    botId: job.botId,
-  }, async () => {
-    const auxiliaryProvider = getAuxiliaryProvider(prismDefaultLlmModel);
-    try {
-      const result = await runAssistantSentImageGeneration({
+  void Promise.resolve(
+    runWithUsageSession(
+      {
         db,
         userId: job.userId,
+        privacyScope: job.incognito ? "private" : "normal",
         mode: job.mode,
-        conversationId: conversationIdForImageGeneration(job),
-        botIdTriState: job.botId,
-        userMessage: job.userMessage,
-        captionPrompt: job.captionPrompt,
-        requestedSize: job.requestedSize,
-        preferredProvider,
-        openAiApiKey,
-        prefs,
-        promptRepairProvider: auxiliaryProvider,
-        signal: job.abortController.signal,
-      });
+        surface: "chat_image",
+        conversationId: job.conversationId,
+        botId: job.botId,
+      },
+      async () => {
+        const auxiliaryProvider = getAuxiliaryProvider(
+          prismDefaultLlmModel,
+          auxiliaryProviderOptions,
+        );
+        try {
+          const result = await runAssistantSentImageGeneration({
+            db,
+            userId: job.userId,
+            mode: job.mode,
+            conversationId: conversationIdForImageGeneration(job),
+            botIdTriState: job.botId,
+            userMessage: job.userMessage,
+            captionPrompt: job.captionPrompt,
+            requestedSize: job.requestedSize,
+            preferredProvider,
+            openAiApiKey,
+            prefs,
+            promptRepairProvider: auxiliaryProvider,
+            signal: job.abortController.signal,
+          });
 
-      if (result.status === "denied") {
-        await finishJobWithAssistantNote({
-          db,
-          job,
-          chatProviderName,
-          chatModelUsed,
-          content: result.message,
-        });
-        return;
-      }
+          if (result.status === "denied") {
+            await finishJobWithAssistantNote({
+              db,
+              job,
+              chatProviderName,
+              chatModelUsed,
+              content: result.message,
+            });
+            return;
+          }
 
-      if (result.status !== "succeeded") {
-        await failJobWithDbNote({
-          db,
-          job,
-          chatProviderName,
-          chatModelUsed,
-          errorUserLine:
-            "I couldn't finish that image — something went wrong with generation or settings. You can try again in a bit.",
-        });
-        return;
-      }
+          if (result.status !== "succeeded") {
+            await failJobWithDbNote({
+              db,
+              job,
+              chatProviderName,
+              chatModelUsed,
+              errorUserLine:
+                "I couldn't finish that image — something went wrong with generation or settings. You can try again in a bit.",
+            });
+            return;
+          }
 
-      const payload = result.payload;
+          const payload = result.payload;
 
-      const followUp = await inferImageReadyFollowUpText({
-        auxiliaryProvider,
-        botName,
-        botSystemPrompt,
-        userMessage: job.userMessage,
-        captionPrompt: job.captionPrompt,
-      });
+          const followUp = await inferImageReadyFollowUpText({
+            auxiliaryProvider,
+            botName,
+            botSystemPrompt,
+            userMessage: job.userMessage,
+            captionPrompt: job.captionPrompt,
+          });
 
-      const imageModelTag = payload.imageModel?.trim() || chatModelUsed;
-      const toolPayloadImage = serializeAssistantToolPayload({ sentGeneratedImage: payload });
-
-      if (job.incognito || !job.conversationId) {
-        const tFollow = new Date().toISOString();
-        const tImg = new Date(Date.now() + 2).toISOString();
-        const followId = randomId(12);
-        const imageRowId = randomId(12);
-        const prov =
-          chatProviderName === "local" || chatProviderName === "openai" ? chatProviderName : undefined;
-        const messages: ChatMessage[] = [
-          {
-            id: followId,
-            role: "assistant",
-            content: followUp,
-            createdAt: tFollow,
-            provider: prov,
-            model: chatModelUsed,
-          },
-          {
-            id: imageRowId,
-            role: "assistant",
-            content: "",
-            createdAt: tImg,
-            provider: prov,
-            model: imageModelTag,
+          const imageModelTag = payload.imageModel?.trim() || chatModelUsed;
+          const toolPayloadImage = serializeAssistantToolPayload({
             sentGeneratedImage: payload,
-          },
-        ];
-        await finishImageJob(job.id, job.userId, { status: "succeeded", messages });
-        return;
-      }
+          });
 
-      const followUpId = randomId(12);
-      const imageMsgId = randomId(12);
-      const tFollow = new Date().toISOString();
-      const tImg = new Date(Date.now() + 2).toISOString();
+          if (job.incognito || !job.conversationId) {
+            const tFollow = new Date().toISOString();
+            const tImg = new Date(Date.now() + 2).toISOString();
+            const followId = randomId(12);
+            const imageRowId = randomId(12);
+            const prov =
+              chatProviderName === "local" || chatProviderName === "openai"
+                ? chatProviderName
+                : undefined;
+            const messages: ChatMessage[] = [
+              {
+                id: followId,
+                role: "assistant",
+                content: followUp,
+                createdAt: tFollow,
+                provider: prov,
+                model: chatModelUsed,
+              },
+              {
+                id: imageRowId,
+                role: "assistant",
+                content: "",
+                createdAt: tImg,
+                provider: prov,
+                model: imageModelTag,
+                sentGeneratedImage: payload,
+              },
+            ];
+            await finishImageJob(job.id, job.userId, {
+              status: "succeeded",
+              messages,
+            });
+            return;
+          }
 
-      db.exec("BEGIN IMMEDIATE TRANSACTION");
-      try {
-        db.prepare(
-          `INSERT INTO messages (id, conversation_id, user_id, role, content, provider, model, bot_id, tool_payload, created_at)
-           VALUES (?, ?, ?, 'assistant', ?, ?, ?, ?, NULL, ?)`
-        ).run(
-          followUpId,
-          job.conversationId,
-          job.userId,
-          followUp,
-          chatProviderName,
-          chatModelUsed,
-          job.botId,
-          tFollow
-        );
-        db.prepare(
-          `INSERT INTO messages (id, conversation_id, user_id, role, content, provider, model, bot_id, tool_payload, created_at)
-           VALUES (?, ?, ?, 'assistant', '', ?, ?, ?, ?, ?)`
-        ).run(
-          imageMsgId,
-          job.conversationId,
-          job.userId,
-          chatProviderName,
-          imageModelTag,
-          job.botId,
-          toolPayloadImage,
-          tImg
-        );
-        db.prepare("UPDATE conversations SET updated_at = ? WHERE id = ? AND user_id = ?").run(
-          tImg,
-          job.conversationId,
-          job.userId
-        );
-        db.exec("COMMIT");
-      } catch (e) {
-        db.exec("ROLLBACK");
-        throw e;
-      }
+          const followUpId = randomId(12);
+          const imageMsgId = randomId(12);
+          const tFollow = new Date().toISOString();
+          const tImg = new Date(Date.now() + 2).toISOString();
 
-      const hydrated = fetchHydratedMessagesByIds(db, job.userId, [followUpId, imageMsgId]);
-      await finishImageJob(job.id, job.userId, { status: "succeeded", messages: hydrated });
-    } catch (err) {
-      const aborted = job.abortController.signal.aborted;
-      const msg = err instanceof Error ? err.message : String(err);
-      await failJobWithDbNote({
-        db,
-        job,
-        chatProviderName,
-        chatModelUsed,
-        errorUserLine: aborted
-          ? "That image took too long and was stopped. Try again with a simpler prompt or check ComfyUI."
-          : `I couldn't finish that image (${msg.slice(0, 200)}).`,
-      });
-    } finally {
-      clearTimeout(wallTimer);
-    }
-  })).catch((err) => {
-    console.warn("[image-job-slot] background job crashed:", err);
+          db.exec("BEGIN IMMEDIATE TRANSACTION");
+          try {
+            db.prepare(
+              `INSERT INTO messages (id, conversation_id, user_id, role, content, provider, model, bot_id, tool_payload, created_at)
+           VALUES (?, ?, ?, 'assistant', ?, ?, ?, ?, NULL, ?)`,
+            ).run(
+              followUpId,
+              job.conversationId,
+              job.userId,
+              followUp,
+              chatProviderName,
+              chatModelUsed,
+              job.botId,
+              tFollow,
+            );
+            db.prepare(
+              `INSERT INTO messages (id, conversation_id, user_id, role, content, provider, model, bot_id, tool_payload, created_at)
+           VALUES (?, ?, ?, 'assistant', '', ?, ?, ?, ?, ?)`,
+            ).run(
+              imageMsgId,
+              job.conversationId,
+              job.userId,
+              chatProviderName,
+              imageModelTag,
+              job.botId,
+              toolPayloadImage,
+              tImg,
+            );
+            db.prepare(
+              "UPDATE conversations SET updated_at = ? WHERE id = ? AND user_id = ?",
+            ).run(tImg, job.conversationId, job.userId);
+            db.exec("COMMIT");
+          } catch (e) {
+            db.exec("ROLLBACK");
+            throw e;
+          }
+
+          const hydrated = fetchHydratedMessagesByIds(db, job.userId, [
+            followUpId,
+            imageMsgId,
+          ]);
+          await finishImageJob(job.id, job.userId, {
+            status: "succeeded",
+            messages: hydrated,
+          });
+        } catch (err) {
+          const aborted = job.abortController.signal.aborted;
+          const msg = err instanceof Error ? err.message : String(err);
+          await failJobWithDbNote({
+            db,
+            job,
+            chatProviderName,
+            chatModelUsed,
+            errorUserLine: aborted
+              ? "That image took too long and was stopped. Try again with a simpler prompt or check ComfyUI."
+              : `I couldn't finish that image (${msg.slice(0, 200)}).`,
+          });
+        } finally {
+          clearTimeout(wallTimer);
+        }
+      },
+    ),
+  ).catch((err) => {
+    console.warn("[image-job-slot] background job failed.");
     void finishImageJob(job.id, job.userId, {
       status: "failed",
       error: err instanceof Error ? err.message : String(err),

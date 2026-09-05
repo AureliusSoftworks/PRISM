@@ -9,11 +9,16 @@ import {
   dispatchBackendAvailableEvent,
   dispatchBackendUnavailableDetail,
   dispatchBackendUnavailableEvent,
+  isBackendUnavailableMessage,
   isBackendUnavailablePayload,
   isPrismBackendUnavailableError,
   type BackendUnavailableEventDetail,
 } from "./backendUnavailable.ts";
 import {
+  AUTH_BOOTSTRAP_TIMEOUT_MS,
+  AUTH_BOOTSTRAP_WIDE_TIMEOUT_MS,
+  AUTH_BOOTSTRAP_YOUNG_DOCUMENT_MS,
+  authBootstrapAttemptTimeoutMs,
   backendUnavailableDetailFromError,
   decideAuthBootstrapFailure,
   isAbortLikeError,
@@ -43,6 +48,18 @@ describe("backend unavailable helpers", () => {
     assert.equal(isBackendUnavailablePayload({ ok: false, error: "Internal Server Error" }), false);
   });
 
+  it("recognizes only connection-shaped messages for stale-error cleanup", () => {
+    assert.equal(
+      isBackendUnavailableMessage("Prism is waiting for its local API."),
+      true,
+    );
+    assert.equal(
+      isBackendUnavailableMessage("Trying to reconnect to Prism..."),
+      true,
+    );
+    assert.equal(isBackendUnavailableMessage("ElevenLabs quota exceeded."), false);
+  });
+
   it("converts backend-down payloads into PrismBackendUnavailableError", () => {
     const error = createBackendUnavailableErrorFromPayload(
       {
@@ -63,7 +80,7 @@ describe("backend unavailable helpers", () => {
     assert.equal(error.detail, "fetch failed");
   });
 
-  it("dispatches one app-level backend unavailable event", () => {
+  it("requires corroboration before dispatching an app-level backend unavailable event", () => {
     const target = new EventTarget();
     Object.defineProperty(globalThis, "window", {
       configurable: true,
@@ -74,6 +91,14 @@ describe("backend unavailable helpers", () => {
       received.push((event as CustomEvent<BackendUnavailableEventDetail>).detail);
     });
 
+    dispatchBackendUnavailableEvent(
+      new PrismBackendUnavailableError("Prism is waiting for its local API.", {
+        path: "/api/conversations",
+        status: 503,
+        detail: "ECONNREFUSED",
+      })
+    );
+    assert.deepEqual(received, []);
     dispatchBackendUnavailableEvent(
       new PrismBackendUnavailableError("Prism is waiting for its local API.", {
         path: "/api/conversations",
@@ -113,7 +138,7 @@ describe("backend unavailable helpers", () => {
       code: BACKEND_UNAVAILABLE_CODE,
       message: "Reconnecting",
       path: "/api/first",
-    });
+    }, { immediate: true });
     dispatchBackendUnavailableDetail({
       code: BACKEND_UNAVAILABLE_CODE,
       message: "Reconnecting",
@@ -125,7 +150,7 @@ describe("backend unavailable helpers", () => {
       code: BACKEND_UNAVAILABLE_CODE,
       message: "Reconnecting again",
       path: "/api/second",
-    });
+    }, { immediate: true });
 
     assert.deepEqual(received, ["down:/api/first", "up", "down:/api/second"]);
   });
@@ -153,6 +178,23 @@ describe("backend unavailable helpers", () => {
     });
   });
 
+  it("immediately gates startup authentication without waiting for corroboration", () => {
+    const target = new EventTarget();
+    Object.defineProperty(globalThis, "window", { configurable: true, value: target });
+    const received: BackendUnavailableEventDetail[] = [];
+    target.addEventListener(BACKEND_UNAVAILABLE_EVENT, (event) => {
+      received.push((event as CustomEvent<BackendUnavailableEventDetail>).detail);
+    });
+
+    dispatchBackendUnavailableDetail({
+      code: BACKEND_UNAVAILABLE_CODE,
+      message: "Trying to reconnect to Prism...",
+      path: "/api/auth/me",
+    });
+
+    assert.equal(received.length, 1);
+  });
+
   it("treats auth bootstrap timeouts as reconnecting instead of signed out", () => {
     const timeout = new Error("operation timed out");
     timeout.name = "AbortError";
@@ -174,5 +216,33 @@ describe("backend unavailable helpers", () => {
     );
 
     assert.deepEqual(decision, { kind: "signed-out" });
+  });
+
+  it("widens the bootstrap watchdog while the document is young", () => {
+    assert.equal(
+      authBootstrapAttemptTimeoutMs({ attempt: 1, documentAgeMs: 0 }),
+      AUTH_BOOTSTRAP_WIDE_TIMEOUT_MS
+    );
+    assert.equal(
+      authBootstrapAttemptTimeoutMs({
+        attempt: 1,
+        documentAgeMs: AUTH_BOOTSTRAP_YOUNG_DOCUMENT_MS - 1,
+      }),
+      AUTH_BOOTSTRAP_WIDE_TIMEOUT_MS
+    );
+    assert.equal(
+      authBootstrapAttemptTimeoutMs({
+        attempt: 1,
+        documentAgeMs: AUTH_BOOTSTRAP_YOUNG_DOCUMENT_MS,
+      }),
+      AUTH_BOOTSTRAP_TIMEOUT_MS
+    );
+  });
+
+  it("always widens the silent bootstrap retry, even on an established page", () => {
+    assert.equal(
+      authBootstrapAttemptTimeoutMs({ attempt: 2, documentAgeMs: 600_000 }),
+      AUTH_BOOTSTRAP_WIDE_TIMEOUT_MS
+    );
   });
 });

@@ -1,25 +1,31 @@
 export type CoffeeSessionClockPhase =
   | "selecting"
   | "preview"
+  | "barista"
   | "topic"
   | "arriving"
   | "live"
   | "finished";
 
 export type CoffeeSessionClockHoldReason =
-  | "player_composing"
-  | "manual_autoplay_pause"
-  | "model_warmup";
+  | "model_warmup"
+  | "foreground_generation"
+  | "player_composing";
 
+/**
+ * Canonical Coffee time pauses while the player is actively composing.
+ */
 export function coffeeSessionClockHoldReasons(args: {
-  playerComposing: boolean;
+  /** Retained for call-site compatibility; a paused table still uses active time. */
   autoplayPaused: boolean;
   modelWarmup: boolean;
+  foregroundGeneration: boolean;
+  playerComposing?: boolean;
 }): CoffeeSessionClockHoldReason[] {
   const reasons: CoffeeSessionClockHoldReason[] = [];
-  if (args.playerComposing) reasons.push("player_composing");
-  if (args.autoplayPaused) reasons.push("manual_autoplay_pause");
   if (args.modelWarmup) reasons.push("model_warmup");
+  if (args.foregroundGeneration) reasons.push("foreground_generation");
+  if (args.playerComposing) reasons.push("player_composing");
   return reasons;
 }
 
@@ -39,6 +45,27 @@ export function coffeeSessionEndsAtAfterPausedClockTick(
   return endsAtMs + elapsedMs;
 }
 
+/** Active session time shown by Auto Coffee, clamped from 0 to its duration. */
+export function coffeeSessionElapsedMs(args: {
+  durationMinutes: number | null | undefined;
+  endsAtMs: number | null | undefined;
+  nowMs: number;
+}): number | null {
+  if (
+    typeof args.durationMinutes !== "number" ||
+    !Number.isFinite(args.durationMinutes) ||
+    args.durationMinutes <= 0 ||
+    typeof args.endsAtMs !== "number" ||
+    !Number.isFinite(args.endsAtMs) ||
+    !Number.isFinite(args.nowMs)
+  ) {
+    return null;
+  }
+  const durationMs = Math.max(0, args.durationMinutes * 60_000);
+  const remainingMs = Math.max(0, Math.min(durationMs, args.endsAtMs - args.nowMs));
+  return Math.max(0, Math.min(durationMs, durationMs - remainingMs));
+}
+
 export interface CoffeeSessionClockReconciliation {
   elapsedMs: number;
   nextEndsAtMs: number | null;
@@ -56,6 +83,8 @@ export function reconcileCoffeeSessionClock(args: {
   nowMs: number;
   endsAtMs: number | null | undefined;
   countdownPaused: boolean;
+  /** Let an audible/visible line finish without adding that time to the clock. */
+  finishBlocked?: boolean;
   minimumElapsedMs?: number;
 }): CoffeeSessionClockReconciliation {
   const nowMs = Number.isFinite(args.nowMs) ? args.nowMs : 0;
@@ -88,6 +117,7 @@ export function reconcileCoffeeSessionClock(args: {
     nextEndsAtMs,
     shouldFinish:
       !args.countdownPaused &&
+      !args.finishBlocked &&
       nextEndsAtMs !== null &&
       nowMs >= nextEndsAtMs,
     shouldUpdate: true,

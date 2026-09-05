@@ -1,8 +1,10 @@
 import type { PrismSceneActivity } from "./prismSceneRuntime";
+import type { GraphicsQuality } from "@localai/shared";
 
 export type CoffeeAtmospherePhase =
   | "selecting"
   | "preview"
+  | "barista"
   | "topic"
   | "arriving"
   | "live"
@@ -27,6 +29,19 @@ const DARK_PALETTE = ["#ff5ea0", "#ffcc5c", "#46dcff", "#865eff"] as const;
 const LIGHT_PALETTE = ["#77bdfc", "#9be7ff", "#9da9ff", "#d2a7ff"] as const;
 
 export const COFFEE_ATMOSPHERE_SPEAKER_BLEND_MS = 700;
+
+/** Keep five-seat tables responsive by scaling only peripheral atmosphere FX. */
+export function coffeeAtmosphereGraphicsQualityForVisibleBots(
+  requested: GraphicsQuality,
+  visibleBotCount: number,
+): GraphicsQuality {
+  const count = Number.isFinite(visibleBotCount)
+    ? Math.max(0, Math.floor(visibleBotCount))
+    : 0;
+  if (count >= 5) return "low";
+  if (count >= 4 && requested === "high") return "medium";
+  return requested;
+}
 
 export function coffeeAtmospherePalette(
   theme: CoffeeAtmosphereTheme,

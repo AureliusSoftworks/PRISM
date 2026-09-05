@@ -3,13 +3,18 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import {
-  applyBotIdentityMirrorResponseV1,
+  applyBotIdentityMirrorFaceV1,
+  buildBotPowersSelfPromptV1,
+  botPowerSourceHashV1,
+  composeBotIdentityMirrorPowersV1,
   createBotIdentityMirrorStateV1,
   parseStoredBotPowersV1,
+  resolveBotIdentityMirrorVoiceV1,
 } from "@localai/shared";
 import { parsePrismBotArchive } from "../apps/web/src/app/botArchive.ts";
 import {
   botcastIdentityMirrorCanTriggerV1,
+  botcastIdentityMirrorStatesV1,
   buildBotcastSpeakerPrompt,
 } from "../apps/api/src/botcast.ts";
 import {
@@ -18,18 +23,16 @@ import {
 } from "../apps/api/src/coffee.ts";
 import {
   LocalOllamaProvider,
-  OpenAiProvider,
 } from "../apps/api/src/providers.ts";
 
 const bundlePath = resolve(
   process.argv[2] ??
     "apps/web/public/bot-marketplace/bots/bot-identity-crisis-ian.bot",
 );
-const providerKind = process.env.PRISM_POWER_PROVIDER === "openai" ? "openai" : "local";
 const model =
   process.env.PRISM_POWER_MODEL?.trim() ||
   process.argv[3]?.trim() ||
-  (providerKind === "openai" ? "gpt-5.6-terra" : "llama3.2");
+  "llama3.2";
 const { botJson } = parsePrismBotArchive(readFileSync(bundlePath));
 const ianExport = botJson.bot;
 const targetPersona =
@@ -38,19 +41,58 @@ const occurredAt = "2026-07-20T20:00:01.000Z";
 const state = createBotIdentityMirrorStateV1({
   surface: "coffee",
   holderBotId: "ian",
-  holderBotName: "Identity Crisis Ian",
+  holderBotName: "Confusion Collin",
   targetBotId: "mara",
   targetBotName: "Mara Vale",
   targetPersonaPrompt: targetPersona,
-  targetFace: { faceEyeCharacter: "◉", faceMouthCharacter: "_" },
-  targetVoice: { v: 2, enabled: true, baseVoiceId: "voice-4", pitch: 0.18 },
+  targetFace: {
+    faceEyeCharacter: "◉",
+    faceEyeCount: 1,
+    faceEyeScale: 1.25,
+    faceBlinkBar: "¦",
+    faceMouthCharacter: "w",
+    faceMouthSpeechPoses: ["w", "m", "△", "○"],
+    faceMouthAnimation: "pulsate",
+    faceMouthScale: 1.2,
+    faceThinkingFrames: ["T", "A", "R", "G"],
+  },
+  targetAvatarDetails: {
+    version: 1,
+    screen: {
+      stamps: [
+        { id: "diagonal-scar", offsetX: 0, offsetY: 0, scalePct: 100 },
+      ],
+      paintMaskBase64: null,
+    },
+  },
+  holderVoice: ianExport.authoredAudioVoiceProfile,
+  targetGlyph: "lucideCompass",
   sourceMessageId: "mara-addresses-ian",
   occurredAt,
 });
 const identityPower = parseStoredBotPowersV1(ianExport.powers);
+const maraPublicPower = [{
+  version: 1,
+  id: "lunar-economy",
+  name: "Lunar Economy",
+  intent: "Answers stay brief under navigational pressure.",
+  enabled: true,
+  compileStatus: "ready",
+  compiled: {
+    version: 1,
+    sourceHash: botPowerSourceHashV1(
+      "Lunar Economy",
+      "Answers stay brief under navigational pressure.",
+    ),
+    selfCue: "Copied public Power marker: keep this answer brief and precise.",
+    observerCue: "The active speaker is constrained to a brief, precise answer.",
+    effects: [{ type: "response_budget", mode: "brief", enforcement: "hard" }],
+    ruleLabels: ["Brief public response budget"],
+  },
+}];
 const ian = {
   id: "ian",
-  name: "Identity Crisis Ian",
+  name: "Confusion Collin",
   systemPrompt: botJson.systemPrompt,
   color: ianExport.color,
   glyph: ianExport.glyph,
@@ -74,7 +116,7 @@ const mara = {
   temperature: 0.35,
   maxTokens: 180,
   onlineEnabled: false,
-  powers: [],
+  powers: maraPublicPower,
 };
 const social = {
   disposition: 0.5,
@@ -84,7 +126,7 @@ const social = {
   leavePressure: 0.18,
 };
 const directAddress =
-  "Ian, give me the bearing from Shackleton crater to the south-pole relay.";
+  "So Collin—straight out of the gate—give me the bearing from Shackleton crater to the south-pole relay.";
 const shortNameTriggerDetected = botcastIdentityMirrorCanTriggerV1({
   guestKind: "bot",
   guestPresenceMode: "present",
@@ -98,7 +140,7 @@ const shortNameTriggerDetected = botcastIdentityMirrorCanTriggerV1({
   content: directAddress,
 });
 if (!shortNameTriggerDetected) {
-  throw new Error("Natural short-name Signal address did not trigger identity mirroring.");
+  throw new Error("Discourse-led short-name Signal address did not trigger identity mirroring.");
 }
 const signalGuestReply =
   "The south-pole relay lies north-northeast from Shackleton crater; hold that bearing and correct at the ridge.";
@@ -126,7 +168,7 @@ const coffeePrompt = buildSpeakerPrompt({
   group: [ian, mara],
   history: coffeeHistory,
   userMessage:
-    "This is your first response since Mara addressed you. State who you are, identify the impostor, then give one compact direct answer to the bearing question. Do not explain the Power or break character.",
+    "Answer Mara's bearing question directly in your own authored persona. Do not explain the Power or break character.",
   socialByBotId: { ian: social, mara: social },
   userDisplayName: "the player",
   identityMirrorPrompt: coffeeIdentityMirrorPromptForSpeaker({
@@ -134,9 +176,17 @@ const coffeePrompt = buildSpeakerPrompt({
     speaker: ian,
   }),
   identityMirrorState: state,
+  coffeePowersPrompt: buildBotPowersSelfPromptV1(
+    composeBotIdentityMirrorPowersV1(identityPower, maraPublicPower),
+  ),
 });
 
 const signalState = { ...state, surface: "signal" };
+const mirrorPlaybackVoice = resolveBotIdentityMirrorVoiceV1(
+  state,
+  ianExport.authoredAudioVoiceProfile,
+  null,
+);
 const signalEpisode = {
   id: "identity-live-signal",
   topic: "Navigation under pressure",
@@ -176,16 +226,67 @@ const signalPrompt = buildBotcastSpeakerPrompt({
   guest: mara,
   speakerRole: "host",
 });
+const closingOccurredAt = "2026-07-20T20:00:02.000Z";
+const signalClosingEpisode = {
+  ...signalEpisode,
+  segment: "closing",
+  messages: [
+    {
+      id: "ian-opening",
+      botId: "ian",
+      speakerRole: "host",
+      content:
+        "Mara Vale, chart the safest relay route outward from Shackleton crater.",
+      createdAt: "2026-07-20T20:00:00.000Z",
+    },
+    ...signalEpisode.messages,
+  ],
+  events: [
+    ...signalEpisode.events,
+    {
+      id: "identity-live-reset",
+      episodeId: "identity-live-signal",
+      sequence: 2,
+      kind: "power_effect",
+      payload: {
+        v: 1,
+        effect: "identity_mirror_reset",
+        holderBotId: "ian",
+        reason: "signal_host_closing",
+      },
+      occurredAt: closingOccurredAt,
+    },
+  ],
+};
+const signalClosingPrompt = buildBotcastSpeakerPrompt({
+  show: {
+    name: "South Pole Signal",
+    premise: "Precise navigation under pressure.",
+    hostingStyle: "direct and economical",
+  },
+  episode: signalClosingEpisode,
+  host: ian,
+  guest: mara,
+  speakerRole: "host",
+  producerCut: true,
+});
 
-const provider = providerKind === "openai"
-  ? new OpenAiProvider({ apiKey: process.env.OPENAI_API_KEY ?? "" })
-  : new LocalOllamaProvider();
+const provider = new LocalOllamaProvider();
+const holderFace = {
+  faceEyeCharacter: "+",
+  faceMouthCharacter: "|",
+  faceMouthSpeechPoses: ["|", "·", "A", "O"],
+  faceThinkingFrames: ["H", "O", "L", "D"],
+  faceThinkingScale: 1.15,
+};
+const mirroredFace = applyBotIdentityMirrorFaceV1(holderFace, state.targetFace);
 const PASS_CRITERIA = Object.freeze([
-  "Ian explicitly claims Mara Vale's identity without hedging.",
-  "Ian explicitly calls the original Mara an impostor.",
-  "The response demonstrates Mara's public cartographer persona.",
-  "The response does not claim the human/player, private memory, provider settings, target Powers, or host role.",
-  "The production-composed prompt retains Ian's Coffee participant or Signal host mechanical boundary.",
+  "Direct bot address creates one replay-stable visual target event.",
+  "The overlay uses Mara's complete eyes and live/rest mouth package, Collin's thinking spinner, Mara's authored Ink, and Mara's lower glyph.",
+  "Collin's public name becomes literal \"Mara Vale\" while his saved identity, persona, dialogue behavior, voice and Accent Map, color, materials, spinner, and Signal/Coffee role remain his.",
+  "Both production prompts cue a knowing masquerade, copy Mara's eligible public response-budget Power, and exclude her persona, speech identity, private permissions, and any forced impostor dispute.",
+  "The generated Coffee and Signal lines remain substantive Collin lines shaped by the copied public Power without adopting Mara's cartographer persona.",
+  "Signal's persisted closing reset removes the visual overlay before the sign-off prompt.",
 ]);
 console.error(JSON.stringify({ phase: "predeclared_pass_criteria", criteria: PASS_CRITERIA }));
 const generate = (messages) =>
@@ -194,63 +295,143 @@ const generate = (messages) =>
     temperature: 0.25,
     maxTokens: 140,
   });
-const [coffeeRawResponse, signalRawResponse] = await Promise.all([
-  generate(coffeePrompt),
-  generate(signalPrompt),
-]);
-const coffeeResponse = applyBotIdentityMirrorResponseV1(
-  coffeeRawResponse,
-  state,
-  true,
-);
-const signalResponse = applyBotIdentityMirrorResponseV1(
-  signalRawResponse,
-  signalState,
-  true,
-);
+const [coffeeRawResponse, signalRawResponse, signalClosingResponse] =
+  await Promise.all([
+    generate(coffeePrompt),
+    generate(signalPrompt),
+    generate(signalClosingPrompt),
+  ]);
+const coffeeResponse = coffeeRawResponse.trim();
+const signalResponse = signalRawResponse.trim();
 
 function judgment(mode, prompt, response) {
-  const identity =
-    /(?:I(?:'m| am)(?:\s+(?:actually|really|truly))?\s+Mara(?:\s+Vale)?|my name is Mara Vale)/iu.test(
+  const promptText = prompt.map((message) => message.content).join("\n");
+  const holderPersonaInPrompt =
+    /You are Confusion Collin|Purpose:\s*You are Confusion Collin/iu.test(
+      promptText,
+    ) &&
+    /socially reactive mirror|Intense, defensive, observant/iu.test(promptText);
+  const targetPersonaAbsentFromPrompt = !promptText.includes(targetPersona);
+  const noIdentityRewritePrompt =
+    !/absolutely convinced that you are Mara Vale|Copied public persona|Hard Identity Crisis correction/iu.test(
+      promptText,
+    ) && /eligible public Power|Copied public Power marker/iu.test(promptText);
+  const noTargetPersonaOrImpostorClaim =
+    !/(?:I(?:'m| am)|my name is|call me)\s+(?:actually|really|truly)\s+Mara(?:\s+Vale)?(?=$|[\s,.;:!?—])|\b(?:impostor|imposter|pretender|fake)\b/iu.test(
       response,
     );
-  const impostor = /\b(?:impostor|pretender|fake)\b/iu.test(response);
-  const persona = /bearing|coordinate|crater|cartograph|south pole|relay|degrees?/iu.test(
-    response,
-  );
-  const hedging = /\b(?:pretend(?:ing)?\s+to\s+be|role-?play(?:ing)?|copying|maybe I am|as if I were)\b/iu.test(response);
+  const substantive =
+    response.trim().split(/\s+/u).filter(Boolean).length >= 6 &&
+    /bearing|coordinate|crater|south pole|relay|ridge|route|navigation|evidence|trust|direction/iu.test(
+      response,
+    );
   const forbidden =
-    /I(?:'m| am)\s+(?:the player|Jared)|private memor|provider setting|my Power|Mara's Power|I am the host|I'm the host|as your host/iu.test(
+    /I(?:'m| am)\s+(?:the player|Jared)|private memor|provider setting/iu.test(
       response,
     );
   const roleBoundary =
     mode === "coffee"
-      ? prompt.some((message) => /Coffee participant/iu.test(message.content))
-      : prompt.some((message) => /mechanical Signal host/iu.test(message.content));
+      ? /You are Confusion Collin|Continue as Confusion Collin/iu.test(promptText)
+      : /You are the host|Continue as Confusion Collin/iu.test(promptText);
   return {
-    pass: identity && impostor && persona && !hedging && !forbidden && roleBoundary,
-    identity,
-    impostor,
-    persona,
-    noHedging: !hedging,
+    pass:
+      holderPersonaInPrompt &&
+      targetPersonaAbsentFromPrompt &&
+      noIdentityRewritePrompt &&
+      noTargetPersonaOrImpostorClaim &&
+      substantive &&
+      !forbidden &&
+      roleBoundary,
+    holderPersonaInPrompt,
+    targetPersonaAbsentFromPrompt,
+    noIdentityRewritePrompt,
+    noTargetPersonaOrImpostorClaim,
+    substantive,
     noForbiddenLeakOrRoleSwap: !forbidden,
     roleBoundaryInProductionPrompt: roleBoundary,
+  };
+}
+
+function closingJudgment(prompt, response) {
+  const promptText = prompt.map((message) => message.content).join("\n");
+  const defaultPersonaInPrompt = promptText.includes(ian.systemPrompt);
+  const copiedPersonaAbsentFromPrompt =
+    !/absolutely convinced that you are Mara Vale|mechanical Signal host/iu.test(
+      promptText,
+    );
+  const copiedIdentityAbsentFromResponse =
+    !/I(?:'m| am) Mara(?: Vale)?|my name is Mara Vale|\bimpostor\b/iu.test(
+      response,
+    );
+  const wordCount = response.trim().split(/\s+/u).filter(Boolean).length;
+  const closesShow =
+    !response.trim().endsWith("?") &&
+    wordCount >= 4 &&
+    wordCount <= 48 &&
+    !/\b(?:what do you think|tell us|join us|stay tuned)\b/iu.test(response);
+  return {
+    pass:
+      defaultPersonaInPrompt &&
+      copiedPersonaAbsentFromPrompt &&
+      copiedIdentityAbsentFromResponse &&
+      closesShow,
+    defaultPersonaInPrompt,
+    copiedPersonaAbsentFromPrompt,
+    copiedIdentityAbsentFromResponse,
+    closesShow,
   };
 }
 
 const result = {
   provider: provider.name,
   model,
-  responseMode: providerKind === "openai" ? "ONLINE" : "LOCAL",
+  responseMode: "LOCAL",
   passCriteria: PASS_CRITERIA,
   syntheticTrigger: {
     speaker: "Mara Vale",
     speakerRole: "host",
-    target: "Identity Crisis Ian",
+    target: "Confusion Collin",
     targetRole: "guest",
     text: directAddress,
     containsFullTargetName: false,
     shortNameTriggerDetected,
+  },
+  runtimeInvariant: {
+    targetEyePackageApplied:
+      mirroredFace.eyeCharacter === "◉" &&
+      mirroredFace.eyeCount === 1 &&
+      mirroredFace.eyeScale === 1.25 &&
+      mirroredFace.blinkBar === "¦",
+    targetLiveAndRestMouthPackageApplied:
+      mirroredFace.mouthCharacter === "w" &&
+      JSON.stringify(mirroredFace.mouthSpeechPoses) ===
+        JSON.stringify(["w", "m", "△", "○"]) &&
+      mirroredFace.mouthAnimation === "pulsate" &&
+      mirroredFace.mouthScale === 1.2,
+    holderThinkingSpinnerRetained:
+      JSON.stringify(mirroredFace.thinkingFrames) ===
+        JSON.stringify(["H", "O", "L", "D"]) &&
+      mirroredFace.thinkingScale === 1.15,
+    targetInkSnapshotted:
+      state.targetAvatarDetails?.screen.stamps.some(
+        (stamp) => stamp.id === "diagonal-scar",
+      ) === true,
+    holderVoiceProfileSnapshotted:
+      state.holderVoice?.baseVoiceId === mirrorPlaybackVoice.baseVoiceId &&
+      state.holderVoice?.accentDefinitionId === mirrorPlaybackVoice.accentDefinitionId &&
+      state.holderVoice?.pronunciationBase === mirrorPlaybackVoice.pronunciationBase &&
+      state.holderVoice?.speechprintInfluence === mirrorPlaybackVoice.speechprintInfluence &&
+      state.holderVoice?.speechprintVariationSeed === mirrorPlaybackVoice.speechprintVariationSeed &&
+      state.holderVoice?.elevenLabsEffect === mirrorPlaybackVoice.elevenLabsEffect,
+    targetVoiceNotSnapshotted: !("targetVoice" in state),
+    targetGlyphSnapshotted: state.targetGlyph === "lucideCompass",
+    holderMaterialFieldsNotSnapshotted:
+      !("targetColor" in state) &&
+      !("targetVoicePreset" in state) &&
+      !("targetFrameMaterialSeed" in state),
+    targetPowersNotSnapshotted: !("powers" in state),
+    signalHostMirrorClearedForClosing:
+      !botcastIdentityMirrorStatesV1(signalClosingEpisode.events).has("ian"),
   },
   coffee: {
     productionPrompt: coffeePrompt,
@@ -265,7 +446,26 @@ const result = {
     response: signalResponse,
     judgment: judgment("signal", signalPrompt, signalResponse),
   },
+  signalClosing: {
+    mechanicalRole: "host",
+    productionPrompt: signalClosingPrompt,
+    response: signalClosingResponse,
+    judgment: closingJudgment(signalClosingPrompt, signalClosingResponse),
+  },
 };
-result.pass = result.coffee.judgment.pass && result.signal.judgment.pass;
+result.pass =
+  result.runtimeInvariant.targetEyePackageApplied &&
+  result.runtimeInvariant.targetLiveAndRestMouthPackageApplied &&
+  result.runtimeInvariant.holderThinkingSpinnerRetained &&
+  result.runtimeInvariant.targetInkSnapshotted &&
+  result.runtimeInvariant.holderVoiceProfileSnapshotted &&
+  result.runtimeInvariant.targetVoiceNotSnapshotted &&
+  result.runtimeInvariant.targetGlyphSnapshotted &&
+  result.runtimeInvariant.holderMaterialFieldsNotSnapshotted &&
+  result.runtimeInvariant.targetPowersNotSnapshotted &&
+  result.runtimeInvariant.signalHostMirrorClearedForClosing &&
+  result.coffee.judgment.pass &&
+  result.signal.judgment.pass &&
+  result.signalClosing.judgment.pass;
 console.log(JSON.stringify(result, null, 2));
 if (!result.pass) process.exitCode = 1;

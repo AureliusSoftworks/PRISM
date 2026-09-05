@@ -82,21 +82,21 @@ describe("Coffee pot refill timing", () => {
 
   it("resolves theme-specific Coffee pot sprite paths", () => {
     const version = `?v=${COFFEE_POT_ASSET_VERSION}`;
-    assert.equal(coffeePotRestImageUrl("dark"), `/coffee-pot/coffee_pot.png${version}`);
-    assert.equal(coffeePotRestImageUrl("light"), `/coffee-pot/coffee_light_pot.png${version}`);
-    assert.equal(coffeePotPourImageUrl("dark"), `/coffee-pot/coffee_pot_pour.png${version}`);
+    assert.equal(coffeePotRestImageUrl("dark"), `/coffee-pot/coffee_pot.webp${version}`);
+    assert.equal(coffeePotRestImageUrl("light"), `/coffee-pot/coffee_light_pot.webp${version}`);
+    assert.equal(coffeePotPourImageUrl("dark"), `/coffee-pot/coffee_pot_pour.webp${version}`);
     assert.equal(
       coffeePotPourImageUrl("light"),
-      `/coffee-pot/coffee_light_pot_light_pour.png${version}`
+      `/coffee-pot/coffee_light_pot_light_pour.webp${version}`
     );
-    assert.equal(coffeePotPourFrameImageUrl("dark", 3), `/coffee-pot/coffee_3.png${version}`);
+    assert.equal(coffeePotPourFrameImageUrl("dark", 3), `/coffee-pot/coffee_3.webp${version}`);
     assert.equal(
       coffeePotPourFrameImageUrl("light", 3),
-      `/coffee-pot/coffee_light_3.png${version}`
+      `/coffee-pot/coffee_light_3.webp${version}`
     );
     assert.equal(
       coffeePotPourFrameImageUrl("light", 99),
-      `/coffee-pot/coffee_light_4.png${version}`
+      `/coffee-pot/coffee_light_4.webp${version}`
     );
   });
 

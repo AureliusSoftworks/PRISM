@@ -15,42 +15,46 @@ const signalCss = readFileSync(
   new URL("./botcast.module.css", import.meta.url),
   "utf8",
 );
+const signalVoiceActionCss = readFileSync(
+  new URL("./SignalVoiceActionText.module.css", import.meta.url),
+  "utf8",
+);
 
 describe("avatar visibility Power visual contract", () => {
-  it("keeps Chat and Zen microscopic avatars hidden and Invisible avatars translucent", () => {
+  it("fully hides Chat and Zen embodiments while preserving their outer plate", () => {
     assert.match(
       pageSource,
       /data-power-avatar-visibility=\{[\s\S]{0,180}botPowerAvatarVisibilityModeV1\(bot\.powers\)/u,
     );
     assert.match(
       pageCss,
-      /\.zenLiveBotPresencePlate\[data-power-avatar-visibility="hidden"\]\s*\{[^}]*opacity:\s*0;/u,
+      /\.zenLiveBotPresencePlate\[data-power-avatar-visibility="hidden"\][\s\S]{0,80}> \.botAmbientPresenceRig\s*\{[^}]*opacity:\s*0;/u,
     );
     assert.match(
       pageCss,
-      /\.zenLiveBotPresencePlate\[data-power-avatar-visibility="translucent"\]\s*\{[^}]*opacity:\s*0\.5;/u,
+      /\.zenLiveBotPresencePlate\[data-power-avatar-visibility="translucent"\][\s\S]{0,80}> \.botAmbientPresenceRig\s*\{[^}]*opacity:\s*0\.5;/u,
     );
   });
 
   it("uses Coffee's frozen visibility state without hiding roster previews", () => {
     assert.match(
       pageSource,
-      /const seatAvatarVisibilityMode\s*=\s*coffeePowerPlan[\s\S]{0,220}botPowerAvatarVisibilityModeFromEffectsV1\([\s\S]{0,140}coffeePowerPlan\.bots\[bot\.id\]\?\.effects/u,
+      /const seatObserverProjection[\s\S]{0,700}const seatAvatarVisibilityMode[\s\S]{0,220}seatObserverProjection\?\.visibility[\s\S]{0,260}botPowerAvatarVisibilityModeFromEffectsV1/u,
     );
     assert.match(
       pageCss,
-      /\.coffeeSeat\[data-power-avatar-visibility="hidden"\]:not\(\[data-roster-preview="true"\]\)[\s\S]{0,140}opacity:\s*0;/u,
+      /\.coffeeSeat\[data-power-avatar-visibility="hidden"\]:not\([\s\S]{0,80}\[data-roster-preview="true"\][\s\S]{0,160}> \.botAmbientPresenceRig\s*\{[^}]*opacity:\s*0;/u,
     );
     assert.match(
       pageCss,
-      /\.coffeeSeat\[data-power-avatar-visibility="translucent"\]:not\(\[data-roster-preview="true"\]\)[\s\S]{0,140}opacity:\s*0\.5;/u,
+      /\.coffeeSeat\[data-power-avatar-visibility="translucent"\]:not\([\s\S]{0,80}\[data-roster-preview="true"\][\s\S]{0,160}> \.botAmbientPresenceRig\s*\{[^}]*opacity:\s*0\.5;/u,
     );
   });
 
-  it("freezes Signal visibility in the episode snapshot and never reveals hidden avatars", () => {
+  it("freezes Signal visibility in the episode snapshot", () => {
     assert.match(
       signalSource,
-      /const roleAvatarVisibilityMode[\s\S]{0,320}botcastSnapshotPowersForRoleV1\([\s\S]{0,180}snapshot !== null[\s\S]{0,120}botPowerAvatarVisibilityModeV1\(snapshot\)/u,
+      /const roleAvatarVisibilityMode[\s\S]{0,300}botcastSnapshotPowersForRoleV1\([\s\S]{0,180}snapshot !== null[\s\S]{0,120}botPowerAvatarVisibilityModeV1\(snapshot\)/u,
     );
     assert.match(
       signalSource,
@@ -58,12 +62,24 @@ describe("avatar visibility Power visual contract", () => {
     );
     assert.match(
       signalCss,
-      /\.avatarRig\[data-power-avatar-visibility="hidden"\] \{ opacity: 0; \}/u,
+      /\.avatarRig\[data-power-avatar-visibility="hidden"\] \.avatarEmbodiment \{ opacity: 0; \}/u,
     );
     assert.match(
       signalCss,
-      /\.avatarRig\[data-power-avatar-visibility="translucent"\] \{ opacity: \.5; \}/u,
+      /\.avatarRig\[data-power-avatar-visibility="translucent"\] \.avatarEmbodiment \{ opacity: \.5; \}/u,
     );
+    assert.match(
+      signalCss,
+      /\.avatarRig\[data-power-avatar-visibility="hidden"\]::after \{ opacity: 0; animation: none; \}/u,
+    );
+  });
+
+  it("leaves Signal attribution outside the hidden embodiment", () => {
+    assert.match(
+      signalSource,
+      /<span className=\{styles\.avatarEmbodiment\}[\s\S]{0,600}<\/span>[\s\S]{0,300}<SignalVoiceActionText/u,
+    );
+    assert.match(signalVoiceActionCss, /\.signalVoiceActionText\s*\{/u);
   });
 
   it("adapts hidden, translucent, and speaking-only states to Story", () => {

@@ -9,6 +9,23 @@ const cssSource = readFileSync(
 );
 
 describe("empty Chat Spotlight search", () => {
+  it("keeps the empty-Home bot browser mounted in both Zen and transcript Chat", () => {
+    const visibilitySource = pageSource.slice(
+      pageSource.indexOf("const zenEmptyHeroVisible ="),
+      pageSource.indexOf("const prismHomeEmptyHeroVisible ="),
+    );
+    assert.match(
+      visibilitySource,
+      /const zenEmptyHeroVisible =\s*sharedChatConversationPresentation &&\s*\(!detail \|\| detail\.messages\.length === 0\) &&\s*!pendingReplyVisible &&\s*!zenEphemeralUserActionMessage;/,
+    );
+    assert.doesNotMatch(
+      pageSource,
+      /const zenEmptyHeroVisible =\s*chatLikeSurface &&/,
+    );
+    assert.doesNotMatch(visibilitySource, /emptyStateSearchActive/);
+    assert.equal(pageSource.match(/\{zenEmptyHeroVisible &&/g)?.length, 1);
+  });
+
   it("lets the polished Spotlight own search without the browser rail overlapping it", () => {
     const rendererSource = pageSource.slice(
       pageSource.indexOf("const renderChatCanvasPickerControls"),
@@ -37,7 +54,6 @@ describe("empty Chat Spotlight search", () => {
     );
     assert.match(pageSource, /className=\{styles\.emptyStateSearchField\}/);
     assert.match(pageSource, /className=\{styles\.emptyStateSearchInput\}/);
-    assert.match(pageSource, /className=\{styles\.emptyStateSearchGroupPicker\}/);
   });
 
   it("keeps the persistent Spotlight focused while its query activates", () => {
@@ -83,6 +99,60 @@ describe("empty Chat Spotlight search", () => {
         /sortedPanelBots\.length > 0\s*\? styles\.emptyStateHubPicker\s*:\s*null/g,
       )?.length,
       2,
+    );
+  });
+
+  it("keeps the Hub picker controls compact against the bot grid", () => {
+    const hubPickerControlsRule = cssSource.slice(
+      cssSource.indexOf(".emptyStateHubPicker .chatCanvasPickerControls {"),
+      cssSource.indexOf(".emptyStateHubPicker .chatBotPickerFrame {"),
+    );
+    assert.match(
+      hubPickerControlsRule,
+      /margin-top:\s*clamp\(12px,\s*2\.4vh,\s*26px\);/,
+    );
+    assert.doesNotMatch(hubPickerControlsRule, /margin-top:\s*auto;/);
+    assert.doesNotMatch(hubPickerControlsRule, /padding-top:/);
+    assert.match(cssSource, /\.emptyStateHubPicker\s*\{[\s\S]*padding-bottom:\s*24px;/);
+    const hubPickerFrameRule = cssSource.slice(
+      cssSource.indexOf(".emptyStateHubPicker .chatBotPickerFrame {"),
+      cssSource.indexOf(".emptyStateHubPicker .chatBotPickerFrame[data-returning-all"),
+    );
+    assert.match(hubPickerFrameRule, /margin:\s*auto auto 0;/);
+    assert.match(
+      cssSource,
+      /\.messages\.messagesEmptyState\[data-chat-ephemeral="true"\][\s\S]{0,180}padding-bottom:\s*24px;/,
+    );
+    assert.match(
+      cssSource,
+      /\.messages\.messagesEmptyState\[data-chat-ephemeral="true"\]:has\([\s\S]{0,100}> \.emptyStateHubPicker[\s\S]{0,100}--zen-empty-state-bottom-reserve:\s*24px;/,
+    );
+    assert.match(
+      cssSource,
+      /\.messagesEmptyState[\s\S]{0,80}> \.emptyState\.emptyStateHubPicker\s*\{[\s\S]{0,80}padding-bottom:\s*24px;/,
+    );
+    assert.match(
+      cssSource,
+      /@media \(min-width:\s*721px\)[\s\S]{0,420}> \.emptyState\.emptyStateHubPicker\s*\{[\s\S]{0,80}translate:\s*0 clamp\(56px,\s*8dvh,\s*96px\);/,
+    );
+  });
+
+  it("keeps Spotlight search open while interacting with filtered bot tiles", () => {
+    assert.doesNotMatch(
+      pageSource,
+      /ref=\{emptyStateSpotlightRef\}[\s\S]{0,220}onBlur=\{[\s\S]{0,280}closeEmptyStateBotSearch\(\)/u,
+    );
+    assert.match(
+      pageSource,
+      /function isEmptyStateSearchKeepAliveTarget\(/u,
+    );
+    assert.match(
+      pageSource,
+      /target\.closest\('\[data-bot-picker-frame="true"\]'\)/u,
+    );
+    assert.match(
+      pageSource,
+      /target\.closest\("\[data-prism-menu-owner\]"\)/u,
     );
   });
 });

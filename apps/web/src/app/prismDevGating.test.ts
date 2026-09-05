@@ -2,51 +2,30 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  normalizePrismMarketplaceBranchLock,
   prismAvatarDetailsPaneEnabled,
-  prismBranchAllowsDevTools,
-  prismWebDevChatCommandsEnabled,
-  prismWebDevToolsEnabled,
+  prismBranchIsDev,
+  prismDeveloperAuthoringEnabled,
+  prismMarketplaceBranchLockAllows,
 } from "./prismDevGating.ts";
 
-test("dev tools are disabled on main even when local flags are enabled", () => {
-  const env = {
-    NODE_ENV: "development",
-    NEXT_PUBLIC_DEV_TOOLS: "1",
-    NEXT_PUBLIC_PRISM_BRANCH: "main",
-    NEXT_PUBLIC_PRISM_DEV_COMMANDS: "true",
-  };
-
-  assert.equal(prismBranchAllowsDevTools("main"), false);
-  assert.equal(prismWebDevToolsEnabled(env), false);
-  assert.equal(prismWebDevChatCommandsEnabled(env), false);
-  assert.equal(prismAvatarDetailsPaneEnabled(env), false);
-});
-
-test("dev tools are disabled when the branch cannot be resolved", () => {
-  const env = {
-    NODE_ENV: "development",
-    NEXT_PUBLIC_DEV_TOOLS: "1",
-    NEXT_PUBLIC_PRISM_BRANCH: "unknown",
-    NEXT_PUBLIC_PRISM_DEV_COMMANDS: "true",
-  };
-
-  assert.equal(prismBranchAllowsDevTools(undefined), false);
-  assert.equal(prismBranchAllowsDevTools("unknown"), false);
-  assert.equal(prismWebDevToolsEnabled(env), false);
-  assert.equal(prismWebDevChatCommandsEnabled(env), false);
-  assert.equal(prismAvatarDetailsPaneEnabled(env), false);
-});
-
-test("dev tools stay available by default on non-main development branches", () => {
-  const env = {
-    NODE_ENV: "development",
-    NEXT_PUBLIC_PRISM_BRANCH: "dev",
-  };
-
-  assert.equal(prismBranchAllowsDevTools("dev"), true);
-  assert.equal(prismWebDevToolsEnabled(env), true);
-  assert.equal(prismWebDevChatCommandsEnabled(env), true);
-  assert.equal(prismAvatarDetailsPaneEnabled(env), true);
+test("developer authoring stays on local/dev builds and out of Main releases", () => {
+  assert.equal(prismDeveloperAuthoringEnabled({ NODE_ENV: "development" }), true);
+  assert.equal(
+    prismDeveloperAuthoringEnabled({
+      NODE_ENV: "production",
+      NEXT_PUBLIC_PRISM_BRANCH: "dev",
+    }),
+    true,
+  );
+  assert.equal(
+    prismDeveloperAuthoringEnabled({
+      NODE_ENV: "production",
+      NEXT_PUBLIC_PRISM_BRANCH: "main",
+    }),
+    false,
+  );
+  assert.equal(prismDeveloperAuthoringEnabled({ NODE_ENV: "production" }), false);
 });
 
 test("avatar details stay locked on release branches without an override", () => {
@@ -56,7 +35,7 @@ test("avatar details stay locked on release branches without an override", () =>
         NEXT_PUBLIC_PRISM_BRANCH: branch,
         NEXT_PUBLIC_AVATAR_DETAILS: "1",
       }),
-      false
+      false,
     );
   }
 });
@@ -67,24 +46,24 @@ test("avatar details can be parked on dev without affecting other dev tools", ()
       NEXT_PUBLIC_PRISM_BRANCH: "dev",
       NEXT_PUBLIC_AVATAR_DETAILS: "0",
     }),
-    false
+    false,
   );
 });
 
-test("production dev commands require explicit opt-in on non-main branches", () => {
-  assert.equal(
-    prismWebDevChatCommandsEnabled({
-      NODE_ENV: "production",
-      NEXT_PUBLIC_PRISM_BRANCH: "dev",
-    }),
-    false
-  );
-  assert.equal(
-    prismWebDevChatCommandsEnabled({
-      NODE_ENV: "production",
-      NEXT_PUBLIC_PRISM_BRANCH: "dev",
-      NEXT_PUBLIC_PRISM_DEV_COMMANDS: "1",
-    }),
-    true
-  );
+test("marketplace branch locks require an exact branch match", () => {
+  assert.equal(prismBranchIsDev("dev"), true);
+  assert.equal(prismBranchIsDev("DEV"), true);
+  assert.equal(prismBranchIsDev("feature/dev"), false);
+  assert.equal(prismBranchIsDev(undefined), false);
+  assert.equal(normalizePrismMarketplaceBranchLock("dev"), "dev");
+  assert.equal(normalizePrismMarketplaceBranchLock("DEV"), "dev");
+  assert.equal(normalizePrismMarketplaceBranchLock("main"), null);
+  assert.equal(normalizePrismMarketplaceBranchLock("feature/foo"), null);
+  assert.equal(prismMarketplaceBranchLockAllows(null, "main"), true);
+  assert.equal(prismMarketplaceBranchLockAllows("dev", "dev"), true);
+  assert.equal(prismMarketplaceBranchLockAllows("dev", "DEV"), true);
+  assert.equal(prismMarketplaceBranchLockAllows("dev", "main"), false);
+  assert.equal(prismMarketplaceBranchLockAllows("dev", "feature/dev"), false);
+  assert.equal(prismMarketplaceBranchLockAllows("dev", undefined), false);
+  assert.equal(prismMarketplaceBranchLockAllows("dev", "unknown"), false);
 });

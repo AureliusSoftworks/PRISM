@@ -13,6 +13,7 @@ import {
   resolveLatestZenActionPreview,
   resolvePersistentZenActionPreview,
   resolveZenActionPresentation,
+  resolveZenActionPresentationFromMessage,
   resolveZenActionPreview,
   ZEN_ACTION_REVEAL_LEAD_DISPLAY_LENGTH,
 } from "./zenActions.ts";
@@ -143,7 +144,7 @@ describe("resolveZenActionPresentation", () => {
     assert.equal(presentation.actionOnly, true);
     assert.equal(presentation.mainText, "");
     assert.equal(presentation.cues.length, 1);
-    assert.equal(presentation.cues[0]?.action, "looks at you inquisitively");
+    assert.equal(presentation.cues[0]?.action, "Looks at you inquisitively");
     assert.equal(presentation.cues[0]?.revealAtDisplayLength, 0);
     assert.equal(presentation.cues[0]?.displayAtDisplayLength, 0);
     assert.equal(presentation.cues[0]?.motion, "glance");
@@ -157,9 +158,9 @@ describe("resolveZenActionPresentation", () => {
     assert.equal(presentation.mainText, "I hear you.");
     assert.deepEqual(
       presentation.cues.map((cue) => cue.action),
-      ["softly nods"]
+      ["Softly nods"]
     );
-    assert.equal(resolveCurrentZenActionCue(presentation.cues, 0)?.action, "softly nods");
+    assert.equal(resolveCurrentZenActionCue(presentation.cues, 0)?.action, "Softly nods");
   });
 
   it("treats double-asterisk model actions as action box cues, not canvas markdown", () => {
@@ -171,7 +172,27 @@ describe("resolveZenActionPresentation", () => {
     assert.equal(presentation.mainText, "The second economy is patience.");
     assert.deepEqual(
       presentation.cues.map((cue) => cue.action),
-      ["takes a breath"]
+      ["Takes a breath"]
+    );
+  });
+
+  it("uses one above-bot action timeline for bracket and asterisk cues", () => {
+    const presentation = resolveZenActionPresentation(
+      "[gasps] This is enough prose to separate the next cue clearly. *waves*",
+    );
+
+    assert.equal(
+      presentation.mainText,
+      "This is enough prose to separate the next cue clearly.",
+    );
+    assert.deepEqual(
+      presentation.cues.map((cue) => cue.action),
+      ["Gasps", "Waves"],
+    );
+    assert.equal(resolveCurrentZenActionCue(presentation.cues, 0)?.action, "Gasps");
+    assert.equal(
+      resolveCurrentZenActionCue(presentation.cues, Number.POSITIVE_INFINITY)?.action,
+      "Waves",
     );
   });
 
@@ -186,21 +207,21 @@ describe("resolveZenActionPresentation", () => {
     );
     assert.deepEqual(
       presentation.cues.map((cue) => cue.action),
-      ["takes a breath", "sets the cup down"]
+      ["Takes a breath", "Sets the cup down"]
     );
     const trailingCue = presentation.cues[1]!;
-    assert.equal(resolveCurrentZenActionCue(presentation.cues, 0)?.action, "takes a breath");
+    assert.equal(resolveCurrentZenActionCue(presentation.cues, 0)?.action, "Takes a breath");
     assert.equal(
       trailingCue.displayAtDisplayLength,
       trailingCue.revealAtDisplayLength - ZEN_ACTION_REVEAL_LEAD_DISPLAY_LENGTH
     );
     assert.equal(
       resolveCurrentZenActionCue(presentation.cues, trailingCue.displayAtDisplayLength)?.action,
-      "sets the cup down"
+      "Sets the cup down"
     );
     assert.equal(
       resolveCurrentZenActionCue(presentation.cues, Number.POSITIVE_INFINITY)?.action,
-      "sets the cup down"
+      "Sets the cup down"
     );
   });
 
@@ -209,10 +230,10 @@ describe("resolveZenActionPresentation", () => {
       "**takes a breath** This is enough prose to make a later cue arrive separately. **sets the trap gently**"
     );
 
-    assert.equal(resolveCanvasZenActionCue(presentation.cues)?.action, "takes a breath");
+    assert.equal(resolveCanvasZenActionCue(presentation.cues)?.action, "Takes a breath");
     assert.equal(
       resolveCurrentZenActionCue(presentation.cues, Number.POSITIVE_INFINITY)?.action,
-      "sets the trap gently"
+      "Sets the trap gently"
     );
   });
 
@@ -220,9 +241,9 @@ describe("resolveZenActionPresentation", () => {
     const presentation = resolveZenActionPresentation("I hear you. *sets the cup down*");
 
     assert.equal(presentation.mainText, "I hear you.");
-    assert.equal(presentation.cues[0]?.action, "sets the cup down");
+    assert.equal(presentation.cues[0]?.action, "Sets the cup down");
     assert.equal(presentation.cues[0]?.displayAtDisplayLength, 0);
-    assert.equal(resolveCurrentZenActionCue(presentation.cues, 0)?.action, "sets the cup down");
+    assert.equal(resolveCurrentZenActionCue(presentation.cues, 0)?.action, "Sets the cup down");
   });
 
   it("keeps inline emphasis as prose when it is not an action", () => {
@@ -235,26 +256,88 @@ describe("resolveZenActionPresentation", () => {
   });
 
   it("previews composer actions without treating commands as action drafts", () => {
-    assert.equal(resolveZenActionPreview("*looks around*")?.action, "looks around");
-    assert.equal(resolveZenActionPreview("/nvm *looks around*"), null);
+    assert.equal(resolveZenActionPreview("*looks around*")?.action, "Looks around");
+    assert.equal(resolveZenActionPreview("$nvm *looks around*"), null);
     assert.equal(resolveZenActionPreview("!prompt *looks around*"), null);
+    assert.equal(resolveZenActionPreview("?web-search *looks around*"), null);
   });
 
   it("uses the latest meaningful composer action for live previews", () => {
     assert.equal(
       resolveLatestZenActionPreview("*bows head* Lord Vader, I *stand up*")?.action,
-      "stand up"
+      "Stand up"
     );
   });
 
   it("keeps the last action preview after the composer clears until reset", () => {
     const first = resolveLatestZenActionPreview("*waves*");
-    assert.equal(first?.action, "waves");
+    assert.equal(first?.action, "Waves");
     const persisted = resolvePersistentZenActionPreview(first, "");
-    assert.equal(persisted?.action, "waves");
+    assert.equal(persisted?.action, "Waves");
     const replaced = resolvePersistentZenActionPreview(persisted, "*does a funky dance*");
-    assert.equal(replaced?.action, "does a funky dance");
+    assert.equal(replaced?.action, "Does a funky dance");
     assert.equal(resolvePersistentZenActionPreview(replaced, "", { reset: true }), null);
+  });
+
+  it("always sentence-cases action text for the canvas", () => {
+    assert.equal(
+      resolveZenActionPresentation("*SMILES AT YOU* Hello.").cues[0]?.action,
+      "Smiles at you",
+    );
+  });
+
+  it("prefers canonical stage-action metadata over inline legacy cues", () => {
+    const presentation = resolveZenActionPresentationFromMessage({
+      content: "*looks away* Spoken reply.",
+      zenStageAction: {
+        v: 1,
+        name: "zenStageAction",
+        source: "director",
+        category: "warm",
+        action: "offers a small smile",
+        seed: "conversation:bot:1:stage-action",
+      },
+    });
+
+    assert.equal(presentation.mainText, "*looks away* Spoken reply.");
+    assert.deepEqual(
+      presentation.cues.map((cue) => cue.action),
+      ["Offers a small smile"],
+    );
+  });
+
+  it("keeps inline action parsing for legacy messages without metadata", () => {
+    const presentation = resolveZenActionPresentationFromMessage({
+      content: "*takes a breath* Spoken reply.",
+    });
+
+    assert.equal(presentation.mainText, "Spoken reply.");
+    assert.equal(presentation.cues[0]?.action, "Takes a breath");
+  });
+
+  it("requires explicit action markup for player prose", () => {
+    const ordinarySpeech = resolveZenActionPresentationFromMessage({
+      content: "Yeah. Let’s just let it be nice for a minute.",
+      inferUnmarkedActions: false,
+    });
+
+    assert.equal(
+      ordinarySpeech.mainText,
+      "Yeah. Let’s just let it be nice for a minute.",
+    );
+    assert.equal(ordinarySpeech.hasActions, false);
+    assert.deepEqual(ordinarySpeech.cues, []);
+
+    const explicitAction = resolveZenActionPresentationFromMessage({
+      content: "*smiles* Nice",
+      inferUnmarkedActions: false,
+    });
+
+    assert.equal(explicitAction.mainText, "Nice");
+    assert.deepEqual(
+      explicitAction.cues.map((cue) => cue.action),
+      ["Smiles"],
+    );
   });
 });
 
@@ -296,11 +379,11 @@ describe("Zen live action client helpers", () => {
         botId: "santa",
         clientSequenceId: "seq-2",
       },
-      "draft_action",
+      "submitted_action",
       123
     );
 
-    assert.equal(normalized?.action, "waves back warmly");
+    assert.equal(normalized?.action, "Waves back warmly");
     assert.equal(normalized?.moodHint, "warm");
     assert.equal(
       normalizeZenLiveBotActionState(

@@ -14,33 +14,32 @@ import {
   type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
+import type { PrismIntroResolution } from "@localai/shared";
 import {
   PRISM_INTRO_SCENES,
   clampPrismIntroSceneIndex,
-  markPrismIntroSequenceSeen,
   prismIntroSceneAt,
-  prismIntroSequenceWasSeen,
 } from "./prismIntroSequenceData";
+import {
+  createPrismIntroAudioController,
+  type PrismIntroAudioController,
+  type PrismIntroAudioPlaybackState,
+} from "./prismIntroAudio";
+import { usePrismDocumentTheme } from "./usePrismDocumentTheme";
 import styles from "./PrismIntroSequence.module.css";
 
 type PrismIntroSequenceMode = "first-run" | "replay";
 
 interface PrismIntroSequenceContextValue {
-  requestFirstRunPrismIntro(): void;
+  requestFirstRunPrismIntro(options?: {
+    force?: boolean;
+    onResolved?: (resolution: Exclude<PrismIntroResolution, "pending">) => void;
+  }): void;
   replayPrismIntro(): void;
 }
 
 const PrismIntroSequenceContext =
   createContext<PrismIntroSequenceContextValue | null>(null);
-
-function prismIntroLocalStorage(): Storage | null {
-  if (typeof window === "undefined") return null;
-  try {
-    return window.localStorage;
-  } catch {
-    return null;
-  }
-}
 
 export function usePrismIntroSequence(): PrismIntroSequenceContextValue {
   const value = useContext(PrismIntroSequenceContext);
@@ -59,14 +58,17 @@ export function PrismIntroSequenceProvider({
 }): React.JSX.Element {
   const [mode, setMode] = useState<PrismIntroSequenceMode | null>(null);
   const firstRunResolvedThisSessionRef = useRef(false);
+  const firstRunResolutionRef = useRef<
+    ((resolution: Exclude<PrismIntroResolution, "pending">) => void) | null
+  >(null);
 
-  const requestFirstRunPrismIntro = useCallback(() => {
-    if (firstRunResolvedThisSessionRef.current) return;
-    const storage = prismIntroLocalStorage();
-    if (storage && prismIntroSequenceWasSeen(storage)) {
-      firstRunResolvedThisSessionRef.current = true;
-      return;
-    }
+  const requestFirstRunPrismIntro = useCallback((options?: {
+    force?: boolean;
+    onResolved?: (resolution: Exclude<PrismIntroResolution, "pending">) => void;
+  }) => {
+    if (firstRunResolvedThisSessionRef.current && !options?.force) return;
+    if (options?.force) firstRunResolvedThisSessionRef.current = false;
+    firstRunResolutionRef.current = options?.onResolved ?? null;
     setMode((current) => current ?? "first-run");
   }, []);
 
@@ -74,18 +76,16 @@ export function PrismIntroSequenceProvider({
     setMode("replay");
   }, []);
 
-  const closePrismIntro = useCallback(() => {
-    setMode((current) => {
-      if (current === "first-run") {
-        firstRunResolvedThisSessionRef.current = true;
-        const storage = prismIntroLocalStorage();
-        if (storage) {
-          markPrismIntroSequenceSeen(storage);
-        }
-      }
-      return null;
-    });
-  }, []);
+  const closePrismIntro = useCallback((
+    resolution: Exclude<PrismIntroResolution, "pending">,
+  ) => {
+    if (mode === "first-run") {
+      firstRunResolvedThisSessionRef.current = true;
+      firstRunResolutionRef.current?.(resolution);
+      firstRunResolutionRef.current = null;
+    }
+    setMode(null);
+  }, [mode]);
 
   const value = useMemo(
     () => ({ requestFirstRunPrismIntro, replayPrismIntro }),
@@ -107,10 +107,18 @@ function PrismIntroSequenceDialog({
   onClose,
 }: {
   mode: PrismIntroSequenceMode;
-  onClose: () => void;
+  onClose: (
+    resolution: Exclude<PrismIntroResolution, "pending">,
+  ) => void;
 }): React.JSX.Element | null {
+  const resolvedTheme = usePrismDocumentTheme();
   const [sceneIndex, setSceneIndex] = useState(0);
+  const [isTransitioning, setIsTransitioning] = useState(false);
+  const [audioPlaybackState, setAudioPlaybackState] =
+    useState<PrismIntroAudioPlaybackState>("starting");
   const rootRef = useRef<HTMLDivElement | null>(null);
+  const transitionTimerRef = useRef<number | null>(null);
+  const audioControllerRef = useRef<PrismIntroAudioController | null>(null);
   const titleId = useId();
   const bodyId = useId();
   const visualDescriptionId = useId();
@@ -118,8 +126,73 @@ function PrismIntroSequenceDialog({
   const finalSceneIndex = PRISM_INTRO_SCENES.length - 1;
   const isFinalScene = sceneIndex === finalSceneIndex;
 
+  useEffect(() => {
+    const controller = createPrismIntroAudioController({
+      onPlaybackStateChange: setAudioPlaybackState,
+    });
+    audioControllerRef.current = controller;
+    controller.start(PRISM_INTRO_SCENES[0]!.id);
+    return () => {
+      if (audioControllerRef.current === controller) {
+        audioControllerRef.current = null;
+      }
+      controller.release();
+    };
+  }, []);
+
+  useEffect(() => {
+    audioControllerRef.current?.showScene(scene.id);
+  }, [scene.id]);
+
+  const resumeIntroAudio = useCallback(() => {
+    if (audioPlaybackState !== "blocked") return;
+    audioControllerRef.current?.resume(scene.id);
+  }, [audioPlaybackState, scene.id]);
+
+  const toggleIntroAudio = useCallback(() => {
+    const controller = audioControllerRef.current;
+    if (!controller) return;
+    if (audioPlaybackState === "muted") {
+      controller.setEnabled(true, scene.id);
+      return;
+    }
+    if (audioPlaybackState === "blocked") {
+      controller.resume(scene.id);
+      return;
+    }
+    controller.setEnabled(false, scene.id);
+  }, [audioPlaybackState, scene.id]);
+
   const goToScene = useCallback((index: number) => {
-    setSceneIndex(clampPrismIntroSceneIndex(index));
+    resumeIntroAudio();
+    const nextIndex = clampPrismIntroSceneIndex(index);
+    if (nextIndex === sceneIndex || isTransitioning) return;
+    setIsTransitioning(true);
+    transitionTimerRef.current = window.setTimeout(() => {
+      setSceneIndex(nextIndex);
+      setIsTransitioning(false);
+      transitionTimerRef.current = null;
+    }, window.matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : 460);
+  }, [isTransitioning, resumeIntroAudio, sceneIndex]);
+
+  const advanceScene = useCallback(() => {
+    resumeIntroAudio();
+    if (isTransitioning) return;
+    if (!isFinalScene) {
+      goToScene(sceneIndex + 1);
+      return;
+    }
+    setIsTransitioning(true);
+    transitionTimerRef.current = window.setTimeout(() => {
+      onClose("completed");
+      transitionTimerRef.current = null;
+    }, window.matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : 560);
+  }, [goToScene, isFinalScene, isTransitioning, onClose, resumeIntroAudio, sceneIndex]);
+
+  useEffect(() => () => {
+    if (transitionTimerRef.current !== null) {
+      window.clearTimeout(transitionTimerRef.current);
+    }
   }, []);
 
   useEffect(() => {
@@ -165,7 +238,17 @@ function PrismIntroSequenceDialog({
 
   const sceneStyle = {
     "--prism-intro-image-position": scene.imagePosition,
+    "--prism-intro-target-x": `${scene.lightTarget.xPercent}%`,
+    "--prism-intro-target-y": `${scene.lightTarget.yPercent}%`,
+    "--prism-intro-target-size": `clamp(76px, ${scene.lightTarget.diameterVmin}vmin, 360px)`,
   } as CSSProperties;
+  const audioButtonLabel = audioPlaybackState === "muted"
+    ? "Sound off"
+    : audioPlaybackState === "blocked"
+    ? "Start sound"
+    : "Sound on";
+  const audioIsActive =
+    audioPlaybackState === "starting" || audioPlaybackState === "playing";
 
   return createPortal(
     <div
@@ -173,24 +256,38 @@ function PrismIntroSequenceDialog({
       className={styles.backdrop}
       style={sceneStyle}
       data-prism-intro-sequence="true"
+      data-prism-document-theme-surface="true"
       data-prism-intro-mode={mode}
       data-prism-intro-scene={scene.id}
+      data-theme={resolvedTheme}
       data-final-scene={isFinalScene ? "true" : undefined}
+      data-transitioning={isTransitioning ? "true" : undefined}
       role="dialog"
       aria-modal="true"
       aria-labelledby={titleId}
       aria-describedby={`${bodyId} ${visualDescriptionId}`}
+      aria-busy={isTransitioning}
       tabIndex={-1}
+      onPointerMove={(event) => {
+        const root = rootRef.current;
+        if (!root) return;
+        root.style.setProperty("--prism-intro-light-x", `${event.clientX}px`);
+        root.style.setProperty("--prism-intro-light-y", `${event.clientY}px`);
+        root.dataset.lightActive = "true";
+      }}
+      onPointerLeave={() => {
+        if (rootRef.current) delete rootRef.current.dataset.lightActive;
+      }}
       onKeyDown={(event) => {
         if (event.key === "Escape") {
           event.preventDefault();
           event.stopPropagation();
-          onClose();
+          onClose("skipped");
           return;
         }
         if (event.key === "ArrowRight") {
           event.preventDefault();
-          goToScene(sceneIndex + 1);
+          advanceScene();
           return;
         }
         if (event.key === "ArrowLeft") {
@@ -206,6 +303,14 @@ function PrismIntroSequenceDialog({
         if (event.key === "End") {
           event.preventDefault();
           goToScene(finalSceneIndex);
+          return;
+        }
+        if (
+          (event.key === " " || event.key === "Enter") &&
+          event.target === rootRef.current
+        ) {
+          event.preventDefault();
+          advanceScene();
           return;
         }
         if (event.key !== "Tab") return;
@@ -253,41 +358,37 @@ function PrismIntroSequenceDialog({
         <span className={styles.paperVeil} />
       </div>
 
+      <span className={styles.cursorLight} aria-hidden="true" />
+
       <div className={styles.topRail}>
-        <div className={styles.sceneCount} aria-live="polite">
-          <span>PRISM</span>
-          <strong>
-            {String(sceneIndex + 1).padStart(2, "0")} /{" "}
-            {String(PRISM_INTRO_SCENES.length).padStart(2, "0")}
-          </strong>
-        </div>
+        <button
+          type="button"
+          className={styles.audioButton}
+          data-prism-intro-audio-toggle="true"
+          data-audio-state={audioPlaybackState}
+          onClick={toggleIntroAudio}
+          aria-label={audioButtonLabel}
+          aria-pressed={audioIsActive}
+        >
+          <span className={styles.audioIndicator} aria-hidden="true" />
+          <span>{audioButtonLabel}</span>
+        </button>
         <button
           type="button"
           className={styles.skipButton}
-          onClick={onClose}
+          onClick={() => onClose("skipped")}
           aria-label={
             mode === "first-run"
               ? "Skip the PRISM introduction"
               : "Close the PRISM introduction"
           }
         >
-          {mode === "first-run" ? "Skip introduction" : "Close"}
-          <span aria-hidden="true">×</span>
+          <kbd>Esc</kbd>
+          <span>{mode === "first-run" ? "Skip" : "Close"}</span>
         </button>
       </div>
 
       <div className={styles.copyStage} aria-live="polite" aria-atomic="true">
-        {scene.showBrandMark ? (
-          <Image
-            className={styles.brandMark}
-            src="/refraction-emblem.svg"
-            width={88}
-            height={88}
-            alt=""
-            aria-hidden="true"
-            unoptimized
-          />
-        ) : null}
         <p className={styles.eyebrow}>{scene.eyebrow}</p>
         <h1 id={titleId} key={`${scene.id}-title`}>
           {scene.title}
@@ -300,51 +401,23 @@ function PrismIntroSequenceDialog({
         </span>
       </div>
 
-      <div className={styles.bottomRail}>
-        <div className={styles.progressDots} aria-label="Introduction scenes">
-          {PRISM_INTRO_SCENES.map((candidate, index) => (
-            <button
-              key={candidate.id}
-              type="button"
-              className={styles.progressDot}
-              data-active={index === sceneIndex ? "true" : undefined}
-              onClick={() => goToScene(index)}
-              aria-label={`Go to scene ${index + 1}: ${candidate.eyebrow.toLowerCase()}`}
-              aria-current={index === sceneIndex ? "step" : undefined}
-            />
-          ))}
-        </div>
+      <button
+        type="button"
+        className={styles.lightTarget}
+        data-kind={scene.lightTarget.kind}
+        onClick={advanceScene}
+        aria-label={scene.lightTarget.label}
+        disabled={isTransitioning}
+      >
+        <span className={styles.targetFocus} aria-hidden="true" />
+      </button>
 
-        <div className={styles.navigation}>
-          <button
-            type="button"
-            className={styles.backButton}
-            onClick={() => goToScene(sceneIndex - 1)}
-            disabled={sceneIndex === 0}
-          >
-            <span aria-hidden="true">←</span>
-            Previous
-          </button>
-          <button
-            type="button"
-            className={styles.nextButton}
-            onClick={() => {
-              if (isFinalScene) {
-                onClose();
-              } else {
-                goToScene(sceneIndex + 1);
-              }
-            }}
-          >
-            {isFinalScene
-              ? mode === "first-run"
-                ? "Enter PRISM"
-                : "Return to PRISM"
-              : "Continue"}
-            <span aria-hidden="true">→</span>
-          </button>
-        </div>
-      </div>
+      <p className={styles.interactionHint} aria-hidden="true">
+        {isFinalScene && mode === "replay"
+          ? "Return to PRISM"
+          : scene.lightTarget.hint}
+        <span> · move the light and touch</span>
+      </p>
     </div>,
     document.body,
   );

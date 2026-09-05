@@ -4,16 +4,16 @@ import { describe, it } from "node:test";
 
 const pageSource = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
 
-describe("Coffee Auto request routing", () => {
-  it("uses the validated contextual Auto mode for every Coffee request", () => {
+describe("Coffee contextual Auto request routing", () => {
+  it("sends a binary privacy lane for every Coffee request", () => {
     assert.match(
       pageSource,
-      /const coffeeResponseModeForSend = autoFallbackResponseModeForSend\(/u,
+      /const coffeeResponseModeForSend = responseModeForProvider\(/u,
     );
     assert.equal(
       pageSource.match(/responseMode: coffeeResponseModeForSend(?!Ref)/gu)
         ?.length,
-      3,
+      6,
     );
     assert.equal(
       pageSource.match(/responseMode: coffeeResponseModeForSendRef\.current/gu)

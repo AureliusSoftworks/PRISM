@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { createHash } from "node:crypto";
 import { createDatabase } from "../db.ts";
 import {
   exportUserSnapshot,
@@ -10,12 +11,929 @@ import {
   type BackupSnapshot,
 } from "../backup.ts";
 import {
+  createPendingLivingShellAccountProgress,
+} from "../living-shell-progress.ts";
+import { listLibraryGroups } from "../library-groups.ts";
+import { listModelReasoningEffortPreferences } from "../model-effort-preferences.ts";
+import { listModelTurboPreferences } from "../model-turbo-preferences.ts";
+import {
   DEFAULT_ZEN_MESSAGE_FONT_MAX_PX,
   DEFAULT_ZEN_MESSAGE_FONT_MIN_PX,
   MAX_ZEN_WALLPAPER_STYLE_NOTES_LENGTH,
 } from "../settings.ts";
+import {
+  botPowerSourceHashForPowerV1,
+  botPowerSourceHashV1,
+  normalizeCoffeeSessionSettings,
+  parseStoredBotPowersV1,
+} from "@localai/shared";
+import { encryptJson, encryptText } from "../security.ts";
+import {
+  readGlobalBotMood,
+  setGlobalBotMood,
+} from "../bot-global-mood.ts";
+import {
+  createBotcastEpisode,
+  createBotcastShow,
+  forceEndBotcastEpisode,
+} from "../botcast.ts";
+
+describe("backup credential exclusion", () => {
+  it("never exports the account Ollama Cloud bearer credential", () => {
+    withBackupDatabase((db, userKey) => {
+      const encrypted = encryptText("ollama-cloud-test-secret", userKey);
+      db.prepare(
+        `UPDATE users
+            SET ollama_cloud_key_ciphertext = ?,
+                ollama_cloud_key_iv = ?,
+                ollama_cloud_key_tag = ?
+          WHERE id = 'user-1'`,
+      ).run(encrypted.ciphertext, encrypted.iv, encrypted.tag);
+
+      const serialized = JSON.stringify(exportUserSnapshot(db, "user-1", userKey));
+      assert.equal(serialized.includes("ollama-cloud-test-secret"), false);
+      assert.equal(serialized.includes("ollamaCloudApiKey"), false);
+      assert.equal(serialized.includes("ollama_cloud_key"), false);
+    });
+  });
+});
+
+describe("backup Signal listener reviews", () => {
+  it("round-trips public review provenance and accepts legacy reviews without it", () => {
+    withBackupDatabase((db, userKey) => {
+      const createdAt = "2026-08-26T00:00:00.000Z";
+      for (const [id, name] of [
+        ["signal-host", "Signal Host"],
+        ["signal-guest", "Signal Guest"],
+        ["signal-reviewer", "Signal Reviewer"],
+      ] as const) {
+        db.prepare(
+          `INSERT INTO bots
+            (id, user_id, name, system_prompt, color, glyph,
+             chat_enabled, created_at, updated_at)
+           VALUES (?, 'user-1', ?, 'A careful listener.', '#445566',
+                   'spark', 1, ?, ?)`,
+        ).run(id, name, createdAt, createdAt);
+      }
+      const show = createBotcastShow(db, "user-1", {
+        hostBotId: "signal-host",
+      });
+      const episode = createBotcastEpisode(db, "user-1", show.id, {
+        guestBotId: "signal-guest",
+        topic: "What makes a review trustworthy?",
+        guestBrief:
+          "You know the reviewer missed the most important exchange.",
+      });
+      forceEndBotcastEpisode(db, "user-1", episode.id);
+      const provenance = {
+        version: 1,
+        artifactHash: "artifact-hash",
+        reviewerSnapshotHash: "reviewer-hash",
+        reviewerSnapshot: {
+          version: 1,
+          reviewerId: "signal-reviewer",
+          reviewerName: "Signal Reviewer",
+        },
+        rubricId: "signal.audience-pulse",
+        rubricVersion: 1,
+        provider: "openai",
+        model: "review-model",
+        acceptedAt: "2026-08-26T00:05:00.000Z",
+        output: {
+          rating: 3.5,
+          comment: "I wanted one more concrete question.",
+        },
+      } as const;
+      db.prepare(
+        `UPDATE botcast_episodes
+            SET persona_reviewer_bot_id = 'signal-reviewer',
+                persona_reviewer_name = 'Signal Reviewer',
+                persona_rating = 3.5,
+                persona_comment = 'I wanted one more concrete question.',
+                persona_reviewed_at = ?,
+                persona_review_provenance_json = ?
+          WHERE id = ?`,
+      ).run(provenance.acceptedAt, JSON.stringify(provenance), episode.id);
+
+      const snapshot = exportUserSnapshot(db, "user-1", userKey);
+      assert.deepEqual(
+        snapshot.botcast?.episodes[0]?.personaReview?.provenance,
+        provenance,
+      );
+      assert.equal(
+        snapshot.botcast?.episodes[0]?.guestBrief,
+        "You know the reviewer missed the most important exchange.",
+      );
+      db.prepare("DELETE FROM botcast_shows WHERE id = ?").run(show.id);
+      importUserSnapshot(db, "user-1", snapshot, userKey);
+      assert.deepEqual(
+        JSON.parse(
+          (
+            db
+              .prepare(
+                `SELECT persona_review_provenance_json AS provenance
+                   FROM botcast_episodes WHERE id = ?`,
+              )
+              .get(episode.id) as { provenance: string }
+          ).provenance,
+        ),
+        provenance,
+      );
+      assert.equal(
+        (
+          db
+            .prepare(
+              "SELECT guest_brief AS guestBrief FROM botcast_episodes WHERE id = ?",
+            )
+            .get(episode.id) as { guestBrief: string }
+        ).guestBrief,
+        "You know the reviewer missed the most important exchange.",
+      );
+
+      const legacySnapshot = structuredClone(snapshot);
+      const legacyReview = legacySnapshot.botcast?.episodes[0]?.personaReview;
+      if (legacyReview) delete legacyReview.provenance;
+      db.prepare("DELETE FROM botcast_shows WHERE id = ?").run(show.id);
+      assert.doesNotThrow(() =>
+        importUserSnapshot(db, "user-1", legacySnapshot, userKey),
+      );
+      assert.equal(
+        (
+          db
+            .prepare(
+              `SELECT persona_review_provenance_json AS provenance
+                 FROM botcast_episodes WHERE id = ?`,
+            )
+            .get(episode.id) as { provenance: string | null }
+        ).provenance,
+        null,
+      );
+    });
+  });
+});
+
+describe("backup Whodunnit private state", () => {
+  it("round-trips the Case Bible, replay actions, notebook, and revisions", () => {
+    withBackupDatabase((db, userKey) => {
+      const now = "2026-08-20T20:00:00.000Z";
+      db.prepare(
+        `INSERT INTO debate_sessions
+          (id, user_id, revision, status, phase, step_key, player_role,
+           create_idempotency_key, motion, session_json, created_at, updated_at)
+         VALUES ('mystery-session', 'user-1', 3, 'waiting_for_player',
+                 'challenge', 'mystery_investigation', 'judge',
+                 'mystery-backup-key', 'Whodunnit?', '{}', ?, ?)`,
+      ).run(now, now);
+      const privateJson = JSON.stringify({ version: 1, culpritSeatId: "suspect-2" });
+      const contentHash = createHash("sha256").update(privateJson).digest("hex");
+      db.prepare(
+        `INSERT INTO debate_mystery_cases
+          (session_id, user_id, schema_version, generator_version, private_json,
+           content_hash, created_at, updated_at)
+         VALUES ('mystery-session', 'user-1', 1, 1, ?, ?, ?, ?)`,
+      ).run(privateJson, contentHash, now, now);
+      db.prepare(
+        `INSERT INTO debate_mystery_actions
+          (id, user_id, session_id, sequence, action_kind, public_payload_json, occurred_at)
+         VALUES ('mystery-action', 'user-1', 'mystery-session', 1,
+                 'travel', '{"roomId":"room-2"}', ?)`,
+      ).run(now);
+      const notebookJson = JSON.stringify({ version: 1, sessionId: "mystery-session", revision: 1, pages: [{ id: "page-1", title: "Case Notes", blocks: [{ id: "block-1", kind: "paragraph", text: "Private theory" }], createdAt: now, updatedAt: now }], createdAt: now, updatedAt: now });
+      db.prepare(
+        `INSERT INTO debate_mystery_notebooks
+          (session_id, user_id, revision, document_json, created_at, updated_at)
+         VALUES ('mystery-session', 'user-1', 1, ?, ?, ?)`,
+      ).run(notebookJson, now, now);
+      db.prepare(
+        `INSERT INTO debate_mystery_notebook_revisions
+          (id, user_id, session_id, revision, document_json, reason,
+           idempotency_key, created_at)
+         VALUES ('mystery-note-revision', 'user-1', 'mystery-session', 1,
+                 ?, 'import', 'mystery-note-initial', ?)`,
+      ).run(notebookJson, now);
+
+      const snapshot = exportUserSnapshot(db, "user-1", userKey);
+      assert.equal(snapshot.debates?.mysteryCases?.length, 1);
+      assert.equal(snapshot.debates?.mysteryNotebooks?.[0]?.documentJson.includes("Private theory"), true);
+      db.prepare("DELETE FROM debate_sessions WHERE id = 'mystery-session'").run();
+      importUserSnapshot(db, "user-1", snapshot, userKey);
+      assert.equal((db.prepare("SELECT COUNT(*) AS count FROM debate_mystery_cases WHERE session_id = 'mystery-session'").get() as { count: number }).count, 1);
+      assert.equal((db.prepare("SELECT COUNT(*) AS count FROM debate_mystery_actions WHERE session_id = 'mystery-session'").get() as { count: number }).count, 1);
+      assert.equal((db.prepare("SELECT document_json FROM debate_mystery_notebooks WHERE session_id = 'mystery-session'").get() as { document_json: string }).document_json.includes("Private theory"), true);
+      assert.equal((db.prepare("SELECT COUNT(*) AS count FROM debate_mystery_notebook_revisions WHERE session_id = 'mystery-session'").get() as { count: number }).count, 1);
+    });
+  });
+});
+
+describe("backup global bot mood", () => {
+  it("round-trips account-owned mood state with the bot snapshot", () => {
+    withBackupDatabase((db, userKey) => {
+      db.prepare(
+        `INSERT INTO bots
+          (id, user_id, name, system_prompt, chat_enabled, created_at, updated_at)
+         VALUES ('bot-a', 'user-1', 'Alice', 'A careful critic.', 1, ?, ?)`,
+      ).run("2026-08-14T00:00:00.000Z", "2026-08-14T00:00:00.000Z");
+      setGlobalBotMood(
+        db,
+        "user-1",
+        "bot-a",
+        "guarded",
+        "signal_feedback",
+        "2026-08-14T02:00:00.000Z",
+      );
+      const snapshot = exportUserSnapshot(db, "user-1", userKey);
+      assert.equal(
+        snapshot.bots.find((bot) => bot.id === "bot-a")?.globalMood,
+        "guarded",
+      );
+      db.prepare(
+        "DELETE FROM bot_global_moods WHERE user_id = 'user-1'",
+      ).run();
+      importUserSnapshot(db, "user-1", snapshot, userKey);
+      assert.equal(
+        readGlobalBotMood(db, "user-1", "bot-a").moodKey,
+        "guarded",
+      );
+    });
+  });
+});
+
+describe("backup memory ecology", () => {
+  it("round-trips memory ecology settings, lineage, timestamps, targets, and receipts", () => {
+    withBackupDatabase((db, userKey) => {
+      db.prepare(
+        `UPDATE users
+            SET memory_learn_about_player = 0,
+                memory_learn_about_bots = 1,
+                memory_acquisition_sensitivity = 'curious',
+                memory_short_term_days = 18,
+                memory_long_term_threshold = 0.84,
+                memory_inferred_min_evidence = 2,
+                memory_inferred_threshold = 0.76
+          WHERE id = 'user-1'`,
+      ).run();
+      db.prepare(
+        `INSERT INTO bots (id, user_id, name, created_at, updated_at)
+         VALUES ('bot-a', 'user-1', 'Calvin', 'now', 'now'),
+                ('bot-b', 'user-1', 'Morgan', 'now', 'now')`,
+      ).run();
+      const direct = encryptJson({ text: "Calvin interrupted twice." }, userKey);
+      const derived = encryptJson({ text: "Calvin can be impatient." }, userKey);
+      db.prepare(
+        `INSERT INTO memories
+          (id, user_id, bot_id, target_bot_id, ciphertext, iv, tag,
+           confidence, base_confidence, category, tier, lifecycle, durability,
+           source, certainty, source_message_ids, last_reinforced_at, created_at)
+         VALUES ('memory-direct', 'user-1', 'bot-a', 'bot-b', ?, ?, ?,
+                 0.72, 0.81, 'bot_relation', 'short_term', 'short_term', 0.7,
+                 'direct', 0.72, '["message-1"]', ?, ?)`,
+      ).run(
+        direct.ciphertext,
+        direct.iv,
+        direct.tag,
+        "2026-08-10T10:00:00.000Z",
+        "2026-08-09T10:00:00.000Z",
+      );
+      db.prepare(
+        `INSERT INTO memories
+          (id, user_id, bot_id, target_bot_id, ciphertext, iv, tag,
+           confidence, base_confidence, category, tier, lifecycle, durability,
+           source, certainty, source_message_ids, last_reinforced_at, created_at)
+         VALUES ('memory-derived', 'user-1', 'bot-a', 'bot-b', ?, ?, ?,
+                 0.77, 0.8, 'bot_relation', 'short_term', 'derived', 0.7,
+                 'inferred', 0.8, '["message-1","message-2"]', ?, ?)`,
+      ).run(
+        derived.ciphertext,
+        derived.iv,
+        derived.tag,
+        "2026-08-10T10:01:00.000Z",
+        "2026-08-10T10:01:00.000Z",
+      );
+      db.prepare(
+        `INSERT INTO memory_evidence_links
+          (user_id, inferred_memory_id, evidence_memory_id, created_at)
+         VALUES ('user-1', 'memory-derived', 'memory-direct', ?)`,
+      ).run("2026-08-10T10:01:00.000Z");
+      db.prepare(
+        `INSERT INTO memory_acquisition_receipts
+          (id, user_id, memory_id, learner_bot_id, target_bot_id,
+           conversation_id, kind, created_at, read_at)
+         VALUES ('receipt-1', 'user-1', 'memory-direct', 'bot-a', 'bot-b',
+                 NULL, 'bot_relation', ?, NULL)`,
+      ).run("2026-08-10T10:02:00.000Z");
+
+      const snapshot = exportUserSnapshot(db, "user-1", userKey);
+      assert.deepEqual(snapshot.settings?.memoryEcology, {
+        learnAboutPlayer: false,
+        learnAboutBots: true,
+        acquisitionSensitivity: "curious",
+        shortTermRetentionDays: 18,
+        longTermPromotionThreshold: 0.84,
+        inferredMinEvidenceCount: 2,
+        inferredConfidenceThreshold: 0.76,
+      });
+      const derivedSnapshot = snapshot.memories.find(
+        (memory) => memory.id === "memory-derived",
+      );
+      assert.equal(derivedSnapshot?.lifecycle, "derived");
+      assert.deepEqual(derivedSnapshot?.evidenceMemoryIds, ["memory-direct"]);
+      assert.equal(derivedSnapshot?.evidenceLineageKnown, true);
+      assert.equal(snapshot.memoryReceipts?.[0]?.targetBotId, "bot-b");
+
+      db.prepare("DELETE FROM memory_acquisition_receipts WHERE user_id = 'user-1'").run();
+      db.prepare("DELETE FROM memory_evidence_links WHERE user_id = 'user-1'").run();
+      db.prepare("DELETE FROM memories WHERE user_id = 'user-1'").run();
+      importUserSnapshot(db, "user-1", snapshot, userKey);
+
+      const restored = db
+        .prepare(
+          `SELECT target_bot_id, base_confidence, lifecycle, last_reinforced_at
+             FROM memories WHERE id = 'memory-direct'`,
+        )
+        .get() as {
+        target_bot_id: string;
+        base_confidence: number;
+        lifecycle: string;
+        last_reinforced_at: string;
+      };
+      assert.equal(restored.target_bot_id, "bot-b");
+      assert.equal(restored.base_confidence, 0.81);
+      assert.equal(restored.lifecycle, "short_term");
+      assert.equal(restored.last_reinforced_at, "2026-08-10T10:00:00.000Z");
+      assert.equal(
+        (db
+          .prepare("SELECT COUNT(*) AS count FROM memory_evidence_links")
+          .get() as { count: number }).count,
+        1,
+      );
+      assert.equal(
+        (db
+          .prepare(
+            "SELECT evidence_lineage_known AS known FROM memories WHERE id = 'memory-derived'",
+          )
+          .get() as { known: number }).known,
+        1,
+      );
+      assert.equal(
+        (db
+          .prepare("SELECT COUNT(*) AS count FROM memory_acquisition_receipts")
+          .get() as { count: number }).count,
+        1,
+      );
+    });
+  });
+});
+
+describe("backup response cues", () => {
+  it("round-trips the audience-heard presentation beat", () => {
+    withBackupDatabase((db, userKey) => {
+      const createdAt = "2026-08-01T20:00:00.000Z";
+      db.prepare(
+        `INSERT INTO bots (id, user_id, name, created_at, updated_at)
+         VALUES ('bot-1', 'user-1', 'Jane', ?, ?)`,
+      ).run(createdAt, createdAt);
+      db.prepare(
+        `INSERT INTO debate_sessions
+           (id, user_id, status, phase, step_key, player_role,
+            create_idempotency_key, motion, session_json, created_at, updated_at)
+         VALUES ('debate-1', 'user-1', 'live', 'opening', 'intro', 'spectator',
+                 'response-cue-backup', 'Motion', '{}', ?, ?)`,
+      ).run(createdAt, createdAt);
+      db.prepare(
+        `INSERT INTO bot_presence_beats
+           (id, user_id, surface, session_id, response_id, speaker_bot_id,
+            speaker_name, trigger, source, text, heard_character_count,
+            completion, playback_started_at_ms, playback_ended_at_ms,
+            created_at, updated_at)
+         VALUES ('beat-1', 'user-1', 'debate', 'debate-1', 'response-1',
+                 'bot-1', 'Jane', 'interruption', 'default', 'Okay, then.', 5,
+                 'interrupted', 100, 420, ?, ?)`,
+      ).run(createdAt, createdAt);
+
+      const snapshot = exportUserSnapshot(db, "user-1", userKey);
+      assert.equal(snapshot.presenceBeats?.[0]?.heardCharacterCount, 5);
+      assert.equal(snapshot.presenceBeats?.[0]?.completion, "interrupted");
+
+      db.prepare("DELETE FROM bot_presence_beats WHERE user_id = 'user-1'").run();
+      importUserSnapshot(db, "user-1", snapshot, userKey);
+      const restored = db
+        .prepare(
+          `SELECT text, heard_character_count, completion
+             FROM bot_presence_beats
+            WHERE id = 'beat-1' AND user_id = 'user-1'`,
+        )
+        .get() as {
+        text: string;
+        heard_character_count: number;
+        completion: string;
+      };
+      assert.equal(restored.text, "Okay, then.");
+      assert.equal(restored.heard_character_count, 5);
+      assert.equal(restored.completion, "interrupted");
+    });
+  });
+});
+
+describe("backup applet session notes", () => {
+  it("round-trips a note with its Coffee transcript", () => {
+    withBackupDatabase((db, userKey) => {
+      db.prepare(
+        `INSERT INTO conversations
+          (id, user_id, title, conversation_mode, created_at, updated_at)
+         VALUES ('coffee-note-session', 'user-1', 'Quiet table', 'coffee', ?, ?)`,
+      ).run("2026-08-09T20:00:00.000Z", "2026-08-09T20:00:00.000Z");
+      db.prepare(
+        `INSERT INTO applet_session_notes
+          (user_id, surface, session_id, body, captures_json, created_at, updated_at)
+         VALUES ('user-1', 'coffee', 'coffee-note-session', ?, ?, ?, ?)`,
+      ).run(
+        "- Remember the pause.\n- Revisit the ending.",
+        JSON.stringify([
+          {
+            body: "Remember the pause.",
+            startedAt: "2026-08-09T20:00:30.000Z",
+            fps: 57,
+            committedAt: "2026-08-09T20:01:00.000Z",
+          },
+        ]),
+        "2026-08-09T20:01:00.000Z",
+        "2026-08-09T20:01:00.000Z",
+      );
+      db.prepare(
+        `INSERT INTO applet_transcript_frame_samples
+          (user_id, surface, session_id, entry_id, fps, captured_at)
+         VALUES ('user-1', 'coffee', 'coffee-note-session', 'message-1', 59,
+                 '2026-08-09T20:00:15.000Z')`,
+      ).run();
+      db.prepare(
+        `INSERT INTO live_session_focus_events
+          (user_id, surface, session_id, transition, occurred_at)
+         VALUES ('user-1', 'coffee', 'coffee-note-session', 'away',
+                 '2026-08-09T20:00:20.000Z')`,
+      ).run();
+
+      const snapshot = exportUserSnapshot(db, "user-1", userKey);
+      assert.equal(
+        snapshot.sessionNotes?.[0]?.body,
+        "- Remember the pause.\n- Revisit the ending.",
+      );
+      assert.equal(
+        snapshot.sessionNotes?.[0]?.captures?.[0]?.startedAt,
+        "2026-08-09T20:00:30.000Z",
+      );
+      assert.equal(snapshot.sessionNotes?.[0]?.captures?.[0]?.fps, 57);
+      assert.equal(snapshot.transcriptFrameSamples?.[0]?.entryId, "message-1");
+      assert.equal(snapshot.transcriptFrameSamples?.[0]?.fps, 59);
+      assert.deepEqual(snapshot.focusEvents, [{
+        surface: "coffee",
+        sessionId: "coffee-note-session",
+        transition: "away",
+        occurredAt: "2026-08-09T20:00:20.000Z",
+      }]);
+
+      db.prepare(
+        "DELETE FROM applet_session_notes WHERE user_id = 'user-1'",
+      ).run();
+      db.prepare(
+        "DELETE FROM applet_transcript_frame_samples WHERE user_id = 'user-1'",
+      ).run();
+      db.prepare(
+        "DELETE FROM live_session_focus_events WHERE user_id = 'user-1'",
+      ).run();
+      importUserSnapshot(db, "user-1", snapshot, userKey);
+      const restored = db
+        .prepare(
+          `SELECT body, captures_json FROM applet_session_notes
+            WHERE user_id = 'user-1' AND surface = 'coffee'
+              AND session_id = 'coffee-note-session'`,
+        )
+        .get() as { body: string; captures_json: string };
+      assert.equal(
+        restored.body,
+        "- Remember the pause.\n- Revisit the ending.",
+      );
+      assert.equal(
+        JSON.parse(restored.captures_json)[0]?.startedAt,
+        "2026-08-09T20:00:30.000Z",
+      );
+      assert.equal(JSON.parse(restored.captures_json)[0]?.fps, 57);
+      const restoredFrameSample = db
+        .prepare(
+          `SELECT entry_id, fps FROM applet_transcript_frame_samples
+            WHERE user_id = 'user-1' AND surface = 'coffee'
+              AND session_id = 'coffee-note-session'`,
+        )
+        .get() as { entry_id: string; fps: number };
+      assert.equal(restoredFrameSample.entry_id, "message-1");
+      assert.equal(restoredFrameSample.fps, 59);
+      assert.equal(
+        (db.prepare(
+          `SELECT transition FROM live_session_focus_events
+            WHERE user_id = 'user-1' AND surface = 'coffee'
+              AND session_id = 'coffee-note-session'`,
+        ).get() as { transition: string }).transition,
+        "away",
+      );
+    });
+  });
+});
+
+describe("backup model effort profiles", () => {
+  it("round-trips saved provider/model effort and accepts legacy snapshots", () => {
+    withBackupDatabase((db, userKey) => {
+      db.prepare(
+        `INSERT INTO model_reasoning_effort_preferences
+           (user_id, provider, model_id, effort, updated_at)
+         VALUES ('user-1', 'openai', 'gpt-5.6-sol', 'high',
+                 '2026-08-01T20:00:00.000Z')`,
+      ).run();
+      db.prepare(
+        `INSERT INTO model_turbo_preferences
+           (user_id, provider, model_id, updated_at)
+         VALUES ('user-1', 'openai', 'gpt-5.6-sol',
+                 '2026-08-01T20:00:01.000Z')`,
+      ).run();
+      const snapshot = exportUserSnapshot(db, "user-1", userKey);
+      assert.deepEqual(snapshot.modelEffortPreferences, [
+        {
+          provider: "openai",
+          modelId: "gpt-5.6-sol",
+          effort: "high",
+          updatedAt: "2026-08-01T20:00:00.000Z",
+        },
+      ]);
+      assert.deepEqual(snapshot.modelTurboPreferences, [
+        {
+          provider: "openai",
+          modelId: "gpt-5.6-sol",
+          turbo: true,
+          updatedAt: "2026-08-01T20:00:01.000Z",
+        },
+      ]);
+
+      db.prepare(
+        "DELETE FROM model_reasoning_effort_preferences WHERE user_id = 'user-1'",
+      ).run();
+      db.prepare(
+        "DELETE FROM model_turbo_preferences WHERE user_id = 'user-1'",
+      ).run();
+      importUserSnapshot(db, "user-1", snapshot, userKey);
+      assert.equal(
+        listModelReasoningEffortPreferences(db, "user-1")[0]?.effort,
+        "high",
+      );
+      assert.equal(listModelTurboPreferences(db, "user-1")[0]?.turbo, true);
+
+      const legacySnapshot = structuredClone(snapshot);
+      delete legacySnapshot.modelEffortPreferences;
+      delete legacySnapshot.modelTurboPreferences;
+      importUserSnapshot(db, "user-1", legacySnapshot, userKey);
+      assert.equal(
+        listModelReasoningEffortPreferences(db, "user-1")[0]?.effort,
+        "high",
+      );
+    });
+  });
+});
+
+describe("backup Coffee service state", () => {
+  it("round-trips the bar ritual and requires archived pixels for a special drink", () => {
+    withBackupDatabase((db, userKey) => {
+      const now = "2026-07-21T18:00:00.000Z";
+      const settings = normalizeCoffeeSessionSettings({
+        barRitual: {
+          serviceBot: {
+            id: "barista-1",
+            name: "Casey",
+            color: "#778899",
+            glyph: "spark",
+            fallback: false,
+          },
+          role: "cup",
+          drink: "house",
+          playerCup: {
+            fillId: "fill-1",
+            filledAt: now,
+            topOffCount: 1,
+            sipCount: 2,
+          },
+          waiterOffers: 1,
+          liveStartedAt: now,
+          hardStopAt: "2026-07-21T18:30:00.000Z",
+        },
+      });
+      db.prepare(
+        `INSERT INTO conversations
+           (id, user_id, title, conversation_mode, bot_group_ids, coffee_settings,
+            coffee_session_state, coffee_duration_minutes, created_at, updated_at)
+         VALUES ('coffee-backup', 'user-1', 'Coffee Backup', 'coffee', '[]', ?, 'closing', NULL, ?, ?)`,
+      ).run(JSON.stringify(settings), now, now);
+
+      const snapshot = exportUserSnapshot(db, "user-1", userKey);
+      const coffee = snapshot.conversations.find(
+        (conversation) => conversation.id === "coffee-backup",
+      )?.coffee;
+      assert.equal(coffee?.settings.barRitual?.serviceBot.name, "Casey");
+      assert.equal(coffee?.settings.barRitual?.playerCup?.sipCount, 2);
+      assert.equal(coffee?.sessionState, "closing");
+
+      db.prepare("DELETE FROM conversations WHERE id = 'coffee-backup'").run();
+      importUserSnapshot(db, "user-1", snapshot, userKey);
+      const restored = db.prepare(
+        "SELECT coffee_settings, coffee_session_state FROM conversations WHERE id = 'coffee-backup' AND user_id = 'user-1'",
+      ).get() as { coffee_settings: string; coffee_session_state: string };
+      assert.equal(
+        normalizeCoffeeSessionSettings(JSON.parse(restored.coffee_settings))
+          .barRitual?.serviceBot.name,
+        "Casey",
+      );
+      assert.equal(restored.coffee_session_state, "closing");
+
+      const specialSnapshot = structuredClone(snapshot);
+      const specialRitual = specialSnapshot.conversations.find(
+        (conversation) => conversation.id === "coffee-backup",
+      )?.coffee?.settings.barRitual;
+      assert.ok(specialRitual);
+      specialRitual.drink = "special";
+      specialRitual.specialImageStatus = "ready";
+      specialRitual.specialImageId = "missing-coffee-surface";
+      assert.throws(
+        () => importUserSnapshot(db, "user-1", specialSnapshot, userKey),
+        /missing the project-asset archive/i,
+      );
+    });
+  });
+});
+
+describe("backup Coffee Groups", () => {
+  it("round-trips active identity fields and fixed seat order", () => {
+    withBackupDatabase((db, userKey) => {
+      const createdAt = "2026-07-23T18:00:00.000Z";
+      const updatedAt = "2026-07-24T19:30:00.000Z";
+      for (const [id, name] of [
+        ["coffee-bot-a", "Aster"],
+        ["coffee-bot-b", "Birch"],
+      ]) {
+        db.prepare(
+          `INSERT INTO bots
+             (id, user_id, name, system_prompt, created_at, updated_at)
+           VALUES (?, 'user-1', ?, '', ?, ?)`,
+        ).run(id, name, createdAt, updatedAt);
+      }
+      db.prepare(
+        `INSERT INTO coffee_groups
+           (id, user_id, name, ethos, atmosphere_json, synthesis_json,
+            coffee_settings, preset_mode, coffee_topic_mode, model_choice,
+            starter_topics, mood_summary, archived_at, created_at, updated_at)
+         VALUES ('group-active', 'user-1', 'The Lantern Table',
+                 'Curiosity without hurry.', '{}', ?, ?, 'auto', 'auto', ?,
+                 ?, ?, NULL, ?, ?)`,
+      ).run(
+        JSON.stringify({
+          version: 1,
+          items: {
+            name: { status: "ready", revision: 2, updatedAt, source: "generated" },
+            ethos: { status: "ready", revision: 1, updatedAt, source: "manual" },
+            atmosphere: { status: "pending", revision: 0, updatedAt },
+          },
+        }),
+        JSON.stringify(normalizeCoffeeSessionSettings({ historyLimit: 19 })),
+        JSON.stringify({ local: "qwen3:8b", openai: "gpt-5-mini" }),
+        JSON.stringify({ version: 2, topics: ["Tiny rituals", "Odd museums"] }),
+        JSON.stringify({ warmth: 0.8, tension: 0.1 }),
+        createdAt,
+        updatedAt,
+      );
+      db.prepare(
+        `INSERT INTO coffee_group_seats
+           (user_id, group_id, seat_index, bot_id, updated_at)
+         VALUES ('user-1', 'group-active', 0, 'coffee-bot-b', ?),
+                ('user-1', 'group-active', 1, NULL, ?),
+                ('user-1', 'group-active', 2, 'coffee-bot-a', ?)`,
+      ).run(updatedAt, updatedAt, updatedAt);
+      db.prepare(
+        `INSERT INTO coffee_group_soundtracks
+           (group_id, user_id, generation_status, provider, model, prompt,
+            content_type, audio_bytes, duration_ms, revision, created_at, updated_at)
+         VALUES ('group-active', 'user-1', 'ready', 'elevenlabs', 'music_v2',
+                 'Original calm cafe instrumental', 'audio/mpeg', ?, 45000, 2, ?, ?)`,
+      ).run(Buffer.from([1, 2, 3]), createdAt, updatedAt);
+      db.prepare(
+        `INSERT INTO coffee_groups
+           (id, user_id, name, coffee_settings, archived_at, created_at, updated_at)
+         VALUES ('group-archived', 'user-1', 'Archived', '{}', ?, ?, ?)`,
+      ).run(updatedAt, createdAt, updatedAt);
+
+      const snapshot = exportUserSnapshot(db, "user-1", userKey);
+      assert.equal(snapshot.coffeeGroups?.length, 1);
+      assert.deepEqual(snapshot.coffeeGroups?.[0], {
+        id: "group-active",
+        name: "The Lantern Table",
+        seatBotIds: ["coffee-bot-b", null, "coffee-bot-a", null, null],
+        coffeeSettings: normalizeCoffeeSessionSettings({ historyLimit: 19 }),
+        presetMode: "auto",
+        topicSelectionMode: "auto",
+        modelChoice: { local: "qwen3:8b", openai: "gpt-5-mini" },
+        starterTopics: { version: 2, topics: ["Tiny rituals", "Odd museums"] },
+        moodSummary: { warmth: 0.8, tension: 0.1 },
+        ethos: "Curiosity without hurry.",
+        atmosphere: null,
+        soundtrack: {
+          provider: "elevenlabs",
+          model: "music_v2",
+          prompt: "Original calm cafe instrumental",
+          contentType: "audio/mpeg",
+          audioBase64: Buffer.from([1, 2, 3]).toString("base64"),
+          durationMs: 45_000,
+          revision: 2,
+          createdAt,
+          updatedAt,
+        },
+        synthesis: {
+          version: 1,
+          items: {
+            name: { status: "ready", revision: 2, updatedAt, source: "generated" },
+            ethos: { status: "ready", revision: 1, updatedAt, source: "manual" },
+            atmosphere: { status: "pending", revision: 0, updatedAt },
+          },
+        },
+        archivedAt: null,
+        createdAt,
+        updatedAt,
+      });
+
+      db.prepare("DELETE FROM coffee_groups WHERE user_id = 'user-1'").run();
+      importUserSnapshot(db, "user-1", snapshot, userKey);
+      const restored = db.prepare(
+        `SELECT name, ethos, atmosphere_json, synthesis_json, coffee_settings,
+                preset_mode, coffee_topic_mode, model_choice, starter_topics,
+                mood_summary, archived_at, created_at, updated_at
+           FROM coffee_groups
+          WHERE id = 'group-active' AND user_id = 'user-1'`,
+      ).get() as Record<string, string | null>;
+      assert.equal(restored.name, "The Lantern Table");
+      assert.equal(restored.ethos, "Curiosity without hurry.");
+      assert.equal(restored.atmosphere_json, "{}");
+      assert.deepEqual(JSON.parse(restored.model_choice!), {
+        local: "qwen3:8b",
+        openai: "gpt-5-mini",
+      });
+      assert.deepEqual(JSON.parse(restored.starter_topics!), {
+        version: 2,
+        topics: ["Tiny rituals", "Odd museums"],
+      });
+      assert.deepEqual(JSON.parse(restored.mood_summary!), {
+        warmth: 0.8,
+        tension: 0.1,
+      });
+      assert.equal(restored.preset_mode, "auto");
+      assert.equal(restored.coffee_topic_mode, "auto");
+      assert.equal(restored.created_at, createdAt);
+      assert.equal(restored.updated_at, updatedAt);
+      assert.deepEqual(
+        db.prepare(
+          `SELECT seat_index, bot_id
+             FROM coffee_group_seats
+            WHERE user_id = 'user-1' AND group_id = 'group-active'
+            ORDER BY seat_index`,
+        ).all().map((row) => ({ ...row })),
+        [
+          { seat_index: 0, bot_id: "coffee-bot-b" },
+          { seat_index: 1, bot_id: null },
+          { seat_index: 2, bot_id: "coffee-bot-a" },
+          { seat_index: 3, bot_id: null },
+          { seat_index: 4, bot_id: null },
+        ],
+      );
+      const restoredSoundtrack = db.prepare(
+        `SELECT provider, model, prompt, content_type, audio_bytes,
+                duration_ms, revision
+           FROM coffee_group_soundtracks
+          WHERE user_id = 'user-1' AND group_id = 'group-active'`,
+      ).get() as Record<string, string | number | Uint8Array>;
+      assert.equal(restoredSoundtrack.provider, "elevenlabs");
+      assert.equal(restoredSoundtrack.model, "music_v2");
+      assert.equal(restoredSoundtrack.prompt, "Original calm cafe instrumental");
+      assert.equal(restoredSoundtrack.content_type, "audio/mpeg");
+      assert.deepEqual([...restoredSoundtrack.audio_bytes as Uint8Array], [1, 2, 3]);
+      assert.equal(restoredSoundtrack.duration_ms, 45_000);
+      assert.equal(restoredSoundtrack.revision, 2);
+    });
+  });
+
+  it("accepts old snapshots and clears unarchived atmosphere image ids", () => {
+    withBackupDatabase((db, userKey) => {
+      const snapshot = exportUserSnapshot(db, "user-1", userKey);
+      const oldSnapshot = structuredClone(snapshot);
+      delete oldSnapshot.coffeeGroups;
+      assert.doesNotThrow(() =>
+        importUserSnapshot(db, "user-1", oldSnapshot, userKey)
+      );
+
+      snapshot.coffeeGroups = [{
+        id: "plain-json-group",
+        name: "Plain JSON",
+        seatBotIds: [null, null, null, null, null],
+        coffeeSettings: normalizeCoffeeSessionSettings(undefined),
+        presetMode: "manual",
+        topicSelectionMode: "manual",
+        modelChoice: {},
+        starterTopics: {},
+        moodSummary: {},
+        ethos: "Keep the table gentle.",
+        atmosphere: {
+          imageId: "foreign-image-id",
+          prompt: "A quiet room",
+          revision: 3,
+          updatedAt: snapshot.exportedAt,
+        },
+        synthesis: {
+          version: 1,
+          items: {
+            atmosphere: {
+              status: "ready",
+              revision: 3,
+              updatedAt: snapshot.exportedAt,
+              source: "generated",
+            },
+          },
+        },
+        archivedAt: null,
+        createdAt: snapshot.exportedAt,
+        updatedAt: snapshot.exportedAt,
+      }];
+      importUserSnapshot(db, "user-1", snapshot, userKey);
+      const restored = db.prepare(
+        `SELECT ethos, atmosphere_json, synthesis_json
+           FROM coffee_groups
+          WHERE id = 'plain-json-group' AND user_id = 'user-1'`,
+      ).get() as {
+        ethos: string;
+        atmosphere_json: string;
+        synthesis_json: string;
+      };
+      assert.equal(restored.ethos, "Keep the table gentle.");
+      assert.equal(restored.atmosphere_json, "{}");
+      const restoredSynthesis = JSON.parse(restored.synthesis_json) as {
+        items: { atmosphere: { status: string; error?: string } };
+      };
+      assert.equal(restoredSynthesis.items.atmosphere.status, "failed");
+      assert.match(
+        restoredSynthesis.items.atmosphere.error ?? "",
+        /image was not included/u,
+      );
+      assert.equal(
+        db.prepare("SELECT id FROM images WHERE id = 'foreign-image-id'").get(),
+        undefined,
+      );
+    });
+  });
+});
 
 describe("backup Auto model settings", () => {
+  it("round-trips three-provider weights and paired background lanes", () => {
+    withBackupDatabase((db, userKey) => {
+      const weights = { v: 1, openai: 0.2, anthropic: 0.3, ollama_cloud: 0.5 };
+      db.prepare(
+        "UPDATE users SET online_auto_provider_weights = ?, online_auto_quality_posture = ?, prism_default_llm_model = ?, prism_cloud_llm_model = ? WHERE id = ?",
+      ).run(
+        JSON.stringify(weights),
+        "open",
+        "llama3.2",
+        "ollama-cloud-direct:gpt-oss",
+        "user-1",
+      );
+
+      const snapshot = exportUserSnapshot(db, "user-1", userKey);
+      assert.deepEqual(snapshot.settings?.onlineAutoProviderWeights, weights);
+      assert.equal(snapshot.settings?.onlineAutoQualityPosture, "open");
+      assert.equal(snapshot.settings?.prismDefaultLlmModel, "llama3.2");
+      assert.equal(
+        snapshot.settings?.prismCloudLlmModel,
+        "ollama-cloud-direct:gpt-oss",
+      );
+
+      db.prepare(
+        "UPDATE users SET online_auto_provider_weights = NULL, online_auto_quality_posture = 'quality', prism_default_llm_model = NULL, prism_cloud_llm_model = NULL WHERE id = ?",
+      ).run("user-1");
+      importUserSnapshot(db, "user-1", snapshot, userKey);
+      const restored = db
+        .prepare(
+          "SELECT online_auto_provider_weights, online_auto_quality_posture, prism_default_llm_model, prism_cloud_llm_model FROM users WHERE id = ?",
+        )
+        .get("user-1") as {
+        online_auto_provider_weights: string;
+        online_auto_quality_posture: string;
+        prism_default_llm_model: string;
+        prism_cloud_llm_model: string;
+      };
+      assert.deepEqual(JSON.parse(restored.online_auto_provider_weights), weights);
+      assert.equal(restored.online_auto_quality_posture, "open");
+      assert.equal(restored.prism_default_llm_model, "llama3.2");
+      assert.equal(restored.prism_cloud_llm_model, "ollama-cloud-direct:gpt-oss");
+    });
+  });
+
   it("exports and restores Auto mode without exporting retired text fallback settings", () => {
     withBackupDatabase((db, userKey) => {
       const chain = {
@@ -43,7 +961,11 @@ describe("backup Auto model settings", () => {
         "SELECT auto_switch_model, auto_fallback_chain FROM users WHERE id = ?"
       ).get("user-1") as { auto_switch_model: number; auto_fallback_chain: string | null };
       assert.equal(restored.auto_switch_model, 1);
-      assert.deepEqual(JSON.parse(restored.auto_fallback_chain ?? "null"), chain);
+      assert.deepEqual(JSON.parse(restored.auto_fallback_chain ?? "null"), {
+        v: 2,
+        local: [chain.fallbacks[0]],
+        online: [chain.fallbacks[1]],
+      });
     });
   });
 
@@ -142,6 +1064,7 @@ describe("backup ephemeral chat provider settings", () => {
         coffee: "local",
         botcast: "online",
         slate: "global",
+        debate: "global",
       });
 
       db.prepare(
@@ -159,6 +1082,7 @@ describe("backup ephemeral chat provider settings", () => {
         coffee: "local",
         botcast: "online",
         slate: "global",
+        debate: "global",
       });
 
       const legacySettings = { ...snapshot.settings! };
@@ -180,6 +1104,7 @@ describe("backup ephemeral chat provider settings", () => {
         coffee: "global",
         botcast: "global",
         slate: "global",
+        debate: "global",
       });
     });
   });
@@ -226,14 +1151,279 @@ describe("backup graphics quality", () => {
   });
 });
 
+describe("backup CRT focus", () => {
+  it("round-trips the shared phosphor focus and defaults legacy snapshots to Balanced", () => {
+    withBackupDatabase((db, userKey) => {
+      db.prepare("UPDATE users SET crt_focus = 85 WHERE id = ?").run("user-1");
+      const snapshot = exportUserSnapshot(db, "user-1", userKey);
+      assert.equal(snapshot.settings?.crtFocus, 85);
+
+      db.prepare("UPDATE users SET crt_focus = 20 WHERE id = ?").run("user-1");
+      importUserSnapshot(db, "user-1", snapshot, userKey);
+      assert.equal(
+        (db.prepare("SELECT crt_focus FROM users WHERE id = ?").get(
+          "user-1",
+        ) as { crt_focus: number }).crt_focus,
+        85,
+      );
+
+      const legacySettings = { ...snapshot.settings! };
+      delete legacySettings.crtFocus;
+      importUserSnapshot(
+        db,
+        "user-1",
+        { ...snapshot, settings: legacySettings },
+        userKey,
+      );
+      assert.equal(
+        (db.prepare("SELECT crt_focus FROM users WHERE id = ?").get(
+          "user-1",
+        ) as { crt_focus: number }).crt_focus,
+        50,
+      );
+    });
+  });
+});
+
+describe("backup typography scale", () => {
+  it("round-trips the selected preset and defaults legacy snapshots to Standard", () => {
+    withBackupDatabase((db, userKey) => {
+      db.prepare("UPDATE users SET typography_scale = 'large' WHERE id = ?").run(
+        "user-1",
+      );
+      const snapshot = exportUserSnapshot(db, "user-1", userKey);
+      assert.equal(snapshot.settings?.typographyScale, "large");
+
+      db.prepare(
+        "UPDATE users SET typography_scale = 'compact' WHERE id = ?",
+      ).run("user-1");
+      importUserSnapshot(db, "user-1", snapshot, userKey);
+      assert.equal(
+        (db.prepare("SELECT typography_scale FROM users WHERE id = ?").get(
+          "user-1",
+        ) as { typography_scale: string }).typography_scale,
+        "large",
+      );
+
+      const legacySettings = { ...snapshot.settings! };
+      delete legacySettings.typographyScale;
+      importUserSnapshot(
+        db,
+        "user-1",
+        { ...snapshot, settings: legacySettings },
+        userKey,
+      );
+      assert.equal(
+        (db.prepare("SELECT typography_scale FROM users WHERE id = ?").get(
+          "user-1",
+        ) as { typography_scale: string }).typography_scale,
+        "standard",
+      );
+    });
+  });
+});
+
+describe("backup atmosphere style", () => {
+  it("round-trips the global style and invalidates the derived Home image cache", () => {
+    withBackupDatabase((db, userKey) => {
+      db.prepare(
+        `UPDATE users
+            SET atmosphere_style = 'dreamscape',
+                hub_atmosphere_enabled = 0,
+                hub_atmosphere_image_id = 'old-atmosphere',
+                hub_atmosphere_image_style = 'minimal'
+          WHERE id = ?`,
+      ).run("user-1");
+      const snapshot = exportUserSnapshot(db, "user-1", userKey);
+      assert.equal(snapshot.settings?.atmosphereStyle, "dreamscape");
+      assert.equal(snapshot.settings?.hubAtmosphereEnabled, false);
+
+      db.prepare(
+        "UPDATE users SET atmosphere_style = 'minimal', hub_atmosphere_enabled = 1 WHERE id = ?",
+      ).run("user-1");
+      importUserSnapshot(db, "user-1", snapshot, userKey);
+      const restored = db
+        .prepare(
+          `SELECT atmosphere_style, hub_atmosphere_enabled, hub_atmosphere_image_id, hub_atmosphere_image_style
+             FROM users WHERE id = ?`,
+        )
+        .get("user-1") as {
+        atmosphere_style: string;
+        hub_atmosphere_enabled: number;
+        hub_atmosphere_image_id: string | null;
+        hub_atmosphere_image_style: string | null;
+      };
+      assert.equal(restored.atmosphere_style, "dreamscape");
+      assert.equal(restored.hub_atmosphere_enabled, 0);
+      assert.equal(restored.hub_atmosphere_image_id, null);
+      assert.equal(restored.hub_atmosphere_image_style, null);
+
+      const legacySettings = { ...snapshot.settings };
+      delete legacySettings.hubAtmosphereEnabled;
+      db.prepare(
+        "UPDATE users SET hub_atmosphere_enabled = 0 WHERE id = ?",
+      ).run("user-1");
+      importUserSnapshot(
+        db,
+        "user-1",
+        { ...snapshot, settings: legacySettings },
+        userKey,
+      );
+      assert.equal(
+        (
+          db
+            .prepare(
+              "SELECT hub_atmosphere_enabled FROM users WHERE id = ?",
+            )
+            .get("user-1") as { hub_atmosphere_enabled: number }
+        ).hub_atmosphere_enabled,
+        1,
+      );
+    });
+  });
+});
+
+describe("backup living shell startup preference", () => {
+  it("round-trips saved choices and defaults legacy snapshots to Home", () => {
+    withBackupDatabase((db, userKey) => {
+      db.prepare(
+        "UPDATE users SET startup_preference = 'last_workspace' WHERE id = ?",
+      ).run("user-1");
+      const snapshot = exportUserSnapshot(db, "user-1", userKey);
+      assert.equal(snapshot.settings?.startupPreference, "last_workspace");
+
+      db.prepare(
+        "UPDATE users SET startup_preference = 'slate' WHERE id = ?",
+      ).run("user-1");
+      importUserSnapshot(db, "user-1", snapshot, userKey);
+      assert.equal(
+        (
+          db
+            .prepare("SELECT startup_preference FROM users WHERE id = ?")
+            .get("user-1") as { startup_preference: string }
+        ).startup_preference,
+        "last_workspace",
+      );
+
+      const legacySettings = { ...snapshot.settings! };
+      delete legacySettings.startupPreference;
+      importUserSnapshot(
+        db,
+        "user-1",
+        { ...snapshot, settings: legacySettings },
+        userKey,
+      );
+      assert.equal(
+        (
+          db
+            .prepare("SELECT startup_preference FROM users WHERE id = ?")
+            .get("user-1") as { startup_preference: string }
+        ).startup_preference,
+        "home",
+      );
+    });
+  });
+});
+
+describe("backup living shell revelations", () => {
+  it("opens legacy capability state throughout alpha", () => {
+    withBackupDatabase((db, userKey) => {
+      createPendingLivingShellAccountProgress(db, "user-1");
+      db.prepare(
+        `UPDATE living_shell_account_state
+            SET capability_revelations = ?
+          WHERE user_id = ?`,
+      ).run(
+        JSON.stringify({
+          marketplace: { revealed: false },
+          signal: { revealed: false },
+          coffee: { revealed: false },
+        }),
+        "user-1",
+      );
+      const snapshot = exportUserSnapshot(db, "user-1", userKey);
+      assert.equal(
+        snapshot.settings?.capabilityRevelations?.marketplace.revealed,
+        true,
+      );
+      assert.equal(
+        snapshot.settings?.capabilityRevelations?.coffee.revealed,
+        true,
+      );
+
+      importUserSnapshot(db, "user-1", snapshot, userKey);
+      const restored = exportUserSnapshot(db, "user-1", userKey);
+      assert.equal(
+        restored.settings?.capabilityRevelations?.marketplace.revealed,
+        true,
+      );
+      assert.equal(
+        restored.settings?.capabilityRevelations?.signal.revealed,
+        true,
+      );
+    });
+  });
+});
+
+describe("backup model picker visibility", () => {
+  it("round-trips picker visibility and defaults legacy snapshots to visible", () => {
+    withBackupDatabase((db, userKey) => {
+      db.prepare(
+        "UPDATE users SET hidden_bot_model_ids = ?, hidden_global_picker_model_ids = ? WHERE id = ?",
+      ).run('["disabled-model"]', '["picker-hidden-model"]', "user-1");
+
+      const snapshot = exportUserSnapshot(db, "user-1", userKey);
+      assert.deepEqual(snapshot.settings?.hiddenBotModelIds, ["disabled-model"]);
+      assert.deepEqual(snapshot.settings?.hiddenGlobalPickerModelIds, [
+        "picker-hidden-model",
+      ]);
+
+      importUserSnapshot(db, "user-1", snapshot, userKey);
+      let stored = db
+        .prepare(
+          "SELECT hidden_bot_model_ids, hidden_global_picker_model_ids FROM users WHERE id = ?",
+        )
+        .get("user-1") as {
+        hidden_bot_model_ids: string;
+        hidden_global_picker_model_ids: string;
+      };
+      assert.equal(stored.hidden_bot_model_ids, '["disabled-model"]');
+      assert.equal(
+        stored.hidden_global_picker_model_ids,
+        '["picker-hidden-model"]',
+      );
+
+      const legacySettings = { ...snapshot.settings };
+      delete legacySettings.hiddenGlobalPickerModelIds;
+      importUserSnapshot(
+        db,
+        "user-1",
+        { ...snapshot, settings: legacySettings },
+        userKey,
+      );
+      stored = db
+        .prepare(
+          "SELECT hidden_bot_model_ids, hidden_global_picker_model_ids FROM users WHERE id = ?",
+        )
+        .get("user-1") as {
+        hidden_bot_model_ids: string;
+        hidden_global_picker_model_ids: string;
+      };
+      assert.equal(stored.hidden_bot_model_ids, '["disabled-model"]');
+      assert.equal(stored.hidden_global_picker_model_ids, "[]");
+    });
+  });
+});
+
 describe("backup Zen Atmosphere style notes", () => {
   it("exports and restores normalized style notes", () => {
     withBackupDatabase((db, userKey) => {
       db.prepare(
-        "UPDATE users SET zen_wallpaper_style_notes = ?, zen_wallpaper_blurred_edges_enabled = 0, zen_message_font_min_px = 18.4, zen_message_font_max_px = 36.7, experimental_all_model_effort_enabled = 1, coffee_experimental_table_angle_enabled = 1, psychic_mode_enabled = 1, prism_default_bot_face_thinking_frames = ? WHERE id = ?"
+        "UPDATE users SET zen_wallpaper_style_notes = ?, zen_wallpaper_blurred_edges_enabled = 0, zen_message_font_min_px = 18.4, zen_message_font_max_px = 36.7, experimental_all_model_effort_enabled = 1, coffee_experimental_table_angle_enabled = 1, debate_whodunnit_reuse_synthesized_exhibits = 1, psychic_mode_enabled = 1, prism_default_bot_face_thinking_frames = ?, prism_default_bot_face_mouth_speech_poses = ? WHERE id = ?"
       ).run(
         "  misty\n glass,   paper grain  ",
         '["?","!","?","…"]',
+        '["—","·","△","○"]',
         "user-1"
       );
 
@@ -248,6 +1438,7 @@ describe("backup Zen Atmosphere style notes", () => {
       assert.equal(snapshot.settings?.zenMessageFontMaxPx, 36.7);
       assert.equal(snapshot.settings?.experimentalAllModelEffortEnabled, true);
       assert.equal(snapshot.settings?.coffeeExperimentalTableAngleEnabled, true);
+      assert.equal(snapshot.settings?.debateWhodunnitReuseSynthesizedExhibits, true);
       assert.equal(snapshot.settings?.psychicModeEnabled, true);
       assert.deepEqual(snapshot.settings?.prismDefaultBotFaceThinkingFrames, [
         "?",
@@ -255,6 +1446,10 @@ describe("backup Zen Atmosphere style notes", () => {
         "?",
         "…",
       ]);
+      assert.deepEqual(
+        snapshot.settings?.prismDefaultBotFaceMouthSpeechPoses,
+        ["—", "·", "△", "○"],
+      );
 
       const longNotes = "x".repeat(MAX_ZEN_WALLPAPER_STYLE_NOTES_LENGTH + 10);
       importUserSnapshot(
@@ -270,8 +1465,10 @@ describe("backup Zen Atmosphere style notes", () => {
             zenMessageFontMaxPx: 19.2,
             experimentalAllModelEffortEnabled: false,
             coffeeExperimentalTableAngleEnabled: false,
+            debateWhodunnitReuseSynthesizedExhibits: false,
             psychicModeEnabled: false,
             prismDefaultBotFaceThinkingFrames: [".", "o", "O", "o"],
+            prismDefaultBotFaceMouthSpeechPoses: ["_", "·", "V", "o"],
           },
         },
         userKey
@@ -279,7 +1476,7 @@ describe("backup Zen Atmosphere style notes", () => {
 
       const restored = db
         .prepare(
-          "SELECT zen_wallpaper_style_notes, zen_wallpaper_blurred_edges_enabled, zen_message_font_min_px, zen_message_font_max_px, experimental_all_model_effort_enabled, coffee_experimental_table_angle_enabled, psychic_mode_enabled, prism_default_bot_face_thinking_frames FROM users WHERE id = ?"
+          "SELECT zen_wallpaper_style_notes, zen_wallpaper_blurred_edges_enabled, zen_message_font_min_px, zen_message_font_max_px, experimental_all_model_effort_enabled, coffee_experimental_table_angle_enabled, debate_whodunnit_reuse_synthesized_exhibits, psychic_mode_enabled, prism_default_bot_face_thinking_frames, prism_default_bot_face_mouth_speech_poses FROM users WHERE id = ?"
         )
         .get("user-1") as {
         zen_wallpaper_style_notes: string;
@@ -288,8 +1485,10 @@ describe("backup Zen Atmosphere style notes", () => {
         zen_message_font_max_px: number;
         experimental_all_model_effort_enabled: number;
         coffee_experimental_table_angle_enabled: number;
+        debate_whodunnit_reuse_synthesized_exhibits: number;
         psychic_mode_enabled: number;
         prism_default_bot_face_thinking_frames: string | null;
+        prism_default_bot_face_mouth_speech_poses: string | null;
       };
 
       assert.equal(
@@ -301,8 +1500,13 @@ describe("backup Zen Atmosphere style notes", () => {
       assert.equal(restored.zen_message_font_max_px, 22.4);
       assert.equal(restored.experimental_all_model_effort_enabled, 0);
       assert.equal(restored.coffee_experimental_table_angle_enabled, 0);
+      assert.equal(restored.debate_whodunnit_reuse_synthesized_exhibits, 0);
       assert.equal(restored.psychic_mode_enabled, 0);
       assert.equal(restored.prism_default_bot_face_thinking_frames, '[".","o","O","o"]');
+      assert.equal(
+        restored.prism_default_bot_face_mouth_speech_poses,
+        '["_","·","V","o"]',
+      );
     });
   });
 
@@ -350,6 +1554,35 @@ describe("backup Zen Atmosphere style notes", () => {
   });
 });
 
+describe("backup bot Atmosphere accent identity", () => {
+  it("round-trips explicit accents and preserves legacy Auto", () => {
+    withBackupDatabase((db, userKey) => {
+      const now = "2026-08-11T00:00:00.000Z";
+      db.prepare(
+        `INSERT INTO bots
+          (id, user_id, name, color, accent_color, created_at, updated_at)
+         VALUES (?, 'user-1', ?, ?, ?, ?, ?)`,
+      ).run("accent-bot", "Accent Bot", "#ff0000", "#7799aa", now, now);
+      db.prepare(
+        `INSERT INTO bots
+          (id, user_id, name, color, accent_color, created_at, updated_at)
+         VALUES (?, 'user-1', ?, ?, NULL, ?, ?)`,
+      ).run("auto-bot", "Auto Bot", "#00ff00", now, now);
+
+      const snapshot = exportUserSnapshot(db, "user-1", userKey);
+      assert.equal(snapshot.bots?.find((bot) => bot.id === "accent-bot")?.accentColor, "#22b5ff");
+      assert.equal(snapshot.bots?.find((bot) => bot.id === "auto-bot")?.accentColor, null);
+
+      db.prepare("UPDATE bots SET accent_color = NULL WHERE id = ?").run("accent-bot");
+      importUserSnapshot(db, "user-1", snapshot, userKey);
+      const restored = db.prepare(
+        "SELECT accent_color FROM bots WHERE id = ?",
+      ).get("accent-bot") as { accent_color: string | null };
+      assert.equal(restored.accent_color, "#22b5ff");
+    });
+  });
+});
+
 describe("backup bot avatar face style", () => {
   it("exports and restores saved face font settings", () => {
     withBackupDatabase((db, userKey) => {
@@ -361,10 +1594,17 @@ describe("backup bot avatar face style", () => {
           face_mouth_coffee_pucker, face_font_weight,
           face_eye_scale, face_eye_offset_x, face_eye_offset_y, face_eye_rotation_deg, face_eye_count,
           face_mouth_scale, face_mouth_offset_x, face_mouth_offset_y, face_mouth_rotation_deg,
-          face_blink_bar, face_blink_scale, face_blink_offset_x, face_blink_offset_y,
-          face_thinking_frames,
+          face_blink_bar, face_blink_scale, face_blink_offset_x, face_blink_offset_y, face_blink_rotation_deg,
+          face_thinking_frames, face_thinking_scale, face_thinking_offset_x, face_thinking_offset_y,
           created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        ) VALUES (
+          ?, ?, ?, ?, ?, ?,
+          ?, ?, ?, ?, ?, ?,
+          ?, ?, ?, ?, ?, ?,
+          ?, ?, ?, ?, ?, ?,
+          ?, ?, ?, ?, ?, ?,
+          ?, ?, ?, ?, ?, ?
+        )`
       ).run(
         "bot-1",
         "user-1",
@@ -378,8 +1618,8 @@ describe("backup bot avatar face style", () => {
         "8",
         "wobble",
         "formal",
-        "△",
-        "flicker",
+        "—·△○",
+        "custom",
         1,
         725,
         1.15,
@@ -395,7 +1635,11 @@ describe("backup bot avatar face style", () => {
         1.2,
         -0.08,
         0.06,
+        -40,
         '["·","*","✦","*"]',
+        1.3,
+        -0.08,
+        0.04,
         "2026-01-01T00:00:00.000Z",
         "2026-01-01T00:00:00.000Z"
       );
@@ -423,6 +1667,7 @@ describe("backup bot avatar face style", () => {
 	        topK: 40,
 	        repetitionPenalty: 1.1,
 	        color: null,
+        accentColor: null,
         glyph: null,
         avatarDetails: {
           version: 1,
@@ -440,9 +1685,11 @@ describe("backup bot avatar face style", () => {
         },
         faceEyesFont: "warm",
         faceEyeCharacter: "8",
+        faceEyeAnimation: "natural",
         faceMouthFont: "formal",
-        faceMouthCharacter: "△",
-        faceMouthAnimation: "flicker",
+        faceMouthCharacter: "—",
+        faceMouthAnimation: null,
+        faceMouthSpeechPoses: ["—", "·", "△", "○"],
         faceMouthCoffeePucker: true,
         faceFontWeight: 725,
         faceEyeScale: 1.15,
@@ -450,21 +1697,46 @@ describe("backup bot avatar face style", () => {
         faceEyeOffsetY: -0.08,
         faceEyeRotationDeg: -25,
         faceEyeCount: 2,
+        faceEyeSpacing: 0.36,
         faceMouthScale: 1.25,
         faceMouthOffsetX: -0.04,
         faceMouthOffsetY: 0.06,
         faceMouthRotationDeg: 35,
         faceBlinkBar: "❘",
+        faceBlinkCount: 2,
         faceBlinkScale: 1.2,
         faceBlinkOffsetX: -0.08,
         faceBlinkOffsetY: 0.06,
+        faceBlinkRotationDeg: -40,
         faceThinkingFrames: ["·", "*", "✦", "*"],
+        faceThinkingScale: 1.3,
+        faceThinkingOffsetX: -0.08,
+        faceThinkingOffsetY: 0.04,
           authoredAudioVoiceProfile: {
             v: 2,
             enabled: true,
             baseVoiceId: "voice-1",
             elevenLabsEffect: "chorus",
+            accentLocale: "en-US",
+            accentMode: "prefer-genuine",
+            brightness: 0,
+            corporality: 0.5,
+            localEnginePreference: "inherit",
+            localVoiceSource: "portable",
+            localLaughDelimiter: "-",
+            openness: 0,
+            premiumLilt: 0,
+            premiumPace: 0,
+            premiumPitch: 0,
             pitch: 0,
+            pronunciationBase: "follow-voice",
+            ttsPronunciationEnabled: false,
+            premiumPronunciationEnabled: false,
+            resonance: 0,
+            speechprintInfluence: "none",
+            speechprintStrength: "balanced",
+            speechprintVariationSeed: "natural-v1",
+            weight: 0,
           warmth: 0,
           pace: 0,
           lilt: 0,
@@ -490,14 +1762,14 @@ describe("backup bot avatar face style", () => {
       });
 
       db.prepare(
-        "UPDATE bots SET name_pronunciation = '', self_referral = '', voice_preview_line = NULL, avatar_details_json = NULL, face_eyes_font = NULL, face_eye_character = NULL, face_eye_animation = NULL, face_mouth_font = NULL, face_mouth_character = NULL, face_mouth_animation = NULL, face_mouth_coffee_pucker = 0, face_font_weight = NULL, face_eye_scale = NULL, face_eye_offset_x = NULL, face_eye_offset_y = NULL, face_eye_rotation_deg = NULL, face_eye_count = 1, face_mouth_scale = NULL, face_mouth_offset_x = NULL, face_mouth_offset_y = NULL, face_mouth_rotation_deg = NULL, face_blink_bar = NULL, face_blink_scale = NULL, face_blink_offset_x = NULL, face_blink_offset_y = NULL, face_thinking_frames = NULL WHERE id = ?"
+        "UPDATE bots SET name_pronunciation = '', self_referral = '', voice_preview_line = NULL, avatar_details_json = NULL, face_eyes_font = NULL, face_eye_character = NULL, face_eye_animation = NULL, face_mouth_font = NULL, face_mouth_character = NULL, face_mouth_animation = NULL, face_mouth_speech_poses = NULL, face_mouth_coffee_pucker = 0, face_font_weight = NULL, face_eye_scale = NULL, face_eye_offset_x = NULL, face_eye_offset_y = NULL, face_eye_rotation_deg = NULL, face_eye_count = 1, face_mouth_scale = NULL, face_mouth_offset_x = NULL, face_mouth_offset_y = NULL, face_mouth_rotation_deg = NULL, face_blink_bar = NULL, face_blink_scale = NULL, face_blink_offset_x = NULL, face_blink_offset_y = NULL, face_blink_rotation_deg = NULL, face_thinking_frames = NULL, face_thinking_scale = NULL, face_thinking_offset_x = NULL, face_thinking_offset_y = NULL WHERE id = ?"
       ).run("bot-1");
 
       importUserSnapshot(db, "user-1", snapshot, userKey);
 
       const restored = db
         .prepare(
-          "SELECT name_pronunciation, self_referral, voice_preview_line, avatar_details_json, face_eyes_font, face_eye_character, face_eye_animation, face_mouth_font, face_mouth_character, face_mouth_animation, face_mouth_coffee_pucker, face_font_weight, face_eye_scale, face_eye_offset_x, face_eye_offset_y, face_eye_rotation_deg, face_eye_count, face_mouth_scale, face_mouth_offset_x, face_mouth_offset_y, face_mouth_rotation_deg, face_blink_bar, face_blink_scale, face_blink_offset_x, face_blink_offset_y, face_thinking_frames, profile_picture_image_id FROM bots WHERE id = ?"
+          "SELECT name_pronunciation, self_referral, voice_preview_line, avatar_details_json, face_eyes_font, face_eye_character, face_eye_animation, face_mouth_font, face_mouth_character, face_mouth_animation, face_mouth_speech_poses, face_mouth_coffee_pucker, face_font_weight, face_eye_scale, face_eye_offset_x, face_eye_offset_y, face_eye_rotation_deg, face_eye_count, face_mouth_scale, face_mouth_offset_x, face_mouth_offset_y, face_mouth_rotation_deg, face_blink_bar, face_blink_scale, face_blink_offset_x, face_blink_offset_y, face_blink_rotation_deg, face_thinking_frames, face_thinking_scale, face_thinking_offset_x, face_thinking_offset_y, profile_picture_image_id FROM bots WHERE id = ?"
         )
         .get("bot-1") as {
         name_pronunciation: string;
@@ -510,6 +1782,7 @@ describe("backup bot avatar face style", () => {
         face_mouth_font: string | null;
         face_mouth_character: string | null;
         face_mouth_animation: string | null;
+        face_mouth_speech_poses: string | null;
         face_mouth_coffee_pucker: number;
         face_font_weight: number | null;
         face_eye_scale: number | null;
@@ -525,7 +1798,11 @@ describe("backup bot avatar face style", () => {
         face_blink_scale: number | null;
         face_blink_offset_x: number | null;
         face_blink_offset_y: number | null;
+        face_blink_rotation_deg: number | null;
         face_thinking_frames: string | null;
+        face_thinking_scale: number | null;
+        face_thinking_offset_x: number | null;
+        face_thinking_offset_y: number | null;
         profile_picture_image_id: string | null;
       };
       assert.equal(restored.name_pronunciation, "Ah-vah-tar Bot");
@@ -537,10 +1814,14 @@ describe("backup bot avatar face style", () => {
       );
       assert.equal(restored.face_eyes_font, "warm");
       assert.equal(restored.face_eye_character, "8");
-      assert.equal(restored.face_eye_animation, "none");
+      assert.equal(restored.face_eye_animation, "natural");
       assert.equal(restored.face_mouth_font, "formal");
-      assert.equal(restored.face_mouth_character, "△");
-      assert.equal(restored.face_mouth_animation, "flicker");
+      assert.equal(restored.face_mouth_character, "—");
+      assert.equal(restored.face_mouth_animation, null);
+      assert.equal(
+        restored.face_mouth_speech_poses,
+        '["—","·","△","○"]',
+      );
       assert.equal(restored.face_mouth_coffee_pucker, 1);
       assert.equal(restored.face_font_weight, 725);
       assert.equal(restored.face_eye_scale, 1.15);
@@ -556,8 +1837,88 @@ describe("backup bot avatar face style", () => {
       assert.equal(restored.face_blink_scale, 1.2);
       assert.equal(restored.face_blink_offset_x, -0.08);
       assert.equal(restored.face_blink_offset_y, 0.06);
+      assert.equal(restored.face_blink_rotation_deg, -40);
       assert.equal(restored.face_thinking_frames, '["·","*","✦","*"]');
+      assert.equal(restored.face_thinking_scale, 1.3);
+      assert.equal(restored.face_thinking_offset_x, -0.08);
+      assert.equal(restored.face_thinking_offset_y, 0.04);
       assert.equal(restored.profile_picture_image_id, null);
+
+      const explicitOptOut = snapshot.bots?.[0];
+      assert.ok(explicitOptOut);
+      explicitOptOut.faceMouthCoffeePucker = false;
+      importUserSnapshot(db, "user-1", snapshot, userKey);
+      assert.equal(
+        (
+          db.prepare(
+            "SELECT face_mouth_coffee_pucker AS value FROM bots WHERE id = ?",
+          ).get("bot-1") as { value: number }
+        ).value,
+        0,
+      );
+
+      delete explicitOptOut.faceMouthCoffeePucker;
+      importUserSnapshot(db, "user-1", snapshot, userKey);
+      assert.equal(
+        (
+          db.prepare(
+            "SELECT face_mouth_coffee_pucker AS value FROM bots WHERE id = ?",
+          ).get("bot-1") as { value: number }
+        ).value,
+        1,
+      );
+    });
+  });
+
+  it("round-trips cloned-eye spacing and defaults legacy backups", () => {
+    withBackupDatabase((db, userKey) => {
+      db.prepare(
+        `INSERT INTO bots (
+          id, user_id, name, system_prompt, face_eye_character, face_eye_count,
+          face_eye_spacing, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).run(
+        "eye-spacing-bot",
+        "user-1",
+        "Eye Spacing Bot",
+        "",
+        "•",
+        2,
+        0.52,
+        "2026-01-01T00:00:00.000Z",
+        "2026-01-01T00:00:00.000Z",
+      );
+
+      const snapshot = exportUserSnapshot(db, "user-1", userKey);
+      const exportedBot = snapshot.bots?.find(
+        (bot) => bot.id === "eye-spacing-bot",
+      );
+      assert.ok(exportedBot);
+      assert.equal(exportedBot.faceEyeSpacing, 0.52);
+
+      db.prepare(
+        "UPDATE bots SET face_eye_spacing = 0.24 WHERE id = ? AND user_id = ?",
+      ).run("eye-spacing-bot", "user-1");
+      importUserSnapshot(db, "user-1", snapshot, userKey);
+      assert.equal(
+        (
+          db.prepare(
+            "SELECT face_eye_spacing AS value FROM bots WHERE id = ? AND user_id = ?",
+          ).get("eye-spacing-bot", "user-1") as { value: number }
+        ).value,
+        0.52,
+      );
+
+      delete exportedBot.faceEyeSpacing;
+      importUserSnapshot(db, "user-1", snapshot, userKey);
+      assert.equal(
+        (
+          db.prepare(
+            "SELECT face_eye_spacing AS value FROM bots WHERE id = ? AND user_id = ?",
+          ).get("eye-spacing-bot", "user-1") as { value: number }
+        ).value,
+        0.36,
+      );
     });
   });
 
@@ -700,7 +2061,7 @@ describe("backup bot avatar face style", () => {
 
       assert.throws(
         () => importUserSnapshot(db, "user-1", snapshot, userKey),
-        /belongs to another user/i
+        /unavailable owner-bound data/i
       );
       const retained = db
         .prepare("SELECT user_id, name FROM bots WHERE id = ?")
@@ -718,10 +2079,10 @@ describe("backup bot avatar face style", () => {
 });
 
 describe("backup audio voice settings", () => {
-  it("round-trips account and bot profiles without retired mode-specific voice settings", () => {
+  it("round-trips player, Prism avatar, and bot voice profiles", () => {
     withBackupDatabase((db, userKey) => {
       db.prepare(
-        "UPDATE users SET voice_mode = ?, voice_effects_enabled = 0, voice_volume = ?, operating_system_voices_enabled = 1, english_voice_engine = ?, default_system_voice_name = ?, default_elevenlabs_voice_id = ?, elevenlabs_voice_bank = ?, elevenlabs_voice_model = ?, elevenlabs_voice_collection_id = ?, player_audio_voice_profile = ?, player_name_pronunciation = ?, prism_default_bot_audio_voice_profile = ? WHERE id = ?"
+        "UPDATE users SET voice_mode = ?, voice_effects_enabled = 0, voice_volume = ?, operating_system_voices_enabled = 1, english_voice_engine = ?, default_system_voice_name = ?, default_elevenlabs_voice_id = ?, elevenlabs_voice_bank = ?, elevenlabs_voice_model = ?, elevenlabs_voice_collection_id = ?, zen_player_voice_enabled = 1, player_audio_voice_profile = ?, player_name_pronunciation = ?, prism_default_bot_audio_voice_profile = ? WHERE id = ?"
       ).run(
         "babble",
         0.65,
@@ -771,11 +2132,12 @@ describe("backup audio voice settings", () => {
       assert.equal(snapshot.settings?.elevenLabsVoiceModel, "eleven_flash_v2_5");
       assert.equal(snapshot.settings?.elevenLabsVoiceCollectionId, "collection-main");
       assert.equal(snapshot.settings?.elevenLabsVoiceBank?.["voice-1"], "eleven-a");
-      assert.equal("playerAudioVoiceProfile" in (snapshot.settings ?? {}), false);
-      assert.equal("playerNamePronunciation" in (snapshot.settings ?? {}), false);
+      assert.equal(snapshot.settings?.zenPlayerVoiceEnabled, true);
+      assert.equal(snapshot.settings?.playerAudioVoiceProfile?.baseVoiceId, "voice-3");
+      assert.equal(snapshot.settings?.playerNamePronunciation, "Jair-id");
 
       db.prepare(
-        "UPDATE users SET voice_mode = 'mute', voice_effects_enabled = 1, voice_volume = 1, operating_system_voices_enabled = 0, english_voice_engine = 'builtin', default_system_voice_name = NULL, default_elevenlabs_voice_id = NULL, elevenlabs_voice_bank = '{}', elevenlabs_voice_model = NULL, elevenlabs_voice_collection_id = NULL, player_audio_voice_profile = ?, player_name_pronunciation = ?, prism_default_bot_audio_voice_profile = NULL WHERE id = ?"
+        "UPDATE users SET voice_mode = 'mute', voice_effects_enabled = 1, voice_volume = 1, operating_system_voices_enabled = 0, english_voice_engine = 'builtin', default_system_voice_name = NULL, default_elevenlabs_voice_id = NULL, elevenlabs_voice_bank = '{}', elevenlabs_voice_model = NULL, elevenlabs_voice_collection_id = NULL, zen_player_voice_enabled = 0, player_audio_voice_profile = ?, player_name_pronunciation = ?, prism_default_bot_audio_voice_profile = NULL WHERE id = ?"
       ).run(
         JSON.stringify({ v: 1, baseVoiceId: "voice-2", pitch: 0, warmth: 0, pace: 0, lilt: 0 }),
         "Keep me",
@@ -784,32 +2146,33 @@ describe("backup audio voice settings", () => {
       importUserSnapshot(db, "user-1", snapshot, userKey);
 
       const restoredUser = db.prepare(
-        "SELECT voice_mode, voice_effects_enabled, voice_volume, operating_system_voices_enabled, english_voice_engine, default_system_voice_name, default_elevenlabs_voice_id, elevenlabs_voice_bank, elevenlabs_voice_model, elevenlabs_voice_collection_id, player_audio_voice_profile, player_name_pronunciation, prism_default_bot_audio_voice_profile FROM users WHERE id = ?"
+        "SELECT voice_mode, voice_effects_enabled, voice_volume, operating_system_voices_enabled, english_voice_engine, default_system_voice_name, default_elevenlabs_voice_id, elevenlabs_voice_bank, elevenlabs_voice_model, elevenlabs_voice_collection_id, zen_player_voice_enabled, player_audio_voice_profile, player_name_pronunciation, prism_default_bot_audio_voice_profile FROM users WHERE id = ?"
       ).get("user-1") as Record<string, string | null>;
       assert.equal(restoredUser.voice_mode, "babble");
       assert.equal(restoredUser.voice_effects_enabled, 0);
       assert.equal(restoredUser.voice_volume, 0.65);
       assert.equal(restoredUser.operating_system_voices_enabled, 1);
-      assert.equal(JSON.parse(restoredUser.prism_default_bot_audio_voice_profile ?? "{}").baseVoiceId, "voice-5");
-      assert.equal(JSON.parse(restoredUser.prism_default_bot_audio_voice_profile ?? "{}").elevenLabsEffect, "radio");
-      assert.equal(JSON.parse(restoredUser.prism_default_bot_audio_voice_profile ?? "{}").elevenLabsVoiceInitialized, true);
+      assert.equal(JSON.parse(restoredUser.prism_default_bot_audio_voice_profile ?? "{}").local.archetypeId, "voice-5");
+      assert.equal(JSON.parse(restoredUser.prism_default_bot_audio_voice_profile ?? "{}").delivery.effect, "radio");
+      assert.equal(JSON.parse(restoredUser.prism_default_bot_audio_voice_profile ?? "{}").premium.initialized, true);
       assert.equal(restoredUser.english_voice_engine, "elevenlabs");
       assert.equal(restoredUser.default_system_voice_name, "Alex");
       assert.equal(restoredUser.default_elevenlabs_voice_id, "eleven-global");
       assert.equal(restoredUser.elevenlabs_voice_model, "eleven_flash_v2_5");
       assert.equal(restoredUser.elevenlabs_voice_collection_id, "collection-main");
       assert.equal(JSON.parse(restoredUser.elevenlabs_voice_bank ?? "{}")["voice-1"], "eleven-a");
-      assert.equal(JSON.parse(restoredUser.player_audio_voice_profile ?? "{}").baseVoiceId, "voice-2");
-      assert.equal(restoredUser.player_name_pronunciation, "Keep me");
+      assert.equal(restoredUser.zen_player_voice_enabled, 1);
+      assert.equal(JSON.parse(restoredUser.player_audio_voice_profile ?? "{}").local.archetypeId, "voice-3");
+      assert.equal(restoredUser.player_name_pronunciation, "Jair-id");
 
       const restoredBot = db.prepare(
         "SELECT authored_audio_voice_profile, audio_voice_profile_override FROM bots WHERE id = ?"
       ).get("voice-bot") as Record<string, string>;
-      assert.equal(JSON.parse(restoredBot.authored_audio_voice_profile).baseVoiceId, "voice-4");
-      assert.equal(JSON.parse(restoredBot.authored_audio_voice_profile).elevenLabsEffect, "echo");
-      assert.equal(JSON.parse(restoredBot.audio_voice_profile_override).baseVoiceId, "voice-2");
-      assert.equal(JSON.parse(restoredBot.audio_voice_profile_override).elevenLabsEffect, "robot");
-      assert.equal(JSON.parse(restoredBot.audio_voice_profile_override).elevenLabsVoiceInitialized, true);
+      assert.equal(JSON.parse(restoredBot.authored_audio_voice_profile).local.archetypeId, "voice-4");
+      assert.equal(JSON.parse(restoredBot.authored_audio_voice_profile).delivery.effect, "echo");
+      assert.equal(JSON.parse(restoredBot.audio_voice_profile_override).local.archetypeId, "voice-2");
+      assert.equal(JSON.parse(restoredBot.audio_voice_profile_override).delivery.effect, "robot");
+      assert.equal(JSON.parse(restoredBot.audio_voice_profile_override).premium.initialized, true);
     });
   });
 });
@@ -826,6 +2189,7 @@ describe("backup Slate account data", () => {
         assert.equal("user_id" in rows[0]!, false, `${collection} must not carry a source tenant id`);
       }
 
+      db.prepare("DELETE FROM slate_handoffs WHERE user_id = ?").run("user-1");
       db.prepare("DELETE FROM slate_series WHERE id = ? AND user_id = ?").run(
         "slate-one-series",
         "user-1",
@@ -942,7 +2306,7 @@ describe("backup Slate account data", () => {
 
       assert.throws(
         () => importUserSnapshot(db, "user-1", snapshot, userKey),
-        /belongs to another user/i,
+        /unavailable owner-bound reference/i,
       );
       assert.equal(
         (
@@ -1000,6 +2364,7 @@ const SLATE_BACKUP_TEST_TABLES = [
   "slate_revisions",
   "slate_versions",
   "slate_sections",
+  "slate_handoffs",
   "slate_section_versions",
   "slate_manuscript_state",
   "slate_continuity_sources",
@@ -1033,6 +2398,16 @@ function seedSlateBackupFixture(
   db.prepare(
     "INSERT INTO slate_series (id, user_id, title, description, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
   ).run(seriesId, userId, "The Long Saga", "A restored saga.", now, now);
+  db.prepare(
+    `INSERT INTO conversations
+       (id, user_id, title, conversation_mode, created_at, updated_at)
+     VALUES (?, ?, 'Source conversation', 'zen', ?, ?)`,
+  ).run(`${prefix}-conversation`, userId, now, now);
+  db.prepare(
+    `INSERT INTO messages
+       (id, conversation_id, user_id, role, content, created_at)
+     VALUES (?, ?, ?, 'assistant', 'The restored source.', ?)`,
+  ).run(`${prefix}-message`, `${prefix}-conversation`, userId, now);
   db.prepare(
     `INSERT INTO slate_projects (
       id, user_id, series_id, book_ordinal, title, title_origin, spark, spark_wildcards_json,
@@ -1127,6 +2502,25 @@ function seedSlateBackupFixture(
     3,
     "section-hash",
     "mutation-3",
+    now,
+    now,
+  );
+  db.prepare(
+    `INSERT INTO slate_handoffs (
+      id, user_id, direction, status, source_text, source_label,
+      source_conversation_id, source_message_id, source_selection_start,
+      source_selection_end, target_project_id, created_at, committed_at
+    ) VALUES (?, ?, 'zen-to-slate', 'committed', ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    `${prefix}-handoff`,
+    userId,
+    "The restored source.",
+    "Iris · A quiet spark",
+    `${prefix}-conversation`,
+    `${prefix}-message`,
+    0,
+    20,
+    projectId,
     now,
     now,
   );
@@ -1407,6 +2801,201 @@ describe("backup clone lineage", () => {
             .get("clone-bot") as { clone_family_id: string | null }
         ).clone_family_id,
         "root-bot",
+      );
+    });
+  });
+});
+
+describe("backup spectral Power compatibility", () => {
+  it("round-trips prompt metadata, curated sigils, and audience exclusions", () => {
+    withBackupDatabase((db, userKey) => {
+      const intent = "Only Plankton hears me; everyone except Plankton sees me.";
+      const power = {
+        version: 1 as const,
+        id: "selective-specter",
+        authoringMode: "prompt" as const,
+        name: "Selective Specter",
+        intent,
+        sigil: "eye" as const,
+        enabled: true,
+        compileStatus: "ready" as const,
+        compiled: {
+          version: 1 as const,
+          sourceHash: botPowerSourceHashForPowerV1({
+            authoringMode: "prompt",
+            name: "Selective Specter",
+            intent,
+          }),
+          selfCue: "Plankton hears but cannot see the holder.",
+          observerCue: "Others see but cannot hear the holder.",
+          effects: [
+            {
+              type: "awareness" as const,
+              allowed: [{ kind: "all" as const }],
+              excluded: [{ kind: "bot" as const, name: "Plankton" }],
+            },
+            {
+              type: "speech_audience" as const,
+              allowed: [{ kind: "bot" as const, name: "Plankton" }],
+            },
+            { type: "avatar_visibility" as const, mode: "translucent" as const },
+          ],
+          ruleLabels: ["Selective spectral presence"],
+        },
+      };
+      db.prepare(
+        `INSERT INTO bots
+          (id, user_id, name, system_prompt, powers_json, created_at, updated_at)
+         VALUES ('prompt-spectral-bot', 'user-1', 'Ryuk', '', ?, ?, ?)`,
+      ).run(
+        JSON.stringify([power]),
+        "2026-07-21T00:00:00.000Z",
+        "2026-07-21T00:00:00.000Z",
+      );
+
+      const snapshot = exportUserSnapshot(db, "user-1", userKey);
+      db.prepare("UPDATE bots SET powers_json = '[]' WHERE id = 'prompt-spectral-bot'").run();
+      importUserSnapshot(db, "user-1", snapshot, userKey);
+      const restored = db.prepare(
+        "SELECT powers_json FROM bots WHERE id = 'prompt-spectral-bot'",
+      ).get() as { powers_json: string | null };
+      assert.deepEqual(parseStoredBotPowersV1(restored.powers_json)[0], power);
+    });
+  });
+
+  it("upgrades and round-trips a frozen targeted-Invisible bot without changing its source hash", () => {
+    withBackupDatabase((db, userKey) => {
+      const name = "Invisible";
+      const intent = "Can only be seen by Light Yagami.";
+      const sourceHash = botPowerSourceHashV1(name, intent);
+      const legacyPowers = [{
+        version: 1,
+        id: "invisible",
+        name,
+        intent,
+        enabled: true,
+        compileStatus: "ready",
+        compiled: {
+          version: 1,
+          sourceHash,
+          selfCue: "Remain unseen except to Light.",
+          observerCue: "Only Light can perceive the holder.",
+          effects: [{
+            type: "awareness",
+            allowed: [{ kind: "bot", name: "Light Yagami" }],
+          }],
+          ruleLabels: ["Visible only to Light Yagami"],
+        },
+      }];
+      db.prepare(
+        `INSERT INTO bots
+          (id, user_id, name, system_prompt, powers_json, created_at, updated_at)
+         VALUES (?, 'user-1', ?, '', ?, ?, ?)`,
+      ).run(
+        "spectral-bot",
+        "Ryuk",
+        JSON.stringify(legacyPowers),
+        "2026-07-21T00:00:00.000Z",
+        "2026-07-21T00:00:00.000Z",
+      );
+
+      const snapshot = exportUserSnapshot(db, "user-1", userKey);
+      const exportedPower = snapshot.bots
+        ?.find((bot) => bot.id === "spectral-bot")
+        ?.powers?.[0];
+      assert.equal(exportedPower?.compiled?.sourceHash, sourceHash);
+      assert.deepEqual(exportedPower?.compiled?.effects, [
+        legacyPowers[0]!.compiled.effects[0],
+        { type: "avatar_visibility", mode: "hidden" },
+      ]);
+
+      db.prepare("UPDATE bots SET powers_json = '[]' WHERE id = ?").run(
+        "spectral-bot",
+      );
+      importUserSnapshot(db, "user-1", snapshot, userKey);
+      const restored = db.prepare(
+        "SELECT powers_json FROM bots WHERE id = ?",
+      ).get("spectral-bot") as { powers_json: string | null };
+      const restoredPower = parseStoredBotPowersV1(restored.powers_json)[0];
+      assert.deepEqual(restoredPower, exportedPower);
+    });
+  });
+});
+
+describe("backup server-backed Library groups", () => {
+  it("round-trips 100 members and membership protection overrides", () => {
+    withBackupDatabase((db, userKey) => {
+      const now = "2026-07-26T01:00:00.000Z";
+      const insertBot = db.prepare(
+        `INSERT INTO bots
+          (id, user_id, name, system_prompt, created_at, updated_at)
+         VALUES (?, 'user-1', ?, '', ?, ?)`,
+      );
+      for (let index = 1; index <= 100; index += 1) {
+        insertBot.run(`library-bot-${index}`, `Library Bot ${index}`, now, now);
+      }
+      db.prepare(
+        `INSERT INTO library_groups
+          (id, user_id, name, description, delete_protected_default, built_in,
+           atmosphere_json, glyph_json, leader_bot_id, created_at, updated_at)
+         VALUES ('group:test', 'user-1', 'Test Group', '', 1, 0, '{}', ?, 'library-bot-1', ?, ?)`,
+      ).run(JSON.stringify({ version: 1, seed: "group:test:reroll:1" }), now, now);
+      const insertMember = db.prepare(
+        `INSERT INTO library_group_members
+          (user_id, group_id, bot_id, delete_protected_override, added_at,
+           updated_at)
+         VALUES ('user-1', 'group:test', ?, ?, ?, ?)`,
+      );
+      for (let index = 1; index <= 100; index += 1) {
+        insertMember.run(
+          `library-bot-${index}`,
+          index === 1 ? 0 : null,
+          now,
+          now,
+        );
+      }
+
+      const snapshot = exportUserSnapshot(db, "user-1", userKey);
+      assert.equal(snapshot.libraryGroups?.[1]?.id, "group:test");
+      assert.equal(snapshot.libraryGroups?.[1]?.botIds.length, 100);
+      assert.equal(
+        snapshot.libraryGroups?.[1]?.deleteProtectionByBotId["library-bot-1"],
+        false,
+      );
+      assert.deepEqual(snapshot.libraryGroups?.[1]?.glyph, {
+        version: 1,
+        seed: "group:test:reroll:1",
+      });
+      assert.equal(snapshot.libraryGroups?.[1]?.leaderBotId, "library-bot-1");
+
+      db.prepare("DELETE FROM library_groups WHERE user_id = 'user-1'").run();
+      importUserSnapshot(db, "user-1", snapshot, userKey);
+      const restored = db
+        .prepare(
+          `SELECT delete_protected_override
+             FROM library_group_members
+            WHERE user_id = 'user-1' AND group_id = 'group:test'
+              AND bot_id = 'library-bot-1'`,
+        )
+        .get() as { delete_protected_override: number };
+      assert.equal(restored.delete_protected_override, 0);
+      assert.equal(
+        listLibraryGroups(db, "user-1").find(
+          (group) => group.id === "group:test",
+        )?.botIds.length,
+        100,
+      );
+      assert.deepEqual(
+        listLibraryGroups(db, "user-1").find(
+          (group) => group.id === "group:test",
+        )?.glyph,
+        { version: 1, seed: "group:test:reroll:1" },
+      );
+      assert.equal(
+        listLibraryGroups(db, "user-1").find(
+          (group) => group.id === "group:test",
+        )?.leaderBotId,
+        "library-bot-1",
       );
     });
   });

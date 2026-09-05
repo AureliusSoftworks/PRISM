@@ -109,15 +109,271 @@ impl CommandNoWindow for Command {
     }
 }
 
+// Unix counterpart to the Windows Job Object above: give each runtime child its
+// own process group so the child *and everything it spawns* can be signalled as
+// a unit. Without this, grandchildren (the API's `dns-sd` LAN advertiser, TTS
+// workers) survive their parent and reparent to init.
+trait CommandOwnProcessGroup {
+    fn own_process_group(&mut self) -> &mut Self;
+}
+impl CommandOwnProcessGroup for Command {
+    fn own_process_group(&mut self) -> &mut Self {
+        #[cfg(unix)]
+        {
+            use std::os::unix::process::CommandExt;
+            // 0 = use the child's own pid as the new process group id.
+            self.process_group(0);
+        }
+        self
+    }
+}
+
+/// Stop runtime children and everything they spawned.
+///
+/// `Child::kill()` sends SIGKILL to a single pid. SIGKILL cannot be caught, so
+/// the API's shutdown handler never runs, `stopDiscovery()` never fires, and its
+/// `dns-sd` advertiser is orphaned to init — where it lives forever, still
+/// advertising `_prism._tcp`. Signal the whole process group instead: SIGTERM so
+/// each runtime can shut down cleanly, then SIGKILL for anything still standing.
+#[cfg(unix)]
+fn terminate_children(children: &mut [&mut Child]) {
+    fn signal_group(pid: u32, signal: &str) {
+        // `kill -SIG -PGID` targets the group. Shelling out keeps this
+        // dependency-free; the crate has no `libc`.
+        let _ = Command::new("/bin/kill")
+            .args([signal, &format!("-{pid}")])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+    }
+
+    for child in children.iter() {
+        signal_group(child.id(), "-TERM");
+    }
+
+    // Give every runtime the same grace period, in parallel, so quitting stays
+    // fast regardless of how many children are still draining.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while std::time::Instant::now() < deadline {
+        if children
+            .iter_mut()
+            .all(|child| matches!(child.try_wait(), Ok(Some(_))))
+        {
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+
+    for child in children.iter_mut() {
+        if matches!(child.try_wait(), Ok(Some(_))) {
+            continue;
+        }
+        signal_group(child.id(), "-KILL");
+        let _ = child.wait();
+    }
+}
+
+#[cfg(not(unix))]
+fn terminate_children(children: &mut [&mut Child]) {
+    // The Job Object tears the whole tree down with the process.
+    for child in children.iter_mut() {
+        let _ = child.kill();
+    }
+}
+
+/// Single-child convenience for the spawn-failure rollback paths.
+fn terminate_one(child: &mut Child) {
+    terminate_children(&mut [child]);
+}
+
+/// Command-line markers identifying a Prism runtime process we own.
+#[cfg(unix)]
+const PRISM_RUNTIME_PROCESS_MARKERS: &[&str] = &[
+    "/Resources/runtime/apps/api/dist/server.js",
+    "/Resources/runtime/apps/web/.next/standalone",
+    "/Application Support/Prism/bin/qdrant",
+];
+
+/// Reap Prism runtime processes leaked by a previous shell.
+///
+/// A runtime child always has a live desktop shell as its parent, so anything
+/// reparented to init (ppid 1) is definitionally leaked — the shell was
+/// SIGKILLed, force-quit, or crashed before `stop_runtime` could run. Those
+/// strays keep holding 19787/19788, which pushes the next launch onto a
+/// fallback port and quietly leaves two full stacks running. Restricting to
+/// ppid 1 is what makes this safe: a genuinely running Prism instance owns its
+/// children, so this can never disturb one.
+///
+/// Best-effort throughout — never block startup.
+#[cfg(unix)]
+fn reap_leaked_prism_runtimes(app: &AppHandle) {
+    let listing = match Command::new("/bin/ps")
+        .args(["-eo", "pid=,ppid=,args="])
+        .stdin(Stdio::null())
+        .stderr(Stdio::null())
+        .output()
+    {
+        Ok(output) => String::from_utf8_lossy(&output.stdout).into_owned(),
+        Err(_) => return,
+    };
+
+    let mut reaped = 0usize;
+    for line in listing.lines() {
+        let mut parts = line.split_whitespace();
+        let (Some(pid_raw), Some(ppid_raw)) = (parts.next(), parts.next()) else {
+            continue;
+        };
+        if ppid_raw != "1" {
+            continue;
+        }
+        let Ok(pid) = pid_raw.parse::<i32>() else {
+            continue;
+        };
+        if pid <= 1 {
+            continue;
+        }
+        if !PRISM_RUNTIME_PROCESS_MARKERS
+            .iter()
+            .any(|marker| line.contains(marker))
+        {
+            continue;
+        }
+        unsafe {
+            libc::kill(pid, libc::SIGTERM);
+        }
+        reaped += 1;
+    }
+
+    if reaped > 0 {
+        emit_log(
+            app,
+            "prism",
+            &format!("Reaped {reaped} leaked Prism runtime process(es) from a previous session."),
+        );
+    }
+}
+
+#[cfg(not(unix))]
+fn reap_leaked_prism_runtimes(_app: &AppHandle) {
+    // The Job Object guarantees the tree dies with the shell.
+}
+
+/// Latest shutdown signal seen, 0 when none. Written from a signal handler, so
+/// only async-signal-safe work happens there; a watcher thread does the rest.
+#[cfg(unix)]
+static PRISM_SHUTDOWN_SIGNAL: std::sync::atomic::AtomicI32 =
+    std::sync::atomic::AtomicI32::new(0);
+
+#[cfg(unix)]
+extern "C" fn prism_note_shutdown_signal(signal: i32) {
+    PRISM_SHUTDOWN_SIGNAL.store(signal, std::sync::atomic::Ordering::SeqCst);
+}
+
+/// Run `stop_runtime` on Ctrl-C, `kill`, and terminal hangup.
+///
+/// Tauri's `RunEvent::Exit` covers quitting through the UI, but not a signal —
+/// and since runtime children now live in their own process groups, a terminal
+/// Ctrl-C during `tauri dev` no longer reaches them on its own. Without this,
+/// every interrupted local build would strand a full stack.
+#[cfg(unix)]
+fn install_shutdown_signal_guard(app: AppHandle) {
+    unsafe {
+        for signal in [libc::SIGINT, libc::SIGTERM, libc::SIGHUP] {
+            let handler: extern "C" fn(i32) = prism_note_shutdown_signal;
+            libc::signal(signal, handler as libc::sighandler_t);
+        }
+    }
+    std::thread::spawn(move || loop {
+        if PRISM_SHUTDOWN_SIGNAL.load(std::sync::atomic::Ordering::SeqCst) != 0 {
+            let state: State<'_, RuntimeState> = app.state();
+            stop_runtime(&state);
+            std::process::exit(0);
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    });
+}
+
+#[cfg(not(unix))]
+fn install_shutdown_signal_guard(_app: AppHandle) {}
+
+// Tauri 2 embeds the platform webview (WKWebView/WebView2/WebKitGTK), not an
+// Electron Chromium session. Run this at document start for every PRISM frame
+// so native spelling and automatic-correction UI cannot win a race with React.
+const PRISM_DISABLE_NATIVE_TEXT_CORRECTION_SCRIPT: &str = r#"
+(() => {
+  globalThis.__PRISM_NATIVE_TEXT_CORRECTION_POLICY__ = true;
+  const selector = 'input, textarea, [contenteditable]:not([contenteditable="false"])';
+  const disable = (element) => {
+    if (!(element instanceof HTMLElement) || !element.matches(selector)) return;
+    if (element.spellcheck !== false) element.spellcheck = false;
+    if (element.getAttribute('spellcheck') !== 'false') {
+      element.setAttribute('spellcheck', 'false');
+    }
+    if (element.getAttribute('autocorrect') !== 'off') {
+      element.setAttribute('autocorrect', 'off');
+    }
+  };
+  const disableWithin = (root) => {
+    if (root instanceof Element) disable(root);
+    root.querySelectorAll?.(selector).forEach(disable);
+  };
+  const disableRoot = () => {
+    const root = document.documentElement;
+    if (!root) return;
+    if (root.spellcheck !== false) root.spellcheck = false;
+    if (root.getAttribute('spellcheck') !== 'false') {
+      root.setAttribute('spellcheck', 'false');
+    }
+    if (root.getAttribute('autocorrect') !== 'off') {
+      root.setAttribute('autocorrect', 'off');
+    }
+  };
+
+  disableRoot();
+  const observer = new MutationObserver((records) => {
+    for (const record of records) {
+      if (record.type === 'attributes') {
+        disable(record.target);
+        continue;
+      }
+      record.addedNodes.forEach((node) => {
+        if (node instanceof Element) disableWithin(node);
+      });
+    }
+  });
+  observer.observe(document, {
+    subtree: true,
+    childList: true,
+    attributes: true,
+    attributeFilter: ['spellcheck', 'autocorrect'],
+  });
+  document.addEventListener('DOMContentLoaded', () => {
+    disableRoot();
+    disableWithin(document);
+  }, { once: true });
+})();
+"#;
+
 use tauri::menu::MenuBuilder;
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::utils::config::BackgroundThrottlingPolicy;
 use tauri::{AppHandle, Emitter, Manager, RunEvent, State, WebviewUrl, WebviewWindowBuilder, WindowEvent};
+
+// PRISM is composed at a 16:10 reference size, but the native shell must fit
+// the monitor's logical work area after OS scaling, docks, and taskbars. The
+// web shell owns responsive composition below the reference size.
+const PRISM_WINDOW_REFERENCE_WIDTH: f64 = 1440.0;
+const PRISM_WINDOW_REFERENCE_HEIGHT: f64 = 900.0;
+const PRISM_WINDOW_MIN_WIDTH: f64 = 800.0;
+const PRISM_WINDOW_MIN_HEIGHT: f64 = 520.0;
 use url::Url;
 
 const DEFAULT_API_PORT: u16 = 19787;
 const DEFAULT_WEB_PORT: u16 = 19788;
-const STARTUP_TIMEOUT_SECS: u64 = 90;
+const API_STARTUP_TIMEOUT_SECS: u64 = 15 * 60;
+const WEB_STARTUP_TIMEOUT_SECS: u64 = 90;
+const API_STARTUP_PROGRESS_SECS: u64 = 15;
 
 /// Strip the `\\?\` extended-length path prefix that Rust's `canonicalize()`
 /// adds on Windows.  Node.js / Next.js choke on these prefixed paths.
@@ -136,6 +392,51 @@ struct RuntimeState {
     qdrant_child: Mutex<Option<Child>>,
     api_child: Mutex<Option<Child>>,
     web_child: Mutex<Option<Child>>,
+}
+
+struct PortablePackageOpenState {
+    paths: Mutex<Vec<String>>,
+}
+
+impl PortablePackageOpenState {
+    fn new() -> Self {
+        Self { paths: Mutex::new(Vec::new()) }
+    }
+}
+
+fn portable_package_path(value: &str) -> Option<String> {
+    let path = if let Ok(url) = Url::parse(value) {
+        if url.scheme() != "file" { return None; }
+        url.to_file_path().ok()?
+    } else {
+        PathBuf::from(value)
+    };
+    let extension = path.extension()?.to_str()?.to_ascii_lowercase();
+    if extension != "case" && extension != "mansion" && extension != "whodunnit" { return None; }
+    Some(path.to_string_lossy().into_owned())
+}
+
+fn queue_portable_package_paths(app: &AppHandle, values: impl IntoIterator<Item = String>) {
+    let Some(state) = app.try_state::<PortablePackageOpenState>() else { return; };
+    let mut pending = state.paths.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    for value in values {
+        if let Some(path) = portable_package_path(&value) {
+            if !pending.contains(&path) { pending.push(path); }
+        }
+    }
+    drop(pending);
+    let _ = app.emit("prism-portable-package-open-pending", ());
+}
+
+fn emit_pending_portable_package_paths(app: &AppHandle) {
+    let Some(state) = app.try_state::<PortablePackageOpenState>() else { return; };
+    let pending = {
+        let mut paths = state.paths.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        std::mem::take(&mut *paths)
+    };
+    for path in pending {
+        let _ = app.emit("prism-open-portable-package", serde_json::json!({ "path": path }));
+    }
 }
 
 impl RuntimeState {
@@ -338,9 +639,69 @@ fn emit_status(app: &AppHandle, service: &str, state: &str) {
     let _ = app.emit("prism-status", serde_json::json!({ "service": service, "state": state }));
 }
 
-/// Spawn a background thread that reads lines from `reader`, writes them to
-/// `log_file`, and forwards each line to the splash screen via Tauri events.
-fn spawn_log_tee(
+/// Translate child output into fixed operational messages. Child stdout and
+/// stderr are untrusted: provider failures, framework traces, or future debug
+/// statements may contain account text. No raw child line may reach disk or
+/// the splash terminal.
+fn content_free_runtime_log_line(source: &str, line: &str) -> Option<&'static str> {
+    let normalized = line.trim().to_ascii_lowercase();
+    if normalized.is_empty() {
+        return None;
+    }
+    if normalized.contains("vault")
+        || normalized.contains("migration")
+        || normalized.contains("upgrade")
+    {
+        return Some("Secure workspace preparation is active.");
+    }
+    if normalized.contains("error")
+        || normalized.contains("failed")
+        || normalized.contains("failure")
+        || normalized.contains("fatal")
+        || normalized.contains("panic")
+        || normalized.contains("warning")
+    {
+        return Some("Runtime reported a content-free diagnostic.");
+    }
+    if normalized.contains("ready")
+        || normalized.contains("listening")
+        || normalized.contains("started")
+        || normalized.contains("compiled")
+    {
+        return Some(match source {
+            "api" => "API runtime is responding.",
+            "web" => "Web interface is responding.",
+            "qdrant" => "Private vector service is responding.",
+            _ => "Runtime service is responding.",
+        });
+    }
+    None
+}
+
+#[cfg(test)]
+mod runtime_log_privacy_tests {
+    use super::content_free_runtime_log_line;
+
+    #[test]
+    fn child_output_never_survives_content_free_classification() {
+        let canary = "owner-a-private-prompt-canary";
+        for source in ["api", "web", "qdrant"] {
+            for line in [
+                canary.to_string(),
+                format!("ready {canary}"),
+                format!("fatal provider error: {canary}"),
+                format!("vault migration: {canary}"),
+            ] {
+                let classified = content_free_runtime_log_line(source, &line);
+                assert!(!classified.unwrap_or_default().contains(canary));
+            }
+        }
+    }
+}
+
+/// Drain a child stream while persisting and displaying only fixed,
+/// content-free classifications.
+fn spawn_content_free_log_drain(
     reader: impl std::io::Read + Send + 'static,
     mut log_file: std::fs::File,
     app: AppHandle,
@@ -351,8 +712,10 @@ fn spawn_log_tee(
         for line in buf.lines() {
             match line {
                 Ok(line) => {
-                    let _ = writeln!(log_file, "{line}");
-                    emit_log(&app, source, &line);
+                    if let Some(safe_line) = content_free_runtime_log_line(source, &line) {
+                        let _ = writeln!(log_file, "{source} {safe_line}");
+                        emit_log(&app, source, safe_line);
+                    }
                 }
                 Err(_) => break,
             }
@@ -389,25 +752,43 @@ fn start_runtime(app: &AppHandle, state: &RuntimeState) -> std::io::Result<(u16,
     let web_log    = logs_dir.join("web.log");
     let qdrant_log = logs_dir.join("qdrant.log");
 
-    // Qdrant: both streams go to file (very verbose, not useful on splash).
+    // All child streams are drained through a fixed content-free classifier.
+    // Never redirect raw stdout/stderr into persistent files.
     let qdrant_stdout_file = OpenOptions::new().create(true).append(true).open(&qdrant_log)
         .map_err(|e| io_error(format!("Failed to open qdrant log: {e}")))?;
     let qdrant_stderr_file = qdrant_stdout_file.try_clone()
         .map_err(|e| io_error(format!("Failed to clone qdrant log handle: {e}")))?;
 
-    // API: stdout piped to splash + file; stderr to file only.
+    // API: both streams are classified before splash/file output.
     let api_stdout_file = OpenOptions::new().create(true).append(true).open(&api_log)
         .map_err(|e| io_error(format!("Failed to open api log: {e}")))?;
     let api_stderr_file = api_stdout_file.try_clone()
         .map_err(|e| io_error(format!("Failed to clone api log handle: {e}")))?;
 
-    // Web: stdout piped to splash + file; stderr to file only.
+    // Web: both streams are classified before splash/file output.
     let web_stdout_file = OpenOptions::new().create(true).append(true).open(&web_log)
         .map_err(|e| io_error(format!("Failed to open web log: {e}")))?;
     let web_stderr_file = web_stdout_file.try_clone()
         .map_err(|e| io_error(format!("Failed to clone web log handle: {e}")))?;
 
+    // Clear strays from a previous shell before probing ports, so a leaked
+    // runtime cannot push this launch onto a fallback port.
+    reap_leaked_prism_runtimes(app);
+
     let api_port = pick_available_port(DEFAULT_API_PORT, &[])?;
+    if api_port != DEFAULT_API_PORT {
+        // Surfaced loudly: this almost always means another Prism is still
+        // alive, so the window about to open is a second stack rather than the
+        // build just staged.
+        emit_log(
+            app,
+            "prism",
+            &format!(
+                "WARNING: port {DEFAULT_API_PORT} is already in use by another live Prism instance; \
+                 this shell fell back to {api_port}. Quit the other instance if you meant to test this build.",
+            ),
+        );
+    }
     let web_port = pick_available_port(DEFAULT_WEB_PORT, &[api_port])?;
     let localai_api_origin = format!("http://127.0.0.1:{api_port}");
     // Honour the persisted LAN-access preference: bind to 0.0.0.0 when the
@@ -419,31 +800,41 @@ fn start_runtime(app: &AppHandle, state: &RuntimeState) -> std::io::Result<(u16,
         .parent()
         .map(PathBuf::from)
         .unwrap_or_else(|| root.clone());
-    let qdrant_storage_dir = localai_data_dir.join("Qdrant").join("storage");
+    let qdrant_work_dir = localai_data_dir.join("Qdrant");
+    let qdrant_storage_dir = qdrant_work_dir.join("storage");
     fs::create_dir_all(&qdrant_storage_dir)
         .map_err(|error| io_error(format!("Failed to create Qdrant data directory: {error}")))?;
 
-    emit_log(app, "prism", &format!("Runtime root: {}", root.display()));
-    emit_log(app, "prism", &format!("Ports: API={api_port}  Web={web_port}"));
+    emit_log(app, "prism", "Private runtime paths prepared.");
+    emit_log(app, "prism", "Private service ports reserved.");
 
     // ── Qdrant ──
     emit_status(app, "qdrant", "starting");
     let mut qdrant_child = Command::new(&qdrant)
+        .current_dir(&qdrant_work_dir)
         .env("QDRANT__STORAGE__STORAGE_PATH", qdrant_storage_dir.to_string_lossy().to_string())
         .env("QDRANT__SERVICE__HOST", "127.0.0.1")
         .stdin(Stdio::null())
-        .stdout(Stdio::from(qdrant_stdout_file))
-        .stderr(Stdio::from(qdrant_stderr_file))
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
         .no_window()
+        .own_process_group()
         .spawn()
         .map_err(|e| io_error(format!("Failed to start bundled Qdrant: {e}")))?;
     assign_to_child_job(&qdrant_child);
+    if let Some(stdout) = qdrant_child.stdout.take() {
+        spawn_content_free_log_drain(stdout, qdrant_stdout_file, app.clone(), "qdrant");
+    }
+    if let Some(stderr) = qdrant_child.stderr.take() {
+        spawn_content_free_log_drain(stderr, qdrant_stderr_file, app.clone(), "qdrant");
+    }
     emit_status(app, "qdrant", "running");
-    emit_log(app, "qdrant", &format!("Started (pid {})", qdrant_child.id()));
+    emit_log(app, "qdrant", "Private vector service started.");
 
     // ── API ──
     emit_status(app, "api", "starting");
-    let mut api_child = Command::new(&node)
+    let mut api_command = Command::new(&node);
+    api_command
         .arg(&api)
         .current_dir(&root)
         .env("API_PORT", api_port.to_string())
@@ -454,17 +845,26 @@ fn start_runtime(app: &AppHandle, state: &RuntimeState) -> std::io::Result<(u16,
         .env("PRISM_DESKTOP_MODE", "1")
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
-        .stderr(Stdio::from(api_stderr_file))
+        .stderr(Stdio::piped())
         .no_window()
+        .own_process_group();
+    let playwright_browsers = root.join("playwright-browsers");
+    if playwright_browsers.exists() {
+        api_command.env("PLAYWRIGHT_BROWSERS_PATH", playwright_browsers);
+    }
+    let mut api_child = api_command
         .spawn()
         .map_err(|e| {
-            let _ = qdrant_child.kill();
+            terminate_one(&mut qdrant_child);
             io_error(format!("Failed to start Prism API: {e}"))
         })?;
 
     assign_to_child_job(&api_child);
     if let Some(stdout) = api_child.stdout.take() {
-        spawn_log_tee(stdout, api_stdout_file, app.clone(), "api");
+        spawn_content_free_log_drain(stdout, api_stdout_file, app.clone(), "api");
+    }
+    if let Some(stderr) = api_child.stderr.take() {
+        spawn_content_free_log_drain(stderr, api_stderr_file, app.clone(), "api");
     }
     emit_status(app, "api", "running");
 
@@ -480,18 +880,22 @@ fn start_runtime(app: &AppHandle, state: &RuntimeState) -> std::io::Result<(u16,
         .env("PRISM_DESKTOP_MODE", "1")
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
-        .stderr(Stdio::from(web_stderr_file))
+        .stderr(Stdio::piped())
         .no_window()
+        .own_process_group()
         .spawn()
         .map_err(|e| {
-            let _ = api_child.kill();
-            let _ = qdrant_child.kill();
+            terminate_one(&mut api_child);
+            terminate_one(&mut qdrant_child);
             io_error(format!("Failed to start Prism web runtime: {e}"))
         })?;
 
     assign_to_child_job(&web_child);
     if let Some(stdout) = web_child.stdout.take() {
-        spawn_log_tee(stdout, web_stdout_file, app.clone(), "web");
+        spawn_content_free_log_drain(stdout, web_stdout_file, app.clone(), "web");
+    }
+    if let Some(stderr) = web_child.stderr.take() {
+        spawn_content_free_log_drain(stderr, web_stderr_file, app.clone(), "web");
     }
     emit_status(app, "web", "running");
 
@@ -504,9 +908,12 @@ fn start_runtime(app: &AppHandle, state: &RuntimeState) -> std::io::Result<(u16,
 
 fn wait_for_api(api_port: u16, state: &RuntimeState, app: &AppHandle) -> std::io::Result<()> {
     let start = Instant::now();
-    let timeout_at = start + Duration::from_secs(STARTUP_TIMEOUT_SECS);
+    let timeout_at = start + Duration::from_secs(API_STARTUP_TIMEOUT_SECS);
+    let mut next_progress_at = start + Duration::from_secs(API_STARTUP_PROGRESS_SECS);
+    let status_refresh_at = start + Duration::from_secs(1);
+    let mut status_refreshed = false;
     let target = format!("127.0.0.1:{api_port}");
-    emit_log(app, "prism", &format!("Waiting for API on {target}…"));
+    emit_log(app, "prism", "Waiting for the private API…");
     while Instant::now() < timeout_at {
         if std::net::TcpStream::connect(&target).is_ok() {
             let elapsed = start.elapsed().as_secs_f64();
@@ -526,19 +933,40 @@ fn wait_for_api(api_port: u16, state: &RuntimeState, app: &AppHandle) -> std::io
                 }
             }
         }
+        let now = Instant::now();
+        if !status_refreshed && now >= status_refresh_at {
+            // The splash event listeners can attach after the runtime children
+            // start. Refresh their current state once the webview is painted.
+            emit_status(app, "qdrant", "running");
+            emit_status(app, "api", "running");
+            emit_status(app, "web", "running");
+            status_refreshed = true;
+        }
+        if now >= next_progress_at {
+            let elapsed = start.elapsed().as_secs();
+            emit_status(app, "api", "preparing");
+            emit_log(
+                app,
+                "prism",
+                &format!(
+                    "API is still preparing local data ({elapsed}s). Secure upgrades can take several minutes for large libraries."
+                ),
+            );
+            next_progress_at = now + Duration::from_secs(API_STARTUP_PROGRESS_SECS);
+        }
         thread::sleep(Duration::from_millis(500));
     }
     emit_status(app, "api", "error");
-    Err(io_error(
-        "Prism API did not start in time (90s timeout). Check api.log in the app data directory.",
-    ))
+    Err(io_error(format!(
+        "Prism API did not start in time ({API_STARTUP_TIMEOUT_SECS}s timeout). Check api.log in the app data directory."
+    )))
 }
 
 fn wait_for_web(web_port: u16, api_port: u16, state: &RuntimeState, app: &AppHandle) -> std::io::Result<()> {
     let start = Instant::now();
-    let timeout_at = start + Duration::from_secs(STARTUP_TIMEOUT_SECS);
+    let timeout_at = start + Duration::from_secs(WEB_STARTUP_TIMEOUT_SECS);
     let target = format!("127.0.0.1:{web_port}");
-    emit_log(app, "prism", &format!("Waiting for web on {target}…"));
+    emit_log(app, "prism", "Waiting for the web interface…");
     while Instant::now() < timeout_at {
         if std::net::TcpStream::connect(&target).is_ok() {
             let elapsed = start.elapsed().as_secs_f64();
@@ -563,21 +991,27 @@ fn wait_for_web(web_port: u16, api_port: u16, state: &RuntimeState, app: &AppHan
     let api_alive = std::net::TcpStream::connect(format!("127.0.0.1:{api_port}")).is_ok();
     emit_log(app, "prism", &format!("Timeout reached. API alive: {api_alive}"));
     emit_status(app, "web", "error");
-    Err(io_error(
-        "Prism web runtime did not start in time (90s timeout). Check web.log in the app data directory.",
-    ))
+    Err(io_error(format!(
+        "Prism web runtime did not start in time ({WEB_STARTUP_TIMEOUT_SECS}s timeout). Check web.log in the app data directory."
+    )))
 }
 
 fn stop_runtime(state: &RuntimeState) {
-    if let Ok(mut guard) = state.qdrant_child.lock() {
-        if let Some(mut child) = guard.take() { let _ = child.kill(); }
+    // Take ownership of all three first, then signal them together, so every
+    // runtime shares one grace period instead of queueing behind the last.
+    let mut owned: Vec<Child> = Vec::new();
+    for slot in [&state.web_child, &state.api_child, &state.qdrant_child] {
+        if let Ok(mut guard) = slot.lock() {
+            if let Some(child) = guard.take() {
+                owned.push(child);
+            }
+        }
     }
-    if let Ok(mut guard) = state.api_child.lock() {
-        if let Some(mut child) = guard.take() { let _ = child.kill(); }
+    if owned.is_empty() {
+        return;
     }
-    if let Ok(mut guard) = state.web_child.lock() {
-        if let Some(mut child) = guard.take() { let _ = child.kill(); }
-    }
+    let mut borrowed: Vec<&mut Child> = owned.iter_mut().collect();
+    terminate_children(&mut borrowed);
 }
 
 fn is_app_quitting(app_handle: &AppHandle) -> bool {
@@ -644,11 +1078,65 @@ fn toggle_fullscreen(window: tauri::WebviewWindow) -> Result<bool, String> {
     Ok(next_fullscreen)
 }
 
+#[tauri::command]
+fn set_cursor_position(
+    window: tauri::WebviewWindow,
+    x: f64,
+    y: f64,
+) -> Result<bool, String> {
+    if !x.is_finite() || !y.is_finite() {
+        return Ok(false);
+    }
+    window
+        .set_cursor_position(tauri::LogicalPosition::new(x, y))
+        .map_err(|error| format!("Could not position the cursor: {error}"))?;
+    Ok(true)
+}
+
+#[tauri::command]
+fn open_emoji_picker(app: AppHandle) -> Result<bool, String> {
+    #[cfg(target_os = "macos")]
+    {
+        app.run_on_main_thread(|| {
+            use objc2::MainThreadMarker;
+            use objc2_app_kit::NSApplication;
+
+            let mtm = MainThreadMarker::new()
+                .expect("Tauri scheduled the emoji picker on the macOS main thread");
+            NSApplication::sharedApplication(mtm).orderFrontCharacterPalette(None);
+        })
+        .map_err(|error| format!("Could not open the emoji picker: {error}"))?;
+        return Ok(true);
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = app;
+        Ok(false)
+    }
+}
+
 fn main() {
-    let app = match tauri::Builder::default()
+    let builder = tauri::Builder::default();
+
+    // Register this before every other plugin or managed service. A repeat
+    // launch is redirected to the existing window and exits before setup can
+    // spawn a second Qdrant/API/web runtime tree.
+    #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
+    let builder = builder.plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
+        queue_portable_package_paths(app, args);
+        show_main_window(app);
+    }));
+
+    let app = match builder
         .manage(RuntimeState::new())
         .manage(AppLifecycleState::new())
-        .invoke_handler(tauri::generate_handler![toggle_fullscreen])
+        .manage(PortablePackageOpenState::new())
+        .invoke_handler(tauri::generate_handler![
+            toggle_fullscreen,
+            set_cursor_position,
+            open_emoji_picker
+        ])
         .on_window_event(|window, event| {
             if let WindowEvent::CloseRequested { api, .. } = event {
                 if is_app_quitting(&window.app_handle()) { return; }
@@ -680,6 +1168,11 @@ fn main() {
             setup_tray(app)?;
 
             let app_handle = app.handle().clone();
+            queue_portable_package_paths(&app_handle, std::env::args().skip(1));
+
+            // Arm before any runtime child exists, so an interrupt at any point
+            // during startup still tears the tree down.
+            install_shutdown_signal_guard(app_handle.clone());
 
             // Spawn startup work on a background thread so the event loop can
             // start immediately and paint the splash screen.
@@ -689,18 +1182,18 @@ fn main() {
 
                 let (api_port, web_port) = match start_runtime(&app_handle, &state) {
                     Ok(ports) => ports,
-                    Err(error) => {
-                        emit_log(&app_handle, "prism", &format!("Startup failed: {error}"));
+                    Err(_) => {
+                        emit_log(&app_handle, "prism", "Startup failed. Check the service log.");
                         return;
                     }
                 };
 
-                if let Err(error) = wait_for_api(api_port, &state, &app_handle) {
-                    emit_log(&app_handle, "prism", &format!("API readiness failed: {error}"));
+                if wait_for_api(api_port, &state, &app_handle).is_err() {
+                    emit_log(&app_handle, "prism", "API readiness failed.");
                     return;
                 }
-                if let Err(error) = wait_for_web(web_port, api_port, &state, &app_handle) {
-                    emit_log(&app_handle, "prism", &format!("Web readiness failed: {error}"));
+                if wait_for_web(web_port, api_port, &state, &app_handle).is_err() {
+                    emit_log(&app_handle, "prism", "Web readiness failed.");
                     return;
                 }
 
@@ -713,29 +1206,38 @@ fn main() {
 
                 let web_url = match Url::parse(&format!("http://127.0.0.1:{web_port}")) {
                     Ok(url) => url,
-                    Err(error) => {
-                        emit_log(&app_handle, "prism", &format!("Invalid web URL: {error}"));
+                    Err(_) => {
+                        emit_log(&app_handle, "prism", "The local web address was invalid.");
                         return;
                     }
                 };
 
                 if let Some(window) = app_handle.get_webview_window("main") {
                     let _ = window.navigate(web_url.clone());
-                } else if let Err(error) = WebviewWindowBuilder::new(
+                } else if WebviewWindowBuilder::new(
                     &app_handle,
                     "main",
                     WebviewUrl::External(web_url.clone()),
                 )
                 .title("PRISM")
-                .inner_size(1400.0, 948.0)
-                .min_inner_size(1280.0, 900.0)
+                .inner_size(
+                    PRISM_WINDOW_REFERENCE_WIDTH,
+                    PRISM_WINDOW_REFERENCE_HEIGHT,
+                )
+                .min_inner_size(PRISM_WINDOW_MIN_WIDTH, PRISM_WINDOW_MIN_HEIGHT)
+                .center()
+                .prevent_overflow()
                 .resizable(true)
                 .maximizable(true)
-                .fullscreen(true)
+                .fullscreen(false)
                 .background_throttling(BackgroundThrottlingPolicy::Disabled)
-                .build() {
-                    emit_log(&app_handle, "prism", &format!("Window build failed: {error}"));
+                .initialization_script_for_all_frames(PRISM_DISABLE_NATIVE_TEXT_CORRECTION_SCRIPT)
+                .build()
+                .is_err()
+                {
+                    emit_log(&app_handle, "prism", "The workspace window could not open.");
                 }
+                emit_pending_portable_package_paths(&app_handle);
             });
 
             Ok(())
@@ -756,6 +1258,14 @@ fn main() {
         RunEvent::Exit => {
             let state: State<'_, RuntimeState> = app_handle.state();
             stop_runtime(&state);
+        }
+        #[cfg(target_os = "macos")]
+        RunEvent::Opened { urls } => {
+            queue_portable_package_paths(
+                &app_handle,
+                urls.into_iter().map(|url| url.to_string()),
+            );
+            show_main_window(&app_handle);
         }
         _ => {}
     });

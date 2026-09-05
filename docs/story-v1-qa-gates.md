@@ -83,4 +83,4 @@ the handoff is structured rather than a transcript dump, provenance survives the
 round trip, and no content is incorporated without an explicit writer choice.
 Those gates belong to the later roadmap stages in
 `docs/slate-v1-product-ux-contract.md`; they do not block the standalone Slate
-foundation or current Story V1 preview.
+foundation or Story's later return to preview.

@@ -29,6 +29,10 @@ export const COMPOSE_MENTION_MENU_PORTAL_THEME_VARS = [
   "--accent-soft",
   "--accent-glow",
   "--shadow-sm",
+  "--provider-accent-openai",
+  "--provider-accent-anthropic",
+  "--provider-accent-local",
+  "--provider-accent-elevenlabs",
 ] as const;
 
 /**

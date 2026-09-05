@@ -2,15 +2,20 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
   COFFEE_SEAT_ANGRY_BRACKET_GLYPH,
+  COFFEE_SEAT_BOTTISH_MOUTH_CHARACTERS_PER_PHASE,
   COFFEE_SEAT_MOUTH_CHARACTERS_PER_PHASE,
   COFFEE_SEAT_SIP_FACE_ACTIVE_PROGRESS,
   COFFEE_SEAT_SIP_PLATE_GLYPH,
   coffeeSeatCustomMouthCharacterForSip,
+  coffeeSeatMouthRotationCssDeg,
   coffeeSeatMouthShapeFromVisibleLength,
   coffeeSeatPlateGlyph,
   coffeeSeatSipFaceActive,
+  coffeeSeatSipMouthTreatmentActive,
   coffeeSeatSipMouthOffsetX,
   coffeeSeatSipMouthOffsetY,
+  coffeeSeatScreenRelativeFeatureRotationDeg,
+  coffeeSeatScreenRelativeMouthRotationDeg,
   resolveCoffeeSeatSipFacePresentation,
 } from "./coffee-seat-plate.ts";
 
@@ -42,6 +47,21 @@ describe("coffeeSeatPlateGlyph", () => {
     assert.equal(
       coffeeSeatMouthShapeFromVisibleLength(1, "lamp", false),
       "speech-closed",
+    );
+  });
+
+  it("holds Bottish fallback poses across a slower character span", () => {
+    const speech = "Bottish should not chatter.";
+    const firstShape = coffeeSeatMouthShapeFromVisibleLength(
+      1,
+      speech,
+      false,
+      COFFEE_SEAT_BOTTISH_MOUTH_CHARACTERS_PER_PHASE,
+    );
+    assert.equal(COFFEE_SEAT_BOTTISH_MOUTH_CHARACTERS_PER_PHASE, 6);
+    assert.equal(
+      coffeeSeatMouthShapeFromVisibleLength(6, speech, false, 6),
+      firstShape,
     );
   });
 
@@ -78,15 +98,19 @@ describe("coffeeSeatPlateGlyph", () => {
       rotateDeg: 90,
     });
     assert.deepEqual(coffeeSeatPlateGlyph("warm", "dot"), {
-      text: ":∙",
+      text: ":.",
       rotateDeg: 90,
     });
     assert.deepEqual(coffeeSeatPlateGlyph("warm", "at"), {
       text: ":@",
       rotateDeg: 90,
     });
+    assert.deepEqual(coffeeSeatPlateGlyph("warm", "click"), {
+      text: ":ʘ",
+      rotateDeg: 90,
+    });
     assert.deepEqual(coffeeSeatPlateGlyph("warm", "narrow"), {
-      text: ":o",
+      text: ":ɵ",
       rotateDeg: 90,
     });
     assert.deepEqual(coffeeSeatPlateGlyph("warm", "open-wide"), {
@@ -114,14 +138,14 @@ describe("coffeeSeatPlateGlyph", () => {
     });
   });
 
-  it("lets custom mouths opt into the Coffee sip pucker", () => {
+  it("swaps only custom mouths into the Coffee sip pucker when enabled", () => {
     assert.equal(
       coffeeSeatCustomMouthCharacterForSip({
         mouthCharacter: "△",
         coffeePuckerEnabled: true,
         sipActive: true,
       }),
-      null,
+      "⁎",
     );
     assert.equal(
       coffeeSeatCustomMouthCharacterForSip({
@@ -138,6 +162,117 @@ describe("coffeeSeatPlateGlyph", () => {
         sipActive: false,
       }),
       "△",
+    );
+  });
+
+  it("keeps every sip-mouth treatment behind the Coffee * option", () => {
+    assert.equal(
+      coffeeSeatSipMouthTreatmentActive({
+        sipActive: true,
+        coffeePuckerEnabled: true,
+      }),
+      true,
+    );
+    assert.equal(
+      coffeeSeatSipMouthTreatmentActive({
+        sipActive: true,
+        coffeePuckerEnabled: false,
+      }),
+      false,
+      "a disabled Coffee * leaves persistent mouths completely untouched",
+    );
+    assert.equal(
+      coffeeSeatSipMouthTreatmentActive({
+        sipActive: false,
+        coffeePuckerEnabled: true,
+      }),
+      false,
+    );
+  });
+
+  it("keeps the transient sip pucker upright across left, center, and right face rotations", () => {
+    for (const [faceRotationDeg, expectedMouthRotationDeg] of [
+      [90, -90],
+      [0, 0],
+      [-90, 90],
+    ] as const) {
+      assert.equal(
+        coffeeSeatScreenRelativeMouthRotationDeg(0, faceRotationDeg),
+        expectedMouthRotationDeg,
+      );
+      assert.equal(
+        faceRotationDeg + expectedMouthRotationDeg,
+        0,
+      );
+    }
+    assert.equal(
+      coffeeSeatScreenRelativeMouthRotationDeg(27, 90),
+      -63,
+      "the authored mouth rotation remains recoverable after the sip layer clears",
+    );
+    assert.equal(
+      coffeeSeatScreenRelativeFeatureRotationDeg(27, 90),
+      -63,
+      "custom eyes use the same screen-relative authored angle as mouths",
+    );
+  });
+
+  it("keeps standard and custom-bot fallback visemes on their correct plate baselines", () => {
+    const common = {
+      faceRotationDeg: 90,
+      transientSipPucker: false,
+    };
+
+    assert.equal(
+      coffeeSeatMouthRotationCssDeg({
+        ...common,
+        authoredRotationDeg: 0,
+        configuredCustomMouth: false,
+        renderedCustomMouth: false,
+      }),
+      0,
+      "standard plate mouths keep their built-in orientation",
+    );
+    assert.equal(
+      coffeeSeatMouthRotationCssDeg({
+        ...common,
+        authoredRotationDeg: 27,
+        configuredCustomMouth: false,
+        renderedCustomMouth: false,
+      }),
+      27,
+      "Default speech visemes receive authored rotation as a delta",
+    );
+    assert.equal(
+      coffeeSeatMouthRotationCssDeg({
+        ...common,
+        authoredRotationDeg: 27,
+        configuredCustomMouth: true,
+        renderedCustomMouth: false,
+      }),
+      0,
+      "Signal fallback visemes do not inherit a different custom glyph's angle",
+    );
+    assert.equal(
+      coffeeSeatMouthRotationCssDeg({
+        ...common,
+        authoredRotationDeg: 27,
+        configuredCustomMouth: true,
+        renderedCustomMouth: true,
+      }),
+      -63,
+      "rendered custom glyphs keep their authored screen orientation",
+    );
+    assert.equal(
+      coffeeSeatMouthRotationCssDeg({
+        ...common,
+        authoredRotationDeg: 27,
+        configuredCustomMouth: true,
+        renderedCustomMouth: true,
+        transientSipPucker: true,
+      }),
+      -90,
+      "sip puckers remain upright regardless of authored mouth rotation",
     );
   });
 
@@ -345,5 +480,22 @@ describe("coffeeSeatPlateGlyph", () => {
       }),
       "-0.36em",
     );
+  });
+});
+
+describe("compact mouth glyphs", () => {
+  it("preserves each Mini viseme instead of collapsing them to :0", () => {
+    assert.deepEqual(coffeeSeatPlateGlyph("warm", "open-small"), {
+      text: ":o",
+      rotateDeg: 90,
+    });
+    assert.deepEqual(coffeeSeatPlateGlyph("warm", "open-round"), {
+      text: ":O",
+      rotateDeg: 90,
+    });
+    assert.deepEqual(coffeeSeatPlateGlyph("warm", "at"), {
+      text: ":@",
+      rotateDeg: 90,
+    });
   });
 });

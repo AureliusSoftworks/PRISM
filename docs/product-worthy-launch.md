@@ -8,6 +8,28 @@ workspace.
 Status: not ready for broad outreach until every Go/No-Go item is marked
 `pass` with evidence.
 
+## Steam Checkpoint — 2026-08-12
+
+Verified locally against the current Steam staging tree:
+
+- Trailer: 60 seconds, 1920x1080 H.264/AAC; probe passed.
+- Steam content: 14/14 content/export tests; 25 approved Marketplace bundles
+  staged and verified.
+- Rights and provenance: 315 staged media assets hashed; 97 runtime packages
+  covered by the generated third-party inventory; commercial voice manifest
+  passes.
+- Runtime: pinned Node.js v22.22.2, Steam distribution marker, launcher 2/2,
+  runtime staging tests 6/6, and typecheck/lint gates pass.
+
+Still requiring external evidence or Jared's decision:
+
+- Steamworks sign-in, store/build submission, and Valve review.
+- Windows and Linux clean-target launch smoke tests.
+- A successful CI artifact/upload run and private/prerelease Steam branch
+  evidence for the next build.
+- GitHub distribution restriction or privatization before public Steam launch.
+- Jared's explicit approval before promoting the public Steam branch.
+
 Related launch assets:
 
 - [`launch/outreach-workflow.md`](launch/outreach-workflow.md)
@@ -24,13 +46,14 @@ Related launch assets:
 | Factory reset | Reset/reinstall behavior is documented and works | Command/path used, data retained/deleted notes | pending |
 | LOCAL privacy | LOCAL mode stays local for chat, auxiliary work, embeddings, and image-generation blocking | Test command/log evidence; no unexpected outbound host | pending |
 | ONLINE clarity | README/release notes explain when online providers may be called | Doc links and reviewed copy | pending |
-| Distribution copy | Steam and GitHub are the active public channels | Reviewed README/store/release wording | pending |
+| Distribution copy | Steam is the paid public channel at $9.99; GitHub is temporary development/CI access | Reviewed README/store/release wording | pending |
 | Launch copy | Release notes include downloads, limitations, and privacy summary | Draft link or release notes path | pending |
 | Outreach packet | First public draft includes rule audit and manual-posting note | Link to outreach packet | pending |
 | Steamworks setup | Steam app, package/free-product setup, OS depots, and prerelease branch exist | App ID/depot ID storage location, branch name, non-secret config notes | pending |
 | Steam policy review | Content Survey, live AI disclosure, and store copy are Steam-safe | Reviewed disclosure copy and reviewer notes | pending |
 | Steam store presence | Store page assets represent shipped Prism Desktop only | Store preview, screenshot list, capsule/library asset checklist | pending |
 | Steam depot upload | Smoke-tested desktop artifacts export and upload to a private/prerelease Steam branch | Workflow run, steam-build artifact, Steam branch/build ID | pending |
+| GitHub access transition | GitHub distribution is restricted or privatized before public Steam launch | Repository/release visibility evidence | pending |
 
 ## Go/No-Go
 

@@ -3,7 +3,13 @@ import { randomUUID } from "node:crypto";
 export type SignalArtworkAssetKind =
   | "night-studio"
   | "day-studio"
+  | "studio-lighting"
   | "logo";
+
+export type SignalArtworkGenerationKind = Exclude<
+  SignalArtworkAssetKind,
+  "studio-lighting"
+>;
 
 export type SignalArtworkAssetStatus =
   | "waiting"
@@ -33,6 +39,7 @@ export type SignalArtworkJobTimings = {
   identityMs: number | null;
   nightStudioMs: number | null;
   dayRelightMs: number | null;
+  studioLightingMs: number | null;
   logoMs: number | null;
   downloadMs: number;
   localPersistenceMs: number;
@@ -58,6 +65,8 @@ export type SignalArtworkJobSnapshot = {
 export type SignalArtworkGeneratedAsset = {
   imageId: string;
   imageUrl: string;
+  microphoneTintMaskImageId?: string | null;
+  microphoneTintMaskUrl?: string | null;
   timings?: {
     downloadMs?: number;
     localPersistenceMs?: number;
@@ -69,20 +78,25 @@ export type SignalArtworkJobStart = {
   showId: string;
   showName: string;
   identityMs?: number | null;
-  kinds?: readonly SignalArtworkAssetKind[];
+  kinds?: readonly SignalArtworkGenerationKind[];
+  studioLightingOnly?: boolean;
   sourceNightImageId?: string | null;
   parallelIndependentAssets?: boolean;
   controller?: AbortController;
+  acquireSlot?: (signal: AbortSignal) => Promise<void>;
   releaseSlot: () => Promise<void>;
-  generate: (
-    kind: SignalArtworkAssetKind,
+  generate?: (
+    kind: SignalArtworkGenerationKind,
     sourceNightImageId: string | null,
     signal: AbortSignal,
   ) => Promise<SignalArtworkGeneratedAsset>;
-  attach: (
-    kind: SignalArtworkAssetKind,
+  attach?: (
+    kind: SignalArtworkGenerationKind,
     asset: SignalArtworkGeneratedAsset,
   ) => Promise<void>;
+  refreshStudioLighting?: (
+    signal: AbortSignal,
+  ) => Promise<SignalArtworkGeneratedAsset>;
 };
 
 type SignalArtworkJobRecord = {
@@ -114,15 +128,12 @@ function errorMessage(error: unknown): string {
     : "Signal artwork generation failed.";
 }
 
-export const SIGNAL_ARTWORK_ASSET_ORDER: readonly SignalArtworkAssetKind[] = [
-  "night-studio",
-  "day-studio",
-  "logo",
-];
+export const SIGNAL_ARTWORK_ASSET_ORDER: readonly SignalArtworkGenerationKind[] =
+  ["night-studio", "day-studio", "logo"];
 
 export function normalizeSignalArtworkAssetKinds(
   kinds: unknown,
-): SignalArtworkAssetKind[] {
+): SignalArtworkGenerationKind[] {
   if (kinds === undefined) return [...SIGNAL_ARTWORK_ASSET_ORDER];
   if (!Array.isArray(kinds)) return [];
   const requested = new Set(kinds);
@@ -130,7 +141,7 @@ export function normalizeSignalArtworkAssetKinds(
 }
 
 function timingKey(
-  kind: SignalArtworkAssetKind,
+  kind: SignalArtworkGenerationKind,
 ): "nightStudioMs" | "dayRelightMs" | "logoMs" {
   if (kind === "night-studio") return "nightStudioMs";
   if (kind === "day-studio") return "dayRelightMs";
@@ -158,24 +169,48 @@ export class SignalArtworkJobManager {
     }
     if (current) this.jobs.delete(current.snapshot.id);
 
-    const kinds = normalizeSignalArtworkAssetKinds(input.kinds);
-    if (kinds.length === 0) {
+    const studioLightingOnly = input.studioLightingOnly === true;
+    const kinds = studioLightingOnly
+      ? []
+      : normalizeSignalArtworkAssetKinds(input.kinds);
+    if (kinds.length === 0 && !studioLightingOnly) {
       throw new Error("Choose at least one Signal artwork asset.");
+    }
+    if (studioLightingOnly && !input.refreshStudioLighting) {
+      throw new Error("Studio lighting refresh is not configured.");
     }
     const timestamp = this.now().toISOString();
     const waitsForNewNight =
       kinds.includes("day-studio") &&
       kinds.includes("night-studio") &&
       !input.sourceNightImageId;
+    const includesStudioLighting =
+      Boolean(input.refreshStudioLighting) &&
+      (studioLightingOnly ||
+        kinds.includes("night-studio") ||
+        kinds.includes("day-studio"));
+    const assets: SignalArtworkAssetKind[] = studioLightingOnly
+      ? ["studio-lighting"]
+      : includesStudioLighting
+        ? [
+          ...kinds.filter((kind) => kind !== "logo"),
+          "studio-lighting",
+          ...kinds.filter((kind) => kind === "logo"),
+          ]
+        : kinds;
     const snapshot: SignalArtworkJobSnapshot = {
       id: this.id(),
       showId: input.showId,
       showName: input.showName,
       status: "running",
-      currentAsset: kinds[0] ?? null,
+      currentAsset: input.acquireSlot
+        ? null
+        : studioLightingOnly
+          ? "studio-lighting"
+          : kinds[0] ?? null,
       completedCount: 0,
-      totalCount: kinds.length,
-      assets: kinds.map((kind) => ({
+      totalCount: assets.length,
+      assets: assets.map((kind) => ({
         kind,
         status:
           kind === "day-studio" && waitsForNewNight
@@ -192,6 +227,7 @@ export class SignalArtworkJobManager {
             : null,
         nightStudioMs: null,
         dayRelightMs: null,
+        studioLightingMs: null,
         logoMs: null,
         downloadMs: 0,
         localPersistenceMs: 0,
@@ -230,6 +266,11 @@ export class SignalArtworkJobManager {
         record.snapshot.showId === showId &&
         !isTerminal(record.snapshot.status),
     );
+  }
+
+  hasActiveJobForUser(userId: string): boolean {
+    const record = this.getLatestRecord(userId);
+    return Boolean(record && !isTerminal(record.snapshot.status));
   }
 
   cancel(userId: string, jobId: string): SignalArtworkJobSnapshot | null {
@@ -286,13 +327,24 @@ export class SignalArtworkJobManager {
 
   private async run(record: SignalArtworkJobRecord): Promise<void> {
     const requestedKinds = new Set(
-      record.snapshot.assets.map((asset) => asset.kind),
+      record.snapshot.assets
+        .map((asset) => asset.kind)
+        .filter(
+          (kind): kind is SignalArtworkGenerationKind =>
+            kind !== "studio-lighting",
+        ),
     );
     let canonicalNightImageId = record.start.sourceNightImageId ?? null;
     const signal = record.controller.signal;
+    let slotAcquired = !record.start.acquireSlot;
     try {
+      if (record.start.acquireSlot) {
+        await record.start.acquireSlot(signal);
+        slotAcquired = true;
+      }
+      if (signal.aborted) return;
       const runAsset = async (
-        kind: SignalArtworkAssetKind,
+        kind: SignalArtworkGenerationKind,
         sourceNightImageId: string | null,
       ): Promise<SignalArtworkGeneratedAsset | null> => {
         if (signal.aborted) return null;
@@ -303,6 +355,9 @@ export class SignalArtworkJobManager {
         const assetStartedAt = this.now().getTime();
         let generated: SignalArtworkGeneratedAsset | null = null;
         try {
+          if (!record.start.generate || !record.start.attach) {
+            throw new Error("Signal artwork generation is not configured.");
+          }
           generated = await record.start.generate(
             kind,
             sourceNightImageId,
@@ -362,21 +417,69 @@ export class SignalArtworkJobManager {
             this.touch(record);
           }
         }
-        if (!requestedKinds.has("day-studio") || signal.aborted) return;
-        if (!canonicalNightImageId) {
-          const asset = this.asset(record, "day-studio");
-          asset.status = "skipped";
-          asset.error =
-            "The Dark studio did not finish, so the Light relight could not start.";
-          record.snapshot.errors.push({ asset: "day-studio", message: asset.error });
+        if (requestedKinds.has("day-studio") && !signal.aborted) {
+          if (!canonicalNightImageId) {
+            const asset = this.asset(record, "day-studio");
+            asset.status = "skipped";
+            asset.error =
+              "The Dark studio did not finish, so the Light relight could not start.";
+            record.snapshot.errors.push({
+              asset: "day-studio",
+              message: asset.error,
+            });
+            this.touch(record);
+          } else {
+            await runAsset("day-studio", canonicalNightImageId);
+          }
+        }
+
+        if (!record.start.refreshStudioLighting || signal.aborted) return;
+        const completedStudioCount = record.snapshot.assets.filter(
+          (asset) =>
+            (asset.kind === "night-studio" || asset.kind === "day-studio") &&
+            asset.status === "complete",
+        ).length;
+        const lightingAsset = this.asset(record, "studio-lighting");
+        if (!record.start.studioLightingOnly && completedStudioCount === 0) {
+          lightingAsset.status = "skipped";
           this.touch(record);
           return;
         }
-        await runAsset("day-studio", canonicalNightImageId);
+        lightingAsset.status = "generating";
+        this.refreshCurrentAsset(record);
+        this.touch(record);
+        const lightingStartedAt = this.now().getTime();
+        try {
+          const lighting = await record.start.refreshStudioLighting(signal);
+          if (signal.aborted) return;
+          lightingAsset.imageId = lighting.imageId;
+          lightingAsset.status = "complete";
+          record.snapshot.completedCount += 1;
+        } catch (error) {
+          if (!isAbortError(error, signal)) {
+            lightingAsset.status = "failed";
+            lightingAsset.error = record.start.studioLightingOnly
+              ? `Studio lighting could not be rebuilt: ${errorMessage(error)}`
+              : `Studio artwork is ready, but its lighting map could not be rebuilt: ${errorMessage(error)}`;
+            record.snapshot.errors.push({
+              asset: "studio-lighting",
+              message: lightingAsset.error,
+            });
+          }
+        } finally {
+          record.snapshot.timings.studioLightingMs = Math.max(
+            0,
+            this.now().getTime() - lightingStartedAt,
+          );
+          this.refreshCurrentAsset(record);
+          this.touch(record);
+        }
       };
 
       const hasStudioWork =
-        requestedKinds.has("night-studio") || requestedKinds.has("day-studio");
+        record.start.studioLightingOnly === true ||
+        requestedKinds.has("night-studio") ||
+        requestedKinds.has("day-studio");
       const hasLogoWork = requestedKinds.has("logo");
       if (
         record.start.parallelIndependentAssets &&
@@ -412,6 +515,18 @@ export class SignalArtworkJobManager {
     } catch (error) {
       record.snapshot.currentAsset = null;
       record.snapshot.status = signal.aborted ? "cancelled" : "failed";
+      if (signal.aborted) {
+        for (const asset of record.snapshot.assets) {
+          if (
+            asset.status === "waiting" ||
+            asset.status === "waiting-for-night" ||
+            asset.status === "generating" ||
+            asset.status === "attaching"
+          ) {
+            asset.status = "skipped";
+          }
+        }
+      }
       if (!signal.aborted) {
         record.snapshot.errors.push({
           asset: record.snapshot.assets[0]?.kind ?? "logo",
@@ -421,18 +536,15 @@ export class SignalArtworkJobManager {
     } finally {
       record.snapshot.finishedAt = this.now().toISOString();
       this.touch(record);
-      console.info("[signal-artwork] background job finished", {
-        jobId: record.snapshot.id,
-        showId: record.snapshot.showId,
-        status: record.snapshot.status,
-        completedCount: record.snapshot.completedCount,
-        errorCount: record.snapshot.errors.length,
-        timings: record.snapshot.timings,
-      });
-      try {
-        await record.start.releaseSlot();
-      } catch (error) {
-        console.error("[signal-artwork] could not release image slot", error);
+      console.info(
+        `[signal-artwork] background job finished status=${record.snapshot.status} completed=${record.snapshot.completedCount} errors=${record.snapshot.errors.length}.`,
+      );
+      if (slotAcquired) {
+        try {
+          await record.start.releaseSlot();
+        } catch {
+          console.error("[signal-artwork] could not release image slot.");
+        }
       }
     }
   }

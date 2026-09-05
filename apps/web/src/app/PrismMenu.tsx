@@ -23,8 +23,22 @@ import {
 } from "./prismMenuModel";
 import styles from "./PrismMenu.module.css";
 
+/** Broadcast before opening a top-navbar picker so every picker shares one owner. */
+export const PRISM_NAVBAR_PICKER_OPEN_EVENT = "prism:navbar-picker-open";
+const PRISM_NAVBAR_PICKER_SURFACE_SELECTOR =
+  '[data-navbar-picker-surface="true"]';
+
+export function announcePrismNavbarPickerOpen(source: string): void {
+  window.dispatchEvent(
+    new CustomEvent(PRISM_NAVBAR_PICKER_OPEN_EVENT, {
+      detail: { source },
+    }),
+  );
+}
+
 export type PrismMenuTone = "default" | "danger";
 export type PrismMenuTheme = "dark" | "light";
+export type PrismMenuIconPresentation = "default" | "identity";
 
 export interface PrismMenuBoundary {
   element?: HTMLElement | null;
@@ -49,6 +63,7 @@ export type PrismMenuAnchor =
 interface PrismMenuEntryBase {
   id: string;
   icon?: ReactNode;
+  iconPresentation?: PrismMenuIconPresentation;
   label: string;
   description?: string;
   shortcut?: string;
@@ -115,6 +130,8 @@ export interface PrismMenuRequest {
   accent?: string;
   theme?: PrismMenuTheme;
   minWidth?: number;
+  /** Optional content-height cap for a compact menu; the menu scrolls past it. */
+  maxHeight?: number;
   focusRestoreTarget?: HTMLElement | RefObject<HTMLElement | null> | null;
   onClose?: () => void;
 }
@@ -243,6 +260,76 @@ export function PrismMenuProvider({ children }: { children: ReactNode }): React.
     };
   }, [closeStandaloneMenus]);
 
+  useEffect(() => {
+    const closeForNavbarPicker = () => {
+      closeStandaloneMenus();
+      setActiveMenu((current) => {
+        current?.onClose?.();
+        return null;
+      });
+    };
+    window.addEventListener(PRISM_NAVBAR_PICKER_OPEN_EVENT, closeForNavbarPicker);
+    return () =>
+      window.removeEventListener(
+        PRISM_NAVBAR_PICKER_OPEN_EVENT,
+        closeForNavbarPicker,
+      );
+  }, [closeStandaloneMenus]);
+
+  useEffect(() => {
+    const navbarPickerIsOpen = (): boolean =>
+      Boolean(document.querySelector(PRISM_NAVBAR_PICKER_SURFACE_SELECTOR));
+    const eventStartedInsideNavbarPicker = (event: Event): boolean => {
+      const target = event.target;
+      return (
+        target instanceof Element &&
+        Boolean(target.closest(PRISM_NAVBAR_PICKER_SURFACE_SELECTOR))
+      );
+    };
+    const blockBackgroundScroll = (event: WheelEvent | TouchEvent): void => {
+      if (!navbarPickerIsOpen() || eventStartedInsideNavbarPicker(event)) return;
+      event.preventDefault();
+    };
+    const blockBackgroundKeyboardScroll = (event: KeyboardEvent): void => {
+      if (
+        !navbarPickerIsOpen() ||
+        eventStartedInsideNavbarPicker(event) ||
+        ![
+          "ArrowDown",
+          "ArrowLeft",
+          "ArrowRight",
+          "ArrowUp",
+          "End",
+          "Home",
+          "PageDown",
+          "PageUp",
+          " ",
+        ].includes(event.key)
+      ) {
+        return;
+      }
+      event.preventDefault();
+    };
+
+    // PRISM's pages scroll inside applet-owned containers rather than the body.
+    // Guard at the window capture boundary so every navbar picker freezes all
+    // background scrollers while preserving native overflow inside the picker.
+    window.addEventListener("wheel", blockBackgroundScroll, {
+      capture: true,
+      passive: false,
+    });
+    window.addEventListener("touchmove", blockBackgroundScroll, {
+      capture: true,
+      passive: false,
+    });
+    window.addEventListener("keydown", blockBackgroundKeyboardScroll, true);
+    return () => {
+      window.removeEventListener("wheel", blockBackgroundScroll, true);
+      window.removeEventListener("touchmove", blockBackgroundScroll, true);
+      window.removeEventListener("keydown", blockBackgroundKeyboardScroll, true);
+    };
+  }, []);
+
   const value = useMemo(
     () => ({ activeMenu, openMenu, closeMenu, claimSurface }),
     [activeMenu, claimSurface, closeMenu, openMenu],
@@ -274,6 +361,14 @@ interface PrismMenuSurfaceProps {
   surfaceRef?: RefObject<HTMLDivElement | null>;
   ownerId?: string;
   onBack?: () => void;
+  /** Gives top-navbar dropdowns the shared high-contrast ambient shadow. */
+  navbarPicker?: boolean;
+  /** Lets a hotkey-owned picker commit its pending value on an outside press. */
+  onDismissOutside?: () => boolean | void;
+  /** Runs before PrismMenu's built-in keyboard handling. */
+  onKeyDownCapture?: (event: React.KeyboardEvent<HTMLDivElement>) => void;
+  /** Keeps pointer hover from replacing the hotkey-owned active choice. */
+  cursorAgnostic?: boolean;
 }
 
 export function PrismMenuSurface({
@@ -283,6 +378,10 @@ export function PrismMenuSurface({
   surfaceRef,
   ownerId,
   onBack,
+  navbarPicker = false,
+  onDismissOutside,
+  onKeyDownCapture,
+  cursorAgnostic = false,
 }: PrismMenuSurfaceProps): React.JSX.Element {
   const menuRef = useRef<HTMLDivElement | null>(null);
   const itemRefs = useRef(new Map<string, HTMLButtonElement>());
@@ -321,8 +420,9 @@ export function PrismMenuSurface({
       menuHeight: Math.ceil(rect.height),
       boundary: boundaryRect(request.anchor),
       placement: request.anchor.preferredPlacement ?? "bottom-start",
+      gap: navbarPicker ? -2 : undefined,
     }));
-  }, [request.anchor]);
+  }, [navbarPicker, request.anchor]);
 
   useLayoutEffect(() => {
     measure();
@@ -349,6 +449,7 @@ export function PrismMenuSurface({
           ? event.target.closest<HTMLElement>("[data-prism-menu-owner]")
           : null;
       if (owner?.dataset.prismMenuOwner === rootOwnerId) return;
+      if (onDismissOutside?.() === true) return;
       onClose({ restoreFocus: false });
     };
     const dismissForViewport = () => onClose({ restoreFocus: false });
@@ -364,7 +465,7 @@ export function PrismMenuSurface({
       window.removeEventListener("resize", measure);
       window.removeEventListener("scroll", measure, true);
     };
-  }, [measure, onClose, rootOwnerId]);
+  }, [measure, onClose, onDismissOutside, rootOwnerId]);
 
   const focusIndex = useCallback((index: number) => {
     const entry = interactiveEntries[index];
@@ -387,8 +488,13 @@ export function PrismMenuSurface({
       }
       return;
     }
-    if (entry.kind === "toggle") await entry.onSelect(!entry.checked);
-    else await entry.onSelect();
+    try {
+      if (entry.kind === "toggle") await entry.onSelect(!entry.checked);
+      else await entry.onSelect();
+    } catch {
+      // Keep the menu open when an action fails so the player can retry.
+      return;
+    }
     if (entry.kind === "action" && entry.feedback) {
       setFeedback(entry.feedback);
       window.setTimeout(() => onClose(), 520);
@@ -408,19 +514,30 @@ export function PrismMenuSurface({
       onClose({ restoreFocus: false });
       return;
     }
-    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
-      event.preventDefault();
-      const direction = event.key === "ArrowDown" ? 1 : -1;
-      focusIndex((currentIndex + direction + interactiveEntries.length) % interactiveEntries.length);
-      return;
-    }
-    if (event.key === "Home" || event.key === "End") {
-      event.preventDefault();
-      focusIndex(event.key === "Home" ? 0 : interactiveEntries.length - 1);
-      return;
+    // Top-navbar menus are pointer/wheel driven. Keep Escape/Tab/Enter/Space,
+    // but do not let arrows steal Control-root chords or roam the list.
+    if (!navbarPicker) {
+      if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+        event.preventDefault();
+        const direction = event.key === "ArrowDown" ? 1 : -1;
+        focusIndex(
+          (currentIndex + direction + interactiveEntries.length) %
+            interactiveEntries.length,
+        );
+        return;
+      }
+      if (event.key === "Home" || event.key === "End") {
+        event.preventDefault();
+        focusIndex(event.key === "Home" ? 0 : interactiveEntries.length - 1);
+        return;
+      }
     }
     const activeEntry = interactiveEntries[currentIndex];
-    if (event.key === "ArrowRight" && activeEntry?.kind === "submenu") {
+    if (
+      !navbarPicker &&
+      event.key === "ArrowRight" &&
+      activeEntry?.kind === "submenu"
+    ) {
       event.preventDefault();
       void invoke(activeEntry);
       return;
@@ -430,7 +547,7 @@ export function PrismMenuSurface({
       void invoke(activeEntry);
       return;
     }
-    if (event.key === "ArrowLeft") {
+    if (!navbarPicker && event.key === "ArrowLeft") {
       if (onBack) {
         event.preventDefault();
         onBack();
@@ -460,7 +577,16 @@ export function PrismMenuSurface({
         typeaheadRef.current.value = "";
       }, 520);
     }
-  }, [activeId, focusIndex, interactiveEntries, invoke, onBack, onClose, openSubmenuId]);
+  }, [
+    activeId,
+    focusIndex,
+    interactiveEntries,
+    invoke,
+    navbarPicker,
+    onBack,
+    onClose,
+    openSubmenuId,
+  ]);
 
   const openSubmenu = request.entries.find(
     (entry): entry is PrismMenuSubmenuEntry =>
@@ -480,7 +606,7 @@ export function PrismMenuSurface({
     "--prism-menu-accent": request.accent ?? "#8fb7ff",
     left: position.left / rootZoom,
     top: position.top / rootZoom,
-    maxHeight: position.maxHeight / rootZoom,
+    maxHeight: Math.min(position.maxHeight, request.maxHeight ?? Infinity) / rootZoom,
     minWidth: Math.min(request.minWidth ?? 196, availableWidth),
     maxWidth: Math.min(320, availableWidth),
     visibility: position.left < -1000 ? "hidden" : "visible",
@@ -497,10 +623,12 @@ export function PrismMenuSurface({
         className={`${styles.menu} ${className}`.trim()}
         role="menu"
         aria-label={request.label}
-        data-theme={request.theme ?? "dark"}
+        data-theme={request.theme}
         data-prism-menu-owner={rootOwnerId}
+        data-navbar-picker-surface={navbarPicker ? "true" : undefined}
         data-placement={position.placement}
         style={style}
+        onKeyDownCapture={onKeyDownCapture}
         onKeyDown={handleKeyDown}
       >
         <div className={styles.filament} aria-hidden="true" />
@@ -526,11 +654,15 @@ export function PrismMenuSurface({
               ? "menuitemcheckbox"
               : "menuitem";
           const checked = entry.kind === "radio" || entry.kind === "toggle" ? entry.checked : undefined;
-          const indicator = checked
-            ? <Check aria-hidden="true" />
-            : entry.kind === "radio"
-              ? <Circle aria-hidden="true" />
-              : entry.icon;
+          const preservesIdentityIcon =
+            entry.iconPresentation === "identity" && Boolean(entry.icon);
+          const leadingIcon = preservesIdentityIcon
+            ? entry.icon
+            : checked
+              ? <Check aria-hidden="true" />
+              : entry.kind === "radio"
+                ? <Circle aria-hidden="true" />
+                : entry.icon;
           return (
             <button
               key={entry.id}
@@ -546,16 +678,27 @@ export function PrismMenuSurface({
               aria-description={entry.disabledReason}
               disabled={disabled}
               className={styles.item}
-              data-active={activeId === entry.id ? "true" : undefined}
+              data-icon-presentation={preservesIdentityIcon ? "identity" : undefined}
               data-tone={entry.tone ?? "default"}
               title={entry.disabledReason}
               onPointerDown={(event) => event.preventDefault()}
               onFocus={() => setActiveId(entry.id)}
-              onMouseEnter={() => setActiveId(entry.id)}
+              onMouseEnter={
+                cursorAgnostic ? undefined : () => setActiveId(entry.id)
+              }
               onClick={() => void invoke(entry)}
             >
-              <span className={checked ? styles.indicator : styles.icon} aria-hidden="true">
-                {indicator}
+              <span
+                className={
+                  preservesIdentityIcon
+                    ? styles.identityIcon
+                    : checked
+                      ? styles.indicator
+                      : styles.icon
+                }
+                aria-hidden="true"
+              >
+                {leadingIcon}
               </span>
               <span className={styles.copy}>
                 <strong>{entry.label}</strong>
@@ -564,6 +707,8 @@ export function PrismMenuSurface({
               </span>
               {entry.kind === "submenu"
                 ? <span className={styles.chevron} aria-hidden="true"><ChevronRight /></span>
+                : preservesIdentityIcon && entry.kind === "radio" && checked
+                  ? <span className={styles.selectionMark} aria-hidden="true"><Check /></span>
                 : entry.shortcut
                   ? <span className={styles.shortcut}>{entry.shortcut}</span>
                   : null}
@@ -588,6 +733,7 @@ export function PrismMenuSurface({
                 focusRestoreTarget: openSubmenuAnchor,
               }}
               ownerId={rootOwnerId}
+              navbarPicker={navbarPicker}
               onBack={() => {
                 setOpenSubmenuId(null);
                 setOpenSubmenuAnchor(null);
@@ -603,7 +749,7 @@ export function PrismMenuSurface({
       {feedback ? (
         <div
           className={styles.feedback}
-          data-theme={request.theme ?? "dark"}
+          data-theme={request.theme}
           role="status"
           aria-live="polite"
           style={{

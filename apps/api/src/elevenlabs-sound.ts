@@ -1,3 +1,6 @@
+import { normalizeSignalGenerationKeywords } from "./signal-generation-keywords.ts";
+import { refractionSignal } from "./refraction-cancellation.ts";
+
 export const SIGNAL_ELEVENLABS_ATMOSPHERE_MODEL = "eleven_text_to_sound_v2";
 export const SIGNAL_ELEVENLABS_ATMOSPHERE_DURATION_MS = 30_000;
 export const SIGNAL_ELEVENLABS_SOUND_PROMPT_MAX_CHARACTERS = 450;
@@ -7,7 +10,10 @@ const COFFEE_ACTION_SFX_AUDIO_MAX_BYTES = 512 * 1024;
 export const AVATAR_ELEVENLABS_SFX_MODEL = "eleven_text_to_sound_v2";
 export const AVATAR_ELEVENLABS_SFX_DURATION_SECONDS = 4;
 export const AVATAR_ELEVENLABS_SFX_PROMPT_MAX_CHARACTERS = 400;
+export const SOUND_FX_BENCH_PROMPT_MAX_CHARACTERS = 450;
+export const SOUND_FX_BENCH_DURATION_SECONDS = 1.2;
 const AVATAR_ELEVENLABS_SFX_AUDIO_MAX_BYTES = 1024 * 1024;
+const SOUND_FX_BENCH_AUDIO_MAX_BYTES = 1024 * 1024;
 
 export const COFFEE_ELEVENLABS_ACTION_SFX = {
   cup_set_down: {
@@ -63,14 +69,25 @@ export class ElevenLabsSoundError extends Error {
 export function buildSignalAtmospherePrompt(args: {
   showName: string;
   studioIdentity: string;
+  keywords?: readonly string[];
 }): string {
   const silentRoomQuestion =
     "What would it sound like in this room if one were completely silent?";
-  const directions =
-    "Seamless non-musical room-and-Foley loop unique to this studio. Build a distinctive backing bed from warm low resonance, damped low mids, and several sparse sounds implied by its materials, objects, mechanisms, and setting. Keep highs faint, leave speech space, and smooth the loop boundary.";
+  const keywords = normalizeSignalGenerationKeywords(args.keywords);
+  const keywordDirection = keywords.length
+    ? ` Producer cues: ${keywords.join(", ")}.`
+    : "";
+  const directions = keywords.length
+    ? "Seamless non-musical room-and-Foley loop unique to this studio. Let the producer cues shape its sparse material sounds while speech stays clear and the loop boundary stays smooth."
+    : "Seamless non-musical room-and-Foley loop unique to this studio. Build a distinctive backing bed from warm low resonance, damped low mids, and several sparse sounds implied by its materials, objects, mechanisms, and setting. Keep highs faint, leave speech space, and smooth the loop boundary.";
   const studioPrefix = "Studio: ";
   const promptEnvelopeLength =
-    silentRoomQuestion.length + 1 + studioPrefix.length + 2 + directions.length;
+    silentRoomQuestion.length +
+    1 +
+    studioPrefix.length +
+    2 +
+    keywordDirection.length +
+    directions.length;
   const studioIdentity = boundSignalAtmosphereText(
     cleanSignalAtmosphereStudioIdentity(
       args.studioIdentity.trim() ||
@@ -80,7 +97,7 @@ export function buildSignalAtmospherePrompt(args: {
     SIGNAL_ELEVENLABS_SOUND_PROMPT_MAX_CHARACTERS - promptEnvelopeLength,
   );
   return boundSignalAtmospherePrompt(
-    `${silentRoomQuestion} ${studioPrefix}${studioIdentity}. ${directions}`,
+    `${silentRoomQuestion} ${studioPrefix}${studioIdentity}.${keywordDirection} ${directions}`,
   );
 }
 
@@ -156,6 +173,56 @@ export function buildAvatarElevenLabsSfxPrompt(value: string): string {
   return `A seamless looping character sound effect: ${request}. Smooth loop boundary, stable level, and enough space for clear speech.`;
 }
 
+export async function requestSoundFxBenchSfx(args: {
+  apiKey: string;
+  prompt: string;
+  durationSeconds?: number;
+  signal?: AbortSignal;
+  fetchImpl?: typeof fetch;
+}): Promise<{
+  audioBytes: Buffer;
+  contentType: string;
+  requestId: string | null;
+}> {
+  const fetchImpl = args.fetchImpl ?? fetch;
+  const prompt = boundSignalAtmosphereText(
+    args.prompt,
+    SOUND_FX_BENCH_PROMPT_MAX_CHARACTERS,
+  );
+  const durationSeconds = Math.min(
+    5,
+    Math.max(0.5, Number(args.durationSeconds) || SOUND_FX_BENCH_DURATION_SECONDS),
+  );
+  const response = await fetchImpl(
+    "https://api.elevenlabs.io/v1/sound-generation?output_format=mp3_44100_128",
+    {
+      method: "POST",
+      signal: args.signal,
+      headers: {
+        "content-type": "application/json",
+        "xi-api-key": args.apiKey,
+      },
+      body: JSON.stringify({
+        text: prompt,
+        duration_seconds: durationSeconds,
+        prompt_influence: 0.3,
+        loop: false,
+        model_id: "eleven_text_to_sound_v2",
+      }),
+    },
+  );
+  if (!response.ok) throw await soundError(response, "ElevenLabs could not create this sound effect.");
+  const audioBytes = Buffer.from(await response.arrayBuffer());
+  if (audioBytes.length === 0 || audioBytes.length > SOUND_FX_BENCH_AUDIO_MAX_BYTES) {
+    throw new ElevenLabsSoundError(502, "ElevenLabs returned unusable sound audio.");
+  }
+  const contentType = response.headers.get("content-type")?.split(";")[0]?.trim();
+  if (!contentType?.startsWith("audio/")) {
+    throw new ElevenLabsSoundError(502, "ElevenLabs returned an invalid sound audio format.");
+  }
+  return { audioBytes, contentType, requestId: response.headers.get("request-id") };
+}
+
 export async function requestAvatarElevenLabsSfx(args: {
   apiKey: string;
   prompt: string;
@@ -222,6 +289,151 @@ export async function requestAvatarElevenLabsSfx(args: {
     throw new ElevenLabsSoundError(
       502,
       "ElevenLabs returned an invalid avatar sound audio format.",
+    );
+  }
+  return {
+    audioBytes,
+    contentType,
+    requestId: response.headers.get("request-id"),
+  };
+}
+
+export async function requestActionSfxPackClip(args: {
+  apiKey: string;
+  prompt: string;
+  durationSeconds: number;
+  signal?: AbortSignal;
+  fetchImpl?: typeof fetch;
+}): Promise<{
+  audioBytes: Buffer;
+  contentType: string;
+  requestId: string | null;
+}> {
+  const fetchImpl = args.fetchImpl ?? fetch;
+  const prompt = boundSignalAtmosphereText(
+    args.prompt,
+    SOUND_FX_BENCH_PROMPT_MAX_CHARACTERS,
+  );
+  const durationSeconds = Math.min(
+    2,
+    Math.max(0.5, Number(args.durationSeconds) || 1),
+  );
+  const response = await fetchImpl(
+    "https://api.elevenlabs.io/v1/sound-generation?output_format=mp3_44100_128",
+    {
+      method: "POST",
+      signal: args.signal,
+      headers: {
+        "content-type": "application/json",
+        "xi-api-key": args.apiKey,
+      },
+      body: JSON.stringify({
+        text: prompt,
+        duration_seconds: durationSeconds,
+        prompt_influence: 0.35,
+        loop: false,
+        model_id: "eleven_text_to_sound_v2",
+      }),
+    },
+  );
+  if (!response.ok) {
+    throw await soundError(
+      response,
+      "ElevenLabs could not create this action sound.",
+    );
+  }
+  const audioBytes = Buffer.from(await response.arrayBuffer());
+  if (
+    audioBytes.length === 0 ||
+    audioBytes.length > SOUND_FX_BENCH_AUDIO_MAX_BYTES
+  ) {
+    throw new ElevenLabsSoundError(
+      502,
+      "ElevenLabs returned unusable action sound audio.",
+    );
+  }
+  const contentType = response.headers
+    .get("content-type")
+    ?.split(";")[0]
+    ?.trim();
+  if (!contentType?.startsWith("audio/")) {
+    throw new ElevenLabsSoundError(
+      502,
+      "ElevenLabs returned an invalid action sound audio format.",
+    );
+  }
+  return {
+    audioBytes,
+    contentType,
+    requestId: response.headers.get("request-id"),
+  };
+}
+
+/** One Whodunnit venue effect: a short dry one-shot cue drawn to the venue's
+ * style. Same provider path as the action packs, with a slightly longer
+ * ceiling so a discovery chime or room flourish can finish. */
+export async function requestWhodunnitVenueSfxClip(args: {
+  apiKey: string;
+  prompt: string;
+  durationSeconds: number;
+  signal?: AbortSignal;
+  fetchImpl?: typeof fetch;
+}): Promise<{
+  audioBytes: Buffer;
+  contentType: string;
+  requestId: string | null;
+}> {
+  const fetchImpl = args.fetchImpl ?? fetch;
+  const prompt = boundSignalAtmosphereText(
+    args.prompt,
+    SOUND_FX_BENCH_PROMPT_MAX_CHARACTERS,
+  );
+  const durationSeconds = Math.min(
+    3,
+    Math.max(0.5, Number(args.durationSeconds) || 1),
+  );
+  const response = await fetchImpl(
+    "https://api.elevenlabs.io/v1/sound-generation?output_format=mp3_44100_128",
+    {
+      method: "POST",
+      signal: args.signal,
+      headers: {
+        "content-type": "application/json",
+        "xi-api-key": args.apiKey,
+      },
+      body: JSON.stringify({
+        text: prompt,
+        duration_seconds: durationSeconds,
+        prompt_influence: 0.45,
+        loop: false,
+        model_id: "eleven_text_to_sound_v2",
+      }),
+    },
+  );
+  if (!response.ok) {
+    throw await soundError(
+      response,
+      "ElevenLabs could not create this venue effect.",
+    );
+  }
+  const audioBytes = Buffer.from(await response.arrayBuffer());
+  if (
+    audioBytes.length === 0 ||
+    audioBytes.length > SOUND_FX_BENCH_AUDIO_MAX_BYTES
+  ) {
+    throw new ElevenLabsSoundError(
+      502,
+      "ElevenLabs returned unusable venue effect audio.",
+    );
+  }
+  const contentType = response.headers
+    .get("content-type")
+    ?.split(";")[0]
+    ?.trim();
+  if (!contentType?.startsWith("audio/")) {
+    throw new ElevenLabsSoundError(
+      502,
+      "ElevenLabs returned an invalid venue effect audio format.",
     );
   }
   return {
@@ -317,7 +529,7 @@ export async function requestSignalElevenLabsAtmosphere(args: {
     "https://api.elevenlabs.io/v1/sound-generation?output_format=mp3_44100_128",
     {
       method: "POST",
-      signal: args.signal,
+      signal: refractionSignal(args.signal),
       headers: {
         "content-type": "application/json",
         "xi-api-key": args.apiKey,

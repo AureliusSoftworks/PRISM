@@ -211,8 +211,7 @@ export function coffeeCupSippingActive(args: {
 }): boolean {
   if (args.progress >= 0.96) return false;
   if (args.ambientSipAllowed === false) return false;
-  if (args.speaking === true) return false;
-  if (args.thinking === true) return false;
+  if (args.speaking === true || args.thinking === true) return false;
   if (!Number.isFinite(args.nowMs)) return false;
   const sipLikelihood = coffeeCupSipLikelihoodForProgress(args.progress);
   if (sipLikelihood <= 0) return false;
@@ -398,7 +397,9 @@ function coffeeCupSipGateTimes(args: {
   nowMs: number;
   progress: number;
   durationMinutes?: number | null;
+  ambientSipAllowed?: boolean | null;
   speaking?: boolean | null;
+  thinking?: boolean | null;
   sessionStartedAtMs?: number | null;
   sessionEndsAtMs?: number | null;
 }): { currentGateMs: number; previousGateMs: number } | null {
@@ -416,8 +417,14 @@ function coffeeCupSipGateTimes(args: {
   const offsetMs = Math.round(stableUnitValue(`${args.seed}:offset`) * cycleMs);
   const cyclePositionMs = positiveModulo(args.nowMs + offsetMs, cycleMs);
   const currentCycleStartMs = args.nowMs - cyclePositionMs;
+  // Must agree with coffeeCupSippingActive. Any condition that suppresses the
+  // sip sprite but not this gate makes the level track live through a window
+  // the viewer never sees a sip in — the cup drains without anyone drinking.
   const currentSipVisible =
-    args.speaking !== true && cyclePositionMs < sipWindowMs;
+    args.ambientSipAllowed !== false &&
+    args.speaking !== true &&
+    args.thinking !== true &&
+    cyclePositionMs < sipWindowMs;
   const currentGateMs = currentSipVisible ? args.nowMs : currentCycleStartMs;
   const previousGateMs = currentCycleStartMs - cycleMs;
   const sessionStartedAtMs =
@@ -451,7 +458,9 @@ export function coffeeCupSipGatedTimedProgress(args: {
   sessionStartedAtMs?: number | null;
   sessionEndsAtMs?: number | null;
   durationMinutes?: number | null;
+  ambientSipAllowed?: boolean | null;
   speaking?: boolean | null;
+  thinking?: boolean | null;
 }): number {
   const rawProgress = clampUnit(args.progress);
   if (rawProgress <= 0) return 0;
@@ -465,7 +474,9 @@ export function coffeeCupSipGatedTimedProgress(args: {
     nowMs: args.nowMs,
     progress: progressForSip,
     durationMinutes: args.durationMinutes,
+    ambientSipAllowed: args.ambientSipAllowed,
     speaking: args.speaking,
+    thinking: args.thinking,
     sessionStartedAtMs: args.sessionStartedAtMs,
     sessionEndsAtMs: args.sessionEndsAtMs,
   });
@@ -567,6 +578,87 @@ export function coffeeCupShouldMirrorForSeat(args: CoffeeCupSeatPlacementArgs): 
   return leftPercent < 50;
 }
 
+interface CoffeeCupSipRect {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+}
+
+const COFFEE_CUP_SIP_ACTIVE_SCALE = 0.98;
+const COFFEE_CUP_SIP_PSEUDO_INSET = {
+  left: 9,
+  top: 11,
+  right: 9,
+  bottom: 8,
+} as const;
+const COFFEE_CUP_SIP_TRANSFORM_ORIGIN = {
+  x: 0.58,
+  y: 0.52,
+} as const;
+const COFFEE_CUP_SIP_RIM_CONTACT = {
+  // Authored outer rim point that meets the mouth after the sheet is mirrored.
+  x: 0.79,
+  y: 0.24,
+} as const;
+
+export function coffeeCupSipTranslationForMouth(args: {
+  cupRect: CoffeeCupSipRect;
+  mouthRect: CoffeeCupSipRect;
+  mirrored: boolean;
+}): { x: number; y: number } | null {
+  const values = [
+    args.cupRect.left,
+    args.cupRect.top,
+    args.cupRect.width,
+    args.cupRect.height,
+    args.mouthRect.left,
+    args.mouthRect.top,
+    args.mouthRect.width,
+    args.mouthRect.height,
+  ];
+  if (
+    values.some((value) => !Number.isFinite(value)) ||
+    args.cupRect.width <= 0 ||
+    args.cupRect.height <= 0 ||
+    args.mouthRect.width <= 0 ||
+    args.mouthRect.height <= 0
+  ) {
+    return null;
+  }
+
+  const sipWidth =
+    args.cupRect.width +
+    COFFEE_CUP_SIP_PSEUDO_INSET.left +
+    COFFEE_CUP_SIP_PSEUDO_INSET.right;
+  const sipHeight =
+    args.cupRect.height +
+    COFFEE_CUP_SIP_PSEUDO_INSET.top +
+    COFFEE_CUP_SIP_PSEUDO_INSET.bottom;
+  const sipLeft = args.cupRect.left - COFFEE_CUP_SIP_PSEUDO_INSET.left;
+  const sipTop = args.cupRect.top - COFFEE_CUP_SIP_PSEUDO_INSET.top;
+  const originX = sipWidth * COFFEE_CUP_SIP_TRANSFORM_ORIGIN.x;
+  const originY = sipHeight * COFFEE_CUP_SIP_TRANSFORM_ORIGIN.y;
+  const rimX = sipWidth * COFFEE_CUP_SIP_RIM_CONTACT.x;
+  const rimY = sipHeight * COFFEE_CUP_SIP_RIM_CONTACT.y;
+  const facingScaleX = args.mirrored ? -1 : 1;
+  const transformedRimX =
+    sipLeft +
+    originX +
+    (rimX - originX) * facingScaleX * COFFEE_CUP_SIP_ACTIVE_SCALE;
+  const transformedRimY =
+    sipTop +
+    originY +
+    (rimY - originY) * COFFEE_CUP_SIP_ACTIVE_SCALE;
+  const mouthCenterX = args.mouthRect.left + args.mouthRect.width / 2;
+  const mouthCenterY = args.mouthRect.top + args.mouthRect.height / 2;
+
+  return {
+    x: mouthCenterX - transformedRimX,
+    y: mouthCenterY - transformedRimY,
+  };
+}
+
 function coffeeCupSpritePath(args: {
   color: CoffeeCupSpriteColor;
   sip?: boolean;
@@ -574,7 +666,7 @@ function coffeeCupSpritePath(args: {
 }): string {
   const themePrefix = args.theme === "light" ? "coffee_light" : "coffee";
   const sipSuffix = args.sip === true ? "_sip" : "";
-  return `/coffee-cups/${themePrefix}_${args.color}${sipSuffix}.png`;
+  return `/coffee-cups/${themePrefix}_${args.color}${sipSuffix}.webp`;
 }
 
 export function buildCoffeeCupVisualState(args: {
@@ -668,13 +760,15 @@ export function buildCoffeeCupVisualState(args: {
   const finished = args.finished === true || finishedBySip;
   const finishingSipActive =
     finishedBySip && sippingOverride === true && args.finished !== true && args.forceEmpty !== true;
+  const explicitSipCount =
+    typeof args.sipCount === "number" && Number.isFinite(args.sipCount)
+      ? Math.max(0, Math.floor(args.sipCount))
+      : null;
   const explicitSipProgress =
     args.forceEmpty === true || (finished && !finishingSipActive)
       ? 1
-      : typeof args.sipCount === "number" &&
-          Number.isFinite(args.sipCount) &&
-          args.sipCount > 0
-        ? coffeeCupProgressForSipCount(args.sipCount, sipBaseProgress)
+      : explicitSipCount != null
+        ? coffeeCupProgressForSipCount(explicitSipCount, sipBaseProgress)
         : null;
   const timedProgress =
     args.forceEmpty === true || (finished && !finishingSipActive)
@@ -711,7 +805,9 @@ export function buildCoffeeCupVisualState(args: {
           sessionStartedAtMs: args.sessionStartedAtMs,
           sessionEndsAtMs: args.sessionEndsAtMs,
           durationMinutes: args.durationMinutes,
+          ambientSipAllowed: args.ambientSipAllowed,
           speaking: args.speaking,
+          thinking: args.thinking,
         })
       : timedProgress;
   const previousTimedSipGateProgress =
@@ -722,7 +818,9 @@ export function buildCoffeeCupVisualState(args: {
             nowMs: args.nowMs,
             progress: rawPacedProgress,
             durationMinutes: args.durationMinutes,
+            ambientSipAllowed: args.ambientSipAllowed,
             speaking: args.speaking,
+            thinking: args.thinking,
             sessionStartedAtMs: args.sessionStartedAtMs,
             sessionEndsAtMs: args.sessionEndsAtMs,
           });
@@ -769,11 +867,11 @@ export function buildCoffeeCupVisualState(args: {
     args.forceEmpty === true || (finished && !finishingSipActive)
       ? 1
       : explicitSipProgress != null
-        ? Math.max(ambientVisibleProgress, explicitSipProgress)
+        ? explicitSipProgress
         : ambientVisibleProgress;
   const sipTriggerProgress =
     explicitSipProgress != null
-      ? Math.max(ambientSipTriggerProgress, explicitSipProgress)
+      ? explicitSipProgress
       : ambientSipTriggerProgress;
   const status = coffeeCupStatusForProgress(visibleProgress, args.seed);
   const previousAmbientSipGateProgress =
@@ -793,17 +891,15 @@ export function buildCoffeeCupVisualState(args: {
       })
       : null;
   const previousExplicitSipProgress =
-    typeof args.sipCount === "number" &&
-    Number.isFinite(args.sipCount) &&
-    args.sipCount > 0
-      ? coffeeCupProgressForSipCount(args.sipCount - 1, sipBaseProgress)
+    explicitSipCount != null
+      ? coffeeCupProgressForSipCount(
+          Math.max(0, explicitSipCount - 1),
+          sipBaseProgress,
+        )
       : null;
   const previousSipGateProgress =
-    previousExplicitSipProgress != null
-      ? Math.max(
-          previousAmbientSipGateProgress ?? 0,
-          previousExplicitSipProgress,
-        )
+    explicitSipCount != null
+      ? previousExplicitSipProgress
       : previousAmbientSipGateProgress;
   const previousSipGateFrameIndex =
     previousSipGateProgress != null

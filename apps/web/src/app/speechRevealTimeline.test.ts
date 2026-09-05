@@ -69,9 +69,49 @@ describe("speech reveal timeline", () => {
       speechRevealTimelineIsVoicing(updateSpeechRevealTimeline(timeline, 200)),
       true,
     );
+    // First phrase ends ~250ms; release is capped to half the following silence
+    // (~175ms), so activity ends at ~425ms — idle through the rest of the gap.
+    assert.equal(
+      speechRevealTimelineIsVoicing(updateSpeechRevealTimeline(timeline, 350)),
+      true,
+    );
     assert.equal(
       speechRevealTimelineIsVoicing(updateSpeechRevealTimeline(timeline, 450)),
       false,
+    );
+    assert.equal(
+      speechRevealTimelineIsVoicing(updateSpeechRevealTimeline(timeline, 525)),
+      false,
+    );
+  });
+
+  it("idles the mouth through punctuation when provider alignment is missing", () => {
+    const timeline = startAlignedSpeechRevealTimeline(
+      ["Hello. ", "There."],
+      "Hello. There.",
+      2_000,
+      null,
+    );
+    assert.ok((timeline.speechActivityWindows?.length ?? 0) >= 2);
+    const firstEnd = timeline.speechActivityWindows![0]!.endMs;
+    const secondStart = timeline.speechActivityWindows![1]!.startMs;
+    const pauseMs = Math.round((firstEnd + secondStart) / 2);
+    assert.equal(
+      speechRevealTimelineIsVoicing(updateSpeechRevealTimeline(timeline, pauseMs)),
+      false,
+    );
+    assert.equal(
+      speechRevealTimelineIsVoicing(updateSpeechRevealTimeline(timeline, 40)),
+      false,
+    );
+    assert.equal(
+      speechRevealTimelineIsVoicing(
+        updateSpeechRevealTimeline(
+          timeline,
+          timeline.speechActivityWindows![0]!.startMs + 20,
+        ),
+      ),
+      true,
     );
   });
 

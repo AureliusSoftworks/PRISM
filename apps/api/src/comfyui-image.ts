@@ -984,9 +984,7 @@ export async function generateImageWithComfyUiRegisteredWorkflow(options: {
   const workflow = cloneComfyUiApiWorkflow(wf as Record<string, unknown>);
   const runtimePatch = fillMissingDimensionPatchRefs(workflow, options.registration.patch);
   if (!runtimePatch.width || !runtimePatch.height) {
-    console.warn(
-      `[comfyui-image] workflow "${options.registration.label}" has no width/height patch mapping; requested size ${options.size} may be ignored by that graph.`
-    );
+    console.warn("[comfyui-image] workflow has no dimension patch mapping.");
   }
   applyComfyUiWorkflowRuntimePatches({
     workflow,

@@ -21,10 +21,8 @@ test("Signal presents immersive voice performance as automatic", () => {
   assert.match(pageSource, /activeSettingsScope === "botcast"/u);
   assert.match(pageSource, /data-settings-section="botcast"/u);
   assert.match(pageSource, /Automatic ElevenLabs immersion/u);
-  assert.match(pageSource, /Always on with ElevenLabs v3/u);
-  assert.match(pageSource, /automatically adds sparse/u);
-  assert.match(pageSource, /action floats above/u);
-  assert.match(pageSource, /appears between/u);
+  assert.match(pageSource, /float above the bot/u);
+  assert.match(pageSource, /appear between/u);
   assert.doesNotMatch(pageSource, /settings\.signalImmersiveVoiceEffectsEnabled/u);
   assert.doesNotMatch(pageSource, /Save Signal settings/u);
   assert.match(pageSource, /activeSettingsScope !== "botcast"/u);
@@ -46,16 +44,29 @@ test("Signal navbar opens its contextual settings and preserves the tutorial", (
   );
 });
 
-test("Signal sends saved performance text only through the ElevenLabs request lane", () => {
+test("Signal keeps provider tags scoped while local actions use structured streaming", () => {
   assert.match(
     pageSource,
-    /signalOnlineVoiceEnabled && message\.voicePerformanceText[\s\S]{0,180}elevenLabsText: voiceSpokenText\([\s\S]{0,40}message\.voicePerformanceText/u,
+    /signalOnlineVoiceEnabled && strippedElevenLabsText[\s\S]{0,180}elevenLabsText: strippedElevenLabsText/u,
   );
   assert.match(pageSource, /signalMessageId: message\.id/u);
   assert.match(pageSource, /text: voiceSpokenText\(message\.content\)/u);
+  assert.match(pageSource, /const rawPerformanceText =[\s\S]{0,80}message\.voicePerformanceText \?\? message\.content/u);
+  assert.match(pageSource, /const performanceText = botPowerIsBreathlessV1/u);
   assert.match(
     pageSource,
-    /elevenLabsText: voiceSpokenText\([\s\S]{0,40}message\.voicePerformanceText/u,
+    /const useLocalPerformanceStream =[\s\S]{0,260}segment\.kind === "vocal-action"/u,
+  );
+  assert.match(pageSource, /performanceText,/u);
+  assert.match(pageSource, /includeAlignment: premiumAlignmentRequested/u);
+  assert.match(pageSource, /streamChunks: true/u);
+  assert.match(
+    pageSource,
+    /englishVoiceResponseSupportsChunkedStreaming\(response\)[\s\S]{0,300}kind: "stream"/u,
+  );
+  assert.match(
+    pageSource,
+    /onSegmentTiming: \(timing\) => \{[\s\S]{0,280}segmentTimings: replaySegmentTimings/u,
   );
   assert.match(
     pageSource,
@@ -71,7 +82,7 @@ test("Signal sends saved performance text only through the ElevenLabs request la
 test("Signal procedural voices use the same stage-direction-free spoken text", () => {
   assert.match(
     pageSource,
-    /const spokenText = voiceSpokenText\(message\.content\);[\s\S]{0,1800}sourceText: spokenText/u,
+    /const spokenText = voiceSpokenText\(message\.content\);[\s\S]*?enqueueRobotVoiceMode\(\{[\s\S]*?source: \{ text: spokenText \},\s*sourceText: spokenText/u,
   );
   assert.match(
     pageSource,

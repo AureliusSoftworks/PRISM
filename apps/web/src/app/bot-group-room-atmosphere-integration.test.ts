@@ -69,9 +69,17 @@ describe("saved group room atmosphere integration", () => {
     assert.doesNotMatch(manifestInterface, /roomAtmosphere|imageId/u);
   });
 
-  it("offers Signal-style generate, refresh, upload, and clear controls from the group hero", () => {
+  it("offers the shared typed asset rail and clear control from the group hero", () => {
     assert.match(pageSource, /data-tutorial-target="chat-group-atmosphere"/u);
     assert.match(pageSource, /data-room-atmosphere-dialog="true"/u);
+    assert.match(
+      pageSource,
+      /function botLibraryGroupAllowsRoomAtmosphere\([\s\S]*?BOT_LIBRARY_FAVORITES_GROUP_ID/u,
+    );
+    assert.match(
+      pageSource,
+      /botLibraryGroupAllowsRoomAtmosphere\(focusedBotLibraryGroup\)[\s\S]*?>Atmosphere</u,
+    );
     assert.match(
       pageSource,
       /accept=\{BOT_GROUP_ROOM_ATMOSPHERE_UPLOAD_ACCEPT\}[\s\S]*?uploadBotGroupRoomAtmosphere\(group\.id, file\)/u,
@@ -80,10 +88,21 @@ describe("saved group room atmosphere integration", () => {
       pageSource,
       /readImageBlobAsDataUrl\(file\)[\s\S]*?\/api\/images\/group-room-wallpaper\/upload/u,
     );
+    assert.match(pageSource, /kind="group_room_atmosphere"/u);
     assert.match(
       pageSource,
-      /selectedAtmosphere[\s\S]{0,220}?"Refresh"[\s\S]{0,80}?"Generate"/u,
+      /"Synthesizing softly…"[\s\S]{0,120}: "Generate atmosphere"/u,
     );
+    assert.match(
+      pageSource,
+      /onClick=\{\(\) =>[\s\S]{0,100}generateBotGroupRoomAtmosphere\(group\.id\)/u,
+    );
+    assert.match(
+      pageSource,
+      /onSynthesize=\{\(direction, selection\) =>[\s\S]*?generateBotGroupRoomAtmosphere\(group\.id, direction, selection\)/u,
+    );
+    assert.match(pageSource, /onSelect=\{\(asset\) =>[\s\S]*?applyBotGroupRoomAtmosphereAsset/u);
+    assert.doesNotMatch(pageSource, /selectedAtmosphere[\s\S]{0,220}?"Refresh"/u);
     assert.doesNotMatch(pageSource, /Saved local images/u);
     assert.match(pageSource, /clearBotGroupRoomAtmosphere\(current/u);
     assert.match(
@@ -91,10 +110,43 @@ describe("saved group room atmosphere integration", () => {
       /purpose: "group-room-wallpaper",[\s\S]*?groupName: target\.name,[\s\S]*?groupDescription: target\.description,[\s\S]*?memberBotIds/u,
     );
     assert.match(pageSource, /variationSeed:[\s\S]*?crypto\.randomUUID/u);
-    assert.match(pageSource, /resolveZenWallpaperImageModels\(\)/u);
+    assert.match(pageSource, /assetGenerationPreferences\.group_room_atmosphere/u);
+    assert.match(pageSource, /resolveImageProviderName\(\{/u);
+    assert.match(pageSource, /zenWallpaperImageGenerationAvailable\(groupImageProvider\)/u);
     assert.match(
       pageSource,
-      /LOCAL stays on[\s\S]*?your network; ONLINE sends member cues/u,
+      /LOCAL stays on[\s\S]*?your network; ONLINE sends member\s+cues/u,
+    );
+  });
+
+  it("hands generation to the shared soft-synthesis card and real Prism assistant", () => {
+    assert.match(
+      pageSource,
+      /import \{ registerPrismSoftSynthesisJobs \} from "\.\/prismSoftSynthesisUi\.ts"/u,
+    );
+    assert.match(
+      pageSource,
+      /registerPrismSoftSynthesisJobs\(\s*"bot-group-room-atmosphere",\s*botGroupRoomAtmosphereSynthesisJobs\.length/u,
+    );
+    assert.match(
+      pageSource,
+      /setBotGroupRoomAtmosphereSynthesisJobs\([\s\S]{0,520}closeBotGroupRoomAtmosphereDialog\(\)[\s\S]{0,1800}signal: controller\.signal/u,
+    );
+    assert.match(
+      pageSource,
+      /<PrismBlockingLoader[\s\S]{0,220}open=\{botGroupRoomAtmosphereSynthesisJobs\.length > 0\}[\s\S]{0,120}placement="docked"[\s\S]{0,200}eyebrow="Zen · Group Atmosphere"/u,
+    );
+    assert.match(
+      pageSource,
+      /footer="Soft synthesis — keep using PRISM while the room takes shape\."/u,
+    );
+    assert.match(
+      pageSource,
+      /onCancel=\{cancelBotGroupRoomAtmosphereSynthesis\}/u,
+    );
+    assert.doesNotMatch(
+      pageSource,
+      /BotGroupRoomAtmosphereDialogState[\s\S]{0,140}busy: "generate"/u,
     );
   });
 
@@ -132,8 +184,22 @@ describe("saved group room atmosphere integration", () => {
       focusEffectSource,
       /node\.setAttribute\("aria-hidden", "true"\)/u,
     );
-    assert.match(focusEffectSource, /node\.setAttribute\("inert", ""\)/u);
-    assert.match(focusEffectSource, /node\.removeAttribute\("inert"\)/u);
+    // Inerting the background is refcounted rather than attribute-sniffed.
+    // Two overlapping panel effects each read the other's `inert` as
+    // pre-existing, so both cleanups declined to remove it and the background
+    // latched permanently non-interactive — clicks dead, scrolling still alive
+    // because `inert` does not stop scroll.
+    assert.match(focusEffectSource, /applyPrismInert\(node\)/u);
+    assert.match(focusEffectSource, /releasePrismInert\(node\)/u);
+    assert.match(
+      pageSource,
+      /function applyPrismInert\(node: HTMLElement\): void \{[\s\S]{0,400}node\.dataset\.prismInert = String\(held \+ 1\);\s*node\.setAttribute\("inert", ""\);/u,
+    );
+    // A hold that was never Prism's is never taken away.
+    assert.match(
+      pageSource,
+      /function releasePrismInert\(node: HTMLElement\): void \{[\s\S]{0,400}prismInertForeign === "true"[\s\S]{0,80}return;[\s\S]{0,40}\}\s*node\.removeAttribute\("inert"\);/u,
+    );
     assert.match(
       focusEffectSource,
       /document\.addEventListener\("keydown", handleAtmosphereDialogKeyDown, true\)/u,
@@ -227,6 +293,12 @@ describe("saved group room atmosphere integration", () => {
     );
     assert.match(tutorialSource, /Shape a saved group's room/u);
     assert.match(tutorialSource, /chat-group-atmosphere/u);
-    assert.match(tutorialSource, /Generate or Refresh it, or Upload your own/u);
+    assert.match(tutorialSource, /without replacing its bot grid/u);
+    assert.match(tutorialSource, /grid remains the fixed, fully interactive center/u);
+    assert.match(
+      tutorialSource,
+      /Generate atmosphere hands the job to Prism as soft synthesis/u,
+    );
+    assert.match(tutorialSource, /leading \+ uploads/u);
   });
 });

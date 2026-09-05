@@ -190,10 +190,8 @@ describe("Coffee group-room return resolution", () => {
     for (const sourceGroup of [
       group({ builtIn: true }),
       group({ special: true }),
-      group({ botIds: ["bot-1", "bot-2", "bot-3", "bot-4", "bot-5"] }),
-      group({
-        botIds: ["bot-1", "bot-2", "bot-3", "bot-4", "bot-5", "gone"],
-      }),
+      group({ botIds: ["bot-1"] }),
+      group({ botIds: ["bot-1", "gone"] }),
     ]) {
       assert.deepEqual(
         resolveBotGroupCoffeeReturn({

@@ -122,6 +122,8 @@ jobs:
           - \`Prism-Desktop-Setup-v${RELEASE_VERSION}-win-x64.exe\`
           - \`Prism-Desktop-Setup-v${RELEASE_VERSION}-win-x64.msi\` (optional)
           - \`Prism-Desktop-v${RELEASE_VERSION}-linux-x64.AppImage\`
+          - \`Prism-Desktop-v${RELEASE_VERSION}-steam-macos.zip\`
+          - \`Prism-Desktop-v${RELEASE_VERSION}-steam-win-x64.zip\`
           EOF
 
           if gh release view "${tag}" >/dev/null 2>&1; then
@@ -171,15 +173,30 @@ jobs:
           chmod +x apps/server-mac/scripts/vendor-qdrant.sh
           apps/server-mac/scripts/vendor-qdrant.sh "apps/server-mac/Resources/qdrant"
 
+      - name: Vendor pinned Node runtime for desktop runtime
+        run: |
+          chmod +x apps/server-mac/scripts/vendor-node.sh
+          apps/server-mac/scripts/vendor-node.sh "apps/server-mac/Resources/node"
+
       - name: Build and package macOS artifact
         run: |
           chmod +x scripts/package-desktop-macos.sh
           scripts/package-desktop-macos.sh "${RELEASE_VERSION}"
 
+      - name: Verify Steam content firewall
+        run: npm run steam:content:verify
+
+      - name: Verify Steam asset rights ledger
+        run: npm run steam:assets:verify
+
+      - name: Verify Steam third-party provenance
+        run: npm run steam:third-party:verify
+
       - name: Upload macOS asset to desktop release
         run: |
           gh release upload "desktop/v${RELEASE_VERSION}" \
             "dist-desktop/Prism-Desktop-v${RELEASE_VERSION}.dmg" \
+            "dist-desktop/Prism-Desktop-v${RELEASE_VERSION}-steam-macos.zip" \
             --clobber
 
   package-linux:
@@ -233,6 +250,11 @@ jobs:
       - name: Stamp version
         run: node scripts/set-version.mjs --version "${RELEASE_VERSION}"
 
+      - name: Vendor pinned Node runtime for desktop runtime
+        run: |
+          chmod +x apps/server-linux/scripts/vendor-node.sh
+          apps/server-linux/scripts/vendor-node.sh "apps/server-linux/Resources/node"
+
       - name: Build and package Linux artifact
         env:
           # Force AppImage tools to run without kernel FUSE mounts in CI.
@@ -244,6 +266,18 @@ jobs:
         run: |
           chmod +x scripts/package-desktop-linux.sh
           scripts/package-desktop-linux.sh "${RELEASE_VERSION}"
+
+      - name: Verify Steam content firewall
+        run: npm run steam:content:verify
+
+      - name: Verify Steam asset rights ledger
+        run: npm run steam:assets:verify
+
+      - name: Regenerate third-party inventory after Linux pruning
+        run: npm run steam:third-party:regenerate
+
+      - name: Verify Steam third-party provenance
+        run: npm run steam:third-party:verify
 
       - name: Upload Linux asset to desktop release
         run: |
@@ -277,6 +311,11 @@ jobs:
       - name: Stamp version
         run: node scripts/set-version.mjs --version $env:RELEASE_VERSION
 
+      - name: Vendor pinned Node runtime for desktop runtime
+        shell: pwsh
+        run: |
+          pwsh apps/server-windows/scripts/vendor-node.ps1 -OutputDir "apps/server-windows/src/Resources/node"
+
       - name: Vendor Qdrant binary for desktop runtime
         shell: pwsh
         run: |
@@ -287,6 +326,18 @@ jobs:
         run: |
           pwsh scripts/package-desktop-windows.ps1 -Version $env:RELEASE_VERSION
 
+      - name: Verify Steam content firewall
+        shell: pwsh
+        run: npm run steam:content:verify
+
+      - name: Verify Steam asset rights ledger
+        shell: pwsh
+        run: npm run steam:assets:verify
+
+      - name: Verify Steam third-party provenance
+        shell: pwsh
+        run: npm run steam:third-party:verify
+
       - name: Upload Windows assets to desktop release
         shell: pwsh
         run: |
@@ -295,4 +346,7 @@ jobs:
           }
           if (Test-Path "dist-desktop/Prism-Desktop-Setup-v$env:RELEASE_VERSION-win-x64.msi") {
             gh release upload "desktop/v$env:RELEASE_VERSION" "dist-desktop/Prism-Desktop-Setup-v$env:RELEASE_VERSION-win-x64.msi" --clobber
+          }
+          if (Test-Path "dist-desktop/Prism-Desktop-v$env:RELEASE_VERSION-steam-win-x64.zip") {
+            gh release upload "desktop/v$env:RELEASE_VERSION" "dist-desktop/Prism-Desktop-v$env:RELEASE_VERSION-steam-win-x64.zip" --clobber
           }

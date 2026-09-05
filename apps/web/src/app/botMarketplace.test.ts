@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import { hexToHsl } from "@localai/shared";
 
 import {
   marketplaceBotEyeCharacterIsSideways,
@@ -43,6 +44,7 @@ const baseManifest = {
       bundlePath: "/bot-marketplace/bots/bot-plato.bot",
       memoryCount: 42.8,
       color: "#4F46A5",
+      accentColor: "#7799AA",
       glyph: "lucideDrama",
       themeIds: ["famous-philosophers"],
       tags: ["philosophy", "ancient"],
@@ -111,6 +113,9 @@ describe("bot marketplace helpers", () => {
     assert.equal(manifest.schema, "prism-bot-marketplace-v1");
     assert.equal(manifest.bots.length, 4);
     assert.equal(manifest.bots[0]?.memoryCount, 42);
+    assert.ok(hexToHsl(manifest.bots[0]?.color ?? "").s > 99.5);
+    assert.equal(manifest.bots[0]?.accentColor, "#22b5ff");
+    assert.equal(manifest.bots[1]?.accentColor, null);
     assert.deepEqual(
       manifest.themes.find((theme) => theme.id === "famous-philosophers")?.botIds,
       ["plato", "aristotle"]
@@ -235,6 +240,60 @@ describe("bot marketplace helpers", () => {
     assert.deepEqual(
       marketplaceMissingEntries(entries, installedHashes).map((entry) => entry.name),
       ["Aristotle"]
+    );
+  });
+
+  it("hides branch-locked shelves unless the build branch matches exactly", () => {
+    const manifest = normalizeBotMarketplaceManifest({
+      ...baseManifest,
+      themes: [
+        ...baseManifest.themes,
+        {
+          id: "library-dev-backup",
+          name: "Library Dev Backup",
+          description: "Dev-only backup shelf.",
+          botIds: ["backup-bot"],
+          branchLock: "dev",
+        },
+      ],
+      bots: [
+        ...baseManifest.bots,
+        {
+          id: "backup-bot",
+          name: "Backup Bot",
+          subtitle: "Private",
+          description: "Dev-only.",
+          botHash: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          bundlePath: "/bot-marketplace/bots/bot-backup-bot.bot",
+          memoryCount: 0,
+          color: "#112233",
+          glyph: "lucideArchive",
+          themeIds: ["library-dev-backup"],
+          tags: ["library-backup"],
+          branchLock: "dev",
+        },
+      ],
+    });
+
+    assert.deepEqual(
+      marketplaceVisibleBotEntries(manifest).map((entry) => entry.id),
+      ["plato", "aristotle", "elena-hart"],
+    );
+    assert.deepEqual(
+      marketplaceVisibleBotEntries(manifest, { branchName: "dev" }).map(
+        (entry) => entry.id,
+      ),
+      ["plato", "aristotle", "elena-hart", "backup-bot"],
+    );
+    assert.deepEqual(
+      marketplaceEntriesForTheme(manifest, "library-dev-backup"),
+      [],
+    );
+    assert.deepEqual(
+      marketplaceEntriesForTheme(manifest, "library-dev-backup", {
+        branchName: "dev",
+      }).map((entry) => entry.id),
+      ["backup-bot"],
     );
   });
 

@@ -13,6 +13,11 @@ import {
   BOT_AVATAR_DETAIL_SCALE_MIN,
   BOT_AVATAR_DETAIL_STAMP_CATALOG,
   BOT_AVATAR_DETAIL_STAMP_IDS,
+  BOT_FACE_MOUTH_SCALE_MAX,
+  BOT_FACE_MOUTH_SCALE_MIN,
+  DEFAULT_BOT_FACE_MOUTH_OFFSET_X,
+  DEFAULT_BOT_FACE_MOUTH_OFFSET_Y,
+  DEFAULT_BOT_FACE_MOUTH_SCALE,
   botAvatarDetailsPaintColorCode,
   countBotAvatarDetailsColoredPixels,
   countBotAvatarDetailsPaintedPixels,
@@ -22,11 +27,12 @@ import {
   encodeBotAvatarDetailsPaintMask,
   isBotAvatarDetailsWritablePixel,
   parseBotAvatarDetailsV1,
-  type BotFaceStyle,
   type BotAvatarDetailStampCategory,
   type BotAvatarDetailStampId,
   type BotAvatarDetailStampV1,
   type BotAvatarDetailsV1,
+  type BotAvatarDetailsSpeechInkAnimation,
+  type BotFaceStyle,
 } from "@localai/shared";
 
 export const AVATAR_DETAILS_CANVAS_SIZE = BOT_AVATAR_DETAILS_CANVAS_SIZE;
@@ -67,17 +73,15 @@ export type AvatarDetailsBrushSize =
   (typeof AVATAR_DETAILS_BRUSH_SIZES)[number];
 export type AvatarDetailsPaintMode = "brush" | "eraser";
 export type AvatarDetailsTool =
-  AvatarDetailsPaintMode | "line" | "circle" | "move";
+  | "brush"
+  | "bucket"
+  | "line"
+  | "circle"
+  | "move";
 export type AvatarDetailsInkRole = (typeof AVATAR_DETAILS_INK_ROLES)[number];
+export type AvatarDetailsInkSelection = AvatarDetailsInkRole | "erase";
+export type AvatarDetailsMoveSelection = readonly AvatarDetailsInkRole[];
 export type AvatarDetailsFaceDepth = "all" | "behind-face" | "above-face";
-
-/**
- * The live mouth sits across the lower-face seam on the authored 128 grid.
- * Pixels below this seam are beard territory and render behind the animated
- * mouth; pixels above it remain available for noses, mustaches, hair, and
- * other details that belong over the face glyphs.
- */
-export const AVATAR_DETAILS_LOWER_FACE_DEPTH_Y = 81;
 
 export type AvatarDetailStampV1 = BotAvatarDetailStampV1;
 export type AvatarDetailsV1 = BotAvatarDetailsV1;
@@ -165,6 +169,9 @@ export function normalizeAvatarDetails(value: unknown): AvatarDetailsV1 {
         stamps: parsed.screen.stamps,
         paintMaskBase64: null,
         ...(paintColorMapBase64 ? { paintColorMapBase64 } : {}),
+        ...(parsed.screen.speechInkAnimation
+          ? { speechInkAnimation: parsed.screen.speechInkAnimation }
+          : {}),
       },
     };
   } catch {
@@ -183,6 +190,9 @@ export function cloneAvatarDetails(details: AvatarDetailsV1): AvatarDetailsV1 {
       paintMaskBase64: null,
       ...(details.screen.paintColorMapBase64
         ? { paintColorMapBase64: details.screen.paintColorMapBase64 }
+        : {}),
+      ...(details.screen.speechInkAnimation
+        ? { speechInkAnimation: details.screen.speechInkAnimation }
         : {}),
     },
   };
@@ -339,6 +349,22 @@ export function avatarDetailsWithPaintColorMap(
       stamps: details.screen.stamps,
       paintMaskBase64: null,
       ...(paintColorMapBase64 ? { paintColorMapBase64 } : {}),
+      ...(details.screen.speechInkAnimation
+        ? { speechInkAnimation: details.screen.speechInkAnimation }
+        : {}),
+    },
+  });
+}
+
+export function avatarDetailsWithSpeechInkAnimation(
+  details: AvatarDetailsV1,
+  speechInkAnimation: BotAvatarDetailsSpeechInkAnimation,
+): AvatarDetailsV1 {
+  return normalizeAvatarDetails({
+    ...details,
+    screen: {
+      ...details.screen,
+      speechInkAnimation,
     },
   });
 }
@@ -433,6 +459,66 @@ export function avatarDetailsGridPointFromClient(
     x: Math.max(0, Math.min(AVATAR_DETAILS_CANVAS_SIZE - 1, x)),
     y: Math.max(0, Math.min(AVATAR_DETAILS_CANVAS_SIZE - 1, y)),
   };
+}
+
+export const AVATAR_DETAILS_SYMMETRY_AXIS_X_DEFAULT =
+  (AVATAR_DETAILS_CANVAS_SIZE - 1) / 2;
+export const AVATAR_DETAILS_SYMMETRY_AXIS_X_MIN = 0.5;
+export const AVATAR_DETAILS_SYMMETRY_AXIS_X_MAX =
+  AVATAR_DETAILS_CANVAS_SIZE - 1.5;
+
+export function normalizeAvatarDetailsSymmetryAxisX(value: number): number {
+  if (!Number.isFinite(value)) return AVATAR_DETAILS_SYMMETRY_AXIS_X_DEFAULT;
+  const snapped = Math.round(value - 0.5) + 0.5;
+  return Math.max(
+    AVATAR_DETAILS_SYMMETRY_AXIS_X_MIN,
+    Math.min(AVATAR_DETAILS_SYMMETRY_AXIS_X_MAX, snapped),
+  );
+}
+
+/** Mirrors authored ink across an adjustable vertical half-pixel seam. */
+export function mirrorAvatarDetailsGridPointVertically(
+  point: AvatarDetailsGridPoint,
+  axisX = AVATAR_DETAILS_SYMMETRY_AXIS_X_DEFAULT,
+): AvatarDetailsGridPoint {
+  const normalizedAxisX = normalizeAvatarDetailsSymmetryAxisX(axisX);
+  return {
+    x: Math.round(normalizedAxisX * 2 - Math.round(point.x)),
+    y: Math.round(point.y),
+  };
+}
+
+/** Adds each point's vertical mirror while removing overlapping pixels. */
+export function symmetrizeAvatarDetailsGridPoints(
+  points: readonly AvatarDetailsGridPoint[],
+  axisX = AVATAR_DETAILS_SYMMETRY_AXIS_X_DEFAULT,
+): AvatarDetailsGridPoint[] {
+  const symmetricPoints: AvatarDetailsGridPoint[] = [];
+  const seen = new Set<string>();
+  for (const point of points) {
+    const normalizedPoint = {
+      x: Math.round(point.x),
+      y: Math.round(point.y),
+    };
+    for (const candidate of [
+      normalizedPoint,
+      mirrorAvatarDetailsGridPointVertically(normalizedPoint, axisX),
+    ]) {
+      if (
+        candidate.x < 0 ||
+        candidate.x >= AVATAR_DETAILS_CANVAS_SIZE ||
+        candidate.y < 0 ||
+        candidate.y >= AVATAR_DETAILS_CANVAS_SIZE
+      ) {
+        continue;
+      }
+      const key = `${candidate.x}:${candidate.y}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      symmetricPoints.push(candidate);
+    }
+  }
+  return symmetricPoints;
 }
 
 /** Integer Bresenham traversal prevents holes between sparse pointer events. */
@@ -626,12 +712,23 @@ export interface MoveAvatarDetailsPaintColorMapResult {
 function avatarDetailsPaintColorTranslationIsValid(
   source: Uint8Array,
   offset: AvatarDetailsGridPoint,
+  selectedRoles: ReadonlySet<AvatarDetailsInkRole>,
 ): boolean {
   for (let y = 0; y < AVATAR_DETAILS_CANVAS_SIZE; y += 1) {
     for (let x = 0; x < AVATAR_DETAILS_CANVAS_SIZE; x += 1) {
+      const role = avatarDetailsInkRoleAt(source, x, y);
+      if (!role || !selectedRoles.has(role)) continue;
+      const destinationX = x + offset.x;
+      const destinationY = y + offset.y;
+      if (!avatarDetailsWritablePixel(destinationX, destinationY)) return false;
+      const destinationRole = avatarDetailsInkRoleAt(
+        source,
+        destinationX,
+        destinationY,
+      );
       if (
-        avatarDetailsInkRoleAt(source, x, y) !== null &&
-        !avatarDetailsWritablePixel(x + offset.x, y + offset.y)
+        destinationRole !== null &&
+        !selectedRoles.has(destinationRole)
       ) {
         return false;
       }
@@ -640,14 +737,42 @@ function avatarDetailsPaintColorTranslationIsValid(
   return true;
 }
 
+/** Resolves Photoshop-style Auto targeting from the semantic ink under a
+ * pointer-down point. Empty canvas intentionally produces no move target. */
+export function avatarDetailsMoveSelectionAt(
+  source: Uint8Array,
+  point: AvatarDetailsGridPoint,
+): AvatarDetailsMoveSelection {
+  if (source.length !== AVATAR_DETAILS_COLOR_MAP_BYTE_LENGTH) {
+    throw new RangeError(
+      `Avatar detail color map must contain ${AVATAR_DETAILS_COLOR_MAP_BYTE_LENGTH} bytes.`,
+    );
+  }
+  const role = avatarDetailsInkRoleAt(
+    source,
+    Math.round(point.x),
+    Math.round(point.y),
+  );
+  return role ? [role] : [];
+}
+
 export function moveAvatarDetailsPaintColorMap(
   source: Uint8Array,
   desiredOffset: AvatarDetailsGridPoint,
+  selection: AvatarDetailsMoveSelection,
 ): MoveAvatarDetailsPaintColorMapResult {
   if (source.length !== AVATAR_DETAILS_COLOR_MAP_BYTE_LENGTH) {
     throw new RangeError(
       `Avatar detail color map must contain ${AVATAR_DETAILS_COLOR_MAP_BYTE_LENGTH} bytes.`,
     );
+  }
+  const selectedRoles = new Set(selection);
+  if (selectedRoles.size === 0) {
+    return {
+      colorMap: source.slice(),
+      changed: false,
+      offset: { x: 0, y: 0 },
+    };
   }
   const requested = {
     x: Math.round(desiredOffset.x),
@@ -657,21 +782,45 @@ export function moveAvatarDetailsPaintColorMap(
     { x: 0, y: 0 },
     requested,
   );
-  const offset = [...candidates]
-    .reverse()
-    .find((candidate) =>
-      avatarDetailsPaintColorTranslationIsValid(source, candidate),
-    ) ?? { x: 0, y: 0 };
-  const changed =
-    (offset.x !== 0 || offset.y !== 0) &&
-    avatarDetailsPaintColorPixelCount(source) > 0;
-  if (!changed) return { colorMap: source.slice(), changed: false, offset };
-
-  const colorMap = new Uint8Array(AVATAR_DETAILS_COLOR_MAP_BYTE_LENGTH);
+  let offset = { x: 0, y: 0 };
+  for (const candidate of candidates) {
+    if (
+      !avatarDetailsPaintColorTranslationIsValid(
+        source,
+        candidate,
+        selectedRoles,
+      )
+    ) {
+      break;
+    }
+    offset = candidate;
+  }
+  let movablePixelCount = 0;
   for (let y = 0; y < AVATAR_DETAILS_CANVAS_SIZE; y += 1) {
     for (let x = 0; x < AVATAR_DETAILS_CANVAS_SIZE; x += 1) {
       const role = avatarDetailsInkRoleAt(source, x, y);
-      if (role) {
+      if (role && selectedRoles.has(role)) {
+        movablePixelCount += 1;
+      }
+    }
+  }
+  const changed =
+    (offset.x !== 0 || offset.y !== 0) && movablePixelCount > 0;
+  if (!changed) return { colorMap: source.slice(), changed: false, offset };
+
+  const colorMap = source.slice();
+  for (let y = 0; y < AVATAR_DETAILS_CANVAS_SIZE; y += 1) {
+    for (let x = 0; x < AVATAR_DETAILS_CANVAS_SIZE; x += 1) {
+      const role = avatarDetailsInkRoleAt(source, x, y);
+      if (role && selectedRoles.has(role)) {
+        setAvatarDetailsInkRole(colorMap, x, y, null);
+      }
+    }
+  }
+  for (let y = 0; y < AVATAR_DETAILS_CANVAS_SIZE; y += 1) {
+    for (let x = 0; x < AVATAR_DETAILS_CANVAS_SIZE; x += 1) {
+      const role = avatarDetailsInkRoleAt(source, x, y);
+      if (role && selectedRoles.has(role)) {
         setAvatarDetailsInkRole(colorMap, x + offset.x, y + offset.y, role);
       }
     }
@@ -685,12 +834,81 @@ export interface PaintAvatarDetailsColorMapResult {
   limitReached: boolean;
 }
 
+export interface RecolorAvatarDetailsPaintColorRegionResult {
+  colorMap: Uint8Array;
+  changed: boolean;
+  pixelCount: number;
+}
+
+/**
+ * Changes the four-way-connected semantic ink region under the selected
+ * point. Empty canvas is deliberately a no-op: the bucket changes or erases
+ * existing ink instead of creating a new painted field.
+ */
+export function recolorAvatarDetailsPaintColorRegion(
+  source: Uint8Array,
+  point: AvatarDetailsGridPoint,
+  selection: AvatarDetailsInkSelection,
+): RecolorAvatarDetailsPaintColorRegionResult {
+  if (source.length !== AVATAR_DETAILS_COLOR_MAP_BYTE_LENGTH) {
+    throw new RangeError(
+      `Avatar detail color map must contain ${AVATAR_DETAILS_COLOR_MAP_BYTE_LENGTH} bytes.`,
+    );
+  }
+  const startX = Math.round(point.x);
+  const startY = Math.round(point.y);
+  const sourceRole = avatarDetailsInkRoleAt(source, startX, startY);
+  const colorMap = source.slice();
+  if (!sourceRole || sourceRole === selection) {
+    return { colorMap, changed: false, pixelCount: 0 };
+  }
+  const targetRole = selection === "erase" ? null : selection;
+
+  const visited = new Uint8Array(
+    AVATAR_DETAILS_CANVAS_SIZE * AVATAR_DETAILS_CANVAS_SIZE,
+  );
+  const queue: number[] = [];
+  const enqueue = (x: number, y: number): void => {
+    if (
+      x < 0 ||
+      y < 0 ||
+      x >= AVATAR_DETAILS_CANVAS_SIZE ||
+      y >= AVATAR_DETAILS_CANVAS_SIZE
+    ) {
+      return;
+    }
+    const index = y * AVATAR_DETAILS_CANVAS_SIZE + x;
+    if (
+      visited[index] ||
+      avatarDetailsInkRoleAt(source, x, y) !== sourceRole
+    ) {
+      return;
+    }
+    visited[index] = 1;
+    queue.push(index);
+  };
+
+  enqueue(startX, startY);
+  let pixelCount = 0;
+  for (let cursor = 0; cursor < queue.length; cursor += 1) {
+    const index = queue[cursor]!;
+    const x = index % AVATAR_DETAILS_CANVAS_SIZE;
+    const y = Math.floor(index / AVATAR_DETAILS_CANVAS_SIZE);
+    if (setAvatarDetailsInkRole(colorMap, x, y, targetRole)) pixelCount += 1;
+    enqueue(x - 1, y);
+    enqueue(x + 1, y);
+    enqueue(x, y - 1);
+    enqueue(x, y + 1);
+  }
+
+  return { colorMap, changed: pixelCount > 0, pixelCount };
+}
+
 export function paintAvatarDetailsColorMap(
   source: Uint8Array,
   points: readonly AvatarDetailsGridPoint[],
   brushSize: AvatarDetailsBrushSize,
-  mode: AvatarDetailsPaintMode,
-  role: AvatarDetailsInkRole,
+  selection: AvatarDetailsInkSelection,
 ): PaintAvatarDetailsColorMapResult {
   if (source.length !== AVATAR_DETAILS_COLOR_MAP_BYTE_LENGTH) {
     throw new RangeError(
@@ -702,6 +920,7 @@ export function paintAvatarDetailsColorMap(
   let changed = false;
   let limitReached = false;
   const radius = Math.floor(brushSize / 2);
+  const targetRole = selection === "erase" ? null : selection;
 
   for (const point of points) {
     const centerX = Math.round(point.x);
@@ -710,14 +929,14 @@ export function paintAvatarDetailsColorMap(
       for (let x = centerX - radius; x <= centerX + radius; x += 1) {
         if (!avatarDetailsWritablePixel(x, y)) continue;
         const previousRole = avatarDetailsInkRoleAt(colorMap, x, y);
-        if (mode === "eraser") {
+        if (targetRole === null) {
           if (previousRole && setAvatarDetailsInkRole(colorMap, x, y, null)) {
             pixelCount -= 1;
             changed = true;
           }
           continue;
         }
-        if (previousRole === role) continue;
+        if (previousRole === targetRole) continue;
         if (
           previousRole === null &&
           pixelCount >= AVATAR_DETAILS_MAX_PAINT_PIXELS
@@ -725,7 +944,7 @@ export function paintAvatarDetailsColorMap(
           limitReached = true;
           continue;
         }
-        if (setAvatarDetailsInkRole(colorMap, x, y, role)) {
+        if (setAvatarDetailsInkRole(colorMap, x, y, targetRole)) {
           if (previousRole === null) pixelCount += 1;
           changed = true;
         }
@@ -813,6 +1032,19 @@ export function toggleAvatarDetailStamp(
         ...details.screen.stamps,
         { id, offsetX: 0, offsetY: 0, scalePct: 100 },
       ],
+    },
+  });
+}
+
+export function removeAvatarDetailStamp(
+  details: AvatarDetailsV1,
+  id: AvatarDetailStampId,
+): AvatarDetailsV1 {
+  return normalizeAvatarDetails({
+    ...details,
+    screen: {
+      ...details.screen,
+      stamps: details.screen.stamps.filter((stamp) => stamp.id !== id),
     },
   });
 }
@@ -1255,14 +1487,26 @@ export function normalizeAvatarDetailsFaceGeometry(
       0.18,
       Math.max(-0.18, finiteOr(geometry?.eyeOffsetY, 0)),
     ),
-    mouthScale: Math.min(1.5, Math.max(0.7, finiteOr(geometry?.mouthScale, 1))),
+    mouthScale: Math.min(
+      BOT_FACE_MOUTH_SCALE_MAX,
+      Math.max(
+        BOT_FACE_MOUTH_SCALE_MIN,
+        finiteOr(geometry?.mouthScale, DEFAULT_BOT_FACE_MOUTH_SCALE),
+      ),
+    ),
     mouthOffsetX: Math.min(
       0.18,
-      Math.max(-0.18, finiteOr(geometry?.mouthOffsetX, 0)),
+      Math.max(
+        -0.18,
+        finiteOr(geometry?.mouthOffsetX, DEFAULT_BOT_FACE_MOUTH_OFFSET_X),
+      ),
     ),
     mouthOffsetY: Math.min(
-      0.18,
-      Math.max(-0.18, finiteOr(geometry?.mouthOffsetY, 0)),
+      Math.max(0.18, DEFAULT_BOT_FACE_MOUTH_OFFSET_Y),
+      Math.max(
+        -0.18,
+        finiteOr(geometry?.mouthOffsetY, DEFAULT_BOT_FACE_MOUTH_OFFSET_Y),
+      ),
     ),
     mouthRotationDeg: Math.min(
       180,
@@ -1286,14 +1530,6 @@ function avatarDetailStampFaceDepth(
   stamp: AvatarDetailStampV1,
 ): Exclude<AvatarDetailsFaceDepth, "all"> {
   return stamp.id === "short-beard" || stamp.id === "goatee"
-    ? "behind-face"
-    : "above-face";
-}
-
-function avatarDetailPaintFaceDepth(
-  y: number,
-): Exclude<AvatarDetailsFaceDepth, "all"> {
-  return y >= AVATAR_DETAILS_LOWER_FACE_DEPTH_Y
     ? "behind-face"
     : "above-face";
 }
@@ -1404,7 +1640,12 @@ export function rasterizeAvatarDetailsAlpha(
         if (
           pixelRole &&
           (role === "all" || pixelRole === role) &&
-          (depth === "all" || avatarDetailPaintFaceDepth(y) === depth)
+          // Painted Ink is the authored 128x128 screen itself. Splitting its
+          // lower rows behind the live mouth made a centered lip stamp look
+          // higher everywhere outside the editor. Keep every painted pixel
+          // above the face exactly where it was authored; only legacy
+          // structured beard stamps retain an intentional depth treatment.
+          depth !== "behind-face"
         ) {
           alpha[alphaIndex(x, y)] = 255;
         }
@@ -1431,6 +1672,92 @@ export function rasterizeAvatarDetailsAlpha(
     if (oldestKey !== undefined) avatarDetailsAlphaCache.delete(oldestKey);
   }
   return alpha;
+}
+
+export interface FlattenLegacyAvatarDetailStampsResult {
+  details: AvatarDetailsV1;
+  flattened: boolean;
+  limitReached: boolean;
+  addedPixelCount: number;
+}
+
+/**
+ * Converts the retired structured accessory catalog into ordinary effect ink.
+ * The conversion is all-or-nothing so opening an older bot can never leave a
+ * clipped half-accessory behind when the authored-ink coverage cap is full.
+ */
+export function flattenLegacyAvatarDetailStampsToInk(
+  details: AvatarDetailsV1 | null | undefined,
+  faceGeometry?: Partial<AvatarDetailsFaceGeometry> | null,
+): FlattenLegacyAvatarDetailStampsResult {
+  const normalized = normalizeAvatarDetails(details);
+  if (normalized.screen.stamps.length === 0) {
+    return {
+      details: cloneAvatarDetails(normalized),
+      flattened: false,
+      limitReached: false,
+      addedPixelCount: 0,
+    };
+  }
+  const destination =
+    decodeAvatarDetailsPaintColorMap(
+      normalized.screen.paintColorMapBase64,
+    ) ?? new Uint8Array(AVATAR_DETAILS_COLOR_MAP_BYTE_LENGTH);
+  const stampOnly: AvatarDetailsV1 = {
+    version: AVATAR_DETAILS_VERSION,
+    screen: {
+      stamps: normalized.screen.stamps.map((stamp) => ({ ...stamp })),
+      paintMaskBase64: null,
+    },
+  };
+  const stampAlpha = rasterizeAvatarDetailsAlpha(
+    stampOnly,
+    faceGeometry,
+    "effect",
+  );
+  let addedPixelCount = 0;
+  for (let y = 0; y < AVATAR_DETAILS_CANVAS_SIZE; y += 1) {
+    for (let x = 0; x < AVATAR_DETAILS_CANVAS_SIZE; x += 1) {
+      const alphaIndex = y * AVATAR_DETAILS_CANVAS_SIZE + x;
+      if (
+        (stampAlpha[alphaIndex] ?? 0) > 0 &&
+        avatarDetailsInkRoleAt(destination, x, y) === null
+      ) {
+        addedPixelCount += 1;
+      }
+    }
+  }
+  if (
+    avatarDetailsPaintColorPixelCount(destination) + addedPixelCount >
+    AVATAR_DETAILS_MAX_PAINT_PIXELS
+  ) {
+    return {
+      details: cloneAvatarDetails(normalized),
+      flattened: false,
+      limitReached: true,
+      addedPixelCount,
+    };
+  }
+  for (let y = 0; y < AVATAR_DETAILS_CANVAS_SIZE; y += 1) {
+    for (let x = 0; x < AVATAR_DETAILS_CANVAS_SIZE; x += 1) {
+      const alphaIndex = y * AVATAR_DETAILS_CANVAS_SIZE + x;
+      if ((stampAlpha[alphaIndex] ?? 0) > 0) {
+        setAvatarDetailsInkRole(destination, x, y, "effect");
+      }
+    }
+  }
+  return {
+    details: avatarDetailsWithPaintColorMap(
+      {
+        ...normalized,
+        screen: { ...normalized.screen, stamps: [] },
+      },
+      destination,
+    ),
+    flattened: true,
+    limitReached: false,
+    addedPixelCount,
+  };
 }
 
 export function normalizeAvatarDetailsColor(
@@ -1483,7 +1810,12 @@ export function rasterizeVisibleAvatarDetailsRgba(
   details: AvatarDetailsV1 | null | undefined,
   color: string | null | undefined,
   faceGeometry: Partial<AvatarDetailsFaceGeometry> | null | undefined,
-  state: Readonly<{ blinking: boolean; talking: boolean }>,
+  state: Readonly<{
+    blinking: boolean;
+    talking: boolean;
+    /** Explicit surface override; defaults to the authored idle-rest contract. */
+    speechInkVisible?: boolean;
+  }>,
   depth: AvatarDetailsFaceDepth = "all",
 ): Uint8ClampedArray {
   const visibleAlpha = new Uint8Array(
@@ -1491,7 +1823,7 @@ export function rasterizeVisibleAvatarDetailsRgba(
   );
   const visibleRoles: AvatarDetailsInkRole[] = ["effect"];
   if (!state.blinking) visibleRoles.push("blink");
-  if (!state.talking) visibleRoles.push("talking");
+  if (state.speechInkVisible ?? !state.talking) visibleRoles.push("talking");
 
   for (const role of visibleRoles) {
     const roleAlpha = rasterizeAvatarDetailsAlpha(

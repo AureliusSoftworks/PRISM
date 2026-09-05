@@ -1,0 +1,868 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import {
+  REPLAY_VIDEO_FPS,
+  buildReplaySceneCheckpointsV2,
+  createReplaySceneSamplerV2,
+  compileReplayTimelineV1,
+  compileReplayTimelineV2,
+  defaultReplaySceneV2,
+  reduceReplaySceneV2,
+  replayCameraPresentationAtV2,
+  replayManifestToMarkdownV1,
+  replayManifestToMarkdownV2,
+  replayManifestV2IsValid,
+  replayMouthShapeAtV2,
+  replaySceneAtV2,
+  replayVoiceLightLevelAtV2,
+  replaySpeechActivityAtV2,
+  replayTimelineToWebVttV1,
+  type ReplayManifestV1,
+  type ReplayManifestV2,
+  type ReplayVoiceTakeRecordV1,
+} from "./replay.ts";
+
+test("prepared replay scenes match one-shot reconstruction across seeks and duplicate times", () => {
+  for (const surface of ["coffee", "signal"] as const) {
+    const saved = structuredClone({ ...manifestV2, surface });
+    const original = structuredClone(saved);
+    const sample = createReplaySceneSamplerV2(saved, 1_000);
+    const checkpoints = buildReplaySceneCheckpointsV2(saved, 1_000);
+    const boundaries = saved.direction.flatMap((event) =>
+      [event.atMs, event.endMs].flatMap((at) =>
+        at === undefined ? [] : [at - 1, at, at, at + 1],
+      ),
+    );
+    for (const at of [0, 50_000, ...boundaries.reverse(), -1, NaN, Infinity]) {
+      assert.deepEqual(sample(at), replaySceneAtV2(saved, at, checkpoints));
+    }
+    const changedResult = sample(3_000);
+    changedResult.participants.host!.effects.push("caller-owned");
+    changedResult.studioMix.master = 0;
+    assert.deepEqual(sample(3_000), replaySceneAtV2(saved, 3_000, checkpoints));
+    assert.deepEqual(saved, original, "preparation/sampling must not rewrite the recording");
+  }
+});
+
+test("prepared playback never traverses the source direction array on a frame", () => {
+  let reads = 0;
+  const saved = structuredClone(manifestV2);
+  saved.direction = new Proxy(saved.direction, {
+    get(target, property, receiver) {
+      if (typeof property === "string" && /^\d+$/u.test(property)) reads++;
+      return Reflect.get(target, property, receiver);
+    },
+  });
+  const sample = createReplaySceneSamplerV2(saved);
+  assert.ok(reads > 0);
+  reads = 0;
+  for (let frame = 0; frame < 600; frame++) sample(frame * 16.67);
+  assert.equal(reads, 0, "no full-history sort/expansion during playback");
+});
+
+test("speech activity seeks use logarithmic cue reads and preserve ties", () => {
+  const saved = structuredClone(manifestV2);
+  let reads = 0;
+  const cues = Array.from({ length: 65_536 }, (_, index) => ({
+    atMs: Math.floor(index / 2) * 10,
+    active: index % 2 === 1,
+  }));
+  saved.presentation = {
+    ...saved.presentation!,
+    speechActivityTracks: [{ participantId: "host", cues: new Proxy(cues, {
+      get(target, property, receiver) {
+        if (typeof property === "string" && /^\d+$/u.test(property)) reads++;
+        return Reflect.get(target, property, receiver);
+      },
+    }) }],
+  };
+  assert.equal(replaySpeechActivityAtV2(saved, "host", 327_670), true);
+  assert.ok(reads <= 17, `read ${reads} cues`);
+  assert.equal(replaySpeechActivityAtV2(saved, "missing", 0), null);
+});
+
+const manifest: ReplayManifestV1 = {
+  v: 1,
+  surface: "signal",
+  sourceId: "episode-1",
+  title: "A deterministic episode",
+  createdAt: "2026-07-21T00:00:00.000Z",
+  completedAt: "2026-07-21T00:04:00.000Z",
+  privacyMode: "local",
+  participants: [
+    {
+      id: "host",
+      name: "Host",
+      kind: "bot",
+      role: "host",
+      color: "#ff3366",
+      glyph: "spark",
+      seatIndex: 0,
+      visible: true,
+    },
+    {
+      id: "guest",
+      name: "Guest",
+      kind: "bot",
+      role: "guest",
+      color: "#33aaff",
+      glyph: "orbit",
+      seatIndex: 1,
+      visible: true,
+    },
+  ],
+  utterances: [
+    {
+      id: "one",
+      sourceMessageId: "message-1",
+      speakerId: "host",
+      speakerRole: "host",
+      text: "Welcome to the show.",
+      spokenText: "Welcome to the show.",
+      moodKey: "warm",
+      audible: true,
+      visible: true,
+      createdAt: "2026-07-21T00:00:01.000Z",
+    },
+    {
+      id: "two",
+      sourceMessageId: "message-2",
+      speakerId: "guest",
+      speakerRole: "guest",
+      text: "I am talking over the handoff.",
+      spokenText: "I am talking over the handoff.",
+      moodKey: "neutral",
+      audible: true,
+      visible: true,
+      createdAt: "2026-07-21T00:00:02.000Z",
+    },
+  ],
+  events: [
+    {
+      id: "overlap",
+      kind: "perception_overlap",
+      sourceMessageId: "message-2",
+      occurredAt: null,
+      payload: {
+        precedingMessageId: "message-1",
+        overlappingMessageId: "message-2",
+        startRatio: 0.66,
+      },
+    },
+  ],
+  visual: {
+    theme: "dark",
+    accentColor: "#ff3366",
+    atmosphereImageUrl: null,
+  },
+};
+
+test("replay timeline is deterministic and honors captured durations and overlap", () => {
+  const takes = [
+    {
+      id: "take-1",
+      recordingId: "recording-1",
+      snapshot: {
+        v: 1,
+        sourceKey: "message-1",
+        sourceMessageId: "message-1",
+        sourceEventId: null,
+        speakerId: "host",
+        speakerName: "Host",
+        spokenText: "Welcome to the show.",
+        performanceText: null,
+        mode: "english",
+        requestedEngine: "builtin",
+        resolvedEngine: "builtin",
+        profile: {
+          v: 1,
+          baseVoiceId: "voice-1",
+          pitch: 0,
+          warmth: 0,
+          pace: 0,
+          lilt: 0,
+        },
+        moodKey: "warm",
+        effectsEnabled: true,
+        gain: 1,
+        stereoPan: -0.3,
+        channel: "primary",
+        seed: "one",
+        audible: true,
+        durationMs: 4_000,
+        alignment: null,
+      },
+      status: "captured",
+      audioUrl: "/audio",
+      audioContentType: "audio/wav",
+      audioSizeBytes: 4,
+      createdAt: manifest.createdAt,
+      updatedAt: manifest.createdAt,
+    },
+  ] satisfies ReplayVoiceTakeRecordV1[];
+  const first = compileReplayTimelineV1(manifest, takes);
+  const second = compileReplayTimelineV1(manifest, takes);
+  assert.deepEqual(first, second);
+  const utterances = first.beats.filter((beat) => beat.kind === "utterance");
+  assert.equal(utterances[0]?.endMs - utterances[0]?.startMs, 4_000);
+  assert.equal(utterances[1]?.channel, "crosstalk");
+  assert.equal(
+    utterances[1]?.startMs,
+    Math.round((utterances[0]?.startMs ?? 0) + 4_000 * 0.66),
+  );
+});
+
+test("Signal live-master timing keeps the intro, speech, dead air, and outro verbatim", () => {
+  const capturedManifest: ReplayManifestV1 = {
+    ...manifest,
+    events: [
+      ...manifest.events,
+      {
+        id: "start-one",
+        kind: "capture_timing",
+        sourceMessageId: "message-1",
+        occurredAt: manifest.createdAt,
+        payload: {
+          phase: "speech_start",
+          messageId: "message-1",
+          atMs: 4_380,
+        },
+      },
+      {
+        id: "end-one",
+        kind: "capture_timing",
+        sourceMessageId: "message-1",
+        occurredAt: manifest.createdAt,
+        payload: {
+          phase: "speech_end",
+          messageId: "message-1",
+          atMs: 7_910,
+        },
+      },
+      {
+        id: "start-two",
+        kind: "capture_timing",
+        sourceMessageId: "message-2",
+        occurredAt: manifest.createdAt,
+        payload: {
+          phase: "speech_start",
+          messageId: "message-2",
+          atMs: 12_240,
+        },
+      },
+      {
+        id: "end-two",
+        kind: "capture_timing",
+        sourceMessageId: "message-2",
+        occurredAt: manifest.createdAt,
+        payload: {
+          phase: "speech_end",
+          messageId: "message-2",
+          atMs: 15_600,
+        },
+      },
+      {
+        id: "outro",
+        kind: "capture_timing",
+        sourceMessageId: null,
+        occurredAt: manifest.completedAt,
+        payload: { phase: "outro_start", atMs: 16_900 },
+      },
+      {
+        id: "capture-end",
+        kind: "capture_timing",
+        sourceMessageId: null,
+        occurredAt: manifest.completedAt,
+        payload: { phase: "capture_end", atMs: 20_750 },
+      },
+    ],
+  };
+  const timeline = compileReplayTimelineV1(capturedManifest);
+  const title = timeline.beats.find((beat) => beat.kind === "title");
+  const utterances = timeline.beats.filter(
+    (beat) => beat.kind === "utterance",
+  );
+  const end = timeline.beats.find((beat) => beat.kind === "end");
+  assert.equal(title?.endMs, 4_380);
+  assert.deepEqual(
+    utterances.map((beat) => [beat.startMs, beat.endMs]),
+    [
+      [4_380, 7_910],
+      [12_240, 15_600],
+    ],
+  );
+  assert.equal(end?.startMs, 16_900);
+  assert.equal(end?.endMs, 20_750);
+  assert.equal(timeline.durationMs, 20_750);
+
+  const skippedIntroTimeline = compileReplayTimelineV1({
+    ...capturedManifest,
+    events: capturedManifest.events.map((event) =>
+      event.kind === "capture_timing" &&
+      event.payload.phase === "speech_start" &&
+      event.payload.messageId === "message-1"
+        ? { ...event, payload: { ...event.payload, atMs: 1_100 } }
+        : event,
+    ),
+  });
+  assert.equal(
+    skippedIntroTimeline.beats.find((beat) => beat.kind === "title")?.endMs,
+    1_100,
+  );
+});
+
+test("replay transcript exports use the same deterministic timeline", () => {
+  const timeline = compileReplayTimelineV1(manifest);
+  const vtt = replayTimelineToWebVttV1(timeline);
+  const markdown = replayManifestToMarkdownV1(manifest, timeline);
+  assert.match(vtt, /^WEBVTT/u);
+  assert.match(vtt, /Host: Welcome to the show\./u);
+  assert.match(markdown, /# A deterministic episode/u);
+  assert.match(markdown, /\*\*\d\d:\d\d · Guest\*\*/u);
+});
+
+test("the fixed video clock keeps scheduled speech and captions inside the drift budget", () => {
+  const timeline = compileReplayTimelineV1(manifest);
+  const frameDurationMs = 1_000 / REPLAY_VIDEO_FPS;
+  for (const beat of timeline.beats.filter((entry) => entry.kind === "utterance")) {
+    const firstVisibleFrameMs =
+      Math.ceil(beat.startMs / frameDurationMs) * frameDurationMs;
+    assert.ok(firstVisibleFrameMs - beat.startMs <= frameDurationMs);
+    assert.ok(firstVisibleFrameMs - beat.startMs < 80);
+  }
+});
+
+const manifestV2: ReplayManifestV2 = {
+  v: 2,
+  surface: "signal",
+  sourceId: "episode-v2",
+  title: "Faithful direction",
+  createdAt: "2026-07-24T00:00:00.000Z",
+  completedAt: "2026-07-24T00:00:12.000Z",
+  privacyMode: "local",
+  participants: manifest.participants,
+  utterances: manifest.utterances,
+  initialScene: {
+    camera: "wide",
+    cameraTransitionMode: "animated",
+    cameraTransitionPreset: "signal-camera-v1",
+    segment: "opening",
+    introActive: true,
+    outroActive: false,
+    activeAction: null,
+    activeReaction: null,
+    overlapMessageIds: [],
+    studioMix: { master: 0.8 },
+    participants: {
+      host: {
+        visible: true,
+        present: true,
+        speaking: false,
+        thinking: false,
+        mood: "warm",
+        cupLevel: 1,
+        sipping: false,
+        voiceMode: "english",
+        audible: true,
+        gain: 0.9,
+        pan: -0.4,
+        effects: ["radio"],
+      },
+      guest: {
+        visible: true,
+        present: true,
+        speaking: false,
+        thinking: false,
+        mood: "neutral",
+        cupLevel: 0.6,
+        sipping: false,
+        voiceMode: "bottish",
+        audible: true,
+        gain: 1,
+        pan: 0.4,
+        effects: [],
+      },
+    },
+  },
+  direction: [
+    {
+      sequence: 1,
+      atMs: 500,
+      kind: "intro",
+      sourceMessageId: null,
+      payload: { active: false },
+    },
+    {
+      sequence: 2,
+      atMs: 600,
+      endMs: 1_000,
+      kind: "thinking",
+      sourceMessageId: "message-1",
+      payload: {
+        participantId: "host",
+        botId: "host",
+        startMs: 600,
+        endMs: 1_000,
+        audible: false,
+        camera: "left",
+        segment: "opening",
+        followingMessageId: "message-1",
+        endReason: "completed",
+      },
+    },
+    {
+      sequence: 3,
+      atMs: 700,
+      endMs: 1_500,
+      kind: "thinking",
+      sourceMessageId: "message-2",
+      payload: {
+        participantId: "guest",
+        botId: "guest",
+        startMs: 700,
+        endMs: 1_500,
+        audible: true,
+        camera: "wide",
+        segment: "opening",
+        followingMessageId: "message-2",
+        endReason: "interrupted",
+      },
+    },
+    {
+      sequence: 4,
+      atMs: 1_000,
+      endMs: 4_000,
+      kind: "speech",
+      sourceMessageId: "message-1",
+      payload: {
+        speakerId: "host",
+        voiceMode: "english",
+        audible: true,
+        gain: 0.9,
+        pan: -0.4,
+        effects: ["radio"],
+        active: true,
+      },
+    },
+    {
+      sequence: 5,
+      atMs: 1_500,
+      kind: "camera",
+      sourceMessageId: "message-1",
+      payload: {
+        shot: "left",
+        transitionMode: "animated",
+        transitionPreset: "signal-camera-v1",
+      },
+    },
+    {
+      sequence: 6,
+      atMs: 1_800,
+      kind: "camera",
+      sourceMessageId: "message-1",
+      payload: {
+        shot: "left",
+        transitionMode: "instant",
+        transitionPreset: "signal-camera-v1",
+      },
+    },
+    {
+      sequence: 7,
+      atMs: 2_000,
+      endMs: 3_500,
+      kind: "overlap",
+      sourceMessageId: "message-2",
+      payload: {
+        messageIds: ["message-1", "message-2"],
+        active: true,
+      },
+    },
+    {
+      sequence: 8,
+      atMs: 4_500,
+      endMs: 5_200,
+      kind: "sip",
+      sourceMessageId: null,
+      payload: { participantId: "guest", active: true },
+    },
+    {
+      sequence: 9,
+      atMs: 6_000,
+      kind: "departure",
+      sourceMessageId: null,
+      payload: { participantId: "guest" },
+    },
+    {
+      sequence: 10,
+      atMs: 8_000,
+      endMs: 12_000,
+      kind: "outro",
+      sourceMessageId: null,
+      payload: { active: true },
+    },
+  ],
+  presentation: {
+    voiceSelection: {
+      voiceMode: "english",
+      englishVoiceEngine: "builtin",
+    },
+    mouthTracks: [
+      {
+        participantId: "host",
+        cues: [
+          { atMs: 0, shape: "closed" },
+          { atMs: 1_000, shape: "open-wide" },
+          { atMs: 1_200, shape: "narrow" },
+          { atMs: 1_600, shape: "closed" },
+        ],
+      },
+    ],
+    voiceLightTracks: [
+      {
+        participantId: "host",
+        cues: [
+          { atMs: 0, level: 0 },
+          { atMs: 1_000, level: 0.2 },
+          { atMs: 1_100, level: 0.8 },
+          { atMs: 1_500, level: 0 },
+        ],
+      },
+    ],
+    speechActivityTracks: [
+      {
+        participantId: "host",
+        cues: [
+          { atMs: 1_000, active: true },
+          { atMs: 1_300, active: false },
+          { atMs: 1_500, active: true },
+        ],
+      },
+    ],
+  },
+  visual: manifest.visual,
+};
+
+test("V2 direction seeks deterministically through speech, overlaps, sips, departures, and outro", () => {
+  assert.equal(replayManifestV2IsValid(manifestV2), true);
+  const checkpoints = buildReplaySceneCheckpointsV2(manifestV2, 2_000);
+  const firstThinking = replaySceneAtV2(manifestV2, 650, checkpoints);
+  assert.equal(firstThinking.camera, "left");
+  assert.equal(firstThinking.participants.host?.thinking, true);
+  assert.equal(firstThinking.participants.host?.audible, false);
+  const overlappingThinking = replaySceneAtV2(manifestV2, 800, checkpoints);
+  assert.equal(overlappingThinking.camera, "wide");
+  assert.equal(overlappingThinking.participants.host?.thinking, true);
+  assert.equal(overlappingThinking.participants.guest?.thinking, true);
+  const speechAfterThinking = replaySceneAtV2(manifestV2, 1_200, checkpoints);
+  assert.equal(speechAfterThinking.participants.host?.thinking, false);
+  assert.equal(speechAfterThinking.participants.host?.speaking, true);
+  assert.equal(speechAfterThinking.participants.guest?.thinking, true);
+  assert.equal(
+    replaySceneAtV2(manifestV2, 1_600, checkpoints).participants.guest
+      ?.thinking,
+    false,
+  );
+  assert.deepEqual(
+    replaySceneAtV2(manifestV2, 2_500, checkpoints),
+    replaySceneAtV2(manifestV2, 2_500),
+  );
+  const overlap = replaySceneAtV2(manifestV2, 2_500, checkpoints);
+  assert.equal(overlap.camera, "left");
+  assert.equal(overlap.participants.host?.speaking, true);
+  assert.deepEqual(overlap.overlapMessageIds, ["message-1", "message-2"]);
+
+  const afterSpeech = replaySceneAtV2(manifestV2, 4_250, checkpoints);
+  assert.equal(afterSpeech.participants.host?.speaking, false);
+  assert.deepEqual(afterSpeech.overlapMessageIds, []);
+
+  assert.equal(
+    replaySceneAtV2(manifestV2, 4_800, checkpoints).participants.guest
+      ?.sipping,
+    true,
+  );
+  assert.equal(
+    replaySceneAtV2(manifestV2, 5_500, checkpoints).participants.guest
+      ?.sipping,
+    false,
+  );
+  const departed = replaySceneAtV2(manifestV2, 7_000, checkpoints);
+  assert.equal(departed.participants.guest?.present, false);
+  assert.equal(departed.participants.guest?.visible, false);
+  assert.equal(replaySceneAtV2(manifestV2, 9_000).outroActive, true);
+  assert.equal(replaySceneAtV2(manifestV2, 12_500).outroActive, false);
+});
+
+test("compacted thinking preserves explicit replay camera and segment authority", () => {
+  const directed = reduceReplaySceneV2(
+    reduceReplaySceneV2(defaultReplaySceneV2(manifestV2.participants), {
+      sequence: 1,
+      atMs: 100,
+      kind: "camera",
+      sourceMessageId: null,
+      payload: { shot: "host_close" },
+    }),
+    {
+      sequence: 2,
+      atMs: 100,
+      kind: "segment",
+      sourceMessageId: null,
+      payload: { segment: "closing" },
+    },
+  );
+  const compactedThinking = reduceReplaySceneV2(directed, {
+    sequence: 3,
+    atMs: 120,
+    endMs: 121,
+    kind: "thinking",
+    sourceMessageId: "message-1",
+    payload: {
+      participantId: "host",
+      active: true,
+      timelineCompacted: true,
+      camera: "wide",
+      segment: "opening",
+      followingMessageId: "message-1",
+    },
+  });
+
+  assert.equal(compactedThinking.camera, "host_close");
+  assert.equal(compactedThinking.segment, "closing");
+  assert.equal(compactedThinking.participants.host?.thinking, true);
+
+  const replayed = replaySceneAtV2(
+    {
+      ...manifestV2,
+      initialScene: defaultReplaySceneV2(manifestV2.participants),
+      direction: [
+        {
+          sequence: 1,
+          atMs: 100,
+          kind: "camera",
+          sourceMessageId: null,
+          payload: { shot: "host_close" },
+        },
+        {
+          sequence: 2,
+          atMs: 100,
+          kind: "segment",
+          sourceMessageId: null,
+          payload: { segment: "closing" },
+        },
+        {
+          sequence: 3,
+          atMs: 120,
+          endMs: 500,
+          kind: "thinking",
+          sourceMessageId: "message-1",
+          payload: {
+            participantId: "host",
+            active: true,
+            timelineCompacted: true,
+            camera: "wide",
+            segment: "opening",
+            followingMessageId: "message-1",
+          },
+        },
+      ],
+    },
+    130,
+  );
+  assert.equal(replayed.camera, "host_close");
+  assert.equal(replayed.segment, "closing");
+  assert.equal(replayed.participants.host?.thinking, true);
+});
+
+test("V2 seeks exact baked mouths and mode-only camera transitions", () => {
+  assert.equal(replayMouthShapeAtV2(manifestV2, "host", 999), "closed");
+  assert.equal(replayMouthShapeAtV2(manifestV2, "host", 1_000), "open-wide");
+  assert.equal(replayMouthShapeAtV2(manifestV2, "host", 1_350), "narrow");
+  assert.equal(replayMouthShapeAtV2(manifestV2, "host", 1_600), "closed");
+  assert.equal(replayMouthShapeAtV2(manifestV2, "guest", 1_350), null);
+
+  assert.deepEqual(replayCameraPresentationAtV2(manifestV2, 1_700), {
+    shot: "left",
+    transitionMode: "animated",
+    transitionPreset: "signal-camera-v1",
+  });
+  assert.deepEqual(replayCameraPresentationAtV2(manifestV2, 1_900), {
+    shot: "left",
+    transitionMode: "instant",
+    transitionPreset: "signal-camera-v1",
+  });
+});
+
+test("V2 interpolates compact voice-light cues without anticipating across gaps", () => {
+  assert.equal(replayVoiceLightLevelAtV2(manifestV2, "host", 999), 0);
+  assert.equal(replayVoiceLightLevelAtV2(manifestV2, "host", 1_050), 0.5);
+  assert.equal(replayVoiceLightLevelAtV2(manifestV2, "host", 1_300), 0.8);
+  assert.equal(replayVoiceLightLevelAtV2(manifestV2, "host", 1_500), 0);
+  assert.equal(replayVoiceLightLevelAtV2(manifestV2, "guest", 1_050), null);
+  assert.equal(
+    replayVoiceLightLevelAtV2(
+      { ...manifestV2, presentation: undefined },
+      "host",
+      1_050,
+    ),
+    null,
+  );
+});
+
+test("V2 preserves semantic speech activity across closed-mouth gaps", () => {
+  assert.equal(replaySpeechActivityAtV2(manifestV2, "host", 999), false);
+  assert.equal(replaySpeechActivityAtV2(manifestV2, "host", 1_100), true);
+  assert.equal(replaySpeechActivityAtV2(manifestV2, "host", 1_350), false);
+  assert.equal(replaySpeechActivityAtV2(manifestV2, "host", 1_550), true);
+  assert.equal(replaySpeechActivityAtV2(manifestV2, "guest", 1_100), null);
+});
+
+test("V2 presentation validation requires coalesced mouth shapes", () => {
+  const duplicatedShapeManifest: ReplayManifestV2 = {
+    ...manifestV2,
+    presentation: {
+      ...manifestV2.presentation!,
+      mouthTracks: [
+        {
+          participantId: "host",
+          cues: [
+            { atMs: 0, shape: "closed" },
+            { atMs: 100, shape: "closed" },
+          ],
+        },
+      ],
+    },
+  };
+  assert.equal(replayManifestV2IsValid(duplicatedShapeManifest), false);
+});
+
+test("V2 presentation validation rejects invalid voice-light levels", () => {
+  const invalidLightManifest: ReplayManifestV2 = {
+    ...manifestV2,
+    presentation: {
+      ...manifestV2.presentation!,
+      voiceLightTracks: [
+        {
+          participantId: "host",
+          cues: [{ atMs: 100, level: 1.01 }],
+        },
+      ],
+    },
+  };
+  assert.equal(replayManifestV2IsValid(invalidLightManifest), false);
+});
+
+test("legacy V2 manifests default to CRT reconstruction and Animated cameras", () => {
+  const legacyManifest: ReplayManifestV2 = {
+    ...manifestV2,
+    presentation: undefined,
+    initialScene: {
+      ...manifestV2.initialScene,
+      cameraTransitionMode: undefined,
+      cameraTransitionPreset: undefined,
+    },
+    direction: manifestV2.direction
+      .filter(
+        (event) =>
+          event.kind !== "camera" || event.atMs !== 1_800,
+      )
+      .map((event) =>
+        event.kind === "camera"
+          ? { ...event, payload: { shot: event.payload.shot } }
+          : event,
+      )
+      .map((event, index) => ({ ...event, sequence: index + 1 })),
+  };
+  assert.equal(replayManifestV2IsValid(legacyManifest), true);
+  assert.equal(replayMouthShapeAtV2(legacyManifest, "host", 2_000), null);
+  assert.equal(
+    replayCameraPresentationAtV2(legacyManifest, 2_000).transitionMode,
+    "animated",
+  );
+});
+
+test("V2 compiles only captured speech timing and exports a readable private-safe transcript", () => {
+  const timeline = compileReplayTimelineV2(manifestV2);
+  assert.deepEqual(
+    timeline.beats
+      .filter((beat) => beat.kind === "utterance")
+      .map((beat) => [beat.startMs, beat.endMs]),
+    [[1_000, 4_000]],
+  );
+  const markdown = replayManifestToMarkdownV2(manifestV2, timeline);
+  assert.match(markdown, /\*\*00:01 · Host\*\*/u);
+  assert.match(markdown, /Welcome to the show\./u);
+  assert.doesNotMatch(
+    markdown,
+    /voiceMode|effects|radio|provider|diagnostic|camera|thinking|endReason/u,
+  );
+});
+
+test("V2 pairs captured speech start and stop events on the master clock", () => {
+  const pairedManifest: ReplayManifestV2 = {
+    ...manifestV2,
+    direction: [
+      {
+        sequence: 1,
+        atMs: 1_000,
+        kind: "speech",
+        sourceMessageId: "message-1",
+        payload: {
+          speakerId: "host",
+          active: true,
+          audible: true,
+          channel: "primary",
+        },
+      },
+      {
+        sequence: 2,
+        atMs: 1_500,
+        kind: "speech",
+        sourceMessageId: "message-2",
+        payload: {
+          speakerId: "guest",
+          active: true,
+          audible: true,
+          channel: "reaction",
+        },
+      },
+      {
+        sequence: 3,
+        atMs: 1_900,
+        kind: "speech",
+        sourceMessageId: "message-2",
+        payload: {
+          speakerId: "guest",
+          active: false,
+          audible: true,
+          channel: "reaction",
+        },
+      },
+      {
+        sequence: 4,
+        atMs: 4_000,
+        kind: "speech",
+        sourceMessageId: "message-1",
+        payload: {
+          speakerId: "host",
+          active: false,
+          audible: true,
+          channel: "primary",
+        },
+      },
+    ],
+  };
+  const utterances = compileReplayTimelineV2(pairedManifest).beats.filter(
+    (beat) => beat.kind === "utterance",
+  );
+  assert.deepEqual(
+    utterances.map((beat) => [
+      beat.sourceMessageId,
+      beat.channel,
+      beat.startMs,
+      beat.endMs,
+    ]),
+    [
+      ["message-1", "primary", 1_000, 4_000],
+      ["message-2", "reaction", 1_500, 1_900],
+    ],
+  );
+});

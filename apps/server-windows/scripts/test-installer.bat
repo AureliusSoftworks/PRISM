@@ -1,8 +1,5 @@
 @echo off
 setlocal EnableExtensions EnableDelayedExpansion
-REM #region agent log
-call :agent_dbglog "H-BOOT" "test-installer:L2" "after_setlocal arg=%~1"
-REM #endregion
 
 REM Launch quirks:
 REM - Double-click / "start *.bat" often run under cmd /c (window closes on exit).
@@ -18,42 +15,24 @@ if /i not "%~1"=="_stayopen" goto prism_smoke_after_stayopen_shift
 shift
 goto prism_smoke_main
 :prism_smoke_after_stayopen_shift
-REM #region agent log
-call :agent_dbglog "H-PARSE" "test-installer:L18" "entered_relaunch_block"
-REM #endregion
 
 set "DO_REL=0"
 if /i "!PRISM_INSTALLER_FORCE_K!"=="1" set "DO_REL=1"
 REM CMDCMDLINE contains '"' and ')'; never feed it to "set /p "=Z!CC!"" — embedded
 REM quotes end the assignment early and cmd reports ". was unexpected at this time."
-REM #region agent log
-call :agent_dbglog "H-SETP" "test-installer:L28" "before_ps_write_temp"
-REM #endregion
 powershell -NoProfile -ExecutionPolicy Bypass -Command "$p=Join-Path $env:TEMP 'prism-smoke-cc.txt'; $t=([char]90) + [Environment]::GetCommandLine(); [IO.File]::WriteAllText($p,$t)"
-REM #region agent log
-call :agent_dbglog "H-SETP" "test-installer:L32" "after_ps_write_temp"
-REM #endregion
 if "!DO_REL!"=="1" goto prism_smoke_rel_done
 findstr /i /c:".bat" "%TEMP%\prism-smoke-cc.txt" >nul && set "DO_REL=1"
-REM #region agent log
-call :agent_dbglog "H-FINDSTR" "test-installer:L35" "after_findstr_bat DO_REL=!DO_REL!"
-REM #endregion
 if "!DO_REL!"=="1" goto prism_smoke_rel_done
 findstr /i /c:"/c" "%TEMP%\prism-smoke-cc.txt" >nul && set "DO_REL=1"
 :prism_smoke_rel_done
 del "%TEMP%\prism-smoke-cc.txt" >nul 2>&1
 if "!DO_REL!"=="0" goto prism_smoke_main
-REM #region agent log
-call :agent_dbglog "H-RELAUNCH" "test-installer:L44" "spawning_cmd_k DO_REL=1"
-REM #endregion
 
 start "Prism Server smoke test" cmd.exe /k call "%~f0" _stayopen %*
 exit /b 0
 
 :prism_smoke_main
-REM #region agent log
-call :agent_dbglog "H-LATER" "test-installer:L52" "prism_smoke_main_entry arg1=%~1"
-REM #endregion
 echo.
 echo [Prism Server] Smoke test running...
 echo     Script: %~f0
@@ -201,17 +180,3 @@ echo.
 echo Press any key to close this window...
 pause >nul
 goto :eof
-
-REM #region agent log
-:agent_dbglog
-setlocal DisableDelayedExpansion
-set "AG_H=%~1"
-set "AG_LOC=%~2"
-set "AG_MSG=%~3"
-for %%I in ("%~dp0..\..\..") do set "AG_RR=%%~fI"
-set "AG_LOG=%AG_RR%\.cursor\debug-f8735d.log"
-if not exist "%AG_RR%\.cursor" mkdir "%AG_RR%\.cursor" 2>nul
-powershell -NoProfile -ExecutionPolicy Bypass -Command "$j=@{sessionId='f8735d';hypothesisId=$env:AG_H;location=$env:AG_LOC;message=$env:AG_MSG;timestamp=[int64]([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds())}; Add-Content -LiteralPath $env:AG_LOG -Value (ConvertTo-Json -InputObject $j -Compress) -Encoding utf8"
-endlocal
-goto :eof
-REM #endregion

@@ -1,0 +1,88 @@
+.reveal {
+  margin-top: 0.42rem;
+  max-width: min(36rem, 100%);
+}
+
+.trigger,
+.close {
+  appearance: none;
+  border: 0;
+  font: inherit;
+  cursor: pointer;
+}
+
+.trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.36rem;
+  padding: 0.2rem 0.56rem;
+  border: 1px solid color-mix(in srgb, currentColor 22%, transparent);
+  border-radius: 999px;
+  color: color-mix(in srgb, currentColor 72%, var(--prism-i, #6e7dff));
+  background: color-mix(in srgb, currentColor 4%, transparent);
+  font-size: 0.72rem;
+  line-height: 1.25;
+  letter-spacing: 0.035em;
+}
+
+.trigger:hover:not(:disabled),
+.trigger:focus-visible {
+  border-color: color-mix(in srgb, var(--prism-i, #6e7dff) 62%, currentColor);
+  background: color-mix(in srgb, var(--prism-i, #6e7dff) 9%, transparent);
+}
+
+.trigger:disabled {
+  cursor: default;
+  opacity: 0.58;
+}
+
+.card {
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--prism-i, #6e7dff) 48%, transparent);
+  border-radius: 0.72rem;
+  background:
+    linear-gradient(
+      135deg,
+      color-mix(in srgb, var(--prism-p, #ff4da6) 9%, transparent),
+      color-mix(in srgb, var(--prism-i, #6e7dff) 11%, transparent)
+    ),
+    color-mix(in srgb, Canvas 94%, transparent);
+  box-shadow: 0 0.55rem 1.6rem color-mix(in srgb, #050817 15%, transparent);
+}
+
+.cardHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.46rem 0.62rem 0.34rem;
+  color: color-mix(in srgb, currentColor 72%, var(--prism-i, #6e7dff));
+  font-size: 0.68rem;
+  font-weight: 650;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.card p {
+  margin: 0;
+  padding: 0.1rem 0.72rem 0.72rem;
+  white-space: pre-wrap;
+  font-size: 0.88rem;
+  line-height: 1.48;
+}
+
+.close {
+  display: grid;
+  width: 1.45rem;
+  height: 1.45rem;
+  place-items: center;
+  border-radius: 50%;
+  color: inherit;
+  background: transparent;
+  line-height: 1;
+}
+
+.close:hover,
+.close:focus-visible {
+  background: color-mix(in srgb, currentColor 10%, transparent);
+}

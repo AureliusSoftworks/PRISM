@@ -27,6 +27,47 @@ const DEFAULT_QDRANT_URL = "http://127.0.0.1:6333";
 /** Default ComfyUI listen address (used only when `COMFYUI_HOST` is unset). */
 const DEFAULT_COMFYUI_HOST = "";
 
+function isPrivateIpv4(hostname: string): boolean {
+  const octets = hostname.split(".").map((part) => Number(part));
+  if (
+    octets.length !== 4 ||
+    octets.some(
+      (part) => !Number.isInteger(part) || part < 0 || part > 255,
+    )
+  ) {
+    return false;
+  }
+  const [first, second] = octets;
+  return (
+    first === 10 ||
+    first === 127 ||
+    (first === 169 && second === 254) ||
+    (first === 172 && second >= 16 && second <= 31) ||
+    (first === 192 && second === 168)
+  );
+}
+
+function isPrivateOllamaHostname(hostname: string): boolean {
+  const normalized = hostname.trim().toLowerCase().replace(/^\[|\]$/gu, "");
+  if (
+    normalized === "localhost" ||
+    normalized === "host.docker.internal" ||
+    normalized === "host.containers.internal" ||
+    normalized.endsWith(".localhost") ||
+    normalized.endsWith(".local")
+  ) {
+    return true;
+  }
+  if (isPrivateIpv4(normalized)) return true;
+  if (normalized === "::1") return true;
+  if (normalized.startsWith("fc") || normalized.startsWith("fd")) return true;
+  if (/^fe[89ab][0-9a-f]:/u.test(normalized)) return true;
+  if (normalized.startsWith("::ffff:")) {
+    return isPrivateIpv4(normalized.slice("::ffff:".length));
+  }
+  return false;
+}
+
 /**
  * Turn whatever value is in OLLAMA_HOST into a URL that `fetch()` can use.
  *
@@ -57,12 +98,17 @@ function normalizeOllamaHost(value: string | undefined): string {
   normalized = normalized.replace(/\/+$/, "");
 
   try {
-    // Final sanity check; throws for truly malformed inputs.
-    new URL(normalized);
+    const parsed = new URL(normalized);
+    if (
+      (parsed.protocol !== "http:" && parsed.protocol !== "https:") ||
+      parsed.username ||
+      parsed.password ||
+      !isPrivateOllamaHostname(parsed.hostname)
+    ) {
+      throw new Error("unsafe Ollama host");
+    }
   } catch {
-    console.warn(
-      `OLLAMA_HOST value ${JSON.stringify(raw)} is not a valid URL; falling back to ${DEFAULT_OLLAMA_HOST}`
-    );
+    console.warn("OLLAMA_HOST was rejected; using the private local default.");
     return DEFAULT_OLLAMA_HOST;
   }
 
@@ -92,9 +138,7 @@ function normalizeQdrantUrl(value: string | undefined): string {
   try {
     new URL(normalized);
   } catch {
-    console.warn(
-      `QDRANT_URL value ${JSON.stringify(raw)} is not a valid URL; falling back to ${DEFAULT_QDRANT_URL}`
-    );
+    console.warn("QDRANT_URL was invalid; using the private local default.");
     return DEFAULT_QDRANT_URL;
   }
 
@@ -125,9 +169,7 @@ function normalizeComfyUiHost(value: string | undefined): string {
   try {
     new URL(normalized);
   } catch {
-    console.warn(
-      `COMFYUI_HOST value ${JSON.stringify(raw)} is not a valid URL; treating as unset`
-    );
+    console.warn("COMFYUI_HOST was invalid; treating it as unset.");
     return DEFAULT_COMFYUI_HOST;
   }
 
@@ -159,6 +201,8 @@ export interface AppConfig {
   ollamaInAppPullModel: string;
   ollamaAuxiliaryModel: string;
   ollamaEmbeddingModel: string;
+  /** Optional server-managed bearer credential for the fixed Ollama Cloud API. */
+  ollamaApiKey?: string;
   openAiApiKey?: string;
   anthropicApiKey?: string;
   elevenLabsApiKey?: string;
@@ -186,6 +230,7 @@ export function getAppConfig(): AppConfig {
       process.env.OLLAMA_IN_APP_PULL_MODEL?.trim() || "flux2-klein",
     ollamaAuxiliaryModel: process.env.OLLAMA_AUXILIARY_MODEL ?? "llama3.2",
     ollamaEmbeddingModel: process.env.OLLAMA_EMBEDDING_MODEL ?? "nomic-embed-text",
+    ollamaApiKey: process.env.OLLAMA_API_KEY,
     openAiApiKey: process.env.OPENAI_API_KEY,
     anthropicApiKey: process.env.ANTHROPIC_API_KEY,
     elevenLabsApiKey: process.env.ELEVENLABS_API_KEY,

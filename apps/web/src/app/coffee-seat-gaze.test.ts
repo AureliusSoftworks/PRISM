@@ -488,7 +488,7 @@ describe("Coffee speaker gaze wiring", () => {
     );
     assert.match(
       pageSource,
-      /coffeeSpeakerGazeParticipant\?\.kind === "player"[\s\S]*?replayPlayerGazeDirection/,
+      /const replayPlayerGazeDirection =\s*coffeeSpeakerGazeParticipant\?\.kind === "player"/u,
     );
     assert.match(
       pageSource,
@@ -496,10 +496,10 @@ describe("Coffee speaker gaze wiring", () => {
     );
   });
 
-  it("labels both bot and player avatars with one active gaze direction", () => {
+  it("labels bot seats with one active gaze direction", () => {
     assert.ok(
-      (pageSource.match(/data-gaze-direction=/g)?.length ?? 0) >= 2,
-      "expected bot-seat and player-avatar gaze attributes",
+      (pageSource.match(/data-gaze-direction=/g)?.length ?? 0) >= 1,
+      "expected a bot-seat gaze attribute",
     );
     assert.match(pageSource, /data-gaze-target-source=/);
   });
@@ -519,11 +519,11 @@ describe("Coffee speaker gaze wiring", () => {
     );
     assert.match(
       cssSource,
-      /\.coffeeSeat \.zenLiveBotPresenceBody,[\s\S]*?transition:\s*transform 380ms/,
+      /\.coffeeSeat \.zenLiveBotPresenceBody,\s*\.coffeeReplayPlayerAvatar \.zenLiveBotPresenceBody\s*\{[\s\S]*?transition:\s*transform 380ms/,
     );
     assert.match(
       cssSource,
-      /@media \(prefers-reduced-motion: reduce\)[\s\S]*?\.coffeeReplayPlayerAvatar \.zenLiveBotPresenceBody[\s\S]*?transition:\s*none/,
+      /@media \(prefers-reduced-motion: reduce\)[\s\S]*?\.coffeeSeat \.zenLiveBotPresenceBody,[\s\S]*?transition:\s*none/,
     );
   });
 });

@@ -12,7 +12,8 @@ wins.
 
 ## Release Channel Semantics
 
-- GitHub **draft** releases are staging slots for upload and verification.
+- GitHub **draft** releases are temporary staging slots for upload and
+  verification while the Steam release is prepared.
 - Drafts are published manually after smoke checks.
 - No App Store/TestFlight review step exists in this model.
 
@@ -57,6 +58,11 @@ Customer-facing outputs:
 - `Prism-Desktop-Setup-v<version>-win-x64.exe` (+ optional MSI)
 - `Prism-Desktop-v<version>-linux-x64.AppImage`
 
+Steam depot inputs:
+- `Prism-Desktop-v<version>-steam-macos.zip` (`PRISM.app` at archive root)
+- `Prism-Desktop-v<version>-steam-win-x64.zip` (`prism_desktop.exe` at archive root)
+- `Prism-Desktop-v<version>-linux-x64.AppImage`
+
 Release tag:
 - `desktop/v<version>`
 
@@ -64,6 +70,8 @@ Release tag:
 
 Before publishing any draft:
 - install and launch each desktop artifact on a clean environment
+- verify the packaged runtime's `STEAM_CONTENT_REPORT.md` matches the approved
+  Marketplace roster
 - verify local API/web startup and first-run dependency checks
 - verify release notes
 - verify Steam/GitHub channel copy and installer readiness
@@ -72,22 +80,36 @@ Publish is an explicit human decision after these checks.
 
 ## Steam Release Lane
 
-Steam is an additional desktop lane, not a replacement for the free GitHub
-release baseline. Start from an already-built `desktop/v<version>` release.
+Steam is the paid desktop release lane, targeting a $9.99 launch price. Start
+from an already-built `desktop/v<version>` release. GitHub is a temporary
+development/CI fallback and must be restricted or privatized before public
+Steam launch; the app itself does not implement runtime entitlement checks.
 
 Prerequisites:
 - Steamworks partner/app setup is complete, with a Prism Desktop App ID and
   Windows, macOS, and Linux depot IDs.
 - Steam app type, package/free-product setup, and branch names are recorded.
 - Steam Content Survey answers are ready, especially the live-generated AI
-  disclosure and guardrails.
+  disclosure and guardrails, including offline generated speech and bundled
+  procedural or pre-generated vocal reactions.
+- Use [`steam-ai-content-disclosure.md`](steam-ai-content-disclosure.md) as the
+  draft. The final survey answer still requires human confirmation of the
+  shipped asset provenance and the live-generated text guardrail stance.
+- Use [`steam-store-copy.md`](steam-store-copy.md) for the store description,
+  metadata, and screenshot handoff; review it against the exact submitted
+  build before publishing the store page.
+- `npm run voice:assets:verify` passes on the release tree. Steam uses the
+  qualified Instant/Kokoro path by default; an unqualified Voice+ candidate
+  remains unavailable and cannot be enabled without an explicit
+  `--require-voice-plus` qualification run.
 - Store presence copy and screenshots describe only shipped functionality.
 
 Operator flow:
 
 1. Complete the normal desktop release draft and smoke-test all platform artifacts.
 2. Dispatch `.github/workflows/release-desktop-steam.yml` with
-   `publish_to_steam=false` to export and inspect `steam-build`.
+   `publish_to_steam=false` to export and inspect `steam-build`. The export
+   must contain launchable depot payloads, not installer-only files.
 3. Run the same workflow with `publish_to_steam=true` only after Jared confirms
    the Steam App ID, depot IDs, branch, and smoke-test gate.
 4. Upload to a private or prerelease branch first; do not set the default branch

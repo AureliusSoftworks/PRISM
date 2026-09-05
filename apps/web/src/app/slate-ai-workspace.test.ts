@@ -10,13 +10,31 @@ const styles = readFileSync(
   new URL("./slateWorkspace.module.css", import.meta.url),
   "utf8",
 );
+const globalCompanion = readFileSync(
+  new URL("./PrismCompanion.tsx", import.meta.url),
+  "utf8",
+);
+const globalCompanionStyles = readFileSync(
+  new URL("./prismCompanion.module.css", import.meta.url),
+  "utf8",
+);
+const page = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
 
 describe("Slate AI workspace controls", () => {
   it("keeps prose routing project-scoped with an explicit model picker", () => {
-    assert.match(workspace, /\["offline", "auto", "online"\]/u);
+    assert.match(workspace, /\["offline", "online"\]/u);
+    assert.match(workspace, /<option value=\{SLATE_AUTO_MODEL_VALUE\}>/u);
     assert.match(workspace, /data-tutorial-target="slate-ai-controls"/u);
     assert.match(workspace, /saveProseModel/u);
     assert.match(workspace, /Every generated prose artifact keeps its provider and\s+model receipt/u);
+  });
+
+  it("carries transient Max from the visible global navbar into foreground Slate AI requests", () => {
+    assert.match(workspace, /foregroundReasoningEffort\?: ProviderReasoningEffort/u);
+    assert.match(workspace, /x-prism-reasoning-effort/u);
+    assert.match(workspace, /x-prism-model-provider/u);
+    assert.match(workspace, /x-prism-model-override/u);
+    assert.match(page, /foregroundReasoningEffort=\{sharedAccountForegroundReasoningEffort\(\)\}/u);
   });
 
   it("surfaces the living summary and advisory title decision on the canvas", () => {
@@ -30,27 +48,33 @@ describe("Slate AI workspace controls", () => {
     assert.match(workspace, /resolveTitleSuggestion\("accepted"\)/u);
   });
 
-  it("renders a movable ephemeral Markdown Prism project companion", () => {
-    assert.match(workspace, /data-tutorial-target="slate-project-chat"/u);
-    assert.match(workspace, /onPointerDown=\{beginCompanionDrag\}/u);
-    assert.match(workspace, /<ReactMarkdown remarkPlugins=\{\[remarkGfm\]\}>/u);
-    assert.match(workspace, /Ideas fade · the last 3 can recover after a close/u);
-    assert.match(workspace, /className=\{styles\.companionBubble\}/u);
+  it("hands safe Slate metadata to the movable global Prism companion", () => {
+    assert.match(workspace, /globalCompanionEnabled: boolean/u);
+    assert.match(workspace, /onCompanionContextChange/u);
+    assert.match(workspace, /projectId: project\.id/u);
+    assert.match(workspace, /sectionId: activeSection\?\.id \?\? null/u);
+    assert.match(workspace, /project && !globalCompanionEnabled/u);
+    assert.match(page, /globalCompanionEnabled/u);
+    assert.match(page, /onCompanionContextChange=\{setSlateCompanionContext\}/u);
+    assert.match(globalCompanion, /data-tutorial-target="prism-companion"/u);
+    assert.match(globalCompanion, /onPointerDown=\{beginDrag\}/u);
+    assert.match(globalCompanion, /<ReactMarkdown remarkPlugins=\{\[remarkGfm\]\}>/u);
+    assert.match(globalCompanion, /recoveryMessages: priorMessages/u);
+    assert.match(globalCompanion, /contextTokenIds: contextTokenIdsRef\.current/u);
     assert.match(
-      workspace,
-      /companionComposerBubble[\s\S]{0,3000}shouldSubmitComposerOnEnter/u,
+      globalCompanion,
+      /className=\{styles\.composer\}[\s\S]{0,3000}shouldSubmitComposerOnEnter/u,
     );
     assert.match(
-      workspace,
-      /companionComposerBubble[\s\S]{0,3000}enterKeyHint="send"/u,
+      globalCompanion,
+      /className=\{styles\.composer\}[\s\S]{0,3000}enterKeyHint="send"/u,
     );
-    assert.match(workspace, /<path d="M16 5\.2 27 25H5Z"/u);
-    assert.match(styles, /\.companionAvatar\s*\{/u);
-    assert.match(styles, /\.companionAvatar::before\s*\{/u);
-    assert.match(styles, /\.companionBubble\s*\{/u);
-    assert.match(styles, /@keyframes slateCompanionBubbleLife/u);
-    assert.match(styles, /@keyframes slateCompanionBubbleReducedLife/u);
-    assert.doesNotMatch(styles, /\.companionPanel\s*\{/u);
+    assert.match(globalCompanion, /<PrismOrb aura=\{false\} className=\{styles\.orb\} \/>/u);
+    assert.match(globalCompanionStyles, /\.avatar\s*\{/u);
+    assert.match(globalCompanionStyles, /\.avatar::before\s*\{/u);
+    assert.match(globalCompanionStyles, /\.bubble,/u);
+    assert.match(globalCompanionStyles, /prefers-reduced-motion: reduce/u);
+    assert.doesNotMatch(globalCompanionStyles, /\.companionPanel\s*\{/u);
   });
 
   it("renders a stoppable two-hemisphere Lux and Umbra deliberation surface", () => {
@@ -62,6 +86,10 @@ describe("Slate AI workspace controls", () => {
     assert.match(workspace, /Use as \{activeSection\?\.prose\.trim\(\)/u);
     assert.match(workspace, /aria-modal="true"/u);
     assert.match(workspace, /data-active-speaker/u);
+    assert.match(workspace, /<strong>Lux<\/strong>/u);
+    assert.match(workspace, /<strong>Umbra<\/strong>/u);
+    assert.match(workspace, /styles\.deliberationEmpty/u);
+    assert.match(workspace, /styles\.deliberationCurrent/u);
     assert.match(styles, /\.deliberationHemisphere\[data-side="lux"\]/u);
     assert.match(styles, /\.deliberationHemisphere\[data-side="umbra"\]/u);
     assert.match(styles, /@keyframes slateLuxHemispherePulse/u);

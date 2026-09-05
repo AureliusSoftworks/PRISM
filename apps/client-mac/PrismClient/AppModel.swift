@@ -69,6 +69,7 @@ final class AppModel: ObservableObject {
 
     private static func isStoredPairingUsable(_ server: PairedServer, now: Date = Date()) -> Bool {
         guard
+            !server.token.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
             let clientAccessToken = server.clientAccessToken?.trimmingCharacters(in: .whitespacesAndNewlines),
             !clientAccessToken.isEmpty,
             server.expiresAt > now,

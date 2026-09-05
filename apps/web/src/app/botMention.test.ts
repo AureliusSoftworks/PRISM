@@ -537,6 +537,47 @@ describe("extractStageDirections", () => {
     assert.deepEqual(double.actions, ["nods"]);
   });
 
+  it("keeps spoken prose miswrapped in asterisks on the table line", () => {
+    const out = extractStageDirections(
+      "*It lets us paint the world not just as it is, but as it should be*",
+    );
+    assert.equal(
+      out.mainText,
+      "It lets us paint the world not just as it is, but as it should be",
+    );
+    assert.deepEqual(out.actions, []);
+  });
+
+  it("keeps reclaim dialogue on the table instead of the seat action badge", () => {
+    const reclaim = extractStageDirections(
+      "*Let me finish—Dumbledore knew that curse would end him, and he cast the Patronus anyway* That's the actual proof, not just the standing still.",
+    );
+    assert.equal(
+      reclaim.mainText,
+      "Let me finish—Dumbledore knew that curse would end him, and he cast the Patronus anyway That's the actual proof, not just the standing still.",
+    );
+    assert.deepEqual(reclaim.actions, []);
+
+    const unmarked = extractStageDirections(
+      "Let me finish—Dumbledore knew that curse would end him, and he cast the Patronus anyway That's the actual proof, not just the standing still.",
+    );
+    assert.equal(
+      unmarked.mainText,
+      "Let me finish—Dumbledore knew that curse would end him, and he cast the Patronus anyway That's the actual proof, not just the standing still.",
+    );
+    assert.deepEqual(unmarked.actions, []);
+
+    const truncated = extractStageDirections(
+      "*The Patronus was a choi—* Hang on.",
+    );
+    assert.equal(truncated.mainText, "The Patronus was a choi— Hang on.");
+    assert.deepEqual(truncated.actions, []);
+
+    const directorBeat = extractStageDirections("*lets a beat pass* The point stands.");
+    assert.equal(directorBeat.mainText, "The point stands.");
+    assert.deepEqual(directorBeat.actions, ["lets a beat pass"]);
+  });
+
   it("unwraps inline emphasis instead of deleting words from regular conversation", () => {
     const out = extractStageDirections("Ah, but a rock can't make a snack—it's the *thought* that counts.");
     assert.equal(out.mainText, "Ah, but a rock can't make a snack—it's the thought that counts.");
@@ -560,6 +601,30 @@ describe("extractStageDirections", () => {
     );
     assert.equal(out.mainText, "Well— excuse me. Moving on.");
     assert.deepEqual(out.actions, ["flatulates discreetly", "clears her throat"]);
+  });
+
+  it("treats streamed vocal and movement beats as inline actions", () => {
+    const out = extractStageDirections(
+      "Look *gasp* at *scream* me! *dance*",
+    );
+    assert.equal(out.mainText, "Look at me!");
+    assert.deepEqual(out.actions, ["gasp", "scream", "dance"]);
+  });
+
+  it("treats bracketed and asterisked items as the same action stream", () => {
+    const out = extractStageDirections(
+      "Look [gasp] at *scream* me! [dance]",
+    );
+    assert.equal(out.mainText, "Look at me!");
+    assert.deepEqual(out.actions, ["gasp", "scream", "dance"]);
+  });
+
+  it("preserves bot mentions while lifting ordinary bracketed actions", () => {
+    const out = extractStageDirections(
+      "[Ada](prism-bot://bot-ada), [waves] hello.",
+    );
+    assert.equal(out.mainText, "[Ada](prism-bot://bot-ada), hello.");
+    assert.deepEqual(out.actions, ["waves"]);
   });
 
   it("unwraps double-asterisk inline emphasis inside prose", () => {
@@ -874,6 +939,18 @@ describe("extractStageDirectionCues", () => {
       "laughs",
     ]);
     assert.deepEqual(cues.map((cue) => cue.revealAtDisplayLength), [0, 27, 45]);
+  });
+
+  it("emits one progressive cue timeline across bracket and asterisk syntax", () => {
+    const cues = extractStageDirectionCues(
+      "Look [gasp] at *scream* me! [dance]",
+    );
+    assert.deepEqual(cues.map((cue) => cue.action), [
+      "gasp",
+      "scream",
+      "dance",
+    ]);
+    assert.deepEqual(cues.map((cue) => cue.revealAtDisplayLength), [4, 7, 11]);
   });
 
   it("does not treat inline emphasis as an action cue", () => {

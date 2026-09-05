@@ -3,12 +3,421 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import {
   SQLITE_BUSY_TIMEOUT_MS,
   createDatabase,
   initializeDatabase,
   resolveDbPath,
 } from "../db.ts";
+
+describe("Accent Map pronunciation engine migration", () => {
+  it("updates only legacy enabled bot profiles and remains idempotent", () => {
+    const db = new DatabaseSync(":memory:");
+    initializeDatabase(db);
+    db.prepare(
+      "INSERT INTO users (id, email, display_name, password_hash, password_salt, wrapped_user_key, wrapped_user_key_iv, wrapped_user_key_tag, created_at, last_active_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    ).run(
+      "voice-user", "voice@example.com", "Voice", "hash", "salt", "cipher", "iv", "tag",
+      "2026-08-31T00:00:00.000Z", "2026-08-31T00:00:00.000Z",
+    );
+    const legacyOn = JSON.stringify({
+      v: 2, enabled: true, baseVoiceId: "voice-1", elevenLabsEffect: "clean",
+      pitch: 0, warmth: 0, pace: 0, lilt: 0, bottishTone: 0.45, volume: 1,
+      texture: { preset: "clean", amount: 0, bandwidth: 1, noise: 0, instability: 0, distortion: 0, damage: 0 },
+      accentPronunciationEnabled: true, accentDefinitionId: "irish-english",
+      pronunciationMapPoint: { x: 0.42, y: 0.31 }, speechprintInfluence: "irish-english",
+    });
+    const legacyOff = legacyOn.replace('"accentPronunciationEnabled":true', '"accentPronunciationEnabled":false');
+    const insert = db.prepare(
+      "INSERT INTO bots (id, user_id, name, authored_audio_voice_profile, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+    );
+    insert.run("voice-on", "voice-user", "On", legacyOn, "2026-08-31T00:00:00.000Z", "2026-08-31T00:00:00.000Z");
+    insert.run("voice-off", "voice-user", "Off", legacyOff, "2026-08-31T00:00:00.000Z", "2026-08-31T00:00:00.000Z");
+
+    initializeDatabase(db);
+    const rows = db.prepare(
+      "SELECT id, authored_audio_voice_profile FROM bots WHERE user_id = ? ORDER BY id",
+    ).all("voice-user") as Array<{ id: string; authored_audio_voice_profile: string }>;
+    const onRow = rows.find((row) => row.id === "voice-on")!;
+    const offRow = rows.find((row) => row.id === "voice-off")!;
+    const on = JSON.parse(onRow.authored_audio_voice_profile) as Record<string, unknown>;
+    assert.equal((on.local as { pronunciation: { ttsPronunciationEnabled: boolean } }).pronunciation.ttsPronunciationEnabled, true);
+    assert.equal((on.premium as { pronunciationEnabled: boolean }).pronunciationEnabled, true);
+    assert.equal(offRow.authored_audio_voice_profile, legacyOff);
+    const migrated = onRow.authored_audio_voice_profile;
+    initializeDatabase(db);
+    assert.equal(
+      (db.prepare("SELECT authored_audio_voice_profile FROM bots WHERE id = ?").get("voice-on") as { authored_audio_voice_profile: string }).authored_audio_voice_profile,
+      migrated,
+    );
+    db.close();
+  });
+});
+
+describe("Signal retry image Reason migration", () => {
+  it("adds private Reason storage to legacy proxy rows with a blank default", () => {
+    const db = new DatabaseSync(":memory:");
+    initializeDatabase(db);
+    db.exec(`
+      INSERT INTO users
+        (id, email, display_name, password_hash, password_salt,
+         wrapped_user_key, wrapped_user_key_iv, wrapped_user_key_tag,
+         created_at, last_active_at)
+      VALUES
+        ('legacy-user', 'legacy@example.com', 'Legacy', 'hash', 'salt',
+         'cipher', 'iv', 'tag', '2026-08-29T00:00:00.000Z',
+         '2026-08-29T00:00:00.000Z');
+      INSERT INTO bots (id, user_id, name, created_at, updated_at)
+      VALUES
+        ('legacy-host', 'legacy-user', 'Host', '2026-08-29T00:00:00.000Z',
+         '2026-08-29T00:00:00.000Z'),
+        ('legacy-guest', 'legacy-user', 'Guest', '2026-08-29T00:00:00.000Z',
+         '2026-08-29T00:00:00.000Z');
+      INSERT INTO botcast_shows
+        (id, user_id, host_bot_id, name, premise, hosting_style, accent_color,
+         created_at, updated_at)
+      VALUES
+        ('legacy-show', 'legacy-user', 'legacy-host', 'Legacy Show', '', '',
+         '#abcdef', '2026-08-29T00:00:00.000Z', '2026-08-29T00:00:00.000Z');
+      INSERT INTO botcast_episodes
+        (id, user_id, show_id, host_bot_id, guest_bot_id, guest_kind,
+         guest_name, title, topic, started_at, created_at, updated_at)
+      VALUES
+        ('legacy-episode', 'legacy-user', 'legacy-show', 'legacy-host',
+         'legacy-guest', 'bot', 'Guest', 'Legacy Episode', 'Legacy Topic',
+         '2026-08-29T00:00:00.000Z', '2026-08-29T00:00:00.000Z',
+         '2026-08-29T00:00:00.000Z');
+    `);
+    db.exec(`
+      PRAGMA foreign_keys = OFF;
+      ALTER TABLE botcast_episode_image_proxies DROP COLUMN presentation_reason;
+      INSERT INTO botcast_episode_image_proxies
+        (episode_id, user_id, image_id, content_type, width, height, image_bytes, created_at)
+      VALUES
+        ('legacy-episode', 'legacy-user', 'legacy-image', 'image/webp', 8, 6, X'00',
+         '2026-08-29T00:00:00.000Z');
+    `);
+
+    initializeDatabase(db);
+
+    const column = (
+      db.prepare("PRAGMA table_info(botcast_episode_image_proxies)").all() as Array<{
+        name: string;
+        dflt_value: string | null;
+      }>
+    ).find((candidate) => candidate.name === "presentation_reason");
+    assert.equal(column?.dflt_value, "''");
+    assert.equal(
+      (
+        db.prepare(
+          "SELECT presentation_reason FROM botcast_episode_image_proxies WHERE episode_id = ?",
+        ).get("legacy-episode") as { presentation_reason: string }
+      ).presentation_reason,
+      "",
+    );
+    db.close();
+  });
+});
+
+describe("Ollama Cloud credential migration", () => {
+  it("adds the nullable encrypted account columns", () => {
+    const db = new DatabaseSync(":memory:");
+    initializeDatabase(db);
+    const columns = new Set(
+      (db.prepare("PRAGMA table_info(users)").all() as Array<{ name: string }>).map(
+        (column) => column.name,
+      ),
+    );
+    assert.equal(columns.has("ollama_cloud_key_ciphertext"), true);
+    assert.equal(columns.has("ollama_cloud_key_iv"), true);
+    assert.equal(columns.has("ollama_cloud_key_tag"), true);
+    db.close();
+  });
+});
+
+describe("three-provider routing and background lane migration", () => {
+  it("adds provider weights, the Quality first posture, and Cloud background storage", () => {
+    const db = new DatabaseSync(":memory:");
+    initializeDatabase(db);
+    const columns = new Set(
+      (db.prepare("PRAGMA table_info(users)").all() as Array<{ name: string }>).map(
+        (column) => column.name,
+      ),
+    );
+    assert.equal(columns.has("online_auto_provider_weights"), true);
+    assert.equal(columns.has("online_auto_quality_posture"), true);
+    assert.equal(columns.has("prism_cloud_llm_model"), true);
+    db.close();
+  });
+
+  it("moves a legacy single-lane Cloud background choice without treating it as local", () => {
+    const db = new DatabaseSync(":memory:");
+    initializeDatabase(db);
+    db.exec("ALTER TABLE users DROP COLUMN prism_cloud_llm_model");
+    db.prepare(
+      "INSERT INTO users (id, email, display_name, password_hash, password_salt, wrapped_user_key, wrapped_user_key_iv, wrapped_user_key_tag, prism_default_llm_model, created_at, last_active_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    ).run(
+      "cloud-lane-user",
+      "cloud@example.com",
+      "Cloud",
+      "hash",
+      "salt",
+      "cipher",
+      "iv",
+      "tag",
+      "ollama-cloud-direct:gpt-oss",
+      "2026-08-28T00:00:00.000Z",
+      "2026-08-28T00:00:00.000Z",
+    );
+    initializeDatabase(db);
+    const migrated = db
+      .prepare(
+        "SELECT prism_default_llm_model, prism_cloud_llm_model FROM users WHERE id = ?",
+      )
+      .get("cloud-lane-user") as {
+      prism_default_llm_model: string | null;
+      prism_cloud_llm_model: string | null;
+    };
+    assert.equal(migrated.prism_default_llm_model, null);
+    assert.equal(migrated.prism_cloud_llm_model, "ollama-cloud-direct:gpt-oss");
+    db.close();
+  });
+});
+
+describe("Ollama Cloud effort preference migration", () => {
+  it("widens the legacy provider constraint without losing saved preferences", () => {
+    const db = new DatabaseSync(":memory:");
+    initializeDatabase(db);
+    db.exec(`
+      DROP INDEX idx_model_effort_preferences_user_updated;
+      ALTER TABLE model_reasoning_effort_preferences
+        RENAME TO model_reasoning_effort_preferences_current;
+      CREATE TABLE model_reasoning_effort_preferences (
+        user_id TEXT NOT NULL,
+        provider TEXT NOT NULL CHECK(provider IN ('local', 'openai', 'anthropic')),
+        model_id TEXT NOT NULL,
+        effort TEXT NOT NULL CHECK(effort IN ('none', 'minimal', 'low', 'medium', 'high', 'xhigh')),
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY(user_id, provider, model_id),
+        FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+      );
+      INSERT INTO model_reasoning_effort_preferences
+        SELECT * FROM model_reasoning_effort_preferences_current;
+      DROP TABLE model_reasoning_effort_preferences_current;
+      CREATE INDEX idx_model_effort_preferences_user_updated
+        ON model_reasoning_effort_preferences(user_id, updated_at DESC);
+    `);
+    db.prepare(
+      "INSERT INTO users (id, email, display_name, password_hash, password_salt, wrapped_user_key, wrapped_user_key_iv, wrapped_user_key_tag, created_at, last_active_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    ).run(
+      "effort-user",
+      "effort@example.com",
+      "Effort",
+      "hash",
+      "salt",
+      "cipher",
+      "iv",
+      "tag",
+      "2026-08-28T00:00:00.000Z",
+      "2026-08-28T00:00:00.000Z",
+    );
+    db.prepare(
+      "INSERT INTO model_reasoning_effort_preferences (user_id, provider, model_id, effort, updated_at) VALUES (?, ?, ?, ?, ?)",
+    ).run(
+      "effort-user",
+      "openai",
+      "gpt-5.6-sol",
+      "high",
+      "2026-08-28T00:00:00.000Z",
+    );
+
+    initializeDatabase(db);
+
+    assert.equal(
+      (
+        db.prepare(
+          "SELECT effort FROM model_reasoning_effort_preferences WHERE user_id = ? AND provider = ?",
+        ).get("effort-user", "openai") as { effort: string }
+      ).effort,
+      "high",
+    );
+    assert.doesNotThrow(() =>
+      db.prepare(
+        "INSERT INTO model_reasoning_effort_preferences (user_id, provider, model_id, effort, updated_at) VALUES (?, ?, ?, ?, ?)",
+      ).run(
+        "effort-user",
+        "ollama_cloud",
+        "ollama-cloud-direct:kimi-k2.7-code:cloud",
+        "minimal",
+        "2026-08-28T00:00:01.000Z",
+      ),
+    );
+    db.close();
+  });
+});
+
+describe("bot color saturation migration", () => {
+  it("upgrades existing bot colors once without changing hue or lightness", () => {
+    const db = new DatabaseSync(":memory:");
+    initializeDatabase(db);
+    db.prepare(
+      "INSERT INTO users (id, email, display_name, password_hash, password_salt, wrapped_user_key, wrapped_user_key_iv, wrapped_user_key_tag, created_at, last_active_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    ).run(
+      "color-user",
+      "color-user@example.com",
+      "Color User",
+      "hash",
+      "salt",
+      "cipher",
+      "iv",
+      "tag",
+      "2026-08-08T00:00:00.000Z",
+      "2026-08-08T00:00:00.000Z",
+    );
+    db.prepare(
+      "INSERT INTO bots (id, user_id, name, color, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+    ).run(
+      "desaturated-bot",
+      "color-user",
+      "Desaturated Bot",
+      "#9a7480",
+      "2026-08-08T00:00:00.000Z",
+      "2026-08-08T00:00:00.000Z",
+    );
+
+    initializeDatabase(db);
+    const first = db
+      .prepare("SELECT color, updated_at FROM bots WHERE id = ?")
+      .get("desaturated-bot") as { color: string; updated_at: string };
+    assert.equal(first.color, "#ff0f5b");
+    assert.equal(first.updated_at, "2026-08-08T00:00:00.000Z");
+
+    initializeDatabase(db);
+    const second = db
+      .prepare("SELECT color FROM bots WHERE id = ?")
+      .get("desaturated-bot") as { color: string };
+    assert.equal(second.color, first.color);
+    db.close();
+  });
+});
+
+describe("bot Atmosphere accent migration", () => {
+  it("adds the nullable column without backfilling existing bots", () => {
+    const db = new DatabaseSync(":memory:");
+    initializeDatabase(db);
+    db.prepare(
+      "INSERT INTO users (id, email, display_name, password_hash, password_salt, wrapped_user_key, wrapped_user_key_iv, wrapped_user_key_tag, created_at, last_active_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    ).run("accent-user", "accent@example.com", "Accent", "hash", "salt", "cipher", "iv", "tag", "2026-08-11", "2026-08-11");
+    db.prepare(
+      "INSERT INTO bots (id, user_id, name, color, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+    ).run("legacy-bot", "accent-user", "Legacy", "#ff0000", "2026-08-11", "2026-08-11");
+    db.exec("ALTER TABLE bots DROP COLUMN accent_color;");
+
+    initializeDatabase(db);
+    const row = db.prepare(
+      "SELECT color, accent_color FROM bots WHERE id = ?",
+    ).get("legacy-bot") as { color: string; accent_color: string | null };
+    assert.equal(row.color, "#ff0000");
+    assert.equal(row.accent_color, null);
+    db.close();
+  });
+});
+
+describe("Custom Speech pose migration", () => {
+  it("moves unshipped packed mouth data into the nullable pose column", () => {
+    const db = new DatabaseSync(":memory:");
+    initializeDatabase(db);
+    db.prepare(
+      "INSERT INTO users (id, email, display_name, password_hash, password_salt, wrapped_user_key, wrapped_user_key_iv, wrapped_user_key_tag, prism_default_bot_face_mouth_character, prism_default_bot_face_mouth_animation, created_at, last_active_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    ).run(
+      "speech-user",
+      "speech@example.test",
+      "Speech",
+      "hash",
+      "salt",
+      "cipher",
+      "iv",
+      "tag",
+      "—·△○",
+      "custom",
+      "2026-08-13",
+      "2026-08-13",
+    );
+    db.prepare(
+      "INSERT INTO bots (id, user_id, name, face_mouth_character, face_mouth_animation, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+    ).run(
+      "speech-bot",
+      "speech-user",
+      "Speech Bot",
+      "—·△○",
+      "custom",
+      "2026-08-13",
+      "2026-08-13",
+    );
+
+    initializeDatabase(db);
+
+    const bot = db.prepare(
+      "SELECT face_mouth_character, face_mouth_animation, face_mouth_speech_poses FROM bots WHERE id = ?",
+    ).get("speech-bot") as Record<string, string>;
+    assert.equal(bot.face_mouth_character, "—");
+    assert.equal(bot.face_mouth_animation, "none");
+    assert.equal(bot.face_mouth_speech_poses, '["—","·","△","○"]');
+    const user = db.prepare(
+      "SELECT prism_default_bot_face_mouth_character, prism_default_bot_face_mouth_animation, prism_default_bot_face_mouth_speech_poses FROM users WHERE id = ?",
+    ).get("speech-user") as Record<string, string>;
+    assert.equal(user.prism_default_bot_face_mouth_character, "—");
+    assert.equal(user.prism_default_bot_face_mouth_animation, "none");
+    assert.equal(
+      user.prism_default_bot_face_mouth_speech_poses,
+      '["—","·","△","○"]',
+    );
+    db.close();
+  });
+});
+
+describe("memory ecology settings migration", () => {
+  it("copies legacy auto_memory into both automatic learning permissions", () => {
+    const db = new DatabaseSync(":memory:");
+    initializeDatabase(db);
+    const insertUser = db.prepare(
+      `INSERT INTO users
+        (id, email, display_name, password_hash, password_salt,
+         wrapped_user_key, wrapped_user_key_iv, wrapped_user_key_tag,
+         auto_memory, created_at, last_active_at)
+       VALUES (?, ?, ?, 'hash', 'salt', 'cipher', 'iv', 'tag', ?, ?, ?)`,
+    );
+    const now = "2026-08-11T00:00:00.000Z";
+    insertUser.run("memory-off", "off@example.test", "Off", 0, now, now);
+    insertUser.run("memory-on", "on@example.test", "On", 1, now, now);
+
+    db.exec("ALTER TABLE users DROP COLUMN memory_learn_about_player;");
+    db.exec("ALTER TABLE users DROP COLUMN memory_learn_about_bots;");
+    initializeDatabase(db);
+
+    const rows = db
+      .prepare(
+        `SELECT id, memory_learn_about_player, memory_learn_about_bots
+           FROM users
+          ORDER BY id`,
+      )
+      .all();
+    assert.deepEqual(rows.map((row) => ({ ...row })), [
+      {
+        id: "memory-off",
+        memory_learn_about_player: 0,
+        memory_learn_about_bots: 0,
+      },
+      {
+        id: "memory-on",
+        memory_learn_about_player: 1,
+        memory_learn_about_bots: 1,
+      },
+    ]);
+    db.close();
+  });
+});
 
 describe("resolveDbPath", () => {
   it("prefers DB_PATH for existing explicit deployments", () => {
@@ -97,6 +506,104 @@ describe("createDatabase English voice engine compatibility", () => {
       ).run("voice-user");
       initializeDatabase(db);
       assert.equal(readEngine(), "elevenlabs");
+      db.close();
+    } finally {
+      restoreEnv("DB_PATH", previousDbPath);
+      restoreEnv("LOCALAI_DATA_DIR", previousDataDir);
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("createDatabase Speech Type compatibility", () => {
+  it("defaults new accounts to English and migrates the retired Mute preference", () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "prism-speech-type-"));
+    const previousDbPath = process.env.DB_PATH;
+    const previousDataDir = process.env.LOCALAI_DATA_DIR;
+    process.env.DB_PATH = join(tempDir, "speech-type.db");
+    delete process.env.LOCALAI_DATA_DIR;
+    try {
+      const db = createDatabase();
+      db.prepare(
+        "INSERT INTO users (id, email, display_name, password_hash, password_salt, wrapped_user_key, wrapped_user_key_iv, wrapped_user_key_tag, created_at, last_active_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      ).run(
+        "speech-user",
+        "speech-user@example.com",
+        "Speech User",
+        "hash",
+        "salt",
+        "cipher",
+        "iv",
+        "tag",
+        "2026-08-26T00:00:00.000Z",
+        "2026-08-26T00:00:00.000Z",
+      );
+
+      const readVoiceMode = (): string =>
+        (
+          db
+            .prepare("SELECT voice_mode FROM users WHERE id = ?")
+            .get("speech-user") as { voice_mode: string }
+        ).voice_mode;
+      assert.equal(readVoiceMode(), "english");
+
+      db.prepare("UPDATE users SET voice_mode = 'mute' WHERE id = ?").run(
+        "speech-user",
+      );
+      initializeDatabase(db);
+      assert.equal(readVoiceMode(), "english");
+
+      db.prepare("UPDATE users SET voice_mode = 'babble' WHERE id = ?").run(
+        "speech-user",
+      );
+      initializeDatabase(db);
+      assert.equal(readVoiceMode(), "babble");
+      db.close();
+    } finally {
+      restoreEnv("DB_PATH", previousDbPath);
+      restoreEnv("LOCALAI_DATA_DIR", previousDataDir);
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("createDatabase living shell startup preference", () => {
+  it("adds a privacy-neutral Home default without rewriting saved choices", () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "prism-startup-preference-"));
+    const previousDbPath = process.env.DB_PATH;
+    const previousDataDir = process.env.LOCALAI_DATA_DIR;
+    process.env.DB_PATH = join(tempDir, "startup-preference.db");
+    delete process.env.LOCALAI_DATA_DIR;
+    try {
+      const db = createDatabase();
+      db.prepare(
+        "INSERT INTO users (id, email, display_name, password_hash, password_salt, wrapped_user_key, wrapped_user_key_iv, wrapped_user_key_tag, created_at, last_active_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      ).run(
+        "startup-user",
+        "startup-user@example.com",
+        "Startup User",
+        "hash",
+        "salt",
+        "cipher",
+        "iv",
+        "tag",
+        "2026-07-22T00:00:00.000Z",
+        "2026-07-22T00:00:00.000Z",
+      );
+
+      const readPreference = (): string =>
+        (
+          db
+            .prepare("SELECT startup_preference FROM users WHERE id = ?")
+            .get("startup-user") as { startup_preference: string }
+        ).startup_preference;
+      assert.equal(readPreference(), "home");
+
+      db.prepare(
+        "UPDATE users SET startup_preference = 'slate' WHERE id = ?",
+      ).run("startup-user");
+      initializeDatabase(db);
+      assert.equal(readPreference(), "slate");
       db.close();
     } finally {
       restoreEnv("DB_PATH", previousDbPath);
@@ -198,6 +705,12 @@ describe("createDatabase bot export hash migration", () => {
       );
       db.exec("ALTER TABLE users DROP COLUMN preferred_image_provider;");
       db.exec("ALTER TABLE users DROP COLUMN graphics_quality;");
+      db.exec("ALTER TABLE users DROP COLUMN crt_focus;");
+      db.exec("ALTER TABLE users DROP COLUMN typography_scale;");
+      db.exec("ALTER TABLE users DROP COLUMN atmosphere_style;");
+      db.exec("ALTER TABLE users DROP COLUMN hub_atmosphere_enabled;");
+      db.exec("ALTER TABLE users DROP COLUMN hub_atmosphere_image_id;");
+      db.exec("ALTER TABLE users DROP COLUMN hub_atmosphere_image_style;");
       db.exec(
         "ALTER TABLE botcast_shows DROP COLUMN fallback_studio_accent_variant;"
       );
@@ -242,6 +755,13 @@ describe("createDatabase bot export hash migration", () => {
       assert.ok(
         userColumns.some(
           (column) =>
+            column.name === "hidden_global_picker_model_ids" &&
+            column.dflt_value === "'[]'",
+        ),
+      );
+      assert.ok(
+        userColumns.some(
+          (column) =>
             column.name === "graphics_quality" &&
             column.dflt_value === "'high'",
         ),
@@ -252,10 +772,57 @@ describe("createDatabase bot export hash migration", () => {
           .get("user-1") as { graphics_quality: string }).graphics_quality,
         "high",
       );
+      assert.equal(
+        (reopened.prepare("SELECT crt_focus FROM users WHERE id = ?").get(
+          "user-1",
+        ) as { crt_focus: number }).crt_focus,
+        50,
+      );
+      assert.equal(
+        userColumns.find((column) => column.name === "typography_scale")
+          ?.dflt_value,
+        "'standard'",
+      );
+      assert.equal(
+        (reopened
+          .prepare("SELECT typography_scale FROM users WHERE id = ?")
+          .get("user-1") as { typography_scale: string }).typography_scale,
+        "standard",
+      );
+      assert.equal(
+        userColumns.find((column) => column.name === "atmosphere_style")
+          ?.dflt_value,
+        "'prismatic'",
+      );
+      assert.equal(
+        userColumns.find((column) => column.name === "hub_atmosphere_enabled")
+          ?.dflt_value,
+        "1",
+      );
+      assert.equal(
+        (reopened
+          .prepare("SELECT hub_atmosphere_enabled FROM users WHERE id = ?")
+          .get("user-1") as { hub_atmosphere_enabled: number })
+          .hub_atmosphere_enabled,
+        1,
+      );
+      assert.ok(
+        userColumns.some((column) => column.name === "hub_atmosphere_image_id"),
+      );
+      assert.ok(
+        userColumns.some(
+          (column) => column.name === "hub_atmosphere_image_style",
+        ),
+      );
       assert.ok(
         userColumns.some(
           (column) => column.name === "prism_default_bot_face_thinking_frames"
         )
+      );
+      assert.ok(
+        userColumns.some(
+          (column) => column.name === "prism_default_bot_face_mouth_speech_poses",
+        ),
       );
       assert.ok(userColumns.some((column) => column.name === "prism_default_bot_audio_voice_profile"));
       assert.ok(userColumns.some((column) => column.name === "default_system_voice_name"));
@@ -286,6 +853,15 @@ describe("createDatabase bot export hash migration", () => {
       );
       assert.ok(userColumns.some((column) => column.name === "hidden_comfyui_workflow_ids"));
       assert.ok(userColumns.some((column) => column.name === "preferred_image_provider"));
+      assert.ok(
+        userColumns.some((column) => column.name === "online_auto_provider_bias"),
+      );
+      assert.equal(
+        userColumns.find(
+          (column) => column.name === "online_auto_provider_bias",
+        )?.dflt_value,
+        "0",
+      );
       assert.equal(
         (
           reopened
@@ -305,7 +881,7 @@ describe("createDatabase bot export hash migration", () => {
         userColumns.find(
           (column) => column.name === "prism_default_bot_face_mouth_coffee_pucker"
         )?.dflt_value,
-        "0"
+        "1"
       );
       assert.ok(
         userColumns.some((column) => column.name === "prism_default_bot_face_eye_rotation_deg")
@@ -316,6 +892,12 @@ describe("createDatabase bot export hash migration", () => {
         )?.dflt_value,
         "1",
       );
+      assert.equal(
+        userColumns.find(
+          (column) => column.name === "prism_default_bot_face_eye_spacing",
+        )?.dflt_value,
+        "0.36",
+      );
       const allModelEffortColumn = userColumns.find(
         (column) => column.name === "experimental_all_model_effort_enabled"
       );
@@ -324,6 +906,22 @@ describe("createDatabase bot export hash migration", () => {
         (column) => column.name === "coffee_experimental_table_angle_enabled"
       );
       assert.equal(coffeeExperimentalTableAngleColumn?.dflt_value, "0");
+      const debateWhodunnitReuseSynthesizedExhibitsColumn = userColumns.find(
+        (column) => column.name === "debate_whodunnit_reuse_synthesized_exhibits"
+      );
+      assert.equal(debateWhodunnitReuseSynthesizedExhibitsColumn?.dflt_value, "0");
+      const debateWhodunnitTextVoiceModeColumn = userColumns.find(
+        (column) => column.name === "debate_whodunnit_text_voice_mode"
+      );
+      assert.equal(debateWhodunnitTextVoiceModeColumn?.dflt_value, "'bottish'");
+      const debateWhodunnitSpeechTypeColumn = userColumns.find(
+        (column) => column.name === "debate_whodunnit_speech_type"
+      );
+      assert.equal(debateWhodunnitSpeechTypeColumn?.dflt_value, "'english'");
+      const debateWhodunnitPerspectiveColumn = userColumns.find(
+        (column) => column.name === "debate_whodunnit_perspective"
+      );
+      assert.equal(debateWhodunnitPerspectiveColumn?.dflt_value, "'first_person'");
       const psychicModeColumn = userColumns.find(
         (column) => column.name === "psychic_mode_enabled"
       );
@@ -390,16 +988,25 @@ describe("createDatabase bot export hash migration", () => {
         false,
         "Avatar Details belongs to custom bots, not Default Prism settings"
       );
+      assert.ok(
+        userColumns.some(
+          (column) =>
+            column.name === "prism_default_bot_face_blink_rotation_deg",
+        ),
+      );
       assert.ok(columns.some((column) => column.name === "face_eyes_font"));
       assert.ok(columns.some((column) => column.name === "face_eye_character"));
       assert.ok(columns.some((column) => column.name === "face_eye_animation"));
       assert.ok(columns.some((column) => column.name === "face_mouth_font"));
       assert.ok(columns.some((column) => column.name === "face_mouth_character"));
       assert.ok(columns.some((column) => column.name === "face_mouth_animation"));
+      assert.ok(
+        columns.some((column) => column.name === "face_mouth_speech_poses"),
+      );
       assert.equal(
         columns.find((column) => column.name === "face_mouth_coffee_pucker")
           ?.dflt_value,
-        "0"
+        "1"
       );
       assert.ok(columns.some((column) => column.name === "face_font_weight"));
       assert.ok(columns.some((column) => column.name === "face_eye_scale"));
@@ -410,6 +1017,10 @@ describe("createDatabase bot export hash migration", () => {
         columns.find((column) => column.name === "face_eye_count")?.dflt_value,
         "1",
       );
+      assert.equal(
+        columns.find((column) => column.name === "face_eye_spacing")?.dflt_value,
+        "0.36",
+      );
       assert.ok(columns.some((column) => column.name === "face_mouth_scale"));
       assert.ok(columns.some((column) => column.name === "face_mouth_offset_x"));
       assert.ok(columns.some((column) => column.name === "face_mouth_offset_y"));
@@ -418,6 +1029,9 @@ describe("createDatabase bot export hash migration", () => {
       assert.ok(columns.some((column) => column.name === "face_blink_scale"));
       assert.ok(columns.some((column) => column.name === "face_blink_offset_x"));
       assert.ok(columns.some((column) => column.name === "face_blink_offset_y"));
+      assert.ok(
+        columns.some((column) => column.name === "face_blink_rotation_deg"),
+      );
       assert.ok(columns.some((column) => column.name === "face_thinking_frames"));
       assert.ok(columns.some((column) => column.name === "profile_picture_image_id"));
       const opinionColumns = reopened
@@ -437,14 +1051,40 @@ describe("createDatabase bot export hash migration", () => {
       assert.ok(botRelationshipColumns.some((column) => column.name === "source_bot_id"));
       assert.ok(botRelationshipColumns.some((column) => column.name === "target_bot_id"));
       assert.ok(botRelationshipColumns.some((column) => column.name === "mood_key"));
+      const memoryColumns = reopened
+        .prepare("PRAGMA table_info(memories)")
+        .all() as Array<{ name: string }>;
+      assert.ok(memoryColumns.some((column) => column.name === "target_bot_id"));
+      const botcastEpisodeColumns = reopened
+        .prepare("PRAGMA table_info(botcast_episodes)")
+        .all() as Array<{ name: string }>;
+      assert.ok(
+        botcastEpisodeColumns.some(
+          (column) => column.name === "pair_history_persisted_at",
+        ),
+      );
+      assert.ok(
+        botcastEpisodeColumns.some(
+          (column) => column.name === "guest_brief",
+        ),
+      );
       const row = reopened
         .prepare("SELECT export_hash FROM bots WHERE id = ?")
         .get("bot-1") as { export_hash: string | null } | undefined;
       assert.ok(row?.export_hash);
       assert.match(row!.export_hash!, /^[a-f0-9]{32}$/);
+      reopened.prepare(
+        "INSERT INTO images (id, user_id, prompt, url, created_at) VALUES (?, ?, ?, ?, ?)",
+      ).run(
+        "img-profile",
+        "user-1",
+        "Profile picture",
+        "/images/img-profile",
+        "2026-01-01T00:00:00.000Z",
+      );
       reopened
         .prepare(
-          "UPDATE bots SET face_eyes_font = ?, face_eye_character = ?, face_mouth_font = ?, face_mouth_character = ?, face_font_weight = ?, face_eye_scale = ?, face_eye_offset_x = ?, face_eye_offset_y = ?, face_mouth_scale = ?, face_mouth_offset_x = ?, face_mouth_offset_y = ?, face_mouth_rotation_deg = ?, face_blink_bar = ?, face_thinking_frames = ?, profile_picture_image_id = ? WHERE id = ?"
+          "UPDATE bots SET face_eyes_font = ?, face_eye_character = ?, face_mouth_font = ?, face_mouth_character = ?, face_font_weight = ?, face_eye_scale = ?, face_eye_offset_x = ?, face_eye_offset_y = ?, face_mouth_scale = ?, face_mouth_offset_x = ?, face_mouth_offset_y = ?, face_mouth_rotation_deg = ?, face_blink_bar = ?, face_thinking_frames = ?, profile_picture_image_id = ? WHERE user_id = ? AND id = ?"
         )
         .run(
           "warm",
@@ -462,6 +1102,7 @@ describe("createDatabase bot export hash migration", () => {
           "¦",
           '[".","o","O","o"]',
           "img-profile",
+          "user-1",
           "bot-1"
         );
       const avatarRow = reopened
@@ -504,12 +1145,13 @@ describe("createDatabase bot export hash migration", () => {
       assert.equal(avatarRow?.profile_picture_image_id, "img-profile");
       const settingsRow = reopened
         .prepare(
-          "SELECT experimental_all_model_effort_enabled, coffee_experimental_table_angle_enabled, psychic_mode_enabled, zen_message_font_min_px, zen_message_font_max_px, zen_persona_transition_choice FROM users WHERE id = ?"
+          "SELECT experimental_all_model_effort_enabled, coffee_experimental_table_angle_enabled, debate_whodunnit_reuse_synthesized_exhibits, psychic_mode_enabled, zen_message_font_min_px, zen_message_font_max_px, zen_persona_transition_choice FROM users WHERE id = ?"
         )
         .get("user-1") as
         | {
             experimental_all_model_effort_enabled: number;
             coffee_experimental_table_angle_enabled: number;
+            debate_whodunnit_reuse_synthesized_exhibits: number;
             psychic_mode_enabled: number;
             zen_message_font_min_px: number;
             zen_message_font_max_px: number;
@@ -518,6 +1160,7 @@ describe("createDatabase bot export hash migration", () => {
         | undefined;
       assert.equal(settingsRow?.experimental_all_model_effort_enabled, 0);
       assert.equal(settingsRow?.coffee_experimental_table_angle_enabled, 0);
+      assert.equal(settingsRow?.debate_whodunnit_reuse_synthesized_exhibits, 0);
       assert.equal(settingsRow?.psychic_mode_enabled, 0);
       assert.equal(settingsRow?.zen_message_font_min_px, 15.8);
       assert.equal(settingsRow?.zen_message_font_max_px, 32.8);
@@ -553,6 +1196,15 @@ describe("createDatabase image provenance migration", () => {
         "tag",
         "2026-01-01T00:00:00.000Z",
         "2026-01-01T00:00:00.000Z"
+      );
+      db.prepare(
+        "INSERT INTO bots (id, user_id, name, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+      ).run(
+        "bot-9",
+        "user-1",
+        "Image Bot",
+        "2026-01-01T00:00:00.000Z",
+        "2026-01-01T00:00:00.000Z",
       );
       const columns = db
         .prepare("PRAGMA table_info(images)")
@@ -616,6 +1268,9 @@ describe("createDatabase image provenance migration", () => {
         now,
         now,
       );
+      db.prepare(
+        "INSERT INTO bots (id, user_id, name, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+      ).run("bob-ross", "user-signal", "Bob Ross", now, now);
       for (const imageId of ["studio-image", "logo-image"]) {
         db.prepare(
           "INSERT INTO images (id, user_id, prompt, url, created_at) VALUES (?, ?, ?, ?, ?)",

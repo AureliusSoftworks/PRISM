@@ -30,6 +30,7 @@ Usage:
   prism mac-client
   prism mac-server
   prism up
+  prism sound
   prism down
   prism standalone
   prism standalone-win [version] [release-channel]
@@ -51,6 +52,9 @@ Notes:
   back to the default browser. Set PRISM_OPEN_WEB=0 to skip opening.
   prism down shuts down the local API/web dev processes by freeing
   ports 18787 and 18788.
+  prism sound runs the same local dev stack and opens the Sound FX Bench at
+  /tools/sound-fx-bench.html. It loads local development secrets, including
+  ELEVENLABS_API_KEY, through the coordinated dev launcher.
   prism standalone builds the desktop app and opens the folder containing
   the latest macOS DMG.
   prism standalone-win dispatches the desktop release workflow for Windows
@@ -414,6 +418,10 @@ run_web() {
   exec npm run dev
 }
 
+run_sound() {
+  PRISM_WEB_URL="${PRISM_WEB_URL:-http://localhost:${WEB_PORT}/tools/sound-fx-bench.html}" run_web
+}
+
 run_down() {
   free_tcp_port "$API_PORT"
   free_tcp_port "$WEB_PORT"
@@ -767,6 +775,9 @@ case "${1:-}" in
     ;;
   up | web)
     run_web
+    ;;
+  sound)
+    run_sound
     ;;
   down)
     run_down

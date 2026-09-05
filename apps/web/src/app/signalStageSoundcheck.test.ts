@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  DEBATE_STAGE_SOUNDCHECK_MESSAGE_PREFIX,
   SIGNAL_STAGE_SOUNDCHECK_MESSAGE_PREFIX,
   signalStageSoundcheckExchangeIndex,
   signalStageSoundcheckMessageIsEphemeral,
@@ -37,9 +38,10 @@ test("Signal stage soundcheck creates a private host and guest voice exchange", 
   assert.match(messages[1].content, /Mira/u);
   assert.ok(messages.every(signalStageSoundcheckMessageIsEphemeral));
   assert.ok(
-    messages.every(({ id, episodeId }) =>
-      id.startsWith(episodeId) &&
-      episodeId.startsWith(SIGNAL_STAGE_SOUNDCHECK_MESSAGE_PREFIX),
+    messages.every(
+      ({ id, episodeId }) =>
+        id.startsWith(episodeId) &&
+        episodeId.startsWith(SIGNAL_STAGE_SOUNDCHECK_MESSAGE_PREFIX),
     ),
   );
   assert.ok(
@@ -48,6 +50,13 @@ test("Signal stage soundcheck creates a private host and guest voice exchange", 
 });
 
 test("ordinary saved Signal messages are never treated as ephemeral soundchecks", () => {
+  assert.equal(
+    signalStageSoundcheckMessageIsEphemeral({
+      id: `${DEBATE_STAGE_SOUNDCHECK_MESSAGE_PREFIX}alignment:1:moderator`,
+      episodeId: `${DEBATE_STAGE_SOUNDCHECK_MESSAGE_PREFIX}alignment:1`,
+    }),
+    true,
+  );
   assert.equal(
     signalStageSoundcheckMessageIsEphemeral({
       id: "saved-message",

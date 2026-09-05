@@ -1,0 +1,114 @@
+.root {
+  position: absolute;
+  z-index: 2;
+  inset: 0;
+  overflow: hidden;
+  transform: none;
+  filter: blur(0);
+  transition: filter 220ms ease, transform 220ms ease;
+  pointer-events: none;
+  isolation: isolate;
+}
+
+/* The whole authored layer blends against the room plate, outside its own stacking context. */
+.root[data-light-source="authored"] { mix-blend-mode: var(--room-light-blend, overlay); }
+.root[data-light-source="authored"] .lighting { mix-blend-mode: normal; }
+.root[data-light-source="authored"] .grade { display: none; }
+.root[data-viewport="true"] { width: 100%; height: 100%; }
+
+/* Occluding effects (steam, fog, snow) paint here with normal blending, beside the
+ * blended light root, and follow the plate's blur and scale while actors are on stage. */
+.atmosphere { position: absolute; z-index: 2; inset: 0; display: block; width: 100%; height: 100%; object-fit: fill; pointer-events: none; transform: none; filter: blur(0); transition: filter 220ms ease; }
+.atmosphere[data-viewport="true"] { width: 100%; height: 100%; }
+.atmosphere[data-blurred="true"] { filter: blur(12px); }
+
+/* Both art styles blur and scale with the room plate (.roomBackdropImage[data-blurred])
+ * while actors are on stage, so lights soften into the background with everything else
+ * and stay on their practical sources. */
+.root[data-blurred="true"] {
+  filter: blur(12px);
+}
+
+.grade,
+.lighting,
+.grain,
+.vignette {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.grade {
+  background:
+    linear-gradient(
+      180deg,
+      var(--room-cinema-grade-top),
+      rgba(24, 31, 38, 0.02) 45%,
+      var(--room-cinema-grade-bottom)
+    ),
+    radial-gradient(ellipse at 50% 50%, transparent 25%, rgba(10, 21, 31, 0.18) 100%);
+  mix-blend-mode: soft-light;
+  opacity: 0.72;
+}
+
+.lighting,
+.grain {
+  display: block;
+  object-fit: fill;
+}
+
+.lighting {
+  mix-blend-mode: overlay;
+  opacity: 0.95;
+}
+
+.grain {
+  mix-blend-mode: soft-light;
+  opacity: var(--room-cinema-grain-opacity);
+}
+
+.vignette {
+  background: radial-gradient(
+    ellipse at 50% 48%,
+    transparent 42%,
+    rgba(1, 3, 6, 0.2) 72%,
+    rgba(0, 0, 0, 0.72) 112%
+  );
+  opacity: var(--room-cinema-vignette-opacity);
+}
+
+/* Only grain follows the Mosaic grid; lights stay smooth and sit on top of the tesserae. */
+.root[data-art-style="mosaic"] .grain {
+  image-rendering: pixelated;
+}
+
+.root[data-art-style="mosaic"] .grade,
+.root[data-art-style="mosaic"] .vignette {
+  display: none;
+}
+
+.root[data-art-style="mosaic"] .lighting {
+  mix-blend-mode: hard-light;
+}
+
+.root[data-art-style="mosaic"] .grain {
+  opacity: calc(var(--room-cinema-grain-opacity) * 0.35);
+}
+
+.root[data-art-style="mosaic"] .vignette {
+  opacity: calc(var(--room-cinema-vignette-opacity) * 0.72);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .root,
+  .atmosphere {
+    transition: none;
+  }
+
+  .lighting,
+  .grain {
+    will-change: auto;
+  }
+}

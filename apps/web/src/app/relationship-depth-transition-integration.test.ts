@@ -25,16 +25,15 @@ function collapseWhitespace(value: string): string {
 }
 
 describe("relationship-depth page integration", () => {
-  it("routes the Home picker without invoking the message-generating guest handoff", () => {
-    const directHomePicker = sourceSlice(
+  it("uses an immediate empty-Home selection and a guest handoff once the Home is established", () => {
+    const headerBotPicker = sourceSlice(
       "function handleZenPersonaSelectionChange",
       "function handleZenMentionPersonaSelection",
     );
-    assert.match(directHomePicker, /visitZenHome\(nextBotId\)/);
-    assert.doesNotMatch(
-      directHomePicker,
-      /commitZenPersonaTransition|sendMessage|personaTransition/,
-    );
+    assert.match(headerBotPicker, /zenSessionHasNotStarted\(\)/);
+    assert.match(headerBotPicker, /armFreshZenPersona\(nextBotId\)/);
+    assert.match(headerBotPicker, /commitZenPersonaTransition\(nextBotId\)/);
+    assert.doesNotMatch(headerBotPicker, /visitZenHome\(nextBotId\)/);
 
     const guestInvitation = sourceSlice(
       "function handleZenMentionPersonaSelection",
@@ -43,20 +42,20 @@ describe("relationship-depth page integration", () => {
     assert.match(guestInvitation, /commitZenPersonaTransition\(botId\)/);
   });
 
-  it("labels the direct picker as Home navigation and keeps guest controls out of it", () => {
+  it("labels the header picker as an invitation and restores its guest handoff footer", () => {
     const picker = sourceSlice(
       "const renderHeaderModelPicker = (",
       "const renderImagesPanelModelPicker",
     );
-    assert.match(picker, /"Visit a Zen Home"/);
-    assert.match(picker, /ariaLabel="Zen Home"/);
-    assert.doesNotMatch(
+    assert.match(picker, /"Invite a Facet into this Home"/);
+    assert.match(picker, /ariaLabel="Invite a Facet into this Home"/);
+    assert.match(
       picker,
       /menuFooter=\{renderZenPersonaTransitionChoiceControl\(\)\}/,
     );
   });
 
-  it("presents Random, New, Intro, and Off only as a Zen guest-invitation setting", () => {
+  it("presents Random, New, Intro, and Off in both the picker and Zen guest-invitation settings", () => {
     const control = sourceSlice(
       "function ZenPersonaTransitionChoiceControl",
       "function normalizeZenPersonaTransitionChoice",
@@ -87,14 +86,20 @@ describe("relationship-depth page integration", () => {
       cssSource,
       /\.zenPersonaTransitionSegmentButton,\s*\.form \.zenPersonaTransitionSegmentButton\s*\{/,
     );
+    assert.match(
+      cssSource,
+      /\.zenPersonaTransitionControl\s*\{[\s\S]*?flex-wrap:\s*wrap;/,
+    );
+    assert.match(
+      cssSource,
+      /\.zenPersonaTransitionSegments\s*\{[\s\S]*?flex:\s*1 1 188px;[\s\S]*?min-width:\s*min\(188px,\s*100%\);/,
+    );
   });
 
   it("exposes one shared identity-anchor contract across Library, room, and Home", () => {
-    for (const surface of ["library", "group-room", "home"] as const) {
-      assert.match(
-        pageSource,
-        new RegExp(`data-relationship-depth-anchor="${surface}"`),
-      );
+    assert.match(pageSource, /"data-relationship-depth-anchor": "library"/);
+    for (const surface of ["group-room", "home"] as const) {
+      assert.match(pageSource, new RegExp(`data-relationship-depth-anchor="${surface}"`));
     }
     assert.match(pageSource, /data-relationship-depth-identity=/);
     assert.match(
@@ -113,14 +118,18 @@ describe("relationship-depth page integration", () => {
     assert.match(roomPresence, /data-relationship-depth-identity=/);
   });
 
-  it("uses the shared runner and restores the saved checkpoint for Back or Escape", () => {
+  it("uses the shared runner and restores the saved checkpoint for Escape", () => {
     assert.match(pageSource, /\brunRelationshipDepthTransition\b/);
     assert.match(pageSource, /\breturnFromRelationshipDepth\b/);
     assert.match(
       pageSource,
       /event\.key !== "Escape"[\s\S]{0,500}returnFromRelationshipDepth\("escape"\)/,
     );
-    assert.match(pageSource, /returnFromRelationshipDepth\("back"\)/);
+    assert.match(pageSource, /function jumpCanvasToCurrentGroupRoot\(/);
+    assert.doesNotMatch(
+      pageSource,
+      /handleEmptyStateBackgroundClick[\s\S]{0,2500}returnFromRelationshipDepth\(/,
+    );
   });
 
   it("gates native transitions by handoff safety and keeps matched manual fallback beats", () => {
@@ -161,9 +170,24 @@ describe("relationship-depth page integration", () => {
     }
   });
 
-  it("opens persona Homes from category rows while keeping nested episodes read-only", () => {
+  it("opens bot Home from the overview grid instead of resuming the latest chat", () => {
+    const commitSelection = sourceSlice(
+      "const commitEmptyStateBotSelection = useCallback(",
+      "useEffect(() => {\n    if (view !== \"chat\") return;\n    const botId = pendingImportedChatBotSelectionRef.current;",
+    );
+    assert.match(
+      commitSelection,
+      /startFreshConversation\(false, \{ zenHomeBotId: botId \}\)/,
+    );
+    assert.doesNotMatch(
+      commitSelection,
+      /visitZenHome\(botId, \{[\s\S]{0,120}sourceSurface: "library"/,
+    );
+  });
+
+  it("focuses a bot Home from its group chip while keeping older conversations selectable", () => {
     const sidebarRows = sourceSlice(
-      "function selectZenPersonaFromSidebar",
+      "const renderConversationRow =",
       "function renderConversationGroupDeleteButton",
     );
     const categoryTile = sourceSlice(
@@ -173,25 +197,72 @@ describe("relationship-depth page integration", () => {
 
     assert.match(
       sidebarRows,
-      /visitZenHome\(botId, \{ destination: \{ kind: "resolve" \} \}\)/,
+      /<button[\s\S]*?void refreshConversation\(c\.id\)/,
     );
-    assert.match(sidebarRows, /nested \? \([\s\S]*?<span/);
-    assert.match(sidebarRows, /data-history-timeline-entry="true"/);
+    assert.doesNotMatch(sidebarRows, /data-history-timeline-entry/);
+    assert.doesNotMatch(sidebarRows, /conversationTimelineEntry/);
+    assert.doesNotMatch(sidebarRows, /conversationGroupNewButton/);
+    assert.match(
+      categoryTile,
+      /startFreshConversation\(false, \{ zenHomeBotId: group\.botId \}\)/,
+    );
     assert.doesNotMatch(
-      sourceSlice(
-        'data-history-timeline-entry="true"',
-        ") : (\n          <button",
-      ),
-      /onClick|refreshConversation/,
+      categoryTile,
+      /visitZenHome\(group\.botId, \{[\s\S]{0,240}destination: \{ kind: "resolve" \}/,
     );
     assert.match(
       categoryTile,
-      /view === "chat" && group\.botId[\s\S]{0,120}selectZenPersonaFromSidebar\(group\.botId\)/,
+      /aria-label=\{`Focus \$\{group\.name\}'s Home and expand conversations`\}/,
+    );
+    assert.doesNotMatch(categoryTile, /performShowAllBotsView\(group\.botId/);
+    assert.doesNotMatch(cssSource, /\.conversationGroupNewButton\s*\{/);
+    assert.doesNotMatch(cssSource, /\.conversationTimelineEntry\s*\{/);
+  });
+
+  it("resolves an existing Home from both Library and Home navigation unless pending is explicit", () => {
+    const visitRoute = sourceSlice(
+      "async function visitZenHome",
+      'useEffect(() => {\n    if (view !== "chat" || relationshipDepthReturnDepth <= 0)',
+    );
+
+    assert.match(
+      visitRoute,
+      /const shouldKeepPendingHome = requestedDestination\.kind === "pending"/,
     );
     assert.match(
-      cssSource,
-      /\.conversationTimelineEntry\s*\{[\s\S]{0,100}cursor: default/,
+      visitRoute,
+      /const shouldResolvePersistedHome =\s*!shouldKeepPendingHome &&\s*\(requestedDestination\.kind === "resolve" \|\|\s*requestedDestination\.kind === "infer"\)/,
     );
+    assert.doesNotMatch(
+      visitRoute,
+      /requestedDestination\.kind === "infer" && sourceIsHome/,
+    );
+    assert.match(
+      visitRoute,
+      /Every ordinary Home visit resumes the latest continuation/,
+    );
+  });
+
+  it("starts a fresh isolated conversation inside the active Home", () => {
+    const startFresh = sourceSlice(
+      "function startFreshConversation",
+      "function setAppWidePrivateMode",
+    );
+    const sendSetup = sourceSlice(
+      "const forceNewConversation =",
+      "if (!trimmed && !isStarterPrompt",
+    );
+
+    assert.match(
+      startFresh,
+      /detail\s*\?\s*conversationEffectiveBotId\(detail\)\s*:\s*zenPersonaBotIdRef\.current/,
+    );
+    assert.match(startFresh, /armFreshZenPersona\(freshZenHomeBotId\)/);
+    assert.match(
+      sendSetup,
+      /const forceNewConversation =\s*!isZenAutonomy[\s\S]{0,160}forceNewConversationOnNextSend/,
+    );
+    assert.doesNotMatch(sendSetup, /!isStarterPrompt/);
   });
 
   it("locks the whole surface only during transition beats", () => {
@@ -209,7 +280,7 @@ describe("relationship-depth page integration", () => {
     );
   });
 
-  it("blocks ordinary Home navigation but settles active work before a room return", () => {
+  it("guards relationship returns while Zen hue-directory escape stays local", () => {
     const returnRoute = sourceSlice(
       "async function returnFromRelationshipDepth",
       "async function visitZenHome",
@@ -217,6 +288,10 @@ describe("relationship-depth page integration", () => {
     const visitRoute = sourceSlice(
       "async function visitZenHome",
       "useEffect(() => {\n    if (view !== \"chat\" || relationshipDepthReturnDepth <= 0)",
+    );
+    const backgroundClick = sourceSlice(
+      "function handleEmptyStateBackgroundClick",
+      "const openEmptyStateBotSearch",
     );
     assert.match(
       returnRoute,
@@ -243,13 +318,20 @@ describe("relationship-depth page integration", () => {
       returnRoute,
       /applyActiveAssistantRevealInterruption/,
     );
+    assert.doesNotMatch(pageSource, /relationshipDepthReturnBlockedByReply/);
+    assert.match(pageSource, /performShowAllBotsView\(\);\s*void openZenMode\(\)/);
+    assert.match(pageSource, /function jumpCanvasToCurrentGroupRoot\(/);
     assert.match(
-      pageSource,
-      /relationshipDepthReturnBlockedByReply[\s\S]{0,240}!relationshipDepthCanInterruptActiveTurn/,
+      backgroundClick,
+      /if \(view === "chat"\) \{[\s\S]{0,500}chatPresentation === "zen"[\s\S]{0,900}jumpCanvasToCurrentGroupRoot\(\)/,
+    );
+    assert.doesNotMatch(
+      backgroundClick,
+      /returnFromRelationshipDepth\(|relationshipDepthReturnDepth|canvasBackgroundShouldZoomOutFocusedBot/,
     );
     assert.match(
       pageSource,
-      /disabled=\{relationshipDepthReturnBlockedByReply\}/,
+      /const renderSharedAppletBrand =[\s\S]*?data-shared-applet-brand=\{appletId\}/,
     );
   });
 
@@ -266,11 +348,19 @@ describe("relationship-depth page integration", () => {
     assert.doesNotMatch(restoreFocus, /focusTarget\.tabIndex = -1/);
   });
 
-  it("teaches Home depth and exact Back or Escape return semantics", () => {
+  it("teaches Home depth and exact Escape return semantics", () => {
     assert.match(tutorialSource, /heading: "Choose a relationship"/);
     assert.match(
       tutorialSource,
-      /Back or Escape returns you to the wider Library or saved group grid exactly where you left it\./,
+      /select the focused tile again to unfocus it; open its mini bot avatar for customization, or send a message to begin Zen\/Chat/,
+    );
+    assert.match(
+      tutorialSource,
+      /Clicking empty canvas space clears bot and hue focus while keeping the navbar’s current All Bots, Ungrouped, or saved-group selection/,
+    );
+    assert.match(
+      tutorialSource,
+      /Escape returns you to the wider Library or saved group grid exactly where you left it\./,
     );
     assert.match(tutorialSource, /heading: "Continue this Home"/);
     assert.match(tutorialSource, /older continuity for this Home/);

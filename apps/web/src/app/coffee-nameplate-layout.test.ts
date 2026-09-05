@@ -44,8 +44,25 @@ test("Coffee keeps bot nameplates inside a responsive prose-safe envelope", () =
     nameplate,
     /--coffee-seat-name-plate-y: clamp\(-42px, -3\.65cqw, -26px\)/,
   );
+  assert.match(
+    nameplate,
+    /--coffee-seat-name-plate-shift-x: clamp\(-13px, -0\.82vw, -8px\)/,
+  );
   assert.match(nameplate, /width: var\(--coffee-seat-name-plate-width\)/);
+  assert.match(
+    nameplate,
+    /translateX\( calc\(-50% \+ var\(--coffee-seat-name-plate-shift-x\)\) \)/,
+  );
   assert.doesNotMatch(nameplate, /clamp\(284px, 23vw, 304px\)/);
+
+  assert.match(
+    ruleFor('.coffeeSeat[data-cup-side="left"] .coffeeSeatGlowPill'),
+    /--coffee-seat-name-plate-shift-x: clamp\(8px, 0\.82vw, 13px\)/,
+  );
+  assert.match(
+    ruleFor('.coffeeSeat[data-roster-preview="true"] .coffeeSeatGlowPill'),
+    /--coffee-seat-name-plate-shift-x: 0px/,
+  );
 
   const compact = ruleFor(
     '.coffeeStage[data-compact="true"] .coffeeSeatGlowPill',
@@ -98,32 +115,38 @@ test("two-to-five-seat action anchors stay locked to their authored seats", () =
   assert.match(pageSource, /data-seat-count=\{display\.seatCount\}/);
 });
 
-test("long bot and player names truncate safely in live and review layouts", () => {
+test("long bot names truncate safely in live and review layouts", () => {
   assert.match(
     ruleFor(".coffeeSeatGlowText span"),
     /overflow: hidden; text-overflow: ellipsis; white-space: nowrap/,
   );
   assert.match(
-    ruleFor(".coffeeReplayPlayerName"),
-    /min-width: 0; overflow: hidden;[\s\S]*?text-overflow: ellipsis;[\s\S]*?white-space: nowrap/,
-  );
-  assert.match(
     pageSource,
-    /const seatAriaLabel = coffeeDevModeEnabled[\s\S]*?`\$\{bot\.name\} at the coffee table`[\s\S]*?aria-label=\{seatAriaLabel\}/,
+    /const seatAriaLabel =[\s\S]*?`\$\{bot\.name\} at the coffee table`[\s\S]*?aria-label=\{seatAriaLabel\}/,
   );
 });
 
-test("review lifts the player plate and keeps its Prism marker glyph", () => {
-  assert.match(
-    ruleFor(".coffeeReplayPlayerNameplate"),
-    /margin-top: clamp\(-41px, -3\.2cqw, -30px\)/,
-  );
+test("review seats Default Prism for replay and restores bot seats", () => {
+  assert.match(cssSource, /\.coffeeReplayPlayerSeat\s*\{/u);
+  assert.match(cssSource, /\.coffeeReplayPlayerAvatar\s*\{/u);
+  assert.match(cssSource, /\.coffeeReplayPlayerNameplate\s*\{/u);
+  assert.match(cssSource, /\.coffeeReplayPlayerGlyph\s*\{/u);
+  assert.match(pageSource, /styles\.coffeeReplayPlayerSeat/u);
   assert.match(
     pageSource,
-    /className=\{styles\.coffeeReplayPlayerGlyph\}[\s\S]{0,180}<BotGlyph\s+name=\{zenDefaultPrismGlyph\}/,
+    /ref=\{coffeeReplayPotDockRef\}[\s\S]*?className=\{styles\.coffeeReplayPlayerPot\}/u,
   );
+  assert.doesNotMatch(pageSource, /coffeeReplayOffCameraPotDock/u);
   assert.match(
     css,
     /\.coffeeStage\[data-phase="finished"\]\[data-replay-active="true"\] \.coffeeSeat \{[\s\S]*?animation: none;[\s\S]*?var\(--coffee-seat-offset-x\)[\s\S]*?var\(--coffee-seat-offset-y\)/,
   );
+});
+
+test("Coffee gives the joined player one explicit mug-gated floor path", () => {
+  assert.match(cssSource, /\.coffeePlayerCupButton\s*\{/u);
+  assert.match(pageSource, /const toggleCoffeeMugComposer = \(\): void =>/u);
+  assert.match(pageSource, /onClick=\{toggleCoffeeMugComposer\}/u);
+  assert.match(pageSource, /coffeePlayerComposerOpen/u);
+  assert.match(pageSource, /consumeJoinSip: true/u);
 });

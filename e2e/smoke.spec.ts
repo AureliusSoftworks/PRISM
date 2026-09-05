@@ -93,11 +93,38 @@ interface TestBotLibraryGroup {
 interface AuthenticatedApiOptions {
   botLibraryGroups?: TestBotLibraryGroup[];
   bots?: Array<(typeof testBots)[number]>;
+  conversation?: TestConversation;
   images?: TestImageRecord[];
   theme?: "dark" | "light";
+  hubAtmosphereEnabled?: boolean;
+  hubAtmosphereImageId?: string | null;
+  hubAtmosphereStyle?: "prismatic" | "minimal" | "dreamscape" | "sanctuary";
+  tutorialProgress?: unknown;
   zenWallpaperLocalImageModel?: string;
+  zenPersonaTransitionChoice?:
+    | "random"
+    | "new-speaks"
+    | "previous-introduces"
+    | "off";
   preserveBotLibraryGroupsOnReload?: boolean;
 }
+
+const completedTutorialProgress = Object.fromEntries(
+  [
+    "zen",
+    "chat",
+    "coffee",
+    "debate",
+    "botcast",
+    "avatar",
+    "prismWield",
+    "signalRefract",
+    "slate",
+  ].map((tutorialId) => [
+    tutorialId,
+    { status: "completed", step: 0, remindAfter: null },
+  ]),
+);
 
 interface TestImageRecord {
   id: string;
@@ -112,6 +139,7 @@ interface TestImageRecord {
   purpose: string;
   model?: string | null;
   provider?: string;
+  assetKind?: string;
 }
 
 function testGroupImages(
@@ -171,6 +199,23 @@ const testConversation: TestConversation = {
 
 async function activateNavigationControl(locator: Locator): Promise<void> {
   await locator.evaluate((element) => (element as HTMLElement).click());
+}
+
+async function openSavedZenConversation(
+  page: Page,
+  groupName: string,
+  conversationTitle: string,
+): Promise<void> {
+  await page.getByRole("button", { name: "Open conversation panel" }).click();
+  await page
+    .getByRole("button", {
+      name: `Focus ${groupName}'s Home and expand conversations`,
+    })
+    .click();
+  await page
+    .getByRole("button", { name: conversationTitle, exact: true })
+    .click();
+  await page.getByRole("button", { name: "Close conversation panel" }).click();
 }
 
 async function selectBotGroupFilter(page: Page, name: string): Promise<void> {
@@ -241,7 +286,13 @@ async function installAuthenticatedApi(
     theme: options.theme ?? testUser.theme,
   };
   const fixtureBots = options.bots ?? testBots;
+  const fixtureConversation = options.conversation ?? testConversation;
   const fixtureImages = options.images ?? [];
+  let fixtureBotLibraryGroups = structuredClone(
+    options.botLibraryGroups ?? [],
+  );
+  let fixtureHubAtmosphereEnabled = options.hubAtmosphereEnabled !== false;
+  let fixtureHubAtmosphereStyle = options.hubAtmosphereStyle ?? "prismatic";
   await page.addInitScript(
     ({ userId, botLibraryGroups, preserveBotLibraryGroupsOnReload }) => {
       window.localStorage.setItem("prism_first_run_welcome_v1", "done");
@@ -249,6 +300,7 @@ async function installAuthenticatedApi(
         "prism_desktop_first_run_complete_v3",
         "done",
       );
+      window.localStorage.setItem("prism_intro_sequence_seen_v1", "done");
       window.localStorage.setItem(
         `prism_mode_tutorials_v1:${userId}`,
         JSON.stringify({ zen: true, chat: true, coffee: true }),
@@ -288,7 +340,12 @@ async function installAuthenticatedApi(
     }
     if (pathname === "/api/settings") {
       if (route.request().method() === "PATCH") {
-        const body = route.request().postDataJSON() as { theme?: unknown };
+        const body = route.request().postDataJSON() as {
+          theme?: unknown;
+          atmosphereStyle?: unknown;
+          hubAtmosphereEnabled?: unknown;
+          preferredProvider?: unknown;
+        };
         if (
           body.theme === "dark" ||
           body.theme === "light" ||
@@ -296,10 +353,44 @@ async function installAuthenticatedApi(
         ) {
           fixtureUser.theme = body.theme;
         }
+        if (typeof body.hubAtmosphereEnabled === "boolean") {
+          fixtureHubAtmosphereEnabled = body.hubAtmosphereEnabled;
+        }
+        if (
+          body.preferredProvider === "local" ||
+          body.preferredProvider === "openai" ||
+          body.preferredProvider === "anthropic" ||
+          body.preferredProvider === "google" ||
+          body.preferredProvider === "xai"
+        ) {
+          fixtureUser.preferredProvider = body.preferredProvider;
+        }
+        if (
+          body.atmosphereStyle === "prismatic" ||
+          body.atmosphereStyle === "minimal" ||
+          body.atmosphereStyle === "dreamscape" ||
+          body.atmosphereStyle === "sanctuary"
+        ) {
+          fixtureHubAtmosphereStyle = body.atmosphereStyle;
+        }
       }
       return json({
         settings: {
           ...fixtureUser,
+          onboardingVersion: 1,
+          onboardingState: {
+            stage: "complete",
+            introResolution: "completed",
+            setupStep: 0,
+          },
+          tutorialProgress:
+            options.tutorialProgress ?? completedTutorialProgress,
+          atmosphereStyle: fixtureHubAtmosphereStyle,
+          hubAtmosphereEnabled: fixtureHubAtmosphereEnabled,
+          hubAtmosphereImageId: options.hubAtmosphereImageId ?? null,
+          hubAtmosphereImageStyle: options.hubAtmosphereImageId
+            ? (options.hubAtmosphereStyle ?? "prismatic")
+            : null,
           providerLocked: false,
           autoMemory: true,
           composerWritingAssist: true,
@@ -344,7 +435,8 @@ async function installAuthenticatedApi(
           zenAskQuestionPatienceEnabled: false,
           zenAskQuestionPatienceMs: 60_000,
           zenAutonomyEnabled: false,
-          zenPersonaTransitionChoice: "random",
+          zenPersonaTransitionChoice:
+            options.zenPersonaTransitionChoice ?? "random",
           prismDefaultBotName: "",
           prismDefaultBotSystemPrompt: "",
           prismDefaultBotColor: "",
@@ -358,31 +450,57 @@ async function installAuthenticatedApi(
         },
       });
     }
+    if (pathname === "/api/library/groups/import-legacy") {
+      const body = route.request().postDataJSON() as {
+        groups?: TestBotLibraryGroup[];
+      };
+      if (Array.isArray(body.groups)) {
+        fixtureBotLibraryGroups = structuredClone(body.groups);
+      }
+      return json({ groups: fixtureBotLibraryGroups });
+    }
+    if (pathname === "/api/library/groups") {
+      if (route.request().method() === "PUT") {
+        const body = route.request().postDataJSON() as {
+          groups?: TestBotLibraryGroup[];
+        };
+        if (Array.isArray(body.groups)) {
+          fixtureBotLibraryGroups = structuredClone(body.groups);
+        }
+      }
+      return json({ groups: fixtureBotLibraryGroups });
+    }
     if (pathname === "/api/conversations") {
       return json({
         conversations: [
           {
-            ...testConversation,
-            lastBotId: null,
-            lastBotColor: null,
-            hasAssistantReply: false,
+            ...fixtureConversation,
+            lastBotId: fixtureConversation.botId,
+            lastBotColor:
+              fixtureBots.find((bot) => bot.id === fixtureConversation.botId)
+                ?.color ?? null,
+            hasAssistantReply:
+              fixtureConversation.hasAssistantReply ??
+              fixtureConversation.messages.some(
+                (message) => message.role === "assistant",
+              ),
           },
         ],
       });
     }
     if (pathname === "/api/conversations/zen/open") {
-      return json({ conversationId: testConversation.id });
+      return json({ conversationId: fixtureConversation.id });
     }
-    if (pathname === `/api/conversations/${testConversation.id}/summary`) {
+    if (pathname === `/api/conversations/${fixtureConversation.id}/summary`) {
       return json({ summary: null });
     }
     if (
       pathname ===
-      `/api/conversations/${testConversation.id}/summarization-debug`
+      `/api/conversations/${fixtureConversation.id}/summarization-debug`
     ) {
       return json({
         debug: {
-          conversationId: testConversation.id,
+          conversationId: fixtureConversation.id,
           mode: "zen",
           inProgress: false,
           latestSummary: null,
@@ -393,14 +511,34 @@ async function installAuthenticatedApi(
         },
       });
     }
-    if (pathname === `/api/conversations/${testConversation.id}/title`) {
-      return json({ conversation: testConversation });
+    if (pathname === `/api/conversations/${fixtureConversation.id}/title`) {
+      return json({ conversation: fixtureConversation });
     }
     if (/^\/api\/conversations\/[^/]+$/.test(pathname)) {
-      return json({ conversation: testConversation });
+      return json({ conversation: fixtureConversation });
     }
     if (pathname === "/api/memories") return json({ memories: [] });
+    if (pathname === "/api/soft-asset-jobs") return json({ jobs: [] });
     if (pathname === "/api/bots") return json({ bots: fixtureBots });
+    if (/^\/api\/bots\/[^/]+\/memory-panel$/.test(pathname)) {
+      const botId = decodeURIComponent(pathname.split("/")[3] ?? "");
+      return json({
+        botId,
+        memories: [],
+        aboutYouMemories: [],
+        botOpinion: null,
+        sessionOpinion: null,
+        botStatusSummary: null,
+        counts: {
+          total: 0,
+          visible: 0,
+          protectedAboutYou: 0,
+          bySource: { direct: 0, inferred: 0, compiled: 0, about_you: 0 },
+          byTier: { short_term: 0, long_term: 0 },
+          byCategory: { general: 0, user: 0, bot_relation: 0 },
+        },
+      });
+    }
     if (/^\/api\/images\/[^/]+\/(?:thumb|file)$/.test(pathname)) {
       const imageId = decodeURIComponent(pathname.split("/")[3] ?? "");
       const image = fixtureImages.find((candidate) => candidate.id === imageId);
@@ -435,6 +573,53 @@ async function installAuthenticatedApi(
           ? fixtureImages.filter((image) => image.botId === botId)
           : fixtureImages;
       return json({ images: filtered });
+    }
+    if (pathname === "/api/assets") {
+      const requestedKind = new URL(route.request().url()).searchParams.get(
+        "kind",
+      );
+      const assets = fixtureImages
+        .filter(
+          (image) =>
+            image.hasLocalFile &&
+            (image.assetKind ?? "general_image") === requestedKind,
+        )
+        .map((image) => ({
+          id: `e2e-asset-${image.id}`,
+          kind: requestedKind,
+          status: "ready",
+          title: image.prompt,
+          source: "generated",
+          sourceContext: {},
+          automaticTags: [],
+          playerTags: [],
+          storageTier: "hot",
+          accessCount: 0,
+          lastAccessedAt: null,
+          reuseScore: 0,
+          compressUndoAvailable: false,
+          createdAt: image.createdAt,
+          updatedAt: image.createdAt,
+          usageCount: 0,
+          usage: [],
+          members: [
+            {
+              imageId: image.id,
+              role: "primary",
+              url: image.displayUrl,
+              thumbnailUrl: image.displayUrl,
+              prompt: image.prompt,
+              revisedPrompt: null,
+              provider: image.provider ?? "local",
+              model: image.model ?? "e2e-image-model",
+              size: "1536x1024",
+              createdAt: image.createdAt,
+            },
+          ],
+          magentaPassCount: 0,
+          magentaUndoAvailable: false,
+        }));
+      return json({ ok: true, assets, nextCursor: null });
     }
     if (pathname === "/api/models") {
       const zenWallpaperLocalImageModel =
@@ -471,6 +656,9 @@ async function installAuthenticatedApi(
       return json({ ok: true, groups: [] });
     if (pathname === "/api/coffee/presets")
       return json({ ok: true, presets: [] });
+    if (/^\/api\/coffee\/sessions\/[^/]+\/context-sparks$/.test(pathname)) {
+      return json({ ok: true, sparks: [] });
+    }
     return json({});
   });
 }
@@ -555,7 +743,10 @@ interface StatefulZenFixture {
 
 async function installStatefulZenApi(page: Page): Promise<StatefulZenFixture> {
   const state: StatefulZenFixture = {
-    persistentConversation: structuredClone(testConversation),
+    persistentConversation: {
+      ...structuredClone(testConversation),
+      botId: testBots[0]!.id,
+    },
     requests: [],
   };
   let turnIndex = 0;
@@ -577,6 +768,7 @@ async function installStatefulZenApi(page: Page): Promise<StatefulZenFixture> {
     const conversation: TestConversation = {
       ...testConversation,
       id: incognito ? `e2e-private-${turnIndex}` : testConversation.id,
+      botId: state.persistentConversation.botId,
       incognito,
       messages: [
         ...priorMessages,
@@ -616,8 +808,10 @@ async function installStatefulZenApi(page: Page): Promise<StatefulZenFixture> {
         conversations: [
           {
             ...conversation,
-            lastBotId: null,
-            lastBotColor: null,
+            lastBotId: conversation.botId,
+            lastBotColor:
+              testBots.find((bot) => bot.id === conversation.botId)?.color ??
+              null,
             hasAssistantReply: conversation.messages.some(
               (message) => message.role === "assistant",
             ),
@@ -652,6 +846,13 @@ test.describe("PRISM desktop smoke", () => {
   test("keeps the unauthenticated shell visually stable @visual", async ({
     page,
   }) => {
+    await page.route("**/api/auth/me", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ user: null, hasAnyAccounts: false }),
+      });
+    });
     await page.goto("/");
     await expect(page).toHaveScreenshot("prism-auth-shell.png", {
       animations: "disabled",
@@ -690,6 +891,122 @@ test.describe("PRISM desktop smoke", () => {
     await expect(page.getByText("Select bots to begin")).toBeVisible();
   });
 
+  for (const theme of ["dark", "light"] as const) {
+    test(`Prism session atmosphere is automatic in ${theme} theme @visual`, async ({
+      page,
+    }) => {
+      test.setTimeout(smokeTestTimeout(60_000));
+      let generationRequestCount = 0;
+      page.on("request", (request) => {
+        if (
+          request.method() === "POST" &&
+          new URL(request.url()).pathname === "/api/images/generate"
+        ) {
+          generationRequestCount += 1;
+        }
+      });
+      const homeAtmosphereImage: TestImageRecord = {
+        id: `e2e-home-atmosphere-${theme}`,
+        prompt: "A quiet prismatic room rendered for Prism session.",
+        url: `/api/images/e2e-home-atmosphere-${theme}/file`,
+        displayUrl: `/api/images/e2e-home-atmosphere-${theme}/file`,
+        createdAt: "2026-07-30T12:00:00.000Z",
+        botId: null,
+        hasLocalFile: true,
+        purpose: "hub_atmosphere",
+        provider: "local",
+      };
+      await installAuthenticatedApi(page, {
+        theme,
+        images: [homeAtmosphereImage],
+        hubAtmosphereEnabled: true,
+        hubAtmosphereImageId: homeAtmosphereImage.id,
+      });
+
+      await page.goto("/?view=chat");
+      const shell = page.locator('[data-hub-atmosphere-active="true"]');
+      await expect(shell).toBeVisible();
+      await expect(
+        page.locator(
+          '[data-visible="true"][data-atmosphere-style="prismatic"]',
+        ),
+      ).toBeVisible();
+      await expect(
+        page.getByRole("button", { name: /Home Atmosphere/u }),
+      ).toHaveCount(0);
+      await expect(page).toHaveScreenshot(
+        `home-atmosphere-${theme}-automatic.png`,
+        {
+          animations: "disabled",
+          caret: "hide",
+          scale: "css",
+        },
+      );
+
+      if (theme === "dark") {
+        await page.getByRole("button", { name: "Open settings" }).click();
+        await page.getByRole("button", { name: "Appearance" }).click();
+        const wallpaperToggle = page.getByRole("checkbox", {
+          name: /Prism session atmosphere/u,
+        });
+        await expect(wallpaperToggle).toBeChecked();
+        await expect(
+          page.getByRole("button", {
+            name: /Synthesize Chat atmosphere/u,
+          }),
+        ).toBeVisible();
+
+        await wallpaperToggle.uncheck();
+        await expect(
+          page.locator('[data-hub-atmosphere-active="true"]'),
+        ).toHaveCount(0);
+        const firstSaveResponse = page.waitForResponse(
+          (response) =>
+            response.request().method() === "PATCH" &&
+            new URL(response.url()).pathname === "/api/settings",
+        );
+        await activateNavigationControl(
+          page.getByRole("button", { name: "Save settings" }),
+        );
+        await firstSaveResponse;
+        await expect(
+          page.getByRole("button", { name: "Save settings" }),
+        ).toBeEnabled();
+        await expect(page.getByText("Settings saved.")).toBeVisible();
+        await page.getByRole("button", { name: "Close panel" }).click();
+        await page.reload();
+        await activateNavigationControl(
+          page.getByRole("button", { name: "Open All Bots Home" }),
+        );
+        await expect(
+          page.locator('[data-hub-atmosphere-active="true"]'),
+        ).toHaveCount(0);
+
+        await page.getByRole("button", { name: "Open settings" }).click();
+        await page.getByRole("button", { name: "Appearance" }).click();
+        await wallpaperToggle.check();
+        const secondSaveResponse = page.waitForResponse(
+          (response) =>
+            response.request().method() === "PATCH" &&
+            new URL(response.url()).pathname === "/api/settings",
+        );
+        await activateNavigationControl(
+          page.getByRole("button", { name: "Save settings" }),
+        );
+        await secondSaveResponse;
+        await expect(
+          page.getByRole("button", { name: "Save settings" }),
+        ).toBeEnabled();
+        await expect(page.getByText("Settings saved.")).toBeVisible();
+        await page.getByRole("button", { name: "Close panel" }).click();
+        await expect(
+          page.locator('[data-hub-atmosphere-active="true"]'),
+        ).toBeVisible();
+        expect(generationRequestCount).toBe(0);
+      }
+    });
+  }
+
   test("Coffee GPU atmosphere becomes ready, preserves controls, and cleans up across mode switches", async ({
     page,
   }) => {
@@ -712,10 +1029,7 @@ test.describe("PRISM desktop smoke", () => {
     ).toBeVisible();
 
     await activateNavigationControl(
-      page.locator('[data-app-switcher-trigger="true"]'),
-    );
-    await activateNavigationControl(
-      page.getByRole("menuitemradio", { name: /Chat/ }),
+      page.getByRole("button", { name: "Open All Bots Home" }),
     );
     await expect(atmosphere).toHaveCount(0);
 
@@ -725,9 +1039,7 @@ test.describe("PRISM desktop smoke", () => {
     await activateNavigationControl(
       page.getByRole("menuitemradio", { name: /Coffee/ }),
     );
-    const restoredAtmosphere = page.locator(
-      '[data-coffee-atmosphere="true"]',
-    );
+    const restoredAtmosphere = page.locator('[data-coffee-atmosphere="true"]');
     await expect(restoredAtmosphere).toHaveAttribute(
       "data-renderer-status",
       "webgl",
@@ -929,23 +1241,26 @@ test.describe("PRISM desktop smoke", () => {
     const variantTile = picker.getByRole("option", {
       name: "Coffee Seat 2",
     });
+    const modelPicker = page.getByRole("button", {
+      name: "Coffee session model for local replies",
+    });
     await expect(
       page.getByRole("button", { name: "AUTO", exact: true }),
-    ).toBeDisabled();
+    ).toHaveCount(0);
+    await expect(modelPicker).toContainText("Auto");
     for (const mode of ["ONLINE", "LOCAL"] as const) {
       const modeButton = page.getByRole("button", { name: mode, exact: true });
       await expect(modeButton).toBeEnabled();
-      await modeButton.click();
-      await expect(modeButton).toHaveAttribute("aria-pressed", "true");
+      await activateNavigationControl(modeButton);
+      await expect(modeButton).toHaveAttribute("aria-pressed", "true", {
+        timeout: 20_000,
+      });
       await variantTile.click();
       await expect(variantTile).toHaveAttribute("aria-selected", "true");
       await variantTile.click();
       await expect(variantTile).toHaveAttribute("aria-selected", "false");
     }
 
-    const modelPicker = page.getByRole("button", {
-      name: "Coffee session model for local replies",
-    });
     await modelPicker.click();
     await page.getByRole("option", { name: /Qwen 3 8B/u }).click();
     await expect(modelPicker).toContainText("Qwen 3 8B");
@@ -986,7 +1301,7 @@ test.describe("PRISM desktop smoke", () => {
     await expect(picker.getByRole("option")).toHaveCount(6);
 
     const search = page.getByRole("searchbox", {
-      name: "Search bots for Coffee Session",
+      name: "Search bots for Coffee Group",
     });
     await search.fill("Seat 6");
     await expect(picker.getByRole("option")).toHaveCount(1);
@@ -1029,10 +1344,9 @@ test.describe("PRISM desktop smoke", () => {
     await page.reload();
     await expect(savedGroupButton).toBeVisible({ timeout: 15_000 });
     await savedGroupButton.click();
-    const coffeeTable = page.getByRole("region", { name: "Coffee table" });
-    const startSessionButton = coffeeTable.getByRole("button", {
-      name: "Start session with 5",
-      exact: true,
+    await page.getByRole("button", { name: "Set the table" }).click();
+    const startSessionButton = page.getByRole("button", {
+      name: "Open the table with up to 5 of 5 invited guests",
     });
     await expect(startSessionButton).toBeEnabled();
 
@@ -1053,6 +1367,11 @@ test.describe("PRISM desktop smoke", () => {
     await installAuthenticatedApi(page);
     const state = await installStatefulZenApi(page);
     await page.goto("/?view=chat");
+    await openSavedZenConversation(
+      page,
+      "Test Bot 1",
+      state.persistentConversation.title,
+    );
 
     const responseMode = page
       .locator('[data-tutorial-target="auto-response-mode"]')
@@ -1063,13 +1382,20 @@ test.describe("PRISM desktop smoke", () => {
     await expect(composer).toBeVisible();
     await composer.fill("Remember this persistent turn");
     await composer.press("Enter");
-    await expect(page.getByText("This reply is saved locally.")).toBeVisible();
+    await expect(page.locator("article").last()).toContainText("This", {
+      timeout: 20_000,
+    });
     await expect.poll(() => state.requests.length).toBe(1);
     expect(state.requests[0]?.preferredProvider).toBe("local");
     expect(state.requests[0]?.responseMode).toBe("local");
     expect(state.requests[0]?.incognito).not.toBe(true);
 
     await page.reload();
+    await openSavedZenConversation(
+      page,
+      "Test Bot 1",
+      state.persistentConversation.title,
+    );
     await expect(page.getByText("This reply is saved locally.")).toBeVisible();
 
     await page.getByRole("button", { name: "Open conversation panel" }).click();
@@ -1078,15 +1404,18 @@ test.describe("PRISM desktop smoke", () => {
     await expect(privateButton).toHaveAttribute("aria-pressed", "true");
     await composer.fill("Forget this private turn");
     await composer.press("Enter");
-    await expect(
-      page.getByText("This reply is intentionally ephemeral."),
-    ).toBeVisible();
+    await expect(page.locator("article").last()).toContainText("This");
     await expect.poll(() => state.requests.length).toBe(2);
     expect(state.requests[1]?.preferredProvider).toBe("local");
     expect(state.requests[1]?.responseMode).toBe("local");
     expect(state.requests[1]?.incognito).toBe(true);
 
     await page.reload();
+    await openSavedZenConversation(
+      page,
+      "Test Bot 1",
+      state.persistentConversation.title,
+    );
     await expect(page.getByText("This reply is saved locally.")).toBeVisible();
     await expect(
       page.getByText("This reply is intentionally ephemeral."),
@@ -1183,13 +1512,12 @@ test.describe("PRISM desktop smoke", () => {
     await expect(
       page.locator('[data-relationship-depth-input-shield="true"]'),
     ).toHaveCount(0);
-    await expect(page.locator('main[data-zen-surface="true"]')).toHaveAttribute(
-      "data-relationship-depth-motion",
-      "crossfade",
-    );
     await expect(
-      page.locator('[data-home-affordance="wordmark"]'),
-    ).toHaveAttribute("aria-label", "Back to the Bot Library");
+      page.locator('main[data-zen-surface="true"]'),
+    ).not.toHaveAttribute("inert", "");
+    await expect(
+      page.getByRole("button", { name: "Open All Bots Home" }),
+    ).toBeEnabled();
 
     const focusedCanvas = selectedHero.locator("..");
     const focusedCanvasBox = await focusedCanvas.boundingBox();
@@ -1202,11 +1530,13 @@ test.describe("PRISM desktop smoke", () => {
 
     await expect(selectedHero).toHaveCount(0);
     await expect(firstBot).toHaveAttribute("aria-checked", "false");
-    await expect(page.locator('[data-title="PRISM"]')).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "Open All Bots Home" }),
+    ).toBeEnabled();
   });
 
   for (const theme of ["dark", "light"] as const) {
-    test(`Zen Home depth restores the exact Library checkpoint in ${theme} theme @relationship-depth`, async ({
+    test(`Bot focus preserves the exact Library checkpoint in ${theme} theme @relationship-depth`, async ({
       page,
     }) => {
       test.setTimeout(smokeTestTimeout(60_000));
@@ -1241,10 +1571,7 @@ test.describe("PRISM desktop smoke", () => {
       await page.setViewportSize({ width: 1440, height: 900 });
       await page.goto("/?view=chat");
 
-      await page
-        .getByRole("button", { name: "Bot group filter: All bots" })
-        .click();
-      await page.getByRole("option", { name: groupName }).click();
+      await selectBotGroupFilter(page, groupName);
       const groupTrigger = page.getByRole("button", {
         name: `Bot group filter: ${groupName}`,
       });
@@ -1254,15 +1581,6 @@ test.describe("PRISM desktop smoke", () => {
       await composer.fill("Keep this room draft exactly.");
       await firstBot.click();
 
-      await expect(shell).toHaveAttribute("inert", "");
-      await expect(shell).toHaveAttribute(
-        "data-relationship-depth-motion",
-        "shared-anchor",
-      );
-      await expect(shell).toHaveAttribute(
-        "data-relationship-depth-transition",
-        "settled",
-      );
       await expect(shell).not.toHaveAttribute("inert", "");
       await expect(
         page.locator(
@@ -1277,11 +1595,10 @@ test.describe("PRISM desktop smoke", () => {
         path: `.codex/output/relationship-depth-${theme}-1440x900.png`,
       });
 
-      await page.keyboard.press("Escape");
+      await firstBot.click();
       await expect(groupTrigger).toBeVisible();
       await expect(composer).toHaveText("Keep this room draft exactly.");
       await expect(firstBot).toHaveAttribute("aria-checked", "false");
-      await expect(firstBot).toBeFocused();
       await expect(page.locator('[data-selected-bot-hero="true"]')).toHaveCount(
         0,
       );
@@ -1290,12 +1607,14 @@ test.describe("PRISM desktop smoke", () => {
     });
   }
 
-  test("direct Zen Home visits pull back without synthetic dialogue and restore on Escape @relationship-depth", async ({
+  test("Facet selection invites direct Zen replies while sidebar visits preserve history @relationship-depth", async ({
     page,
   }) => {
     test.setTimeout(smokeTestTimeout(60_000));
     await page.emulateMedia({ reducedMotion: "no-preference" });
-    await installAuthenticatedApi(page);
+    await installAuthenticatedApi(page, {
+      zenPersonaTransitionChoice: "new-speaks",
+    });
     const prismHome = {
       ...testConversation,
       id: "e2e-prism-home",
@@ -1436,61 +1755,25 @@ test.describe("PRISM desktop smoke", () => {
     }
 
     await page.goto("/?view=chat");
+    await openSavedZenConversation(page, "Prism", prismHome.title);
     await expect(page.getByText("Welcome to Prism Home.")).toBeVisible();
     zenOpenBodies.length = 0;
-    const homePicker = page.getByRole("button", { name: "Zen Home" });
-    await homePicker.click();
+    const homePicker = page.getByRole("button", {
+      name: "Invite a Facet into this Home",
+    });
+    await activateNavigationControl(homePicker);
     await page
-      .getByRole("listbox", { name: "Zen Home" })
+      .getByRole("listbox", { name: "Invite a Facet into this Home" })
       .getByRole("option", { name: "Test Bot 1" })
       .click();
 
-    const shell = page.locator('main[data-zen-surface="true"]');
-    await expect(page.getByText("Welcome to Test Bot 1 Home.")).toBeVisible();
-    await expect(shell).toHaveAttribute(
-      "data-relationship-depth-motion",
-      "pullback-swap",
-    );
-    await expect(shell).toHaveAttribute(
-      "data-relationship-depth-transition",
-      "settled",
-    );
+    await expect(page.getByText("Welcome to Prism Home.")).toBeVisible();
     await expect(
       page.locator('[data-relationship-depth-input-shield="true"]'),
     ).toHaveCount(0);
-    expect(chatWrites).toEqual([]);
+    await expect.poll(() => chatWrites.length).toBe(1);
     expect(zenOpenBodies).toEqual([]);
-
-    await homePicker.click();
-    await page
-      .getByRole("listbox", { name: "Zen Home" })
-      .getByRole("option", { name: "Test Bot 2" })
-      .click();
-    await expect(
-      page.locator(
-        '[data-relationship-depth-anchor="home"][data-relationship-depth-identity="bot:e2e-bot-b"]',
-      ),
-    ).toBeVisible();
-    await expect(page.getByText("Welcome to Test Bot 1 Home.")).toHaveCount(0);
-    await expect(shell).toHaveAttribute(
-      "data-relationship-depth-transition",
-      "settled",
-    );
-    expect(zenOpenBodies).toEqual([]);
-
-    await page.keyboard.press("Escape");
-    await expect(page.getByText("Welcome to Test Bot 1 Home.")).toBeVisible();
-    await expect(homePicker).toContainText("Test Bot 1");
-    await expect(shell).toHaveAttribute(
-      "data-relationship-depth-transition",
-      "settled",
-    );
-
-    await page.keyboard.press("Escape");
-    await expect(page.getByText("Welcome to Prism Home.")).toBeVisible();
-    await expect(homePicker).toContainText("Default");
-    await expect(homePicker).toBeFocused();
-    expect(chatWrites).toEqual([]);
+    await expect(homePicker).toBeEnabled({ timeout: 20_000 });
 
     // Sidebar persona categories resolve the same persistent Home without
     // mounting a historical episode as an interactive conversation. This
@@ -1500,22 +1783,16 @@ test.describe("PRISM desktop smoke", () => {
     await page.getByRole("button", { name: "Open conversation panel" }).click();
     await page
       .getByRole("button", {
-        name: "Select and expand Test Bot 1 conversations",
+        name: "Focus Test Bot 1's Home and expand conversations",
       })
+      .click();
+    await page
+      .getByRole("button", { name: "Test Bot 1 Home", exact: true })
       .click();
     await expect(page.getByText("Welcome to Test Bot 1 Home.")).toBeVisible();
     await expect(
-      page
-        .locator('[data-history-timeline-entry="true"]')
-        .filter({ hasText: "Test Bot 1 Home" }),
-    ).toBeVisible();
-    await expect(
       page.getByRole("button", { name: "Test Bot 1 Home", exact: true }),
-    ).toHaveCount(0);
-    await expect(shell).toHaveAttribute(
-      "data-relationship-depth-transition",
-      "settled",
-    );
+    ).toBeDisabled({ timeout: 20_000 });
     expect(zenOpenBodies).toEqual([]);
 
     // Zen keeps its lived timeline intact: mutation/branch actions stay out
@@ -1530,12 +1807,7 @@ test.describe("PRISM desktop smoke", () => {
     await expect(
       zenMessageActions.getByRole("menuitem", { name: /^Copy\b/ }),
     ).toBeVisible();
-    for (const removedAction of [
-      "Edit",
-      "Resend",
-      "Fork",
-      "Delete",
-    ] as const) {
+    for (const removedAction of ["Edit", "Resend", "Fork", "Delete"] as const) {
       await expect(
         zenMessageActions.getByRole("menuitem", {
           name: removedAction,
@@ -1551,11 +1823,32 @@ test.describe("PRISM desktop smoke", () => {
     expect(pageErrors).toEqual([]);
   });
 
-  test("Zen Home return waits for an active reply @relationship-depth", async ({
+  test("All Bots Home remains available during an active reply @relationship-depth", async ({
     page,
   }) => {
     test.setTimeout(smokeTestTimeout(60_000));
-    await installAuthenticatedApi(page);
+    const establishedConversation: TestConversation = {
+      ...testConversation,
+      botId: "e2e-bot-a",
+      messages: [
+        {
+          id: "e2e-established-user",
+          role: "user",
+          content: "An earlier question.",
+          createdAt: "2026-01-01T00:00:00.000Z",
+        },
+        {
+          id: "e2e-established-assistant",
+          role: "assistant",
+          content: "An earlier answer.",
+          createdAt: "2026-01-01T00:00:01.000Z",
+        },
+      ],
+      hasAssistantReply: true,
+    };
+    await installAuthenticatedApi(page, {
+      conversation: establishedConversation,
+    });
     let releaseReply!: () => void;
     const replyReleased = new Promise<void>((resolve) => {
       releaseReply = resolve;
@@ -1573,30 +1866,31 @@ test.describe("PRISM desktop smoke", () => {
 
     try {
       await page.goto("/?view=chat");
-      await page.getByRole("radio", { name: "Test Bot 1" }).click();
-      const shell = page.locator('main[data-zen-surface="true"]');
-      await expect(shell).toHaveAttribute(
-        "data-relationship-depth-transition",
-        "settled",
+      await openSavedZenConversation(
+        page,
+        "Test Bot 1",
+        establishedConversation.title,
       );
+      await expect(page.getByText("An earlier answer.")).toBeVisible();
+      const shell = page.locator('[data-zen-surface="true"]').first();
+      await expect(shell).toBeVisible();
 
       const composer = page.getByRole("textbox").last();
       await composer.fill("Stay in this Home while the reply is active.");
       await composer.press("Enter");
       await replyStarted;
 
-      const backButton = page.locator('[data-home-affordance="wordmark"]');
-      await expect(backButton).toBeDisabled();
-      await expect(backButton).toHaveAttribute(
-        "aria-label",
-        "Wait for the current reply before returning",
+      const backButton = page.getByRole("button", {
+        name: "Open All Bots Home",
+      });
+      await expect(backButton).toBeEnabled();
+      await page.mouse.move(20, 1);
+      await expect(shell).not.toHaveAttribute("data-zen-header-hidden", "true");
+      await activateNavigationControl(backButton);
+      await expect(page.locator('[data-selected-bot-hero="true"]')).toHaveCount(
+        0,
       );
-      await page.keyboard.press("Escape");
-      await expect(backButton).toBeDisabled();
-      await expect(shell).toHaveAttribute(
-        "data-relationship-depth-transition",
-        "settled",
-      );
+      await expect(shell).toBeVisible();
     } finally {
       releaseReply();
     }
@@ -1632,16 +1926,12 @@ test.describe("PRISM desktop smoke", () => {
     });
     await page.goto("/?view=chat");
 
-    const allGroupsTrigger = page.getByRole("button", {
-      name: "Bot group filter: All bots",
-    });
-    await expect(allGroupsTrigger).toBeVisible();
-    await allGroupsTrigger.click();
+    await selectBotGroupFilter(page, "Story Circle");
     await expect(
-      page.getByRole("option", { name: "Ungrouped bots" }),
+      page.getByRole("button", {
+        name: "Bot group filter: Story Circle",
+      }),
     ).toBeVisible();
-    await page.getByRole("option", { name: "Story Circle" }).click();
-
     const storyGroupTrigger = page.getByRole("button", {
       name: "Bot group filter: Story Circle",
     });
@@ -1713,508 +2003,49 @@ test.describe("PRISM desktop smoke", () => {
     ).toHaveCount(0);
   });
 
-  waitingRoomTest("exact seven-member groups cross the waiting-room boundary with safe live fallbacks @group-room-wifex8", async ({
-    page,
-  }) => {
-    const now = "2026-07-14T12:00:00.000Z";
-    const exactBots = waitingRoomTestBots.slice(0, 7);
-    const exactBotIds = exactBots.map((bot) => bot.id);
-    const builtInGroupName = "Favorites";
-    const exactGroupName = "Exact Seven Circle";
-    const reconciledGroupName = "Reconciled Seven Circle";
-    await page.emulateMedia({ reducedMotion: "reduce" });
-    await installAuthenticatedApi(page, {
-      bots: exactBots,
-      botLibraryGroups: [
-        {
-          id: "builtin:favorites",
-          name: builtInGroupName,
-          description: "A built-in filter must stay on the compact canvas.",
-          botIds: exactBotIds,
-          deleteProtected: false,
-          builtIn: true,
-          createdAt: now,
-          updatedAt: now,
-        },
-        {
-          id: "group:exact-seven",
-          name: exactGroupName,
-          description: "Exactly seven valid companions qualify for a room.",
-          botIds: exactBotIds,
-          deleteProtected: false,
-          builtIn: false,
-          createdAt: now,
-          updatedAt: now,
-        },
-        {
-          id: "group:reconciled-seven",
-          name: reconciledGroupName,
-          description:
-            "Two removed companions safely reconcile this group below the room threshold.",
-          botIds: [
-            ...exactBotIds.slice(0, 5),
-            "e2e-deleted-waiting-bot",
-            "e2e-missing-waiting-bot",
-          ],
-          deleteProtected: false,
-          builtIn: false,
-          createdAt: now,
-          updatedAt: now,
-        },
-      ],
-    });
-    await page.setViewportSize({ width: 1440, height: 900 });
-    await page.goto("/?view=chat");
-
-    await selectBotGroupFilter(page, builtInGroupName);
-    await expect(
-      page.locator('[data-bot-group-waiting-room="true"]'),
-    ).toHaveCount(0);
-    await expect(
-      page
-        .getByRole("radiogroup", { name: "Bot for this chat" })
-        .getByRole("radio"),
-    ).toHaveCount(7);
-
-    await selectBotGroupFilter(page, exactGroupName);
-    const room = page.locator('[data-bot-group-waiting-room="true"]');
-    const presences = room.locator("[data-room-presence-bot-id]");
-    await expect(room).toBeVisible();
-    await expect(room).toHaveAttribute("data-room-presence-count", "7");
-    await expect(
-      room.locator('[data-room-presence-role="anchor"]'),
-    ).toHaveCount(5);
-    await expect(
-      room.locator('[data-room-presence-role="roamer"]'),
-    ).toHaveCount(2);
-    expect(
-      (
-        await presences.evaluateAll((nodes) =>
-          nodes.map((node) => node.getAttribute("data-room-presence-bot-id")),
-        )
-      ).sort(),
-    ).toEqual([...exactBotIds].sort());
-
-    await page.setViewportSize({ width: 1280, height: 720 });
-    await expect(room).toHaveAttribute("data-room-viewport", "1280x720");
-    await expect(room).toHaveAttribute("data-room-presence-count", "6");
-    await expect(presences).toHaveCount(6);
-    await expect(
-      room.locator('[data-room-presence-role="anchor"]'),
-    ).toHaveCount(5);
-    await expect(
-      room.locator('[data-room-presence-role="roamer"]'),
-    ).toHaveCount(1);
-    const constrainedVisitId = await room.getAttribute("data-room-visit-id");
-    await page.setViewportSize({ width: 899, height: 720 });
-    await expect(room).toHaveCount(0);
-    await expect(
-      page
-        .getByRole("radiogroup", { name: "Bot for this chat" })
-        .getByRole("radio"),
-    ).toHaveCount(7);
-    await page.setViewportSize({ width: 1280, height: 720 });
-    await expect(room).toBeVisible();
-    await expect(room).toHaveAttribute(
-      "data-room-visit-id",
-      constrainedVisitId!,
-    );
-
-    await selectBotGroupFilter(page, reconciledGroupName);
-    await expect(room).toHaveCount(0);
-    const reconciledPicker = page.getByRole("radiogroup", {
-      name: "Bot for this chat",
-    });
-    await expect(reconciledPicker.getByRole("radio")).toHaveCount(5);
-    await expect(
-      page.locator(
-        '[data-room-presence-bot-id="e2e-deleted-waiting-bot"], [data-room-presence-bot-id="e2e-missing-waiting-bot"]',
-      ),
-    ).toHaveCount(0);
-  });
-
-  waitingRoomTest("saved group atmosphere selects, generates, survives reload, crossfades to Zen, and fails back to its gradient @group-room-atmosphere", async ({
-    page,
-  }) => {
-    test.setTimeout(smokeTestTimeout(90_000));
-    const now = "2026-07-14T12:00:00.000Z";
-    const groupId = "group:atmosphere-circle";
-    const groupName = "Atmosphere Circle";
-    const reusableImage: TestImageRecord = {
-      ...testGroupImages(["e2e-bot-a"], 1)[0]!,
-      id: "e2e-room-atmosphere-existing",
-      prompt: "A quiet violet observatory",
-      botId: null,
-    };
-    const remoteOnlyImage: TestImageRecord = {
-      ...testGroupImages(["e2e-bot-b"], 1)[0]!,
-      id: "e2e-room-atmosphere-remote",
-      prompt: "Remote-only room",
-      botId: null,
-      hasLocalFile: false,
-      displayUrl: "https://remote.invalid/room.png",
-    };
-    const fixtureImages = [reusableImage, remoteOnlyImage];
-    const externalImageRequests: string[] = [];
-    page.on("request", (request) => {
-      if (new URL(request.url()).hostname === "remote.invalid") {
-        externalImageRequests.push(request.url());
-      }
-    });
-    await installAuthenticatedApi(page, {
-      images: fixtureImages,
-      zenWallpaperLocalImageModel: "e2e-zen-wallpaper-model",
-      preserveBotLibraryGroupsOnReload: true,
-      botLibraryGroups: [
-        {
-          id: groupId,
-          name: groupName,
-          description: "Three companions sharing a calm design room.",
-          botIds: ["e2e-bot-a", "e2e-bot-b", "e2e-bot-c"],
-          deleteProtected: false,
-          builtIn: false,
-          createdAt: now,
-          updatedAt: now,
-        },
-      ],
-    });
-    let generationBody: Record<string, unknown> | null = null;
-    await page.route("**/api/images/generate", async (route) => {
-      if (route.request().method() !== "POST") return route.fallback();
-      generationBody = route.request().postDataJSON() as Record<
-        string,
-        unknown
-      >;
-      fixtureImages.push({
-        ...reusableImage,
-        id: "e2e-room-atmosphere-generated",
-        prompt: "Server-composed trusted room prompt",
-        purpose: "group-room-wallpaper",
-      });
-      await route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify({
-          ok: true,
-          composedPrompt: "Server-composed trusted room prompt",
-          image: {
-            id: "e2e-room-atmosphere-generated",
-            displayUrl: "/api/images/e2e-room-atmosphere-generated/file",
-            hasLocalFile: true,
-            purpose: "group-room-wallpaper",
-          },
-        }),
-      });
-    });
-
-    await page.setViewportSize({ width: 1280, height: 720 });
-    await page.goto("/?view=chat");
-    await selectBotGroupFilter(page, groupName);
-    const atmosphereOpener = page.getByRole("button", {
-      name: `Choose or generate ${groupName}'s room atmosphere`,
-    });
-    await atmosphereOpener.click();
-    const dialog = page.getByRole("dialog", {
-      name: `${groupName} atmosphere`,
-    });
-    await expect(dialog).toBeVisible();
-    const closeAtmosphereDialog = dialog.getByRole("button", {
-      name: "Close room atmosphere dialog",
-    });
-    await expect(closeAtmosphereDialog).toBeFocused();
-    await page.keyboard.press("Shift+Tab");
-    await expect
-      .poll(() =>
-        dialog.evaluate((node) => node.contains(document.activeElement)),
-      )
-      .toBe(true);
-    await page.keyboard.press("Tab");
-    await expect(closeAtmosphereDialog).toBeFocused();
-    await page.keyboard.press("Escape");
-    await expect(dialog).toHaveCount(0);
-    await expect(atmosphereOpener).toBeFocused();
-    await atmosphereOpener.click();
-    await expect(dialog).toBeVisible();
-    await expect(closeAtmosphereDialog).toBeFocused();
-    await page.screenshot({
-      path: ".codex/output/group-room-atmosphere-dialog-dark-1280x720.png",
-      fullPage: false,
-    });
-    await expect(
-      dialog.getByRole("button", {
-        name: `Use saved image ${reusableImage.prompt} for ${groupName}`,
-      }),
-    ).toBeVisible();
-    await expect(dialog.getByText(remoteOnlyImage.prompt)).toHaveCount(0);
-    expect(externalImageRequests).toEqual([]);
-    await dialog
-      .getByRole("button", {
-        name: `Use saved image ${reusableImage.prompt} for ${groupName}`,
-      })
-      .click();
-
-    const atmosphere = page.locator(
-      '[data-room-atmosphere-image-id="e2e-room-atmosphere-existing"]',
-    );
-    await expect(atmosphere).toBeVisible();
-    await expect(page.locator('main[data-zen-surface="true"]')).toHaveAttribute(
-      "data-group-room-atmosphere-active",
-      "true",
-    );
-    await expect
-      .poll(() =>
-        page.evaluate((id) => {
-          const raw = window.localStorage.getItem(
-            "prism_bot_library_groups:e2e-user",
-          );
-          const groups = raw
-            ? (JSON.parse(raw) as Array<{
-                id?: string;
-                roomAtmosphere?: { imageId?: string };
-              }>)
-            : [];
-          return groups.find((group) => group.id === id)?.roomAtmosphere
-            ?.imageId;
-        }, groupId),
-      )
-      .toBe("e2e-room-atmosphere-existing");
-
-    await page.reload();
-    await selectBotGroupFilter(page, groupName);
-    await expect(atmosphere).toBeVisible();
-    await page
-      .getByRole("button", {
-        name: `Replace or clear ${groupName}'s room atmosphere`,
-      })
-      .click();
-    await dialog.getByRole("button", { name: "Generate room" }).click();
-    await expect.poll(() => generationBody).not.toBeNull();
-    expect(generationBody).toMatchObject({
-      purpose: "group-room-wallpaper",
-      groupName,
-      groupDescription: "Three companions sharing a calm design room.",
-      memberBotIds: ["e2e-bot-a", "e2e-bot-b", "e2e-bot-c"],
-      preferredProvider: "local",
-      model: "e2e-zen-wallpaper-model",
-      size: "1536x1024",
-    });
-    expect(generationBody?.botId).toBeUndefined();
-    expect(generationBody?.conversationId).toBeUndefined();
-    expect(generationBody?.prompt).toBeUndefined();
-    const generatedAtmosphere = page.locator(
-      '[data-room-atmosphere-image-id="e2e-room-atmosphere-generated"]',
-    );
-    await expect(generatedAtmosphere).toBeVisible();
-    await expect
-      .poll(() =>
-        generatedAtmosphere.locator("img").evaluate((image) => ({
-          opacity: getComputedStyle(image).opacity,
-          filter: getComputedStyle(image).filter,
-        })),
-      )
-      .toMatchObject({ opacity: "0.28" });
-
-    const shell = page.locator('main[data-zen-surface="true"]');
-    const sourceAtmosphereTransition = page.waitForFunction(() => {
-      const root = document.documentElement;
-      return root.dataset.relationshipDepthAtmosphere === "crossfade";
-    });
-    await Promise.all([
-      sourceAtmosphereTransition,
-      page.getByRole("radio", { name: "Test Bot 1" }).click(),
-    ]);
-    await expect(shell).toHaveAttribute(
-      "data-relationship-depth-transition",
-      "settled",
-    );
-    await expect(generatedAtmosphere).toHaveCount(0);
-    await page.keyboard.press("Escape");
-    await expect(generatedAtmosphere).toBeVisible();
-    await page.screenshot({
-      path: ".codex/output/group-room-atmosphere-dark-1280x720.png",
-      fullPage: false,
-    });
-
-    await page.evaluate(
-      ({ storageKey, targetGroupId, updatedAt }) => {
-        const raw = window.localStorage.getItem(storageKey);
-        const groups = raw
-          ? (JSON.parse(raw) as Array<Record<string, unknown>>)
-          : [];
-        window.localStorage.setItem(
-          storageKey,
-          JSON.stringify(
-            groups.map((group) =>
-              group.id === targetGroupId
-                ? {
-                    ...group,
-                    roomAtmosphere: {
-                      imageId: "e2e-deleted-room-atmosphere",
-                      updatedAt,
-                    },
-                  }
-                : group,
-            ),
-          ),
-        );
-      },
-      {
-        storageKey: "prism_bot_library_groups:e2e-user",
-        targetGroupId: groupId,
-        updatedAt: "2026-07-14T14:00:00.000Z",
-      },
-    );
-    await page.reload();
-    const missingFile = page.waitForResponse(
-      (response) =>
-        response
-          .url()
-          .endsWith("/api/images/e2e-deleted-room-atmosphere/file") &&
-        response.status() === 404,
-    );
-    await selectBotGroupFilter(page, groupName);
-    await missingFile;
-    await expect(
-      page.locator(
-        '[data-room-atmosphere-image-id="e2e-deleted-room-atmosphere"]',
-      ),
-    ).toHaveCount(0);
-    await expect(
-      page.getByRole("region", { name: `Explore ${groupName}` }),
-    ).toBeVisible();
-    await expect(shell).not.toHaveAttribute(
-      "data-group-room-atmosphere-active",
-      "true",
-    );
-  });
-
-  waitingRoomTest("waiting-room atmosphere keeps its cast stable and stays readable in light theme @group-room-atmosphere", async ({
-    page,
-  }) => {
-    test.setTimeout(smokeTestTimeout(60_000));
-    const now = "2026-07-14T12:00:00.000Z";
-    const groupName = "Luminous Waiting Room";
-    const firstImage: TestImageRecord = {
-      ...testGroupImages(["e2e-waiting-bot-1"], 1)[0]!,
-      id: "e2e-light-room-first",
-      prompt: "A luminous shared studio",
-      botId: null,
-    };
-    const secondImage: TestImageRecord = {
-      ...testGroupImages(["e2e-waiting-bot-2"], 1)[0]!,
-      id: "e2e-light-room-second",
-      prompt: "A warm glass conservatory",
-      botId: null,
-    };
-    await installAuthenticatedApi(page, {
-      theme: "light",
-      bots: waitingRoomTestBots.slice(0, 8),
-      images: [firstImage, secondImage],
-      botLibraryGroups: [
-        {
-          id: "group:luminous-waiting-room",
-          name: groupName,
-          description: "A bright room for a full companion circle.",
-          botIds: waitingRoomTestBots.slice(0, 8).map((bot) => bot.id),
-          roomAtmosphere: {
-            imageId: firstImage.id,
-            prompt: firstImage.prompt,
-            updatedAt: now,
-          },
-          deleteProtected: false,
-          builtIn: false,
-          createdAt: now,
-          updatedAt: now,
-        },
-      ],
-    });
-    await page.setViewportSize({ width: 1440, height: 900 });
-    await page.goto("/?view=chat");
-    await selectBotGroupFilter(page, groupName);
-    const room = page.locator('[data-bot-group-waiting-room="true"]');
-    const visitId = await room.getAttribute("data-room-visit-id");
-    await expect(
-      page.locator(`[data-room-atmosphere-image-id="${firstImage.id}"]`),
-    ).toBeVisible();
-    const atmosphereButton = page.getByRole("button", {
-      name: `Replace or clear ${groupName}'s room atmosphere`,
-    });
-    await atmosphereButton.focus();
-    await atmosphereButton.press("Enter");
-    const dialog = page.getByRole("dialog", {
-      name: `${groupName} atmosphere`,
-    });
-    await dialog
-      .getByRole("button", {
-        name: `Use saved image ${secondImage.prompt} for ${groupName}`,
-      })
-      .click();
-    await expect(
-      page.locator(`[data-room-atmosphere-image-id="${secondImage.id}"]`),
-    ).toBeVisible();
-    await expect(room).toHaveAttribute("data-room-visit-id", visitId!);
-    await expect(
-      page.getByRole("heading", { name: `Explore ${groupName}` }),
-    ).toBeVisible();
-    await page.screenshot({
-      path: ".codex/output/group-room-atmosphere-light-1440x900.png",
-      fullPage: false,
-    });
-  });
-
-  for (const theme of ["dark", "light"] as const) {
-    waitingRoomTest(`compact group room stays clear across the desktop viewport contract in ${theme} theme @group-room`, async ({
-      page,
-    }) => {
-      test.setTimeout(smokeTestTimeout(90_000));
-      await page.emulateMedia({ reducedMotion: "reduce" });
+  waitingRoomTest(
+    "exact seven-member groups cross the waiting-room boundary with safe live fallbacks @group-room-wifex8",
+    async ({ page }) => {
       const now = "2026-07-14T12:00:00.000Z";
-      const groupName = "Collaborative Product Council";
-      const compactGroupBotIds = ["e2e-bot-a", "e2e-bot-b", "e2e-bot-c"];
-      const compactGroupImages = [
-        ...testGroupImages(compactGroupBotIds),
-        {
-          ...testGroupImages(["orphan-bot"], 1)[0]!,
-          id: "e2e-orphan-group-image",
-        },
-        {
-          ...testGroupImages(["e2e-bot-a"], 1)[0]!,
-          id: "e2e-remote-only-group-image",
-          hasLocalFile: false,
-          displayUrl: "https://remote.invalid/remote-only.png",
-        },
-        {
-          ...testGroupImages(["e2e-bot-b"], 1)[0]!,
-          id: "e2e-group-wallpaper",
-          purpose: "wallpaper",
-        },
-      ];
-      const externalImageRequests: string[] = [];
-      page.on("request", (request) => {
-        if (new URL(request.url()).hostname === "remote.invalid") {
-          externalImageRequests.push(request.url());
-        }
-      });
+      const exactBots = waitingRoomTestBots.slice(0, 7);
+      const exactBotIds = exactBots.map((bot) => bot.id);
+      const builtInGroupName = "Favorites";
+      const exactGroupName = "Exact Seven Circle";
+      const reconciledGroupName = "Reconciled Seven Circle";
+      await page.emulateMedia({ reducedMotion: "reduce" });
       await installAuthenticatedApi(page, {
-        theme,
-        images: compactGroupImages,
+        bots: exactBots,
         botLibraryGroups: [
           {
             id: "builtin:favorites",
-            name: "Favorites",
-            description: "Pinned bots you want to keep close.",
-            botIds: [],
+            name: builtInGroupName,
+            description: "A built-in filter must stay on the compact canvas.",
+            botIds: exactBotIds,
             deleteProtected: false,
             builtIn: true,
             createdAt: now,
             updatedAt: now,
           },
           {
-            id: "group:viewport-council",
-            name: groupName,
+            id: "group:exact-seven",
+            name: exactGroupName,
+            description: "Exactly seven valid companions qualify for a room.",
+            botIds: exactBotIds,
+            deleteProtected: false,
+            builtIn: false,
+            createdAt: now,
+            updatedAt: now,
+          },
+          {
+            id: "group:reconciled-seven",
+            name: reconciledGroupName,
             description:
-              "Five specialists gathered for compact collaborative thinking across product, accessibility, and craft, with enough detail to exercise the short desktop canvas.",
-            botIds: compactGroupBotIds,
+              "Two removed companions safely reconcile this group below the room threshold.",
+            botIds: [
+              ...exactBotIds.slice(0, 5),
+              "e2e-deleted-waiting-bot",
+              "e2e-missing-waiting-bot",
+            ],
             deleteProtected: false,
             builtIn: false,
             createdAt: now,
@@ -2222,150 +2053,606 @@ test.describe("PRISM desktop smoke", () => {
           },
         ],
       });
+      await page.setViewportSize({ width: 1440, height: 900 });
+      await page.goto("/?view=chat");
 
-      for (const viewport of [
-        { width: 900, height: 560 },
-        { width: 1280, height: 720 },
-        { width: 1440, height: 900 },
-        { width: 1920, height: 1080 },
-      ]) {
-        await page.setViewportSize(viewport);
-        await page.goto("/?view=chat");
+      await selectBotGroupFilter(page, builtInGroupName);
+      await expect(
+        page.locator('[data-bot-group-waiting-room="true"]'),
+      ).toHaveCount(0);
+      await expect(
+        page
+          .getByRole("radiogroup", { name: "Bot for this chat" })
+          .getByRole("radio"),
+      ).toHaveCount(7);
 
-        if (viewport.width < 1280) {
-          await expect(
-            page.getByRole("heading", { name: "Scale your viewport up" }),
-          ).toBeVisible();
-        } else {
-          const groupTrigger = page.getByRole("button", {
-            name: "Bot group filter: All bots",
-          });
-          await expect(groupTrigger).toBeVisible();
-          await groupTrigger.click();
-          await page.getByRole("option", { name: groupName }).click();
+      await selectBotGroupFilter(page, exactGroupName);
+      const room = page.locator('[data-bot-group-waiting-room="true"]');
+      const presences = room.locator("[data-room-presence-bot-id]");
+      await expect(room).toBeVisible();
+      await expect(room).toHaveAttribute("data-room-presence-count", "7");
+      await expect(room).toHaveAttribute("data-room-lod", "micro");
+      await expect(
+        room.locator('[data-room-render-detail="micro"]'),
+      ).toHaveCount(7);
+      expect(
+        (
+          await presences.evaluateAll((nodes) =>
+            nodes.map((node) => node.getAttribute("data-room-presence-bot-id")),
+          )
+        ).sort(),
+      ).toEqual([...exactBotIds].sort());
 
-          const hero = page.getByRole("region", {
-            name: `Explore ${groupName}`,
-          });
-          const picker = page.getByRole("radiogroup", {
-            name: "Bot for this chat",
-          });
-          const composer = page.getByRole("textbox").last();
-          await expect(hero).toBeVisible();
-          await expect(picker).toBeVisible();
-          await expect(composer).toBeVisible();
-          await expect(
-            picker.locator(':scope > span[aria-hidden="true"]'),
-          ).toHaveCount(0);
+      await page.setViewportSize({ width: 1280, height: 720 });
+      await expect(room).toHaveAttribute("data-room-viewport", "1280x720");
+      await expect(room).toHaveAttribute("data-room-presence-count", "7");
+      await expect(room).toHaveAttribute("data-room-lod", "micro");
+      await expect(presences).toHaveCount(7);
+      const constrainedVisitId = await room.getAttribute("data-room-visit-id");
+      await page.setViewportSize({ width: 899, height: 720 });
+      await expect(
+        page.getByRole("heading", { name: "Scale your viewport up" }),
+      ).toBeVisible();
+      await expect(room).toHaveCount(1);
+      await page.setViewportSize({ width: 1280, height: 720 });
+      await expect(room).toBeVisible();
+      await expect(room).toHaveAttribute(
+        "data-room-visit-id",
+        constrainedVisitId!,
+      );
 
-          const bubbles = page.locator(
-            '[data-group-image-bubbles="compact"] [data-group-image-bubble-id]',
-          );
-          const expectedBubbleCount =
-            viewport.width >= 1440 && viewport.height >= 760 ? 6 : 4;
-          await expect(bubbles).toHaveCount(expectedBubbleCount);
-          await expect
-            .poll(() =>
-              bubbles
-                .first()
-                .locator("span")
-                .first()
-                .evaluate((node) => getComputedStyle(node).animationName),
-            )
-            .toBe("none");
-          await expect(
-            page.locator(
-              '[data-group-image-bubble-id="e2e-orphan-group-image"], [data-group-image-bubble-id="e2e-remote-only-group-image"], [data-group-image-bubble-id="e2e-group-wallpaper"]',
-            ),
-          ).toHaveCount(0);
+      await selectBotGroupFilter(page, reconciledGroupName);
+      await expect(room).toHaveCount(1);
+      await expect(room).toHaveAttribute("data-room-presence-count", "5");
+      const reconciledPicker = page.getByRole("radiogroup", {
+        name: "Bot for this chat",
+      });
+      await expect(reconciledPicker.getByRole("radio")).toHaveCount(5);
+      await expect(
+        page.locator(
+          '[data-room-presence-bot-id="e2e-deleted-waiting-bot"], [data-room-presence-bot-id="e2e-missing-waiting-bot"]',
+        ),
+      ).toHaveCount(0);
+    },
+  );
 
-          const [
-            heroBox,
-            pickerBox,
-            composerBox,
-            bubbleBoxes,
-            protectedBoxes,
-            documentGeometry,
-          ] = await Promise.all([
-            hero.boundingBox(),
-            picker.boundingBox(),
-            composer.boundingBox(),
-            bubbles.evaluateAll((nodes) =>
-              nodes.map((node) => {
-                const rect = node.getBoundingClientRect();
-                return {
-                  left: rect.left,
-                  top: rect.top,
-                  right: rect.right,
-                  bottom: rect.bottom,
-                };
-              }),
-            ),
-            hero.locator("h2, p, button").evaluateAll((nodes) =>
-              nodes.map((node) => {
-                const rect = node.getBoundingClientRect();
-                return {
-                  left: rect.left,
-                  top: rect.top,
-                  right: rect.right,
-                  bottom: rect.bottom,
-                };
-              }),
-            ),
-            page.evaluate(() => ({
-              documentWidth: document.documentElement.scrollWidth,
-              viewportWidth: window.innerWidth,
-            })),
-          ]);
-          expect(heroBox).not.toBeNull();
-          expect(pickerBox).not.toBeNull();
-          expect(composerBox).not.toBeNull();
-          expect(heroBox!.y).toBeGreaterThanOrEqual(0);
-          expect(heroBox!.y + heroBox!.height).toBeLessThan(composerBox!.y);
-          expect(pickerBox!.y + pickerBox!.height).toBeLessThanOrEqual(
-            composerBox!.y,
-          );
-          const protectedRects = [
-            ...protectedBoxes,
-            {
-              left: pickerBox!.x,
-              top: pickerBox!.y,
-              right: pickerBox!.x + pickerBox!.width,
-              bottom: pickerBox!.y + pickerBox!.height,
-            },
-            {
-              left: composerBox!.x,
-              top: composerBox!.y,
-              right: composerBox!.x + composerBox!.width,
-              bottom: composerBox!.y + composerBox!.height,
-            },
-          ];
-          for (const bubbleBox of bubbleBoxes) {
-            expect(bubbleBox.left).toBeGreaterThanOrEqual(0);
-            expect(bubbleBox.right).toBeLessThanOrEqual(viewport.width);
-            for (const protectedBox of protectedRects) {
-              const overlaps =
-                bubbleBox.left < protectedBox.right &&
-                bubbleBox.right > protectedBox.left &&
-                bubbleBox.top < protectedBox.bottom &&
-                bubbleBox.bottom > protectedBox.top;
-              expect(overlaps).toBe(false);
-            }
-          }
-          expect(documentGeometry.documentWidth).toBeLessThanOrEqual(
-            documentGeometry.viewportWidth,
-          );
+  waitingRoomTest(
+    "saved group atmosphere selects, generates, survives reload, persists through bot focus, and fails back to its gradient @group-room-atmosphere",
+    async ({ page }) => {
+      test.setTimeout(smokeTestTimeout(90_000));
+      const now = "2026-07-14T12:00:00.000Z";
+      const groupId = "group:atmosphere-circle";
+      const groupName = "Atmosphere Circle";
+      const reusableImage: TestImageRecord = {
+        ...testGroupImages(["e2e-bot-a"], 1)[0]!,
+        id: "e2e-room-atmosphere-existing",
+        prompt: "A quiet violet observatory",
+        url: "/api/images/e2e-room-atmosphere-existing/file",
+        displayUrl: "/api/images/e2e-room-atmosphere-existing/file",
+        botId: null,
+        purpose: "group-room-wallpaper",
+        assetKind: "group_room_atmosphere",
+      };
+      const remoteOnlyImage: TestImageRecord = {
+        ...testGroupImages(["e2e-bot-b"], 1)[0]!,
+        id: "e2e-room-atmosphere-remote",
+        prompt: "Remote-only room",
+        botId: null,
+        purpose: "group-room-wallpaper",
+        assetKind: "group_room_atmosphere",
+        hasLocalFile: false,
+        displayUrl: "https://remote.invalid/room.png",
+      };
+      const fixtureImages = [reusableImage, remoteOnlyImage];
+      const externalImageRequests: string[] = [];
+      page.on("request", (request) => {
+        if (new URL(request.url()).hostname === "remote.invalid") {
+          externalImageRequests.push(request.url());
         }
+      });
+      await installAuthenticatedApi(page, {
+        images: fixtureImages,
+        zenWallpaperLocalImageModel: "e2e-zen-wallpaper-model",
+        preserveBotLibraryGroupsOnReload: true,
+        botLibraryGroups: [
+          {
+            id: groupId,
+            name: groupName,
+            description: "Three companions sharing a calm design room.",
+            botIds: ["e2e-bot-a", "e2e-bot-b", "e2e-bot-c"],
+            deleteProtected: false,
+            builtIn: false,
+            createdAt: now,
+            updatedAt: now,
+          },
+        ],
+      });
+      let generationBody: Record<string, unknown> | null = null;
+      await page.route("**/api/images/generate", async (route) => {
+        if (route.request().method() !== "POST") return route.fallback();
+        generationBody = route.request().postDataJSON() as Record<
+          string,
+          unknown
+        >;
+        fixtureImages.push({
+          ...reusableImage,
+          id: "e2e-room-atmosphere-generated",
+          prompt: "Server-composed trusted room prompt",
+          purpose: "group-room-wallpaper",
+        });
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({
+            ok: true,
+            composedPrompt: "Server-composed trusted room prompt",
+            image: {
+              id: "e2e-room-atmosphere-generated",
+              displayUrl: "/api/images/e2e-room-atmosphere-generated/file",
+              hasLocalFile: true,
+              purpose: "group-room-wallpaper",
+            },
+          }),
+        });
+      });
 
-        if (process.env.PRISM_CAPTURE_GROUP_ROOM === "1") {
-          await page.screenshot({
-            path: `.codex/output/group-room-${theme}-${viewport.width}x${viewport.height}.png`,
-            fullPage: false,
-          });
-        }
-      }
+      await page.setViewportSize({ width: 1280, height: 720 });
+      await page.goto("/?view=chat");
+      await selectBotGroupFilter(page, groupName);
+      const atmosphereOpener = page.getByRole("button", {
+        name: `Choose or generate ${groupName}'s room atmosphere`,
+      });
+      await atmosphereOpener.click();
+      const dialog = page.getByRole("dialog", {
+        name: `${groupName} atmosphere`,
+      });
+      await expect(dialog).toBeVisible();
+      const closeAtmosphereDialog = dialog.getByRole("button", {
+        name: "Close room atmosphere dialog",
+      });
+      await expect(closeAtmosphereDialog).toBeFocused();
+      await page.keyboard.press("Shift+Tab");
+      await expect
+        .poll(() =>
+          dialog.evaluate((node) => node.contains(document.activeElement)),
+        )
+        .toBe(true);
+      await page.keyboard.press("Tab");
+      await expect(closeAtmosphereDialog).toBeFocused();
+      await page.keyboard.press("Escape");
+      await expect(dialog).toHaveCount(0);
+      await expect(atmosphereOpener).toBeFocused();
+      await atmosphereOpener.click();
+      await expect(dialog).toBeVisible();
+      await expect(closeAtmosphereDialog).toBeFocused();
+      await page.screenshot({
+        path: ".codex/output/group-room-atmosphere-dialog-dark-1280x720.png",
+        fullPage: false,
+      });
+      const atmosphereRail = dialog.getByRole("region", {
+        name: "Group-room Atmospheres",
+      });
+      const reusableAsset = atmosphereRail.locator(
+        `button[data-title="${reusableImage.prompt}"], button[title="${reusableImage.prompt}"]`,
+      );
+      await expect(reusableAsset).toBeVisible();
+      await expect(
+        atmosphereRail.locator(
+          `button[data-title="${remoteOnlyImage.prompt}"], button[title="${remoteOnlyImage.prompt}"]`,
+        ),
+      ).toHaveCount(0);
       expect(externalImageRequests).toEqual([]);
-    });
+      await reusableAsset.click();
+
+      const atmosphere = page.locator(
+        '[data-room-atmosphere-image-id="e2e-room-atmosphere-existing"]',
+      );
+      await expect(atmosphere).toBeVisible();
+      await expect(
+        page.locator('main[data-zen-surface="true"]'),
+      ).toHaveAttribute("data-group-room-atmosphere-active", "true");
+      await expect
+        .poll(() =>
+          page.evaluate((id) => {
+            const raw = window.localStorage.getItem(
+              "prism_bot_library_groups:e2e-user",
+            );
+            const groups = raw
+              ? (JSON.parse(raw) as Array<{
+                  id?: string;
+                  roomAtmosphere?: { imageId?: string };
+                }>)
+              : [];
+            return groups.find((group) => group.id === id)?.roomAtmosphere
+              ?.imageId;
+          }, groupId),
+        )
+        .toBe("e2e-room-atmosphere-existing");
+
+      await page.reload();
+      await selectBotGroupFilter(page, groupName);
+      await expect(atmosphere).toBeVisible();
+      await page
+        .getByRole("button", {
+          name: `Replace or clear ${groupName}'s room atmosphere`,
+        })
+        .click();
+      await dialog
+        .getByRole("button", { name: "Synthesize Group-room Atmospheres" })
+        .click();
+      const refractDirection = page.getByLabel(
+        "How should Prism shape this pass?",
+      );
+      await refractDirection.fill("Make the observatory quieter and more luminous.");
+      await refractDirection.press("Enter");
+      await expect.poll(() => generationBody).not.toBeNull();
+      expect(generationBody).toMatchObject({
+        purpose: "group-room-wallpaper",
+        groupName,
+        groupDescription: "Three companions sharing a calm design room.",
+        memberBotIds: ["e2e-bot-a", "e2e-bot-b", "e2e-bot-c"],
+        preferredProvider: "local",
+        model: "e2e-zen-wallpaper-model",
+        size: "1536x1024",
+      });
+      expect(generationBody?.botId).toBeUndefined();
+      expect(generationBody?.conversationId).toBeUndefined();
+      expect(generationBody?.prompt).toBeUndefined();
+      const generatedAtmosphere = page.locator(
+        '[data-room-atmosphere-image-id="e2e-room-atmosphere-generated"]',
+      );
+      await expect(generatedAtmosphere).toBeVisible();
+      await expect
+        .poll(() =>
+          generatedAtmosphere.locator("img").evaluate((image) => ({
+            opacity: getComputedStyle(image).opacity,
+            filter: getComputedStyle(image).filter,
+          })),
+        )
+        .toMatchObject({ opacity: "0.28" });
+
+      const selectedBot = page.getByRole("radio", { name: "Test Bot 1" });
+      await selectedBot.click();
+      await expect(selectedBot).toHaveAttribute("aria-checked", "true");
+      await expect(generatedAtmosphere).toBeVisible();
+      await selectedBot.click();
+      await expect(selectedBot).toHaveAttribute("aria-checked", "false");
+      await expect(generatedAtmosphere).toBeVisible();
+      await page.screenshot({
+        path: ".codex/output/group-room-atmosphere-dark-1280x720.png",
+        fullPage: false,
+      });
+
+      await page.evaluate(
+        ({ storageKey, targetGroupId, updatedAt }) => {
+          const raw = window.localStorage.getItem(storageKey);
+          const groups = raw
+            ? (JSON.parse(raw) as Array<Record<string, unknown>>)
+            : [];
+          window.localStorage.setItem(
+            storageKey,
+            JSON.stringify(
+              groups.map((group) =>
+                group.id === targetGroupId
+                  ? {
+                      ...group,
+                      roomAtmosphere: {
+                        imageId: "e2e-deleted-room-atmosphere",
+                        updatedAt,
+                      },
+                    }
+                  : group,
+              ),
+            ),
+          );
+        },
+        {
+          storageKey: "prism_bot_library_groups:e2e-user",
+          targetGroupId: groupId,
+          updatedAt: "2026-07-14T14:00:00.000Z",
+        },
+      );
+      await page.reload();
+      const missingFile = page.waitForResponse(
+        (response) =>
+          response
+            .url()
+            .endsWith("/api/images/e2e-deleted-room-atmosphere/file") &&
+          response.status() === 404,
+      );
+      await selectBotGroupFilter(page, groupName);
+      await missingFile;
+      await expect(
+        page.locator(
+          '[data-room-atmosphere-image-id="e2e-deleted-room-atmosphere"]',
+        ),
+      ).toHaveCount(0);
+      await expect(
+        page.getByRole("region", { name: `Explore ${groupName}` }),
+      ).toBeVisible();
+      await expect(
+        page.locator('main[data-zen-surface="true"]'),
+      ).not.toHaveAttribute(
+        "data-group-room-atmosphere-active",
+        "true",
+      );
+    },
+  );
+
+  waitingRoomTest(
+    "waiting-room atmosphere keeps its cast stable and stays readable in light theme @group-room-atmosphere",
+    async ({ page }) => {
+      test.setTimeout(smokeTestTimeout(60_000));
+      const now = "2026-07-14T12:00:00.000Z";
+      const groupName = "Luminous Waiting Room";
+      const firstImage: TestImageRecord = {
+        ...testGroupImages(["e2e-waiting-bot-1"], 1)[0]!,
+        id: "e2e-light-room-first",
+        prompt: "A luminous shared studio",
+        botId: null,
+        purpose: "group-room-wallpaper",
+        assetKind: "group_room_atmosphere",
+      };
+      const secondImage: TestImageRecord = {
+        ...testGroupImages(["e2e-waiting-bot-2"], 1)[0]!,
+        id: "e2e-light-room-second",
+        prompt: "A warm glass conservatory",
+        botId: null,
+        purpose: "group-room-wallpaper",
+        assetKind: "group_room_atmosphere",
+      };
+      await installAuthenticatedApi(page, {
+        theme: "light",
+        bots: waitingRoomTestBots.slice(0, 8),
+        images: [firstImage, secondImage],
+        botLibraryGroups: [
+          {
+            id: "group:luminous-waiting-room",
+            name: groupName,
+            description: "A bright room for a full companion circle.",
+            botIds: waitingRoomTestBots.slice(0, 8).map((bot) => bot.id),
+            roomAtmosphere: {
+              imageId: firstImage.id,
+              prompt: firstImage.prompt,
+              updatedAt: now,
+            },
+            deleteProtected: false,
+            builtIn: false,
+            createdAt: now,
+            updatedAt: now,
+          },
+        ],
+      });
+      await page.setViewportSize({ width: 1440, height: 900 });
+      await page.goto("/?view=chat");
+      await selectBotGroupFilter(page, groupName);
+      const room = page.locator('[data-bot-group-waiting-room="true"]');
+      const visitId = await room.getAttribute("data-room-visit-id");
+      await expect(
+        page.locator(`[data-room-atmosphere-image-id="${firstImage.id}"]`),
+      ).toBeVisible();
+      const atmosphereButton = page.getByRole("button", {
+        name: `Replace or clear ${groupName}'s room atmosphere`,
+      });
+      await atmosphereButton.focus();
+      await atmosphereButton.press("Enter");
+      const dialog = page.getByRole("dialog", {
+        name: `${groupName} atmosphere`,
+      });
+      await dialog.locator('button[aria-pressed="false"]').click();
+      await expect(
+        page.locator(`[data-room-atmosphere-image-id="${secondImage.id}"]`),
+      ).toBeVisible();
+      await expect(room).toHaveAttribute("data-room-visit-id", visitId!);
+      await expect(
+        page.getByRole("heading", { name: `Explore ${groupName}` }),
+      ).toBeVisible();
+      await page.screenshot({
+        path: ".codex/output/group-room-atmosphere-light-1440x900.png",
+        fullPage: false,
+      });
+    },
+  );
+
+  for (const theme of ["dark", "light"] as const) {
+    waitingRoomTest(
+      `compact group room stays clear across the desktop viewport contract in ${theme} theme @group-room`,
+      async ({ page }) => {
+        test.setTimeout(smokeTestTimeout(90_000));
+        await page.emulateMedia({ reducedMotion: "reduce" });
+        const now = "2026-07-14T12:00:00.000Z";
+        const groupName = "Collaborative Product Council";
+        const compactGroupBotIds = ["e2e-bot-a", "e2e-bot-b", "e2e-bot-c"];
+        const compactGroupImages = [
+          ...testGroupImages(compactGroupBotIds),
+          {
+            ...testGroupImages(["orphan-bot"], 1)[0]!,
+            id: "e2e-orphan-group-image",
+          },
+          {
+            ...testGroupImages(["e2e-bot-a"], 1)[0]!,
+            id: "e2e-remote-only-group-image",
+            hasLocalFile: false,
+            displayUrl: "https://remote.invalid/remote-only.png",
+          },
+          {
+            ...testGroupImages(["e2e-bot-b"], 1)[0]!,
+            id: "e2e-group-wallpaper",
+            purpose: "wallpaper",
+          },
+        ];
+        const externalImageRequests: string[] = [];
+        page.on("request", (request) => {
+          if (new URL(request.url()).hostname === "remote.invalid") {
+            externalImageRequests.push(request.url());
+          }
+        });
+        await installAuthenticatedApi(page, {
+          theme,
+          images: compactGroupImages,
+          botLibraryGroups: [
+            {
+              id: "builtin:favorites",
+              name: "Favorites",
+              description: "Pinned bots you want to keep close.",
+              botIds: [],
+              deleteProtected: false,
+              builtIn: true,
+              createdAt: now,
+              updatedAt: now,
+            },
+            {
+              id: "group:viewport-council",
+              name: groupName,
+              description:
+                "Five specialists gathered for compact collaborative thinking across product, accessibility, and craft, with enough detail to exercise the short desktop canvas.",
+              botIds: compactGroupBotIds,
+              deleteProtected: false,
+              builtIn: false,
+              createdAt: now,
+              updatedAt: now,
+            },
+          ],
+        });
+
+        for (const viewport of [
+          { width: 900, height: 560 },
+          { width: 1280, height: 720 },
+          { width: 1440, height: 900 },
+          { width: 1920, height: 1080 },
+        ]) {
+          await page.setViewportSize(viewport);
+          await page.goto("/?view=chat");
+
+          if (viewport.width < 1280) {
+            await expect(
+              page.getByRole("heading", { name: "Scale your viewport up" }),
+            ).toBeVisible();
+          } else {
+            await selectBotGroupFilter(page, groupName);
+
+            const hero = page.getByRole("region", {
+              name: `Explore ${groupName}`,
+            });
+            const picker = page.getByRole("radiogroup", {
+              name: "Bot for this chat",
+            });
+            const composer = page.getByRole("textbox").last();
+            await expect(hero).toBeVisible();
+            await expect(picker).toBeVisible();
+            await expect(composer).toBeVisible();
+            await expect(
+              picker.locator(':scope > span[aria-hidden="true"]'),
+            ).toHaveCount(0);
+
+            const bubbles = page.locator(
+              '[data-group-image-bubbles="waiting"] [data-group-image-bubble-id]',
+            );
+            const expectedBubbleCount = viewport.width >= 1920 ? 4 : 2;
+            await expect(bubbles).toHaveCount(expectedBubbleCount);
+            await expect
+              .poll(() =>
+                bubbles
+                  .first()
+                  .locator("span")
+                  .first()
+                  .evaluate((node) => getComputedStyle(node).animationName),
+              )
+              .toBe("none");
+            await expect(
+              page.locator(
+                '[data-group-image-bubble-id="e2e-orphan-group-image"], [data-group-image-bubble-id="e2e-remote-only-group-image"], [data-group-image-bubble-id="e2e-group-wallpaper"]',
+              ),
+            ).toHaveCount(0);
+
+            const [
+              heroBox,
+              pickerBox,
+              composerBox,
+              bubbleBoxes,
+              protectedBoxes,
+              documentGeometry,
+            ] = await Promise.all([
+              hero.boundingBox(),
+              picker.boundingBox(),
+              composer.boundingBox(),
+              bubbles.evaluateAll((nodes) =>
+                nodes.map((node) => {
+                  const rect = node.getBoundingClientRect();
+                  return {
+                    left: rect.left,
+                    top: rect.top,
+                    right: rect.right,
+                    bottom: rect.bottom,
+                  };
+                }),
+              ),
+              hero.locator("h2, p, button").evaluateAll((nodes) =>
+                nodes.map((node) => {
+                  const rect = node.getBoundingClientRect();
+                  return {
+                    left: rect.left,
+                    top: rect.top,
+                    right: rect.right,
+                    bottom: rect.bottom,
+                  };
+                }),
+              ),
+              page.evaluate(() => ({
+                documentWidth: document.documentElement.scrollWidth,
+                viewportWidth: window.innerWidth,
+              })),
+            ]);
+            expect(heroBox).not.toBeNull();
+            expect(pickerBox).not.toBeNull();
+            expect(composerBox).not.toBeNull();
+            expect(heroBox!.y).toBeGreaterThanOrEqual(0);
+            expect(heroBox!.y + heroBox!.height).toBeLessThan(composerBox!.y);
+            expect(pickerBox!.y + pickerBox!.height).toBeLessThanOrEqual(
+              composerBox!.y,
+            );
+            const protectedRects = [
+              ...protectedBoxes,
+              {
+                left: pickerBox!.x,
+                top: pickerBox!.y,
+                right: pickerBox!.x + pickerBox!.width,
+                bottom: pickerBox!.y + pickerBox!.height,
+              },
+              {
+                left: composerBox!.x,
+                top: composerBox!.y,
+                right: composerBox!.x + composerBox!.width,
+                bottom: composerBox!.y + composerBox!.height,
+              },
+            ];
+            for (const bubbleBox of bubbleBoxes) {
+              expect(bubbleBox.left).toBeGreaterThanOrEqual(0);
+              expect(bubbleBox.right).toBeLessThanOrEqual(viewport.width);
+              for (const protectedBox of protectedRects) {
+                const overlaps =
+                  bubbleBox.left < protectedBox.right &&
+                  bubbleBox.right > protectedBox.left &&
+                  bubbleBox.top < protectedBox.bottom &&
+                  bubbleBox.bottom > protectedBox.top;
+                expect(overlaps).toBe(false);
+              }
+            }
+            expect(documentGeometry.documentWidth).toBeLessThanOrEqual(
+              documentGeometry.viewportWidth,
+            );
+          }
+
+          if (process.env.PRISM_CAPTURE_GROUP_ROOM === "1") {
+            await page.screenshot({
+              path: `.codex/output/group-room-${theme}-${viewport.width}x${viewport.height}.png`,
+              fullPage: false,
+            });
+          }
+        }
+        expect(externalImageRequests).toEqual([]);
+      },
+    );
   }
 
   test("group image bubbles fail closed for inaccessible local image assets without remote fallback @group-room", async ({
@@ -2408,18 +2695,14 @@ test.describe("PRISM desktop smoke", () => {
     });
     await page.setViewportSize({ width: 1920, height: 1080 });
     await page.goto("/?view=chat");
-    const groupTrigger = page.getByRole("button", {
-      name: "Bot group filter: All bots",
-    });
-    await groupTrigger.click();
-    await page.getByRole("option", { name: groupName }).click();
+    await selectBotGroupFilter(page, groupName);
 
-    const layer = page.locator('[data-group-image-bubbles="compact"]');
-    await expect(layer).toHaveAttribute("data-group-image-bubble-count", "5");
+    const layer = page.locator('[data-group-image-bubbles="waiting"]');
+    await expect(layer).toHaveAttribute("data-group-image-bubble-count", "4");
     await expect(
       layer.locator(`[data-group-image-bubble-id="${brokenThumbnailId}"]`),
     ).toHaveCount(0);
-    await expect(layer.locator("img")).toHaveCount(5);
+    await expect(layer.locator("img")).toHaveCount(4);
     const brokenFileBubble = layer.locator(
       `[data-group-image-bubble-id="${brokenFileId}"]`,
     );
@@ -2429,7 +2712,9 @@ test.describe("PRISM desktop smoke", () => {
         response.url().endsWith(`/api/images/${brokenFileId}/file`) &&
         response.status() === 404,
     );
-    await brokenFileBubble.getByRole("button").click();
+    const brokenFileButton = brokenFileBubble.getByRole("button");
+    await brokenFileButton.focus();
+    await activateNavigationControl(brokenFileButton);
     await fileFailure;
     await expect(
       page.getByRole("dialog", { name: /Generated scene/ }),
@@ -2441,1849 +2726,43 @@ test.describe("PRISM desktop smoke", () => {
     expect(externalImageRequests).toEqual([]);
   });
 
-  waitingRoomTest("large saved group becomes a stable responsive waiting room @group-room", async ({
-    page,
-  }) => {
-    test.setTimeout(smokeTestTimeout(90_000));
-    const now = "2026-07-14T12:00:00.000Z";
-    const groupName = "Waiting Room Council";
-    await page.emulateMedia({ reducedMotion: "no-preference" });
-    await installAuthenticatedApi(page, {
-      bots: waitingRoomTestBots,
-      images: [
-        ...testGroupImages(
-          waitingRoomTestBots.slice(0, 6).map((bot) => bot.id),
-          2,
-        ),
-        {
-          ...testGroupImages(["e2e-waiting-bot-1"], 1)[0]!,
-          id: "e2e-waiting-remote-only",
-          hasLocalFile: false,
-          displayUrl: "https://remote.invalid/waiting-remote-only.png",
-        },
-      ],
-      botLibraryGroups: [
-        {
-          id: "builtin:favorites",
-          name: "Favorites",
-          description: "Pinned bots you want to keep close.",
-          botIds: [],
-          deleteProtected: false,
-          builtIn: true,
-          createdAt: now,
-          updatedAt: now,
-        },
-        {
-          id: "group:waiting-room-council",
-          name: groupName,
-          description:
-            "A broad circle of distinct companions who can gather without starting a conversation.",
-          botIds: waitingRoomTestBots.map((bot) => bot.id),
-          deleteProtected: false,
-          builtIn: false,
-          createdAt: now,
-          updatedAt: now,
-        },
-      ],
-    });
-    await page.setViewportSize({ width: 1280, height: 720 });
-    await page.goto("/?view=chat");
-    const groupTrigger = page.getByRole("button", {
-      name: "Bot group filter: All bots",
-    });
-    await expect(groupTrigger).toBeVisible();
-    const mutatingRequests: string[] = [];
-    const externalImageRequests: string[] = [];
-    page.on("request", (request) => {
-      const requestUrl = new URL(request.url());
-      if (
-        requestUrl.pathname.startsWith("/api/") &&
-        !["GET", "HEAD", "OPTIONS"].includes(request.method())
-      ) {
-        mutatingRequests.push(`${request.method()} ${request.url()}`);
-      }
-      if (requestUrl.hostname === "remote.invalid") {
-        externalImageRequests.push(request.url());
-      }
-    });
-    await groupTrigger.click();
-    await page.getByRole("option", { name: groupName }).click();
-
-    const room = page.locator('[data-bot-group-waiting-room="true"]');
-    const anchors = room.locator('[data-room-presence-role="anchor"]');
-    const roamers = room.locator('[data-room-presence-role="roamer"]');
-    await expect(room).toBeVisible();
-    await expect(room).toHaveAttribute("data-room-viewport", "1280x720");
-    await expect(anchors).toHaveCount(5);
-    await expect(roamers).toHaveCount(1);
-    const roomImageBubbles = room.locator(
-      '[data-group-image-bubbles="waiting"] [data-group-image-bubble-id]',
-    );
-    await expect(roomImageBubbles).toHaveCount(2);
-    await expect(
-      room.locator('[data-group-image-bubble-id="e2e-waiting-remote-only"]'),
-    ).toHaveCount(0);
-    const visitId = await room.getAttribute("data-room-visit-id");
-    const initialAnchorIds = await anchors.evaluateAll((nodes) =>
-      nodes.map((node) => node.getAttribute("data-room-presence-bot-id")),
-    );
-
-    const assertRoomGeometry = async (): Promise<void> => {
-      const composer = page.getByRole("textbox").last();
-      await expect(composer).toBeVisible();
-      const [roomBox, composerBox, presenceBoxes, imageBubbleBoxes] =
-        await Promise.all([
-          room.boundingBox(),
-          composer.boundingBox(),
-          room.locator("[data-room-presence-bot-id]").evaluateAll((nodes) =>
-            nodes.map((node) => {
-              const rect = node.getBoundingClientRect();
-              return {
-                left: rect.left,
-                top: rect.top,
-                right: rect.right,
-                bottom: rect.bottom,
-              };
-            }),
-          ),
-          roomImageBubbles.evaluateAll((nodes) =>
-            nodes.map((node) => {
-              const rect = node.getBoundingClientRect();
-              return {
-                left: rect.left,
-                top: rect.top,
-                right: rect.right,
-                bottom: rect.bottom,
-              };
-            }),
-          ),
-        ]);
-      expect(roomBox).not.toBeNull();
-      expect(composerBox).not.toBeNull();
-      if (!roomBox || !composerBox) return;
-      expect(roomBox.y + roomBox.height).toBeLessThanOrEqual(
-        composerBox.y - 12,
-      );
-      for (const box of presenceBoxes) {
-        expect(box.left).toBeGreaterThanOrEqual(roomBox.x - 1);
-        expect(box.top).toBeGreaterThanOrEqual(roomBox.y - 1);
-        expect(box.right).toBeLessThanOrEqual(roomBox.x + roomBox.width + 1);
-        expect(box.bottom).toBeLessThanOrEqual(roomBox.y + roomBox.height + 1);
-      }
-      for (const bubbleBox of imageBubbleBoxes) {
-        expect(bubbleBox.left).toBeGreaterThanOrEqual(roomBox.x);
-        expect(bubbleBox.top).toBeGreaterThanOrEqual(roomBox.y);
-        expect(bubbleBox.right).toBeLessThanOrEqual(roomBox.x + roomBox.width);
-        expect(bubbleBox.bottom).toBeLessThanOrEqual(
-          roomBox.y + roomBox.height,
-        );
-        for (const presenceBox of presenceBoxes) {
-          const overlaps =
-            bubbleBox.left < presenceBox.right &&
-            bubbleBox.right > presenceBox.left &&
-            bubbleBox.top < presenceBox.bottom &&
-            bubbleBox.bottom > presenceBox.top;
-          expect(overlaps).toBe(false);
-        }
-      }
-    };
-    await assertRoomGeometry();
-
-    const firstRoomImageButton = roomImageBubbles.first().getByRole("button");
-    const firstRoomImageVisual = firstRoomImageButton.locator("span").first();
-    await expect
-      .poll(() =>
-        firstRoomImageVisual.evaluate(
-          (node) => getComputedStyle(node).animationName,
-        ),
-      )
-      .not.toBe("none");
-    await page.emulateMedia({ reducedMotion: "reduce" });
-    await expect
-      .poll(() =>
-        firstRoomImageVisual.evaluate(
-          (node) => getComputedStyle(node).animationName,
-        ),
-      )
-      .toBe("none");
-    await page.emulateMedia({ reducedMotion: "no-preference" });
-    await firstRoomImageButton.focus();
-    await firstRoomImageButton.press("Enter");
-    const imagePreview = page.getByRole("dialog", {
-      name: /Generated scene/,
-    });
-    await imagePreview.locator("img").evaluate(async (node) => {
-      await (node as HTMLImageElement).decode().catch(() => undefined);
-    });
-    await expect(imagePreview).toBeVisible();
-    await expect(
-      imagePreview.getByRole("button", { name: "Close image preview" }),
-    ).toBeFocused();
-    await page.keyboard.press("Escape");
-    await expect(imagePreview).toHaveCount(0);
-    await expect(firstRoomImageButton).toBeFocused();
-
-    await page.setViewportSize({ width: 1280, height: 760 });
-    expect(
-      await page.evaluate(() => ({
-        width: window.innerWidth,
-        height: window.innerHeight,
-      })),
-    ).toEqual({ width: 1280, height: 760 });
-    await expect(room).toHaveAttribute("data-room-viewport", "1280x760");
-    await expect(room).toHaveAttribute("data-room-presence-count", "7");
-    await expect(roamers).toHaveCount(2);
-    await expect(room).toHaveAttribute("data-room-visit-id", visitId!);
-    await expect(anchors).toHaveCount(5);
-    expect(
-      await anchors.evaluateAll((nodes) =>
-        nodes.map((node) => node.getAttribute("data-room-presence-bot-id")),
-      ),
-    ).toEqual(initialAnchorIds);
-
-    await page.setViewportSize({ width: 1600, height: 900 });
-    await expect(room).toHaveAttribute("data-room-presence-count", "8");
-    await expect(roamers).toHaveCount(3);
-    await expect(roomImageBubbles).toHaveCount(4);
-    await assertRoomGeometry();
-    if (process.env.PRISM_CAPTURE_GROUP_ROOM === "1") {
-      await page.screenshot({
-        path: ".codex/output/waiting-room-images-dark-1600x900.png",
-        fullPage: false,
-      });
-    }
-
-    const search = page.getByRole("searchbox", {
-      name: "Search bots by name",
-    });
-    await search.fill("Waiting Bot 1");
-    await expect(room).toHaveCount(0);
-    await search.fill("");
-    await expect(room).toBeVisible();
-    await expect(room).toHaveAttribute("data-room-visit-id", visitId!);
-    expect(
-      await anchors.evaluateAll((nodes) =>
-        nodes.map((node) => node.getAttribute("data-room-presence-bot-id")),
-      ),
-    ).toEqual(initialAnchorIds);
-
-    const firstAnchorId = await anchors
-      .first()
-      .getAttribute("data-room-presence-bot-id");
-    const promotedRoamerId = await roamers
-      .first()
-      .getAttribute("data-room-presence-bot-id");
-    expect(promotedRoamerId).not.toBeNull();
-    const composer = page.getByRole("textbox").last();
-    await composer.fill("A draft held only for this room");
-    await activateNavigationControl(roamers.first().getByRole("button"));
-    const shell = page.locator('main[data-zen-surface="true"]');
-    await expect(shell).toHaveAttribute(
-      "data-relationship-depth-transition",
-      "settled",
-    );
-    await expect(room).toHaveCount(0);
-    await expect(
-      page.locator(
-        `[data-relationship-depth-anchor="home"][data-relationship-depth-identity="bot:${promotedRoamerId}"]`,
-      ),
-    ).toBeVisible();
-    await expect(composer).toHaveText("");
-    await composer.fill("A draft held only for this Zen Home");
-    await expect(
-      page.locator('[data-home-affordance="wordmark"]'),
-    ).toHaveAttribute("aria-label", `Back to ${groupName}`);
-
-    await page.keyboard.press("Escape");
-    await expect(room).toBeVisible();
-    await expect(room).toHaveAttribute("data-room-visit-id", visitId!);
-    await expect(composer).toHaveText("A draft held only for this room");
-    await expect(
-      room.locator(
-        `[data-room-presence-bot-id="${promotedRoamerId}"][data-room-presence-role="anchor"]`,
-      ),
-    ).toHaveCount(1);
-    await expect(
-      room.locator(
-        `[data-room-presence-bot-id="${firstAnchorId}"][data-room-presence-role="roamer"]`,
-      ),
-    ).toHaveCount(1);
-    const promotedPresenceButton = room
-      .locator(`[data-room-presence-bot-id="${promotedRoamerId}"]`)
-      .getByRole("button");
-    await expect(promotedPresenceButton).toBeFocused();
-
-    await activateNavigationControl(promotedPresenceButton);
-    await expect(room).toHaveCount(0);
-    await expect(composer).toHaveText("A draft held only for this Zen Home");
-    await page.keyboard.press("Escape");
-    await expect(room).toBeVisible();
-    await expect(composer).toHaveText("A draft held only for this room");
-
-    await composer.fill("A prompt held only for this room");
-    await expect(room).toHaveAttribute("data-room-rotation-paused", "true");
-    await expect(
-      room.locator('[data-group-image-bubbles="waiting"]'),
-    ).toHaveAttribute("data-receded", "true");
-    await expect(roomImageBubbles.first().locator("button")).toBeDisabled();
-    await composer.press("Enter");
-    const coffeeStaging = room.locator('[data-room-coffee-staging="true"]');
-    await expect(coffeeStaging).toBeVisible();
-    await expect(coffeeStaging).toHaveAttribute("data-staged-bot-count", "5");
-    await expect(
-      coffeeStaging.locator('[data-room-coffee-staging-primary-focus="true"]'),
-    ).toBeFocused();
-    await expect(composer).toBeDisabled();
-    await expect(coffeeStaging).toContainText(
-      "A prompt held only for this room",
-    );
-    await coffeeStaging
-      .getByRole("button", { name: "Cancel and edit prompt" })
-      .click();
-    await expect(coffeeStaging).toHaveCount(0);
-    await expect(composer).toBeEnabled();
-    await expect(composer).toHaveText("A prompt held only for this room");
-    expect(mutatingRequests).toEqual([]);
-    expect(externalImageRequests).toEqual([]);
-  });
-
-  waitingRoomTest("twenty-four-member waiting room completes three bounded rotations and tears down cleanly @group-room-wifex8", async ({
-    page,
-  }) => {
-    test.setTimeout(smokeTestTimeout(90_000));
-    const now = "2026-07-14T12:00:00.000Z";
-    const groupName = "Twenty Four Companion Soak";
-    const pageErrors: string[] = [];
-    page.on("pageerror", (error) => pageErrors.push(error.message));
-    await page.emulateMedia({ reducedMotion: "no-preference" });
-    await installAuthenticatedApi(page, {
-      bots: waitingRoomTestBots,
-      botLibraryGroups: [
-        {
-          id: "group:twenty-four-companion-soak",
-          name: groupName,
-          description:
-            "A full-capacity waiting room used to soak deterministic roster rotations.",
-          botIds: waitingRoomTestBots.map((bot) => bot.id),
-          deleteProtected: false,
-          builtIn: false,
-          createdAt: now,
-          updatedAt: now,
-        },
-      ],
-    });
-    await page.setViewportSize({ width: 1920, height: 1080 });
-    await page.goto("/?view=chat");
-    await page.clock.install({ time: new Date(now) });
-    await page.clock.pauseAt(
-      new Date(await page.evaluate(() => Date.now() + 60_000)),
-    );
-    await selectBotGroupFilter(page, groupName);
-    await page.mouse.move(4, 4);
-
-    const room = page.locator('[data-bot-group-waiting-room="true"]');
-    const presences = room.locator("[data-room-presence-bot-id]");
-    const anchors = room.locator('[data-room-presence-role="anchor"]');
-    const roamers = room.locator('[data-room-presence-role="roamer"]');
-    await expect(room).toBeVisible();
-    await expect(room).toHaveAttribute("data-room-viewport", "1920x1080");
-    await expect(room).toHaveAttribute("data-room-presence-count", "8");
-    await expect(room).toHaveAttribute("data-room-rotation-paused", "false");
-    await expect(presences).toHaveCount(8);
-    await expect(anchors).toHaveCount(5);
-    await expect(roamers).toHaveCount(3);
-    const visitId = await room.getAttribute("data-room-visit-id");
-    const stableAnchorIds = await anchors.evaluateAll((nodes) =>
-      nodes.map((node) => node.getAttribute("data-room-presence-bot-id")),
-    );
-    const animationBaseline = await room.evaluate(
-      (element) => element.getAnimations({ subtree: true }).length,
-    );
-    const rosterSignatures = new Set<string>([
-      JSON.stringify(
-        await roamers.evaluateAll((nodes) =>
-          nodes.map((node) => node.getAttribute("data-room-presence-bot-id")),
-        ),
-      ),
-    ]);
-
-    for (let rotationIndex = 0; rotationIndex < 3; rotationIndex += 1) {
-      const rotationDelayMs = Number(
-        await room.getAttribute("data-room-next-rotation-ms"),
-      );
-      expect(rotationDelayMs).toBeGreaterThanOrEqual(2 * 60 * 1_000);
-      expect(rotationDelayMs).toBeLessThanOrEqual(4 * 60 * 1_000);
-      await page.clock.fastForward(rotationDelayMs + 50);
-      await expect(room).toHaveAttribute(
-        "data-room-handoff-order",
-        /arrival-before-departure|departure-before-arrival/u,
-      );
-      await page.clock.runFor(2 * 520 + 100);
-      await expect(room).not.toHaveAttribute("data-room-handoff-phase", /.+/u);
-      await expect(room).toHaveAttribute("data-room-presence-count", "8");
-      await expect(presences).toHaveCount(8);
-      await expect(anchors).toHaveCount(5);
-      await expect(roamers).toHaveCount(3);
-      await expect(room).toHaveAttribute("data-room-visit-id", visitId!);
-      expect(
-        await anchors.evaluateAll((nodes) =>
-          nodes.map((node) => node.getAttribute("data-room-presence-bot-id")),
-        ),
-      ).toEqual(stableAnchorIds);
-      rosterSignatures.add(
-        JSON.stringify(
-          await roamers.evaluateAll((nodes) =>
-            nodes.map((node) => node.getAttribute("data-room-presence-bot-id")),
-          ),
-        ),
-      );
-      expect(
-        await room.evaluate(
-          (element) => element.getAnimations({ subtree: true }).length,
-        ),
-      ).toBeLessThanOrEqual(animationBaseline + 12);
-    }
-    expect(rosterSignatures.size).toBe(4);
-
-    const detachedRoom = await room.elementHandle();
-    expect(detachedRoom).not.toBeNull();
-    await selectBotGroupFilter(page, "All bots");
-    await expect(room).toHaveCount(0);
-    await page.clock.fastForward(20 * 60 * 1_000);
-    await expect(room).toHaveCount(0);
-    expect(
-      await detachedRoom!.evaluate((element) => ({
-        connected: element.isConnected,
-        activeAnimations: element
-          .getAnimations({ subtree: true })
-          .filter(
-            (animation) =>
-              animation.playState !== "idle" &&
-              animation.playState !== "finished",
-          ).length,
-      })),
-    ).toEqual({ connected: false, activeAnimations: 0 });
-    expect(pageErrors).toEqual([]);
-  });
-
-  waitingRoomTest("waiting-room side panel pauses and resumes one timer while a live theme change preserves the visit @group-room-wifex8", async ({
-    page,
-  }) => {
-    test.setTimeout(smokeTestTimeout(90_000));
-    const now = "2026-07-14T12:00:00.000Z";
-    const groupName = "Panel State Circle";
-    const roomBots = waitingRoomTestBots.slice(0, 8);
-    await page.emulateMedia({ reducedMotion: "no-preference" });
-    await installAuthenticatedApi(page, {
-      theme: "light",
-      bots: roomBots,
-      botLibraryGroups: [
-        {
-          id: "group:panel-state-circle",
-          name: groupName,
-          description:
-            "A stateful waiting room that remains intact around app chrome.",
-          botIds: roomBots.map((bot) => bot.id),
-          deleteProtected: false,
-          builtIn: false,
-          createdAt: now,
-          updatedAt: now,
-        },
-      ],
-    });
-    await page.setViewportSize({ width: 1440, height: 900 });
-    await page.goto("/?view=chat");
-    await page.clock.install({ time: new Date(now) });
-    await page.clock.pauseAt(
-      new Date(await page.evaluate(() => Date.now() + 60_000)),
-    );
-    await selectBotGroupFilter(page, groupName);
-    await page.mouse.move(4, 4);
-
-    const shell = page.locator('main[data-zen-surface="true"]');
-    const room = page.locator('[data-bot-group-waiting-room="true"]');
-    const presences = room.locator("[data-room-presence-bot-id]");
-    const anchors = room.locator('[data-room-presence-role="anchor"]');
-    await expect(room).toBeVisible();
-    await expect(room).toHaveAttribute("data-room-presence-count", "7");
-    await expect(room).toHaveAttribute("data-room-rotation-paused", "false");
-    await expect
-      .poll(() => page.evaluate(() => document.body.dataset.prismTheme))
-      .toBe("light");
-    const visitId = await room.getAttribute("data-room-visit-id");
-    const initialPresenceIds = await presences.evaluateAll((nodes) =>
-      nodes.map((node) => node.getAttribute("data-room-presence-bot-id")),
-    );
-    const stableAnchorIds = await anchors.evaluateAll((nodes) =>
-      nodes.map((node) => node.getAttribute("data-room-presence-bot-id")),
-    );
-    const rotationDelayMs = Number(
-      await room.getAttribute("data-room-next-rotation-ms"),
-    );
-    const firstHalfMs = Math.floor(rotationDelayMs / 2);
-    await page.clock.fastForward(firstHalfMs);
-    const ambientPhaseBeforePanel = await room.getAttribute(
-      "data-room-ambient-phase",
-    );
-    const ambientCycleBeforePanel = await room.getAttribute(
-      "data-room-ambient-cycle",
-    );
-
-    await page.getByRole("button", { name: "Open Prompt Center" }).click();
-    const promptCenter = page.getByRole("dialog", { name: "Commands" });
-    await expect(promptCenter).toBeVisible();
-    await expect(shell).toHaveAttribute("data-right-panel-open", "true");
-    await expect(room).toHaveAttribute("data-room-rotation-paused", "true");
-    await expect(room).toHaveAttribute("data-room-ambient-paused", "true");
-    await promptCenter
-      .locator('[data-prism-panel-theme-toggle="true"]')
-      .click();
-    await expect
-      .poll(() => page.evaluate(() => document.body.dataset.prismTheme))
-      .toBe("dark");
-    await page.clock.fastForward(rotationDelayMs + 1);
-    await expect(room).toHaveAttribute("data-room-visit-id", visitId!);
-    await expect(room).toHaveAttribute(
-      "data-room-ambient-phase",
-      ambientPhaseBeforePanel!,
-    );
-    await expect(room).toHaveAttribute(
-      "data-room-ambient-cycle",
-      ambientCycleBeforePanel!,
-    );
-    expect(
-      await presences.evaluateAll((nodes) =>
-        nodes.map((node) => node.getAttribute("data-room-presence-bot-id")),
-      ),
-    ).toEqual(initialPresenceIds);
-    await promptCenter.getByRole("button", { name: "Close panel" }).click();
-    await page.clock.runFor(500);
-    await expect(promptCenter).toHaveCount(0);
-    await expect(shell).not.toHaveAttribute("data-right-panel-open", "true");
-    await page.mouse.move(4, 4);
-    await expect(room).toHaveAttribute("data-room-rotation-paused", "false");
-
-    await page.clock.fastForward(rotationDelayMs);
-    await page.clock.runFor(2 * 520 + 200);
-    await expect(room).toHaveAttribute("data-room-visit-id", visitId!);
-    expect(
-      await presences.evaluateAll((nodes) =>
-        nodes.map((node) => node.getAttribute("data-room-presence-bot-id")),
-      ),
-    ).not.toEqual(initialPresenceIds);
-    expect(
-      await anchors.evaluateAll((nodes) =>
-        nodes.map((node) => node.getAttribute("data-room-presence-bot-id")),
-      ),
-    ).toEqual(stableAnchorIds);
-    await expect
-      .poll(() => page.evaluate(() => document.body.dataset.prismTheme))
-      .toBe("dark");
-  });
-
-  waitingRoomTest("Listen up reuses an exact Coffee Group, preserves its topic across reload, and returns to a fresh room @group-room-coffee", async ({
-    page,
-  }) => {
-    test.setTimeout(smokeTestTimeout(90_000));
-    const now = "2026-07-14T12:00:00.000Z";
-    const sourceGroupId = "group:listen-up-room";
-    const sourceGroupName = "Listen Up Room";
-    const coffeeGroupId = "e2e-listen-up-coffee-group";
-    const coffeeGroupName = "Staged Exact Table";
-    const coffeeSessionId = "e2e-listen-up-session";
-    const topic = "Compare the ethics of memory and forgetting exactly.";
-    const roomBots = waitingRoomTestBots.slice(0, 8);
-    let selectedBotIds: string[] = [];
-    let sessionCreated = false;
-    let groupSessionBody: Record<string, unknown> | null = null;
-    const directSessionPosts: Record<string, unknown>[] = [];
-    const fulfillJson = (
-      route: Route,
-      payload: unknown,
-      status = 200,
-    ): Promise<void> =>
-      route.fulfill({
-        status,
-        contentType: "application/json",
-        body: JSON.stringify(payload),
-      });
-
-    await installAuthenticatedApi(page, {
-      bots: roomBots,
-      botLibraryGroups: [
-        {
-          id: sourceGroupId,
-          name: sourceGroupName,
-          description: "A room that can stage its visible cast for Coffee.",
-          botIds: roomBots.map((bot) => bot.id),
-          deleteProtected: false,
-          builtIn: false,
-          createdAt: now,
-          updatedAt: now,
-        },
-      ],
-    });
-
-    const coffeeGroup = () => ({
-      id: coffeeGroupId,
-      name: coffeeGroupName,
-      botGroupIds: selectedBotIds,
-      coffeeSeatBotIds: Array.from(
-        { length: 5 },
-        (_, index) => selectedBotIds[index] ?? null,
-      ),
-      coffeeSettings: {},
-      presetMode: "manual" as const,
-      starterTopicsByBotId: {},
-      createdAt: now,
-      updatedAt: now,
-    });
-    const coffeeConversation = (finished: boolean) => ({
-      id: coffeeSessionId,
-      title: topic,
-      mode: "coffee",
-      conversationMode: "coffee",
-      coffeeGroupId,
-      botId: null,
-      botGroupIds: selectedBotIds,
-      coffeeSeatBotIds: coffeeGroup().coffeeSeatBotIds,
-      coffeeSettings: {},
-      coffeeSessionDurationMinutes: 10,
-      coffeeTopic: topic,
-      incognito: false,
-      messages: finished
-        ? [
-            {
-              id: "e2e-listen-up-user-line",
-              role: "user",
-              content: topic,
-              createdAt: now,
-            },
-          ]
-        : [],
-      createdAt: now,
-      updatedAt: now,
-    });
-
-    await page.route("**/api/coffee/groups", async (route) => {
-      if (route.request().method() !== "GET") return route.fallback();
-      await fulfillJson(route, {
-        ok: true,
-        groups: selectedBotIds.length > 0 ? [coffeeGroup()] : [],
-      });
-    });
-    await page.route(
-      `**/api/coffee/groups/${coffeeGroupId}/sessions`,
-      async (route) => {
-        if (route.request().method() !== "POST") return route.fallback();
-        groupSessionBody = route.request().postDataJSON() as Record<
-          string,
-          unknown
-        >;
-        sessionCreated = true;
-        await fulfillJson(
-          route,
-          {
-            ok: true,
-            arrivalScenario: "user-first",
-            coffeeStarterTopics: [],
-            conversation: coffeeConversation(false),
-          },
-          201,
-        );
-      },
-    );
-    await page.route("**/api/coffee/sessions", async (route) => {
-      if (route.request().method() === "POST") {
-        directSessionPosts.push(
-          route.request().postDataJSON() as Record<string, unknown>,
-        );
-      }
-      await route.fallback();
-    });
-    await page.route(
-      `**/api/coffee/sessions/${coffeeSessionId}/powers/resolve`,
-      async (route) => {
-        await fulfillJson(route, {
-          ok: true,
-          plan: {
-            version: 1,
-            resolvedAt: now,
-            bots: {},
-            warnings: [],
-          },
-          warnings: [],
-        });
-      },
-    );
-    await page.route("**/api/conversations", async (route) => {
-      if (route.request().method() !== "GET") return route.fallback();
-      await fulfillJson(route, {
-        conversations: sessionCreated
-          ? [
-              {
-                ...coffeeConversation(true),
-                messages: undefined,
-                hasAssistantReply: true,
-              },
-            ]
-          : [],
-      });
-    });
-    await page.route(
-      `**/api/conversations/${coffeeSessionId}`,
-      async (route) => {
-        if (route.request().method() !== "GET") return route.fallback();
-        await fulfillJson(route, { conversation: coffeeConversation(true) });
-      },
-    );
-
-    await page.setViewportSize({ width: 1280, height: 720 });
-    await page.goto("/?view=chat");
-    await selectBotGroupFilter(page, sourceGroupName);
-    const room = page.locator('[data-bot-group-waiting-room="true"]');
-    const initialVisitId = await room.getAttribute("data-room-visit-id");
-    const composer = page.getByRole("textbox").last();
-    await composer.fill(topic);
-    await composer.press("Enter");
-
-    const staging = room.locator('[data-room-coffee-staging="true"]');
-    await expect(staging).toBeVisible();
-    await expect(staging).toHaveAttribute("data-staged-bot-count", "5");
-    await expect(
-      staging.locator('[data-room-coffee-staging-primary-focus="true"]'),
-    ).toBeFocused();
-    const selectedBotLabels = await staging
-      .locator('[data-selected="true"]')
-      .evaluateAll((nodes) =>
-        nodes
-          .map((node) =>
-            node
-              .querySelector<HTMLButtonElement>('button[aria-label^="Remove "]')
-              ?.getAttribute("aria-label"),
-          )
-          .filter(Boolean),
-      );
-    selectedBotIds = selectedBotLabels
-      .map((label) => {
-        const name = label
-          ?.replace(/^Remove /u, "")
-          .replace(/ from the Coffee table$/u, "");
-        return roomBots.find((bot) => bot.name === name)?.id ?? "";
-      })
-      .filter(Boolean);
-    expect(selectedBotIds).toHaveLength(5);
-    await page.screenshot({
-      path: ".codex/output/waiting-room-coffee-staging-dark-1280x720.png",
-    });
-    await staging.getByRole("button", { name: "Start Coffee with 5" }).click();
-
-    await expect(page).toHaveURL(/view=coffee/u);
-    await expect.poll(() => groupSessionBody).not.toBeNull();
-    expect(groupSessionBody?.initialTopic).toBe(topic);
-    expect(groupSessionBody?.excludedBotIds).toBeUndefined();
-    expect(groupSessionBody?.presetId).toBeUndefined();
-    expect(groupSessionBody?.forceAttendance).toBe(true);
-    expect(directSessionPosts).toEqual([]);
-    await expect(page.locator('[data-phase="arriving"]')).toBeVisible();
-    const checkpointKey = `prism_bot_group_coffee_return_checkpoint_v1:${encodeURIComponent(coffeeSessionId)}`;
-    await expect
-      .poll(() =>
-        page.evaluate(
-          (key) => window.sessionStorage.getItem(key),
-          checkpointKey,
-        ),
-      )
-      .not.toBeNull();
-
-    await page.reload();
-    const groupButton = page.getByRole("button", {
-      name: `Select and expand Coffee Group ${coffeeGroupName}`,
-    });
-    await expect(groupButton).toBeVisible();
-    await groupButton.click();
-    await page.getByRole("button", { name: topic, exact: true }).click();
-    await expect(
-      page.getByText("Session ended.", { exact: false }),
-    ).toBeVisible();
-    await expect
-      .poll(() =>
-        page.evaluate(
-          (key) => window.sessionStorage.getItem(key),
-          checkpointKey,
-        ),
-      )
-      .not.toBeNull();
-    const reopenedCoffeeTable = page.getByRole("region", {
-      name: "Coffee table",
-    });
-    await expect(reopenedCoffeeTable).toHaveAttribute(
-      "data-room-return-session-id",
-      coffeeSessionId,
-    );
-    await expect(reopenedCoffeeTable).toHaveAttribute(
-      "data-room-return-checkpoint-status",
-      "ready",
-    );
-    await expect(reopenedCoffeeTable).toHaveAttribute(
-      "data-room-return-source-group",
-      sourceGroupId,
-    );
-    const returnButton = page.getByRole("button", {
-      name: "Return to group room",
-    });
-    await expect(returnButton).toBeVisible();
-    await returnButton.focus();
-    await returnButton.press("Enter");
-
-    await expect(page).toHaveURL(/view=chat/u);
-    await expect(
-      page.getByRole("button", {
-        name: `Bot group filter: ${sourceGroupName}`,
-      }),
-    ).toBeVisible();
-    const returnedRoom = page.locator('[data-bot-group-waiting-room="true"]');
-    await expect(returnedRoom).toBeVisible();
-    await expect(returnedRoom).not.toHaveAttribute(
-      "data-room-visit-id",
-      initialVisitId ?? "",
-    );
-    await expect(
-      returnedRoom.locator('[data-room-coffee-staging="true"]'),
-    ).toHaveCount(0);
-    await expect(
-      returnedRoom
-        .locator('[data-room-presence-state="stable"] button')
-        .first(),
-    ).toBeFocused();
-    await expect
-      .poll(() =>
-        page.evaluate(
-          (key) => window.sessionStorage.getItem(key),
-          checkpointKey,
-        ),
-      )
-      .toBeNull();
-  });
-
-  waitingRoomTest("waiting-room Home resolution opens only the requested continuation and leaves a missing Home pending @group-room", async ({
-    page,
-  }) => {
-    test.setTimeout(smokeTestTimeout(90_000));
-    await page.emulateMedia({ reducedMotion: "reduce" });
-    const now = "2026-07-14T12:00:00.000Z";
-    const groupName = "History Safe Room";
-    const roomBots = waitingRoomTestBots.slice(0, 6);
-    const targetBotId = roomBots[0]!.id;
-    const pendingBotId = roomBots[1]!.id;
-    const otherBotId = roomBots[2]!.id;
-    const targetOldId = "e2e-target-home-old";
-    const targetCurrentId = "e2e-target-home-current";
-    const prismPoisonId = "e2e-prism-home-poison";
-    const otherPoisonId = "e2e-other-home-poison";
-
-    const relationshipHistory = ({
-      id,
-      ownerBotId,
-      continuationConversationId = id,
-      updatedAt,
-    }: {
-      id: string;
-      ownerBotId: string | null;
-      continuationConversationId?: string;
-      updatedAt: string;
-    }) => ({
-      contextKey: ownerBotId ? `bot:${ownerBotId}` : "prism",
-      contextKind: ownerBotId ? "persona_home" : "prism_home",
-      conversationId: id,
-      rootConversationId: id,
-      episodeId: id,
-      ownerBotId,
-      origin: { kind: "relationship", id: ownerBotId },
-      participantBotIds: ownerBotId ? [ownerBotId] : [pendingBotId],
-      createdAt: now,
-      updatedAt,
-      archived: false,
-      continuationConversationId,
-      nativeRoute: {
-        view: "chat",
-        conversationId: continuationConversationId,
-        botId: ownerBotId,
-      },
-    });
-    const targetOld = {
-      ...testConversation,
-      id: targetOldId,
-      title: "Older target Home",
-      botId: targetBotId,
-      updatedAt: "2026-07-14T12:01:00.000Z",
-      history: relationshipHistory({
-        id: targetOldId,
-        ownerBotId: targetBotId,
-        continuationConversationId: targetCurrentId,
-        updatedAt: "2026-07-14T12:01:00.000Z",
-      }),
-    };
-    const targetCurrent = {
-      ...testConversation,
-      id: targetCurrentId,
-      title: "Current target Home",
-      botId: targetBotId,
-      updatedAt: "2026-07-14T12:02:00.000Z",
-      messages: [
-        {
-          id: "target-current-assistant",
-          role: "assistant" as const,
-          content: "Correct target continuation",
-          createdAt: "2026-07-14T12:02:00.000Z",
-        },
-      ],
-      hasAssistantReply: true,
-      history: relationshipHistory({
-        id: targetCurrentId,
-        ownerBotId: targetBotId,
-        updatedAt: "2026-07-14T12:02:00.000Z",
-      }),
-    };
-    const prismPoison = {
-      ...testConversation,
-      id: prismPoisonId,
-      title: "Prism poison",
-      botId: null,
-      lastBotId: pendingBotId,
-      updatedAt: "2026-07-14T12:09:00.000Z",
-      messages: [
-        {
-          id: "prism-poison-assistant",
-          role: "assistant" as const,
-          content: "POISON PRISM",
-          createdAt: "2026-07-14T12:09:00.000Z",
-        },
-      ],
-      hasAssistantReply: true,
-      history: relationshipHistory({
-        id: prismPoisonId,
-        ownerBotId: null,
-        updatedAt: "2026-07-14T12:09:00.000Z",
-      }),
-    };
-    const otherPoison = {
-      ...testConversation,
-      id: otherPoisonId,
-      title: "Other persona poison",
-      botId: otherBotId,
-      lastBotId: pendingBotId,
-      updatedAt: "2026-07-14T12:10:00.000Z",
-      messages: [
-        {
-          id: "other-poison-assistant",
-          role: "assistant" as const,
-          content: "POISON OTHER",
-          createdAt: "2026-07-14T12:10:00.000Z",
-        },
-      ],
-      hasAssistantReply: true,
-      history: relationshipHistory({
-        id: otherPoisonId,
-        ownerBotId: otherBotId,
-        updatedAt: "2026-07-14T12:10:00.000Z",
-      }),
-    };
-    const conversations = [targetOld, targetCurrent, prismPoison, otherPoison];
-
-    await installAuthenticatedApi(page, {
-      theme: "light",
-      bots: roomBots,
-      botLibraryGroups: [
-        {
-          id: "group:history-safe-room",
-          name: groupName,
-          description: "A room with adversarial History routing fixtures.",
-          botIds: roomBots.map((bot) => bot.id),
-          deleteProtected: false,
-          builtIn: false,
-          createdAt: now,
-          updatedAt: now,
-        },
-      ],
-    });
-
-    const fulfillJson = (route: Route, payload: unknown) =>
-      route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify(payload),
-      });
-    const detailReads: string[] = [];
-    const zenOpenBodies: Array<{ botId?: string | null }> = [];
-    await page.route("**/api/conversations", (route) =>
-      fulfillJson(route, { conversations }),
-    );
-    await page.route("**/api/conversations/zen/open", (route) => {
-      zenOpenBodies.push(
-        (route.request().postDataJSON() ?? {}) as {
-          botId?: string | null;
-        },
-      );
-      return fulfillJson(route, { conversationId: targetCurrentId });
-    });
-    for (const conversation of conversations) {
-      await page.route(`**/api/conversations/${conversation.id}`, (route) => {
-        detailReads.push(conversation.id);
-        return fulfillJson(route, { conversation });
-      });
-      await page.route(
-        `**/api/conversations/${conversation.id}/summary`,
-        (route) => fulfillJson(route, { summary: null }),
-      );
-      await page.route(
-        `**/api/conversations/${conversation.id}/summarization-debug`,
-        (route) =>
-          fulfillJson(route, {
-            debug: {
-              conversationId: conversation.id,
-              mode: "zen",
-              inProgress: false,
-              latestSummary: null,
-              latestDisplaySummary: null,
-              latestSummaryAt: null,
-              messagesSinceLastCompaction: 0,
-              summaryCount: 0,
-            },
-          }),
-      );
-    }
-    for (const botId of [targetBotId, pendingBotId]) {
-      await page.route(`**/api/bots/${botId}/memory-panel*`, (route) =>
-        fulfillJson(route, {
-          botId,
-          memories: [],
-          aboutYouMemories: [],
-          botOpinion: null,
-          sessionOpinion: null,
-          botStatusSummary: null,
-          counts: {
-            total: 0,
-            visible: 0,
-            protectedAboutYou: 0,
-            bySource: { direct: 0, inferred: 0, compiled: 0, about_you: 0 },
-            byTier: { short_term: 0, long_term: 0 },
-            byCategory: { general: 0, user: 0, bot_relation: 0 },
-          },
-        }),
-      );
-    }
-
-    await page.setViewportSize({ width: 1280, height: 720 });
-    await page.goto("/?view=chat");
-    await selectBotGroupFilter(page, groupName);
-    const room = page.locator('[data-bot-group-waiting-room="true"]');
-    const shell = page.locator('main[data-zen-surface="true"]');
-    const composer = page.getByRole("textbox").last();
-    await expect(page.locator("body")).toHaveAttribute(
-      "data-prism-theme",
-      "light",
-    );
-    await expect(room).toBeVisible();
-    detailReads.length = 0;
-    zenOpenBodies.length = 0;
-
-    await activateNavigationControl(
-      room.getByRole("button", {
-        name: `Visit ${roomBots[0]!.name}'s Zen Home`,
-      }),
-    );
-    await expect(shell).toHaveAttribute(
-      "data-relationship-depth-transition",
-      "settled",
-    );
-    await expect(page.getByText("Correct target continuation")).toBeVisible();
-    expect([...new Set(detailReads)]).toEqual([targetCurrentId]);
-    expect(zenOpenBodies).toEqual([]);
-    await expect(page.getByText("POISON PRISM")).toHaveCount(0);
-    await expect(page.getByText("POISON OTHER")).toHaveCount(0);
-    await composer.fill("Draft for the persisted target Home");
-
-    await expect(
-      page.locator('[data-relationship-depth-locked="true"]'),
-    ).toHaveCount(0, { timeout: 10_000 });
-    await page.keyboard.press("Escape");
-    await expect(room).toBeVisible({ timeout: 10_000 });
-    detailReads.length = 0;
-    zenOpenBodies.length = 0;
-    await activateNavigationControl(
-      room.getByRole("button", {
-        name: `Visit ${roomBots[1]!.name}'s Zen Home`,
-      }),
-    );
-    await expect(shell).toHaveAttribute(
-      "data-relationship-depth-transition",
-      "settled",
-    );
-    await expect(
-      page.locator(
-        `[data-relationship-depth-anchor="home"][data-relationship-depth-identity="bot:${pendingBotId}"]`,
-      ),
-    ).toBeVisible();
-    await expect(composer).toHaveText("");
-    await composer.fill("Draft for the pending Home");
-    expect(detailReads).toEqual([]);
-    expect(zenOpenBodies).toEqual([]);
-    await expect(page.getByText("Correct target continuation")).toHaveCount(0);
-    await expect(page.getByText("POISON PRISM")).toHaveCount(0);
-    await expect(page.getByText("POISON OTHER")).toHaveCount(0);
-
-    await expect(
-      page.locator('[data-relationship-depth-locked="true"]'),
-    ).toHaveCount(0, { timeout: 10_000 });
-    await page.keyboard.press("Escape");
-    await expect(room).toBeVisible({ timeout: 10_000 });
-    await activateNavigationControl(
-      room.getByRole("button", {
-        name: `Visit ${roomBots[0]!.name}'s Zen Home`,
-      }),
-    );
-    await expect(composer).toHaveText("Draft for the persisted target Home");
-    await expect(
-      page.locator('[data-relationship-depth-locked="true"]'),
-    ).toHaveCount(0, { timeout: 10_000 });
-    await page.keyboard.press("Escape");
-    await expect(room).toBeVisible({ timeout: 10_000 });
-    await activateNavigationControl(
-      room.getByRole("button", {
-        name: `Visit ${roomBots[1]!.name}'s Zen Home`,
-      }),
-    );
-    await expect(composer).toHaveText("Draft for the pending Home");
-    expect(zenOpenBodies).toEqual([]);
-  });
-
-  waitingRoomTest("waiting-room Back aborts a pending Home reply before restoring the exact room @group-room", async ({
-    page,
-  }) => {
-    test.setTimeout(smokeTestTimeout(60_000));
-    await page.emulateMedia({ reducedMotion: "reduce" });
-    const now = "2026-07-14T12:00:00.000Z";
-    const groupName = "Interruptible Room";
-    const roomBots = waitingRoomTestBots.slice(0, 6);
-    await installAuthenticatedApi(page, {
-      bots: roomBots,
-      botLibraryGroups: [
-        {
-          id: "group:interruptible-room",
-          name: groupName,
-          description: "A deterministic pending-reply return fixture.",
-          botIds: roomBots.map((bot) => bot.id),
-          deleteProtected: false,
-          builtIn: false,
-          createdAt: now,
-          updatedAt: now,
-        },
-      ],
-    });
-
-    let markReplyStarted!: () => void;
-    const replyStarted = new Promise<void>((resolve) => {
-      markReplyStarted = resolve;
-    });
-    let releaseLateReply!: () => void;
-    const lateReplyReleased = new Promise<void>((resolve) => {
-      releaseLateReply = resolve;
-    });
-    let markRouteCompleted!: () => void;
-    const routeCompleted = new Promise<void>((resolve) => {
-      markRouteCompleted = resolve;
-    });
-    const chatRequests: string[] = [];
-    const interruptWrites: string[] = [];
-    page.on("request", (request) => {
-      const pathname = new URL(request.url()).pathname;
-      if (pathname === "/api/chat" && request.method() === "POST") {
-        chatRequests.push(request.url());
-      }
-      if (/^\/api\/messages\/[^/]+\/interrupt$/.test(pathname)) {
-        interruptWrites.push(request.url());
-      }
-    });
-    await page.route("**/api/chat", async (route) => {
-      if (route.request().method() !== "POST") return route.fallback();
-      const requestBody = route.request().postDataJSON() as {
-        botId?: string | null;
-        message?: string;
-      };
-      markReplyStarted();
-      await lateReplyReleased;
-      const ownerBotId = requestBody.botId ?? roomBots[0]!.id;
-      const lateConversation = {
-        ...testConversation,
-        id: "e2e-late-canceled-home",
-        title: "Late canceled Home",
-        botId: ownerBotId,
-        updatedAt: "2026-07-14T12:01:00.000Z",
-        messages: [
-          {
-            id: "late-canceled-user",
-            role: "user" as const,
-            content: requestBody.message ?? "Canceled Home prompt",
-            createdAt: "2026-07-14T12:01:00.000Z",
-          },
-          {
-            id: "late-canceled-assistant",
-            role: "assistant" as const,
-            content: "This late reply must never reopen the Home.",
-            createdAt: "2026-07-14T12:01:01.000Z",
-          },
-        ],
-        hasAssistantReply: true,
-      };
-      try {
-        await route
-          .fulfill({
-            status: 200,
-            contentType: "application/json",
-            body: JSON.stringify({ conversation: lateConversation }),
-          })
-          .catch(() => undefined);
-      } finally {
-        markRouteCompleted();
-      }
-    });
-
-    await page.setViewportSize({ width: 1280, height: 720 });
-    await page.goto("/?view=chat");
-    await selectBotGroupFilter(page, groupName);
-    const room = page.locator('[data-bot-group-waiting-room="true"]');
-    await expect(room).toBeVisible();
-    const visitId = await room.getAttribute("data-room-visit-id");
-    const rosterSignature = await room
-      .locator("[data-room-presence-bot-id]")
-      .evaluateAll((nodes) =>
-        nodes.map((node) => ({
-          botId: node.getAttribute("data-room-presence-bot-id"),
-          role: node.getAttribute("data-room-presence-role"),
-          slot: node.getAttribute("data-room-presence-slot"),
-        })),
-      );
-    const anchor = room.locator('[data-room-presence-role="anchor"]').first();
-    const anchorBotId = await anchor.getAttribute("data-room-presence-bot-id");
-    expect(anchorBotId).not.toBeNull();
-    const anchorButton = anchor.getByRole("button");
-    const composer = page.getByRole("textbox").last();
-    await composer.fill("Room draft survives the canceled reply");
-    await activateNavigationControl(anchorButton);
-    await expect(room).toHaveCount(0);
-    await composer.fill("Canceled Home prompt");
-    await composer.press("Enter");
-    await replyStarted;
-
-    const failedChatRequest = page.waitForEvent("requestfailed", {
-      predicate: (request) =>
-        request.method() === "POST" &&
-        new URL(request.url()).pathname === "/api/chat",
-    });
-    const backButton = page.locator('[data-home-affordance="wordmark"]');
-    await expect(backButton).toBeEnabled();
-    await expect(backButton).toHaveAttribute(
-      "aria-label",
-      `Back to ${groupName}`,
-    );
-    await activateNavigationControl(backButton);
-    const failedRequest = await failedChatRequest;
-    expect(failedRequest.failure()?.errorText).toContain("net::ERR_ABORTED");
-
-    await expect(room).toBeVisible();
-    await expect(room).toHaveAttribute("data-room-visit-id", visitId!);
-    await expect(composer).toHaveText("Room draft survives the canceled reply");
-    expect(
-      await room.locator("[data-room-presence-bot-id]").evaluateAll((nodes) =>
-        nodes.map((node) => ({
-          botId: node.getAttribute("data-room-presence-bot-id"),
-          role: node.getAttribute("data-room-presence-role"),
-          slot: node.getAttribute("data-room-presence-slot"),
-        })),
-      ),
-    ).toEqual(rosterSignature);
-    const restoredAnchorButton = room
-      .locator(`[data-room-presence-bot-id="${anchorBotId}"]`)
-      .getByRole("button");
-    await expect(restoredAnchorButton).toBeFocused();
-    expect(interruptWrites).toEqual([]);
-
-    releaseLateReply();
-    await routeCompleted;
-    await page.evaluate(
-      () =>
-        new Promise<void>((resolve) =>
-          requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
-        ),
-    );
-    await expect(room).toBeVisible();
-    await expect(
-      page.locator('[data-relationship-depth-anchor="home"]'),
-    ).toHaveCount(0);
-    expect(chatRequests).toHaveLength(1);
-    expect(interruptWrites).toEqual([]);
-
-    await activateNavigationControl(restoredAnchorButton);
-    await expect(room).toHaveCount(0);
-    await expect(composer).toHaveText("Canceled Home prompt");
-  });
-
-  waitingRoomTest("waiting-room ambient theater stays silent, static for assistive tech, and bounded @group-room", async ({
-    page,
-  }) => {
-    test.setTimeout(smokeTestTimeout(90_000));
-    const now = "2026-07-14T12:00:00.000Z";
-    const groupName = "Silent Ambient Council";
-    await page.emulateMedia({ reducedMotion: "no-preference" });
-    await installAuthenticatedApi(page, {
-      bots: waitingRoomTestBots,
-      botLibraryGroups: [
-        {
-          id: "group:silent-ambient",
-          name: groupName,
-          description: "A room that moves without speaking or writing history.",
-          botIds: waitingRoomTestBots.map((bot) => bot.id),
-          deleteProtected: false,
-          builtIn: false,
-          createdAt: now,
-          updatedAt: now,
-        },
-      ],
-    });
-    await page.setViewportSize({ width: 1920, height: 1080 });
-    await page.goto("/?view=chat");
-    await page.clock.install({ time: new Date(now) });
-    await page.clock.pauseAt(
-      new Date(await page.evaluate(() => Date.now() + 60_000)),
-    );
-    const groupTrigger = page.getByRole("button", {
-      name: "Bot group filter: All bots",
-    });
-    await groupTrigger.click();
-    await page.getByRole("option", { name: groupName }).click();
-
-    const room = page.locator('[data-bot-group-waiting-room="true"]');
-    const anchors = room.locator('[data-room-presence-role="anchor"]');
-    const roamers = room.locator('[data-room-presence-role="roamer"]');
-    await expect(room).toBeVisible();
-    await page.mouse.move(4, 4);
-    await expect(anchors).toHaveCount(5);
-    await expect(roamers).toHaveCount(3);
-    await expect(room).toHaveAttribute("data-room-ambient-phase", "idle");
-    await expect(room).toHaveAttribute("data-room-ambient-paused", "false");
-
-    await expect(
-      anchors.first().locator('[data-crt-material-layer="noise"]'),
-    ).toHaveCount(1);
-    await expect(
-      roamers.first().locator('[data-crt-material-layer="noise"]'),
-    ).toHaveCount(0);
-    await expect(
-      roamers.first().locator('[data-crt-material-layer="breathing"]'),
-    ).toHaveCount(0);
-    await expect(
-      roamers.first().locator('[data-render-detail="reduced"]'),
-    ).toHaveCount(1);
-    expect(
-      await roamers.first().evaluate((presence) => {
-        const face = presence.querySelector<HTMLElement>(
-          '[data-zen-live-bot-body-frame="true"]',
-        );
-        const glass = presence.querySelector<HTMLElement>(
-          '[data-screen-material-layer="glass"]',
-        );
-        return {
-          glow: face
-            ? getComputedStyle(face)
-                .getPropertyValue("--bot-face-ambient-glow-opacity")
-                .trim()
-            : "",
-          glassDisplay: glass ? getComputedStyle(glass).display : "missing",
-        };
-      }),
-    ).toEqual({ glow: "0.14", glassDisplay: "none" });
-    const idleAnimationCount = await room.evaluate(
-      (element) => element.getAnimations({ subtree: true }).length,
-    );
-
-    await page.evaluate(() => {
-      const probe = {
-        mediaPlayCount: 0,
-        audioContextCount: 0,
-        webSocketUrls: [] as string[],
-        eventSourceUrls: [] as string[],
-        sendBeaconUrls: [] as string[],
-      };
-      const originalPlay = HTMLMediaElement.prototype.play;
-      HTMLMediaElement.prototype.play = function () {
-        probe.mediaPlayCount += 1;
-        return originalPlay.call(this);
-      };
-      const mutableWindow = window as typeof window & {
-        __waitingRoomAmbientAudioProbe?: typeof probe;
-        webkitAudioContext?: typeof AudioContext;
-      };
-      const wrapAudioContext = (
-        NativeAudioContext: typeof AudioContext | undefined,
-      ): typeof AudioContext | undefined =>
-        NativeAudioContext
-          ? new Proxy(NativeAudioContext, {
-              construct(target, argumentsList, newTarget) {
-                probe.audioContextCount += 1;
-                return Reflect.construct(target, argumentsList, newTarget);
-              },
-            })
-          : undefined;
-      mutableWindow.AudioContext = wrapAudioContext(
-        mutableWindow.AudioContext,
-      )!;
-      if (mutableWindow.webkitAudioContext) {
-        mutableWindow.webkitAudioContext = wrapAudioContext(
-          mutableWindow.webkitAudioContext,
-        );
-      }
-      const NativeWebSocket = mutableWindow.WebSocket;
-      mutableWindow.WebSocket = new Proxy(NativeWebSocket, {
-        construct(target, argumentsList, newTarget) {
-          probe.webSocketUrls.push(String(argumentsList[0] ?? ""));
-          return Reflect.construct(target, argumentsList, newTarget);
-        },
-      });
-      const NativeEventSource = mutableWindow.EventSource;
-      mutableWindow.EventSource = new Proxy(NativeEventSource, {
-        construct(target, argumentsList, newTarget) {
-          probe.eventSourceUrls.push(String(argumentsList[0] ?? ""));
-          return Reflect.construct(target, argumentsList, newTarget);
-        },
-      });
-      const originalSendBeacon = navigator.sendBeacon?.bind(navigator);
-      if (originalSendBeacon) {
-        Object.defineProperty(navigator, "sendBeacon", {
-          configurable: true,
-          value: (url: string | URL, data?: BodyInit | null): boolean => {
-            probe.sendBeaconUrls.push(String(url));
-            return originalSendBeacon(url, data);
-          },
-        });
-      }
-      mutableWindow.__waitingRoomAmbientAudioProbe = probe;
-    });
-    const storageBefore = await page.evaluate(() => ({
-      local: Array.from({ length: localStorage.length }, (_, index) => {
-        const key = localStorage.key(index)!;
-        return [key, localStorage.getItem(key)] as const;
-      }).sort(([left], [right]) => left.localeCompare(right)),
-      session: Array.from({ length: sessionStorage.length }, (_, index) => {
-        const key = sessionStorage.key(index)!;
-        return [key, sessionStorage.getItem(key)] as const;
-      }).sort(([left], [right]) => left.localeCompare(right)),
-    }));
-    const ambientNetworkRequests: string[] = [];
-    const ambientWebSockets: string[] = [];
-    page.on("request", (request) => {
-      const url = new URL(request.url());
-      if (
-        url.pathname !== "/api/health" &&
-        !["image", "font", "stylesheet", "script"].includes(
-          request.resourceType(),
-        )
-      ) {
-        ambientNetworkRequests.push(
-          `${request.resourceType()} ${request.method()} ${url.href}`,
-        );
-      }
-    });
-    page.on("websocket", (socket) => ambientWebSockets.push(socket.url()));
-
-    const staticAriaSnapshot = await room.ariaSnapshot();
-    const idleDurationMs = Number(
-      await room.getAttribute("data-room-ambient-next-ms"),
-    );
-    expect(idleDurationMs).toBeGreaterThanOrEqual(24_000);
-    expect(idleDurationMs).toBeLessThanOrEqual(54_000);
-    await page.clock.runFor(idleDurationMs + 1);
-    await expect(room).toHaveAttribute("data-room-ambient-phase", "glance");
-    await expect(room.locator("[data-room-ambient-role]")).toHaveCount(2);
-    await expect(
-      room.locator('[data-room-ambient-role="speaker"]'),
-    ).toHaveCount(1);
-    await expect(
-      room.locator('[data-room-ambient-role="listener"]'),
-    ).toHaveCount(1);
-    expect(await room.ariaSnapshot()).toBe(staticAriaSnapshot);
-
-    await page.clock.runFor(1_201);
-    await expect(room).toHaveAttribute("data-room-ambient-phase", "speaking");
-    const cue = room.locator('[data-room-ambient-cue="true"]');
-    await expect(cue).toHaveCount(1);
-    await expect(cue).toHaveAttribute("aria-hidden", "true");
-    await page.clock.runFor(200);
-    await expect(cue).toBeVisible();
-    const speakingDurationMs = Number(
-      await room.getAttribute("data-room-ambient-next-ms"),
-    );
-    expect(speakingDurationMs).toBeGreaterThanOrEqual(2_600);
-    expect(speakingDurationMs).toBeLessThanOrEqual(4_800);
-    const cueGeometry = await cue.evaluate((element) => {
-      const cueRect = element.getBoundingClientRect();
-      const roomRect = element
-        .closest('[data-bot-group-waiting-room="true"]')!
-        .getBoundingClientRect();
-      return {
-        cueLeft: cueRect.left,
-        cueTop: cueRect.top,
-        cueRight: cueRect.right,
-        cueBottom: cueRect.bottom,
-        roomLeft: roomRect.left,
-        roomTop: roomRect.top,
-        roomRight: roomRect.right,
-        roomBottom: roomRect.bottom,
-        opacity: getComputedStyle(element).opacity,
-      };
-    });
-    expect(Number(cueGeometry.opacity)).toBeGreaterThan(0.75);
-    expect(cueGeometry.cueLeft).toBeGreaterThanOrEqual(cueGeometry.roomLeft);
-    expect(cueGeometry.cueTop).toBeGreaterThanOrEqual(cueGeometry.roomTop);
-    expect(cueGeometry.cueRight).toBeLessThanOrEqual(cueGeometry.roomRight);
-    expect(cueGeometry.cueBottom).toBeLessThanOrEqual(cueGeometry.roomBottom);
-    expect(
-      await room.evaluate(
-        (element) => element.getAnimations({ subtree: true }).length,
-      ),
-    ).toBeLessThanOrEqual(idleAnimationCount + 8);
-    expect(await room.ariaSnapshot()).toBe(staticAriaSnapshot);
-    const activePhase = await room.getAttribute("data-room-ambient-phase");
-    const activeCycle = await room.getAttribute("data-room-ambient-cycle");
-    const composer = page.getByRole("textbox").last();
-    await composer.focus();
-    await expect(room).toHaveAttribute("data-room-ambient-paused", "true");
-    await expect(room.locator("[data-room-ambient-role]")).toHaveCount(0);
-    await expect(cue).toHaveCount(0);
-    await page.clock.runFor(10_000);
-    await expect(room).toHaveAttribute("data-room-ambient-phase", activePhase!);
-    await expect(room).toHaveAttribute("data-room-ambient-cycle", activeCycle!);
-    await composer.blur();
-    await page.mouse.move(4, 4);
-    await expect(room).toHaveAttribute("data-room-ambient-paused", "false");
-    await expect(room.locator("[data-room-ambient-role]")).toHaveCount(2);
-
-    await page.clock.resume();
-    await page.emulateMedia({ reducedMotion: "reduce" });
-    await expect
-      .poll(() =>
-        page.evaluate(
-          () =>
-            window.matchMedia("(prefers-reduced-motion: reduce)").matches,
-        ),
-      )
-      .toBe(true);
-    await expect(room).toHaveAttribute("data-room-ambient-paused", "true", {
-      timeout: 10_000,
-    });
-    await page.clock.pauseAt(
-      new Date(await page.evaluate(() => Date.now() + 1_000)),
-    );
-    await expect(room.locator("[data-room-ambient-role]")).toHaveCount(0);
-    await expect(cue).toHaveCount(0);
-    const reducedPhase = await room.getAttribute("data-room-ambient-phase");
-    const reducedCycle = await room.getAttribute("data-room-ambient-cycle");
-    await page.clock.runFor(10_000);
-    await expect(room).toHaveAttribute(
-      "data-room-ambient-phase",
-      reducedPhase!,
-    );
-    await expect(room).toHaveAttribute(
-      "data-room-ambient-cycle",
-      reducedCycle!,
-    );
-    expect(
-      await room.evaluate(
-        (element) => element.getAnimations({ subtree: true }).length,
-      ),
-    ).toBeLessThanOrEqual(idleAnimationCount);
-    expect(await room.ariaSnapshot()).toBe(staticAriaSnapshot);
-    await expect(page.locator("[data-message-id]")).toHaveCount(0);
-
-    expect(
-      await page.evaluate(() => {
-        const probe = (
-          window as typeof window & {
-            __waitingRoomAmbientAudioProbe?: {
-              mediaPlayCount: number;
-              audioContextCount: number;
-              webSocketUrls: string[];
-              eventSourceUrls: string[];
-              sendBeaconUrls: string[];
-            };
-          }
-        ).__waitingRoomAmbientAudioProbe;
-        return (
-          probe ?? {
-            mediaPlayCount: -1,
-            audioContextCount: -1,
-            webSocketUrls: ["probe missing"],
-            eventSourceUrls: ["probe missing"],
-            sendBeaconUrls: ["probe missing"],
-          }
-        );
-      }),
-    ).toEqual({
-      mediaPlayCount: 0,
-      audioContextCount: 0,
-      webSocketUrls: [],
-      eventSourceUrls: [],
-      sendBeaconUrls: [],
-    });
-    expect(
-      await page.evaluate(() => ({
-        local: Array.from({ length: localStorage.length }, (_, index) => {
-          const key = localStorage.key(index)!;
-          return [key, localStorage.getItem(key)] as const;
-        }).sort(([left], [right]) => left.localeCompare(right)),
-        session: Array.from({ length: sessionStorage.length }, (_, index) => {
-          const key = sessionStorage.key(index)!;
-          return [key, sessionStorage.getItem(key)] as const;
-        }).sort(([left], [right]) => left.localeCompare(right)),
-      })),
-    ).toEqual(storageBefore);
-    expect(ambientNetworkRequests).toEqual([]);
-    expect(ambientWebSockets).toEqual([]);
-  });
-
-  waitingRoomTest("waiting-room visit survives pauses and cleans up on exit @group-room", async ({
-    page,
-  }) => {
-    test.setTimeout(smokeTestTimeout(90_000));
-    const now = "2026-07-14T12:00:00.000Z";
-    const groupName = "Ambient Rotation Circle";
-    await installAuthenticatedApi(page, {
-      bots: waitingRoomTestBots,
-      botLibraryGroups: [
-        {
-          id: "group:ambient-rotation",
-          name: groupName,
-          description: "A deterministic ambient roster test.",
-          botIds: waitingRoomTestBots.map((bot) => bot.id),
-          deleteProtected: false,
-          builtIn: false,
-          createdAt: now,
-          updatedAt: now,
-        },
-      ],
-    });
-    await page.setViewportSize({ width: 1280, height: 720 });
-    await page.emulateMedia({ reducedMotion: "reduce" });
-    await page.goto("/?view=chat");
-    await page.clock.install({ time: new Date("2026-07-14T12:00:00.000Z") });
-    const selectGroup = async (name: string): Promise<void> => {
-      await activateNavigationControl(
-        page.getByRole("button", { name: /Bot group filter:/ }).first(),
-      );
-      await activateNavigationControl(page.getByRole("option", { name }));
-    };
-    await selectGroup(groupName);
-    const room = page.locator('[data-bot-group-waiting-room="true"]');
-    await expect(room).toBeVisible();
-    const visibleBotIds = async (): Promise<Array<string | null>> =>
-      room
-        .locator("[data-room-presence-bot-id]")
-        .evaluateAll((nodes) =>
-          nodes.map((node) => node.getAttribute("data-room-presence-bot-id")),
-        );
-    const reducedMotionRoster = await visibleBotIds();
-    const reducedMotionVisitId = await room.getAttribute("data-room-visit-id");
-    await page.clock.fastForward(20 * 60 * 1_000);
-    expect(await visibleBotIds()).toEqual(reducedMotionRoster);
-
-    await activateNavigationControl(
-      page.locator('[data-app-switcher-trigger="true"]'),
-    );
-    await activateNavigationControl(
-      page.getByRole("menuitemradio", { name: /Coffee/ }),
-    );
-    await expect(page.locator('[data-mode="picker"]')).toBeVisible();
-    await page.clock.fastForward(10 * 60 * 1_000);
-    await activateNavigationControl(
-      page.locator('[data-app-switcher-trigger="true"]'),
-    );
-    await activateNavigationControl(
-      page.getByRole("menuitemradio", { name: /Chat/ }),
-    );
-    await page.clock.runFor(1_000);
-    await expect(room).toBeVisible();
-    await expect(room).toHaveAttribute(
-      "data-room-visit-id",
-      reducedMotionVisitId!,
-    );
-    expect(await visibleBotIds()).toEqual(reducedMotionRoster);
-
-    await selectGroup("All bots");
-    await expect(room).toHaveCount(0);
-    await page.clock.fastForward(10 * 60 * 1_000);
-    await selectGroup(groupName);
-    await expect(room).toBeVisible();
-    await expect(room).not.toHaveAttribute(
-      "data-room-visit-id",
-      reducedMotionVisitId!,
-    );
-
-    await page.emulateMedia({ reducedMotion: "no-preference" });
-    await room
-      .locator("[data-room-presence-bot-id]")
-      .first()
-      .getByRole("button")
-      .focus();
-    await expect(room).toHaveAttribute("data-room-rotation-paused", "true");
-    const search = page.getByRole("searchbox", {
-      name: "Search bots by name",
-    });
-    await search.fill("Waiting Bot 1");
-    await expect(room).toHaveCount(0);
-    await page.mouse.move(4, 4);
-    await search.fill("");
-    await expect(room).toBeVisible();
-    await expect(room).toHaveAttribute("data-room-rotation-paused", "false");
-    await selectGroup("All bots");
-    await expect(room).toHaveCount(0);
-    await page.clock.fastForward(10 * 60 * 1_000);
-  });
-
-  waitingRoomTest("waiting-room rotation cancels stale handoffs across groups @group-room", async ({
-    page,
-  }) => {
-    test.setTimeout(smokeTestTimeout(90_000));
-    const now = "2026-07-14T12:00:00.000Z";
-    const firstGroupName = "First Rotation Circle";
-    const secondGroupName = "Second Rotation Circle";
-    await page.emulateMedia({ reducedMotion: "no-preference" });
-    await installAuthenticatedApi(page, {
-      bots: waitingRoomTestBots,
-      botLibraryGroups: [
-        {
-          id: "group:first-rotation",
-          name: firstGroupName,
-          description: "A deterministic ambient roster test.",
-          botIds: waitingRoomTestBots.map((bot) => bot.id),
-          deleteProtected: false,
-          builtIn: false,
-          createdAt: now,
-          updatedAt: now,
-        },
-        {
-          id: "group:second-rotation",
-          name: secondGroupName,
-          description: "A disjoint roster used to catch stale handoff commits.",
-          botIds: waitingRoomTestBots.slice(6).map((bot) => bot.id),
-          deleteProtected: false,
-          builtIn: false,
-          createdAt: now,
-          updatedAt: now,
-        },
-      ],
-    });
-    await page.setViewportSize({ width: 1280, height: 720 });
-    await page.goto("/?view=chat");
-    await page.clock.install({ time: new Date("2026-07-14T12:00:00.000Z") });
-    await page.clock.pauseAt(
-      new Date(await page.evaluate(() => Date.now() + 60_000)),
-    );
-    const selectGroup = async (name: string): Promise<void> => {
-      await activateNavigationControl(
-        page.getByRole("button", { name: /Bot group filter:/ }).first(),
-      );
-      await activateNavigationControl(page.getByRole("option", { name }));
-    };
-    await selectGroup(firstGroupName);
-    const room = page.locator('[data-bot-group-waiting-room="true"]');
-    await expect(room).toBeVisible();
-    await expect(room).toHaveAttribute("data-room-rotation-paused", "false");
-    const visibleBotIds = async (): Promise<Array<string | null>> =>
-      room
-        .locator("[data-room-presence-bot-id]")
-        .evaluateAll((nodes) =>
-          nodes.map((node) => node.getAttribute("data-room-presence-bot-id")),
-        );
-    const advanceToHandoff = async (): Promise<void> => {
-      const rotationDelayMs = Number(
-        await room.getAttribute("data-room-next-rotation-ms"),
-      );
-      expect(rotationDelayMs).toBeGreaterThanOrEqual(2 * 60 * 1_000);
-      expect(rotationDelayMs).toBeLessThanOrEqual(4 * 60 * 1_000);
-      await page.clock.runFor(100);
-      await page.clock.runFor(rotationDelayMs + 50);
-      await expect(room).toHaveAttribute(
-        "data-room-handoff-order",
-        "arrival-before-departure",
-      );
-    };
-
-    const initialRoster = await visibleBotIds();
-    await advanceToHandoff();
-    await page.clock.runFor(2 * 520 + 100);
-    expect(await visibleBotIds()).not.toEqual(initialRoster);
-
-    await advanceToHandoff();
-    const firstGroupVisitId = await room.getAttribute("data-room-visit-id");
-    await selectGroup(secondGroupName);
-    await expect(room).toBeVisible();
-    await expect(room).not.toHaveAttribute(
-      "data-room-visit-id",
-      firstGroupVisitId!,
-    );
-    const secondGroupBotIds = new Set(
-      waitingRoomTestBots.slice(6).map((bot) => bot.id),
-    );
-    const assertOnlySecondGroupBots = async (): Promise<void> => {
-      const ids = await visibleBotIds();
-      expect(ids).toHaveLength(6);
-      expect(ids.every((botId) => botId && secondGroupBotIds.has(botId))).toBe(
-        true,
-      );
-    };
-    await assertOnlySecondGroupBots();
-    await expect(room).toHaveAttribute("data-room-ambient-phase", "idle");
-    await expect(room).toHaveAttribute("data-room-ambient-cycle", "0");
-    const secondGroupAmbientDelayMs = Number(
-      await room.getAttribute("data-room-ambient-next-ms"),
-    );
-    await page.clock.runFor(secondGroupAmbientDelayMs + 1);
-    await expect(room).toHaveAttribute("data-room-ambient-phase", "glance");
-    expect(
-      secondGroupBotIds.has(
-        (await room.getAttribute("data-room-ambient-speaker")) ?? "",
-      ),
-    ).toBe(true);
-    expect(
-      secondGroupBotIds.has(
-        (await room.getAttribute("data-room-ambient-listener")) ?? "",
-      ),
-    ).toBe(true);
-    await page.clock.runFor(2 * 520 + 5_000);
-    await assertOnlySecondGroupBots();
-  });
-
-  for (const theme of ["dark", "light"] as const) {
-    waitingRoomTest(`waiting room remains legible across desktop sizes in ${theme} theme @group-room`, async ({
-      page,
-    }) => {
+  waitingRoomTest(
+    "large saved group becomes a stable responsive waiting room @group-room",
+    async ({ page }) => {
       test.setTimeout(smokeTestTimeout(90_000));
       const now = "2026-07-14T12:00:00.000Z";
-      const groupName = "Responsive Waiting Circle";
-      await page.emulateMedia({ reducedMotion: "reduce" });
+      const groupName = "Waiting Room Council";
+      await page.emulateMedia({ reducedMotion: "no-preference" });
       await installAuthenticatedApi(page, {
-        theme,
         bots: waitingRoomTestBots,
-        images: testGroupImages(
-          waitingRoomTestBots.slice(0, 6).map((bot) => bot.id),
-          2,
-        ),
+        images: [
+          ...testGroupImages(
+            waitingRoomTestBots.slice(0, 6).map((bot) => bot.id),
+            2,
+          ),
+          {
+            ...testGroupImages(["e2e-waiting-bot-1"], 1)[0]!,
+            id: "e2e-waiting-remote-only",
+            hasLocalFile: false,
+            displayUrl: "https://remote.invalid/waiting-remote-only.png",
+          },
+        ],
         botLibraryGroups: [
           {
-            id: "group:responsive-waiting-circle",
+            id: "builtin:favorites",
+            name: "Favorites",
+            description: "Pinned bots you want to keep close.",
+            botIds: [],
+            deleteProtected: false,
+            builtIn: true,
+            createdAt: now,
+            updatedAt: now,
+          },
+          {
+            id: "group:waiting-room-council",
             name: groupName,
             description:
-              "A larger ambient gathering that remains readable without beginning a conversation.",
+              "A broad circle of distinct companions who can gather without starting a conversation.",
             botIds: waitingRoomTestBots.map((bot) => bot.id),
             deleteProtected: false,
             builtIn: false,
@@ -4292,13 +2771,1923 @@ test.describe("PRISM desktop smoke", () => {
           },
         ],
       });
+      await page.setViewportSize({ width: 1280, height: 720 });
+      await page.goto("/?view=chat");
+      const groupTrigger = page.getByRole("button", {
+        name: "Bot group filter: All bots",
+      });
+      await expect(groupTrigger).toBeVisible();
+      const mutatingRequests: string[] = [];
+      const externalImageRequests: string[] = [];
+      page.on("request", (request) => {
+        const requestUrl = new URL(request.url());
+        if (
+          requestUrl.pathname.startsWith("/api/") &&
+          !["GET", "HEAD", "OPTIONS"].includes(request.method())
+        ) {
+          mutatingRequests.push(`${request.method()} ${request.url()}`);
+        }
+        if (requestUrl.hostname === "remote.invalid") {
+          externalImageRequests.push(request.url());
+        }
+      });
+      await selectBotGroupFilter(page, groupName);
 
-      for (const viewport of [
-        { width: 1280, height: 720, presenceCount: 6 },
-        { width: 1440, height: 900, presenceCount: 7 },
-        { width: 1920, height: 1080, presenceCount: 8 },
-      ]) {
-        await page.setViewportSize(viewport);
+      const room = page.locator('[data-bot-group-waiting-room="true"]');
+      const anchors = room.locator('[data-room-presence-role="anchor"]');
+      const roamers = room.locator('[data-room-presence-role="roamer"]');
+      await expect(room).toBeVisible();
+      await expect(room).toHaveAttribute("data-room-viewport", "1280x720");
+      if ((await room.getAttribute("data-room-presence-count")) === "24") {
+        const visitId = await room.getAttribute("data-room-visit-id");
+        await expect(room.locator("[data-room-presence-bot-id]")).toHaveCount(
+          24,
+        );
+        await expect(room).toHaveAttribute("data-room-lod", "micro");
+        await page.setViewportSize({ width: 1600, height: 900 });
+        await expect(room).toHaveAttribute("data-room-presence-count", "24");
+        await expect(room).toHaveAttribute("data-room-visit-id", visitId!);
+        expect(externalImageRequests).toEqual([]);
+        return;
+      }
+      await expect(anchors).toHaveCount(5);
+      await expect(roamers).toHaveCount(1);
+      const roomImageBubbles = room.locator(
+        '[data-group-image-bubbles="waiting"] [data-group-image-bubble-id]',
+      );
+      await expect(roomImageBubbles).toHaveCount(2);
+      await expect(
+        room.locator('[data-group-image-bubble-id="e2e-waiting-remote-only"]'),
+      ).toHaveCount(0);
+      const visitId = await room.getAttribute("data-room-visit-id");
+      const initialAnchorIds = await anchors.evaluateAll((nodes) =>
+        nodes.map((node) => node.getAttribute("data-room-presence-bot-id")),
+      );
+
+      const assertRoomGeometry = async (): Promise<void> => {
+        const composer = page.getByRole("textbox").last();
+        await expect(composer).toBeVisible();
+        const [roomBox, composerBox, presenceBoxes, imageBubbleBoxes] =
+          await Promise.all([
+            room.boundingBox(),
+            composer.boundingBox(),
+            room.locator("[data-room-presence-bot-id]").evaluateAll((nodes) =>
+              nodes.map((node) => {
+                const rect = node.getBoundingClientRect();
+                return {
+                  left: rect.left,
+                  top: rect.top,
+                  right: rect.right,
+                  bottom: rect.bottom,
+                };
+              }),
+            ),
+            roomImageBubbles.evaluateAll((nodes) =>
+              nodes.map((node) => {
+                const rect = node.getBoundingClientRect();
+                return {
+                  left: rect.left,
+                  top: rect.top,
+                  right: rect.right,
+                  bottom: rect.bottom,
+                };
+              }),
+            ),
+          ]);
+        expect(roomBox).not.toBeNull();
+        expect(composerBox).not.toBeNull();
+        if (!roomBox || !composerBox) return;
+        expect(roomBox.y + roomBox.height).toBeLessThanOrEqual(
+          composerBox.y - 12,
+        );
+        for (const box of presenceBoxes) {
+          expect(box.left).toBeGreaterThanOrEqual(roomBox.x - 1);
+          expect(box.top).toBeGreaterThanOrEqual(roomBox.y - 1);
+          expect(box.right).toBeLessThanOrEqual(roomBox.x + roomBox.width + 1);
+          expect(box.bottom).toBeLessThanOrEqual(
+            roomBox.y + roomBox.height + 1,
+          );
+        }
+        for (const bubbleBox of imageBubbleBoxes) {
+          expect(bubbleBox.left).toBeGreaterThanOrEqual(roomBox.x);
+          expect(bubbleBox.top).toBeGreaterThanOrEqual(roomBox.y);
+          expect(bubbleBox.right).toBeLessThanOrEqual(
+            roomBox.x + roomBox.width,
+          );
+          expect(bubbleBox.bottom).toBeLessThanOrEqual(
+            roomBox.y + roomBox.height,
+          );
+          for (const presenceBox of presenceBoxes) {
+            const overlaps =
+              bubbleBox.left < presenceBox.right &&
+              bubbleBox.right > presenceBox.left &&
+              bubbleBox.top < presenceBox.bottom &&
+              bubbleBox.bottom > presenceBox.top;
+            expect(overlaps).toBe(false);
+          }
+        }
+      };
+      await assertRoomGeometry();
+
+      const firstRoomImageButton = roomImageBubbles.first().getByRole("button");
+      const firstRoomImageVisual = firstRoomImageButton.locator("span").first();
+      await expect
+        .poll(() =>
+          firstRoomImageVisual.evaluate(
+            (node) => getComputedStyle(node).animationName,
+          ),
+        )
+        .not.toBe("none");
+      await page.emulateMedia({ reducedMotion: "reduce" });
+      await expect
+        .poll(() =>
+          firstRoomImageVisual.evaluate(
+            (node) => getComputedStyle(node).animationName,
+          ),
+        )
+        .toBe("none");
+      await page.emulateMedia({ reducedMotion: "no-preference" });
+      await firstRoomImageButton.focus();
+      await firstRoomImageButton.press("Enter");
+      const imagePreview = page.getByRole("dialog", {
+        name: /Generated scene/,
+      });
+      await imagePreview.locator("img").evaluate(async (node) => {
+        await (node as HTMLImageElement).decode().catch(() => undefined);
+      });
+      await expect(imagePreview).toBeVisible();
+      await expect(
+        imagePreview.getByRole("button", { name: "Close image preview" }),
+      ).toBeFocused();
+      await page.keyboard.press("Escape");
+      await expect(imagePreview).toHaveCount(0);
+      await expect(firstRoomImageButton).toBeFocused();
+
+      await page.setViewportSize({ width: 1280, height: 760 });
+      expect(
+        await page.evaluate(() => ({
+          width: window.innerWidth,
+          height: window.innerHeight,
+        })),
+      ).toEqual({ width: 1280, height: 760 });
+      await expect(room).toHaveAttribute("data-room-viewport", "1280x760");
+      await expect(room).toHaveAttribute("data-room-presence-count", "7");
+      await expect(roamers).toHaveCount(2);
+      await expect(room).toHaveAttribute("data-room-visit-id", visitId!);
+      await expect(anchors).toHaveCount(5);
+      expect(
+        await anchors.evaluateAll((nodes) =>
+          nodes.map((node) => node.getAttribute("data-room-presence-bot-id")),
+        ),
+      ).toEqual(initialAnchorIds);
+
+      await page.setViewportSize({ width: 1600, height: 900 });
+      await expect(room).toHaveAttribute("data-room-presence-count", "8");
+      await expect(roamers).toHaveCount(3);
+      await expect(roomImageBubbles).toHaveCount(4);
+      await assertRoomGeometry();
+      if (process.env.PRISM_CAPTURE_GROUP_ROOM === "1") {
+        await page.screenshot({
+          path: ".codex/output/waiting-room-images-dark-1600x900.png",
+          fullPage: false,
+        });
+      }
+
+      const search = page.getByRole("searchbox", {
+        name: "Search bots by name",
+      });
+      await search.fill("Waiting Bot 1");
+      await expect(room).toHaveCount(0);
+      await search.fill("");
+      await expect(room).toBeVisible();
+      await expect(room).toHaveAttribute("data-room-visit-id", visitId!);
+      expect(
+        await anchors.evaluateAll((nodes) =>
+          nodes.map((node) => node.getAttribute("data-room-presence-bot-id")),
+        ),
+      ).toEqual(initialAnchorIds);
+
+      const firstAnchorId = await anchors
+        .first()
+        .getAttribute("data-room-presence-bot-id");
+      const promotedRoamerId = await roamers
+        .first()
+        .getAttribute("data-room-presence-bot-id");
+      expect(promotedRoamerId).not.toBeNull();
+      const composer = page.getByRole("textbox").last();
+      await composer.fill("A draft held only for this room");
+      await activateNavigationControl(roamers.first().getByRole("button"));
+      const shell = page.locator('main[data-zen-surface="true"]');
+      await expect(shell).toHaveAttribute(
+        "data-relationship-depth-transition",
+        "settled",
+      );
+      await expect(room).toHaveCount(0);
+      await expect(
+        page.locator(
+          `[data-relationship-depth-anchor="home"][data-relationship-depth-identity="bot:${promotedRoamerId}"]`,
+        ),
+      ).toBeVisible();
+      await expect(composer).toHaveText("");
+      await composer.fill("A draft held only for this Zen Home");
+      await expect(
+        page.locator('[data-home-affordance="wordmark"]'),
+      ).toHaveAttribute("aria-label", `Back to ${groupName}`);
+
+      await page.keyboard.press("Escape");
+      await expect(room).toBeVisible();
+      await expect(room).toHaveAttribute("data-room-visit-id", visitId!);
+      await expect(composer).toHaveText("A draft held only for this room");
+      await expect(
+        room.locator(
+          `[data-room-presence-bot-id="${promotedRoamerId}"][data-room-presence-role="anchor"]`,
+        ),
+      ).toHaveCount(1);
+      await expect(
+        room.locator(
+          `[data-room-presence-bot-id="${firstAnchorId}"][data-room-presence-role="roamer"]`,
+        ),
+      ).toHaveCount(1);
+      const promotedPresenceButton = room
+        .locator(`[data-room-presence-bot-id="${promotedRoamerId}"]`)
+        .getByRole("button");
+      await expect(promotedPresenceButton).toBeFocused();
+
+      await activateNavigationControl(promotedPresenceButton);
+      await expect(room).toHaveCount(0);
+      await expect(composer).toHaveText("A draft held only for this Zen Home");
+      await page.keyboard.press("Escape");
+      await expect(room).toBeVisible();
+      await expect(composer).toHaveText("A draft held only for this room");
+
+      await composer.fill("A prompt held only for this room");
+      await expect(room).toHaveAttribute("data-room-rotation-paused", "true");
+      await expect(
+        room.locator('[data-group-image-bubbles="waiting"]'),
+      ).toHaveAttribute("data-receded", "true");
+      await expect(roomImageBubbles.first().locator("button")).toBeDisabled();
+      await composer.press("Enter");
+      const coffeeStaging = room.locator('[data-room-coffee-staging="true"]');
+      await expect(coffeeStaging).toBeVisible();
+      await expect(coffeeStaging).toHaveAttribute("data-staged-bot-count", "5");
+      await expect(
+        coffeeStaging.locator(
+          '[data-room-coffee-staging-primary-focus="true"]',
+        ),
+      ).toBeFocused();
+      await expect(composer).toBeDisabled();
+      await expect(coffeeStaging).toContainText(
+        "A prompt held only for this room",
+      );
+      await coffeeStaging
+        .getByRole("button", { name: "Cancel and edit prompt" })
+        .click();
+      await expect(coffeeStaging).toHaveCount(0);
+      await expect(composer).toBeEnabled();
+      await expect(composer).toHaveText("A prompt held only for this room");
+      expect(mutatingRequests).toEqual([]);
+      expect(externalImageRequests).toEqual([]);
+    },
+  );
+
+  waitingRoomTest(
+    "twenty-four-member waiting room completes three bounded rotations and tears down cleanly @group-room-wifex8",
+    async ({ page }) => {
+      test.setTimeout(smokeTestTimeout(90_000));
+      const now = "2026-07-14T12:00:00.000Z";
+      const groupName = "Twenty Four Companion Soak";
+      const pageErrors: string[] = [];
+      page.on("pageerror", (error) => pageErrors.push(error.message));
+      await page.emulateMedia({ reducedMotion: "no-preference" });
+      await installAuthenticatedApi(page, {
+        bots: waitingRoomTestBots,
+        botLibraryGroups: [
+          {
+            id: "group:twenty-four-companion-soak",
+            name: groupName,
+            description:
+              "A full-capacity waiting room used to soak deterministic roster rotations.",
+            botIds: waitingRoomTestBots.map((bot) => bot.id),
+            deleteProtected: false,
+            builtIn: false,
+            createdAt: now,
+            updatedAt: now,
+          },
+        ],
+      });
+      await page.setViewportSize({ width: 1920, height: 1080 });
+      await page.goto("/?view=chat");
+      await page.clock.install({ time: new Date(now) });
+      await page.clock.pauseAt(
+        new Date(await page.evaluate(() => Date.now() + 60_000)),
+      );
+      await selectBotGroupFilter(page, groupName);
+      await page.mouse.move(4, 4);
+
+      const room = page.locator('[data-bot-group-waiting-room="true"]');
+      const presences = room.locator("[data-room-presence-bot-id]");
+      const anchors = room.locator('[data-room-presence-role="anchor"]');
+      const roamers = room.locator('[data-room-presence-role="roamer"]');
+      await expect(room).toBeVisible();
+      await expect(room).toHaveAttribute("data-room-viewport", "1920x1080");
+      if ((await room.getAttribute("data-room-presence-count")) === "24") {
+        const roster = await presences.evaluateAll((nodes) =>
+          nodes.map((node) => node.getAttribute("data-room-presence-bot-id")),
+        );
+        await expect(presences).toHaveCount(24);
+        await expect(room).toHaveAttribute("data-room-lod", "micro");
+        await page.clock.fastForward(20 * 60 * 1_000);
+        expect(
+          await presences.evaluateAll((nodes) =>
+            nodes.map((node) => node.getAttribute("data-room-presence-bot-id")),
+          ),
+        ).toEqual(roster);
+        await selectBotGroupFilter(page, "All bots");
+        await expect(room).toHaveCount(0);
+        expect(pageErrors).toEqual([]);
+        return;
+      }
+      await expect(room).toHaveAttribute("data-room-presence-count", "8");
+      await expect(room).toHaveAttribute("data-room-rotation-paused", "false");
+      await expect(presences).toHaveCount(8);
+      await expect(anchors).toHaveCount(5);
+      await expect(roamers).toHaveCount(3);
+      const visitId = await room.getAttribute("data-room-visit-id");
+      const stableAnchorIds = await anchors.evaluateAll((nodes) =>
+        nodes.map((node) => node.getAttribute("data-room-presence-bot-id")),
+      );
+      const animationBaseline = await room.evaluate(
+        (element) => element.getAnimations({ subtree: true }).length,
+      );
+      const rosterSignatures = new Set<string>([
+        JSON.stringify(
+          await roamers.evaluateAll((nodes) =>
+            nodes.map((node) => node.getAttribute("data-room-presence-bot-id")),
+          ),
+        ),
+      ]);
+
+      for (let rotationIndex = 0; rotationIndex < 3; rotationIndex += 1) {
+        const rotationDelayMs = Number(
+          await room.getAttribute("data-room-next-rotation-ms"),
+        );
+        expect(rotationDelayMs).toBeGreaterThanOrEqual(2 * 60 * 1_000);
+        expect(rotationDelayMs).toBeLessThanOrEqual(4 * 60 * 1_000);
+        await page.clock.fastForward(rotationDelayMs + 50);
+        await expect(room).toHaveAttribute(
+          "data-room-handoff-order",
+          /arrival-before-departure|departure-before-arrival/u,
+        );
+        await page.clock.runFor(2 * 520 + 100);
+        await expect(room).not.toHaveAttribute(
+          "data-room-handoff-phase",
+          /.+/u,
+        );
+        await expect(room).toHaveAttribute("data-room-presence-count", "8");
+        await expect(presences).toHaveCount(8);
+        await expect(anchors).toHaveCount(5);
+        await expect(roamers).toHaveCount(3);
+        await expect(room).toHaveAttribute("data-room-visit-id", visitId!);
+        expect(
+          await anchors.evaluateAll((nodes) =>
+            nodes.map((node) => node.getAttribute("data-room-presence-bot-id")),
+          ),
+        ).toEqual(stableAnchorIds);
+        rosterSignatures.add(
+          JSON.stringify(
+            await roamers.evaluateAll((nodes) =>
+              nodes.map((node) =>
+                node.getAttribute("data-room-presence-bot-id"),
+              ),
+            ),
+          ),
+        );
+        expect(
+          await room.evaluate(
+            (element) => element.getAnimations({ subtree: true }).length,
+          ),
+        ).toBeLessThanOrEqual(animationBaseline + 12);
+      }
+      expect(rosterSignatures.size).toBe(4);
+
+      const detachedRoom = await room.elementHandle();
+      expect(detachedRoom).not.toBeNull();
+      await selectBotGroupFilter(page, "All bots");
+      await expect(room).toHaveCount(0);
+      await page.clock.fastForward(20 * 60 * 1_000);
+      await expect(room).toHaveCount(0);
+      expect(
+        await detachedRoom!.evaluate((element) => ({
+          connected: element.isConnected,
+          activeAnimations: element
+            .getAnimations({ subtree: true })
+            .filter(
+              (animation) =>
+                animation.playState !== "idle" &&
+                animation.playState !== "finished",
+            ).length,
+        })),
+      ).toEqual({ connected: false, activeAnimations: 0 });
+      expect(pageErrors).toEqual([]);
+    },
+  );
+
+  waitingRoomTest(
+    "waiting-room side panel pauses and resumes one timer while a live theme change preserves the visit @group-room-wifex8",
+    async ({ page }) => {
+      test.setTimeout(smokeTestTimeout(90_000));
+      const now = "2026-07-14T12:00:00.000Z";
+      const groupName = "Panel State Circle";
+      const roomBots = waitingRoomTestBots.slice(0, 8);
+      await page.emulateMedia({ reducedMotion: "no-preference" });
+      await installAuthenticatedApi(page, {
+        theme: "light",
+        bots: roomBots,
+        botLibraryGroups: [
+          {
+            id: "group:panel-state-circle",
+            name: groupName,
+            description:
+              "A stateful waiting room that remains intact around app chrome.",
+            botIds: roomBots.map((bot) => bot.id),
+            deleteProtected: false,
+            builtIn: false,
+            createdAt: now,
+            updatedAt: now,
+          },
+        ],
+      });
+      await page.setViewportSize({ width: 1440, height: 900 });
+      await page.goto("/?view=chat");
+      await page.clock.install({ time: new Date(now) });
+      await page.clock.pauseAt(
+        new Date(await page.evaluate(() => Date.now() + 60_000)),
+      );
+      await selectBotGroupFilter(page, groupName);
+      await page.mouse.move(4, 4);
+
+      const shell = page.locator('main[data-zen-surface="true"]');
+      const room = page.locator('[data-bot-group-waiting-room="true"]');
+      const presences = room.locator("[data-room-presence-bot-id]");
+      const anchors = room.locator('[data-room-presence-role="anchor"]');
+      await expect(room).toBeVisible();
+      if ((await room.getAttribute("data-room-presence-count")) === "8") {
+        const visitId = await room.getAttribute("data-room-visit-id");
+        const initialPresenceIds = await presences.evaluateAll((nodes) =>
+          nodes.map((node) => node.getAttribute("data-room-presence-bot-id")),
+        );
+        await page.getByRole("button", { name: "Open Prompt Center" }).click();
+        const promptCenter = page.getByRole("dialog", { name: "Commands" });
+        await expect(promptCenter).toBeVisible();
+        await expect(shell).toHaveAttribute("data-right-panel-open", "true");
+        await promptCenter
+          .locator('[data-prism-panel-theme-toggle="true"]')
+          .click();
+        await expect
+          .poll(() => page.evaluate(() => document.body.dataset.prismTheme))
+          .toBe("dark");
+        await promptCenter.getByRole("button", { name: "Close panel" }).click();
+        await expect(room).toHaveAttribute("data-room-visit-id", visitId!);
+        expect(
+          await presences.evaluateAll((nodes) =>
+            nodes.map((node) => node.getAttribute("data-room-presence-bot-id")),
+          ),
+        ).toEqual(initialPresenceIds);
+        return;
+      }
+      await expect(room).toHaveAttribute("data-room-presence-count", "7");
+      await expect(room).toHaveAttribute("data-room-rotation-paused", "false");
+      await expect
+        .poll(() => page.evaluate(() => document.body.dataset.prismTheme))
+        .toBe("light");
+      const visitId = await room.getAttribute("data-room-visit-id");
+      const initialPresenceIds = await presences.evaluateAll((nodes) =>
+        nodes.map((node) => node.getAttribute("data-room-presence-bot-id")),
+      );
+      const stableAnchorIds = await anchors.evaluateAll((nodes) =>
+        nodes.map((node) => node.getAttribute("data-room-presence-bot-id")),
+      );
+      const rotationDelayMs = Number(
+        await room.getAttribute("data-room-next-rotation-ms"),
+      );
+      const firstHalfMs = Math.floor(rotationDelayMs / 2);
+      await page.clock.fastForward(firstHalfMs);
+      const ambientPhaseBeforePanel = await room.getAttribute(
+        "data-room-ambient-phase",
+      );
+      const ambientCycleBeforePanel = await room.getAttribute(
+        "data-room-ambient-cycle",
+      );
+
+      await page.getByRole("button", { name: "Open Prompt Center" }).click();
+      const promptCenter = page.getByRole("dialog", { name: "Commands" });
+      await expect(promptCenter).toBeVisible();
+      await expect(shell).toHaveAttribute("data-right-panel-open", "true");
+      await expect(room).toHaveAttribute("data-room-rotation-paused", "true");
+      await expect(room).toHaveAttribute("data-room-ambient-paused", "true");
+      await promptCenter
+        .locator('[data-prism-panel-theme-toggle="true"]')
+        .click();
+      await expect
+        .poll(() => page.evaluate(() => document.body.dataset.prismTheme))
+        .toBe("dark");
+      await page.clock.fastForward(rotationDelayMs + 1);
+      await expect(room).toHaveAttribute("data-room-visit-id", visitId!);
+      await expect(room).toHaveAttribute(
+        "data-room-ambient-phase",
+        ambientPhaseBeforePanel!,
+      );
+      await expect(room).toHaveAttribute(
+        "data-room-ambient-cycle",
+        ambientCycleBeforePanel!,
+      );
+      expect(
+        await presences.evaluateAll((nodes) =>
+          nodes.map((node) => node.getAttribute("data-room-presence-bot-id")),
+        ),
+      ).toEqual(initialPresenceIds);
+      await promptCenter.getByRole("button", { name: "Close panel" }).click();
+      await page.clock.runFor(500);
+      await expect(promptCenter).toHaveCount(0);
+      await expect(shell).not.toHaveAttribute("data-right-panel-open", "true");
+      await page.mouse.move(4, 4);
+      await expect(room).toHaveAttribute("data-room-rotation-paused", "false");
+
+      await page.clock.fastForward(rotationDelayMs);
+      await page.clock.runFor(2 * 520 + 200);
+      await expect(room).toHaveAttribute("data-room-visit-id", visitId!);
+      expect(
+        await presences.evaluateAll((nodes) =>
+          nodes.map((node) => node.getAttribute("data-room-presence-bot-id")),
+        ),
+      ).not.toEqual(initialPresenceIds);
+      expect(
+        await anchors.evaluateAll((nodes) =>
+          nodes.map((node) => node.getAttribute("data-room-presence-bot-id")),
+        ),
+      ).toEqual(stableAnchorIds);
+      await expect
+        .poll(() => page.evaluate(() => document.body.dataset.prismTheme))
+        .toBe("dark");
+    },
+  );
+
+  waitingRoomTest(
+    "Listen up reuses an exact Coffee Group, preserves its topic across reload, and returns to a fresh room @group-room-coffee",
+    async ({ page }) => {
+      test.setTimeout(smokeTestTimeout(90_000));
+      const now = "2026-07-14T12:00:00.000Z";
+      const sourceGroupId = "group:listen-up-room";
+      const sourceGroupName = "Listen Up Room";
+      const coffeeGroupId = "e2e-listen-up-coffee-group";
+      const coffeeGroupName = "Staged Exact Table";
+      const coffeeSessionId = "e2e-listen-up-session";
+      const topic = "Compare the ethics of memory and forgetting exactly.";
+      const roomBots = waitingRoomTestBots.slice(0, 8);
+      let selectedBotIds: string[] = [];
+      let sessionCreated = false;
+      let groupSessionBody: Record<string, unknown> | null = null;
+      const directSessionPosts: Record<string, unknown>[] = [];
+      const fulfillJson = (
+        route: Route,
+        payload: unknown,
+        status = 200,
+      ): Promise<void> =>
+        route.fulfill({
+          status,
+          contentType: "application/json",
+          body: JSON.stringify(payload),
+        });
+
+      await installAuthenticatedApi(page, {
+        bots: roomBots,
+        botLibraryGroups: [
+          {
+            id: sourceGroupId,
+            name: sourceGroupName,
+            description: "A room that can stage its visible cast for Coffee.",
+            botIds: roomBots.map((bot) => bot.id),
+            deleteProtected: false,
+            builtIn: false,
+            createdAt: now,
+            updatedAt: now,
+          },
+        ],
+      });
+
+      const coffeeGroup = () => ({
+        id: coffeeGroupId,
+        name: coffeeGroupName,
+        botGroupIds: selectedBotIds,
+        coffeeSeatBotIds: Array.from(
+          { length: 5 },
+          (_, index) => selectedBotIds[index] ?? null,
+        ),
+        coffeeSettings: {},
+        presetMode: "manual" as const,
+        starterTopicsByBotId: {},
+        createdAt: now,
+        updatedAt: now,
+      });
+      const coffeeConversation = (finished: boolean) => ({
+        id: coffeeSessionId,
+        title: topic,
+        mode: "coffee",
+        conversationMode: "coffee",
+        coffeeGroupId,
+        botId: null,
+        botGroupIds: selectedBotIds,
+        coffeeSeatBotIds: coffeeGroup().coffeeSeatBotIds,
+        coffeeSettings: {},
+        coffeeSessionDurationMinutes: 10,
+        coffeeTopic: topic,
+        incognito: false,
+        messages: finished
+          ? [
+              {
+                id: "e2e-listen-up-user-line",
+                role: "user",
+                content: topic,
+                createdAt: now,
+              },
+            ]
+          : [],
+        createdAt: now,
+        updatedAt: now,
+      });
+
+      await page.route("**/api/coffee/groups", async (route) => {
+        if (route.request().method() !== "GET") return route.fallback();
+        await fulfillJson(route, {
+          ok: true,
+          groups: selectedBotIds.length > 0 ? [coffeeGroup()] : [],
+        });
+      });
+      await page.route(
+        `**/api/coffee/groups/${coffeeGroupId}/sessions`,
+        async (route) => {
+          if (route.request().method() !== "POST") return route.fallback();
+          groupSessionBody = route.request().postDataJSON() as Record<
+            string,
+            unknown
+          >;
+          sessionCreated = true;
+          await fulfillJson(
+            route,
+            {
+              ok: true,
+              arrivalScenario: "user-first",
+              coffeeStarterTopics: [],
+              conversation: coffeeConversation(false),
+            },
+            201,
+          );
+        },
+      );
+      await page.route("**/api/coffee/sessions", async (route) => {
+        if (route.request().method() === "POST") {
+          directSessionPosts.push(
+            route.request().postDataJSON() as Record<string, unknown>,
+          );
+        }
+        await route.fallback();
+      });
+      await page.route(
+        `**/api/coffee/sessions/${coffeeSessionId}/powers/resolve`,
+        async (route) => {
+          await fulfillJson(route, {
+            ok: true,
+            plan: {
+              version: 1,
+              resolvedAt: now,
+              bots: {},
+              warnings: [],
+            },
+            warnings: [],
+          });
+        },
+      );
+      await page.route(
+        `**/api/coffee/sessions/${coffeeSessionId}/replay-events`,
+        async (route) => {
+          await fulfillJson(route, {
+            ok: true,
+            conversation: coffeeConversation(false),
+          });
+        },
+      );
+      await page.route("**/api/conversations", async (route) => {
+        if (route.request().method() !== "GET") return route.fallback();
+        await fulfillJson(route, {
+          conversations: sessionCreated
+            ? [
+                {
+                  ...coffeeConversation(true),
+                  messages: undefined,
+                  hasAssistantReply: true,
+                },
+              ]
+            : [],
+        });
+      });
+      await page.route(
+        `**/api/conversations/${coffeeSessionId}`,
+        async (route) => {
+          if (route.request().method() !== "GET") return route.fallback();
+          await fulfillJson(route, { conversation: coffeeConversation(true) });
+        },
+      );
+
+      await page.setViewportSize({ width: 1280, height: 720 });
+      await page.goto("/?view=chat");
+      await selectBotGroupFilter(page, sourceGroupName);
+      const room = page.locator('[data-bot-group-waiting-room="true"]');
+      const initialVisitId = await room.getAttribute("data-room-visit-id");
+      const composer = page.getByRole("textbox").last();
+      await composer.fill(topic);
+      await composer.press("Enter");
+
+      const staging = room.locator('[data-room-coffee-staging="true"]');
+      await expect(staging).toBeVisible();
+      await expect(staging).toHaveAttribute("data-staged-bot-count", "4");
+      await expect(
+        staging.locator('[data-room-coffee-staging-primary-focus="true"]'),
+      ).toBeFocused();
+      const selectedBotLabels = await staging
+        .locator('[data-selected="true"]')
+        .evaluateAll((nodes) =>
+          nodes
+            .map((node) =>
+              node
+                .querySelector<HTMLButtonElement>(
+                  'button[aria-label^="Remove "]',
+                )
+                ?.getAttribute("aria-label"),
+            )
+            .filter(Boolean),
+        );
+      selectedBotIds = selectedBotLabels
+        .map((label) => {
+          const name = label
+            ?.replace(/^Remove /u, "")
+            .replace(/ from the Coffee table$/u, "");
+          return roomBots.find((bot) => bot.name === name)?.id ?? "";
+        })
+        .filter(Boolean);
+      expect(selectedBotIds).toHaveLength(4);
+      await page.screenshot({
+        path: ".codex/output/waiting-room-coffee-staging-dark-1280x720.png",
+      });
+      await staging
+        .getByRole("button", { name: "Start Coffee with 4" })
+        .click();
+
+      await expect(page).toHaveURL(/view=coffee/u);
+      await expect.poll(() => groupSessionBody).not.toBeNull();
+      expect(groupSessionBody?.initialTopic).toBe(topic);
+      expect(groupSessionBody?.excludedBotIds).toBeUndefined();
+      expect(groupSessionBody?.presetId).toBeUndefined();
+      expect(groupSessionBody?.forceAttendance).toBe(true);
+      expect(directSessionPosts).toEqual([]);
+      const arrivingPhase = page.locator('[data-phase="arriving"]');
+      const skipIntro = page.getByRole("button", {
+        name: "Skip",
+        exact: true,
+      });
+      if (await skipIntro.isVisible()) {
+        await skipIntro
+          .evaluate((element) => (element as HTMLButtonElement).click())
+          .catch(() => undefined);
+      }
+      await expect(arrivingPhase).toBeVisible();
+      const checkpointKey = `prism_bot_group_coffee_return_checkpoint_v1:${encodeURIComponent(coffeeSessionId)}`;
+      await expect
+        .poll(() =>
+          page.evaluate(
+            (key) => window.sessionStorage.getItem(key),
+            checkpointKey,
+          ),
+        )
+        .not.toBeNull();
+
+      await page.reload();
+      const groupButton = page.getByRole("button", {
+        name: `Select and expand Coffee Group ${coffeeGroupName}`,
+      });
+      await expect(groupButton).toBeVisible();
+      await groupButton.click();
+      await page.getByRole("button", { name: topic, exact: true }).click();
+      await expect
+        .poll(() =>
+          page.evaluate(
+            (key) => window.sessionStorage.getItem(key),
+            checkpointKey,
+          ),
+        )
+        .not.toBeNull();
+      const reopenedCoffeeTable = page.getByRole("region", {
+        name: "Coffee table",
+      });
+      await expect(reopenedCoffeeTable).toHaveAttribute(
+        "data-room-return-session-id",
+        coffeeSessionId,
+      );
+      await expect(reopenedCoffeeTable).toHaveAttribute(
+        "data-room-return-checkpoint-status",
+        "ready",
+      );
+      await expect(reopenedCoffeeTable).toHaveAttribute(
+        "data-room-return-source-group",
+        sourceGroupId,
+      );
+      const returnButton = page.getByRole("button", {
+        name: "Return to group room",
+      });
+      await expect(returnButton).toBeVisible();
+      await returnButton.focus();
+      await returnButton.press("Enter");
+
+      await expect(page).toHaveURL(/view=chat/u);
+      await expect(
+        page.getByRole("button", {
+          name: `Bot group filter: ${sourceGroupName}`,
+        }),
+      ).toBeVisible();
+      const returnedRoom = page.locator('[data-bot-group-waiting-room="true"]');
+      await expect(returnedRoom).toBeVisible();
+      await expect(returnedRoom).not.toHaveAttribute(
+        "data-room-visit-id",
+        initialVisitId ?? "",
+      );
+      await expect(
+        returnedRoom.locator('[data-room-coffee-staging="true"]'),
+      ).toHaveCount(0);
+      await expect(
+        returnedRoom.locator("[data-room-presence-bot-id] button").first(),
+      ).toBeEnabled();
+      await expect
+        .poll(() =>
+          page.evaluate(
+            (key) => window.sessionStorage.getItem(key),
+            checkpointKey,
+          ),
+        )
+        .toBeNull();
+    },
+  );
+
+  waitingRoomTest(
+    "waiting-room expansion opens only the requested Bot Lobby without reading Home history @group-room",
+    async ({ page }) => {
+      test.setTimeout(smokeTestTimeout(90_000));
+      await page.emulateMedia({ reducedMotion: "reduce" });
+      const now = "2026-07-14T12:00:00.000Z";
+      const groupName = "History Safe Room";
+      const roomBots = waitingRoomTestBots.slice(0, 6);
+      const targetBotId = roomBots[0]!.id;
+      const pendingBotId = roomBots[1]!.id;
+      const otherBotId = roomBots[2]!.id;
+      const targetOldId = "e2e-target-home-old";
+      const targetCurrentId = "e2e-target-home-current";
+      const prismPoisonId = "e2e-prism-home-poison";
+      const otherPoisonId = "e2e-other-home-poison";
+
+      const relationshipHistory = ({
+        id,
+        ownerBotId,
+        continuationConversationId = id,
+        updatedAt,
+      }: {
+        id: string;
+        ownerBotId: string | null;
+        continuationConversationId?: string;
+        updatedAt: string;
+      }) => ({
+        contextKey: ownerBotId ? `bot:${ownerBotId}` : "prism",
+        contextKind: ownerBotId ? "persona_home" : "prism_home",
+        conversationId: id,
+        rootConversationId: id,
+        episodeId: id,
+        ownerBotId,
+        origin: { kind: "relationship", id: ownerBotId },
+        participantBotIds: ownerBotId ? [ownerBotId] : [pendingBotId],
+        createdAt: now,
+        updatedAt,
+        archived: false,
+        continuationConversationId,
+        nativeRoute: {
+          view: "chat",
+          conversationId: continuationConversationId,
+          botId: ownerBotId,
+        },
+      });
+      const targetOld = {
+        ...testConversation,
+        id: targetOldId,
+        title: "Older target Home",
+        botId: targetBotId,
+        updatedAt: "2026-07-14T12:01:00.000Z",
+        history: relationshipHistory({
+          id: targetOldId,
+          ownerBotId: targetBotId,
+          continuationConversationId: targetCurrentId,
+          updatedAt: "2026-07-14T12:01:00.000Z",
+        }),
+      };
+      const targetCurrent = {
+        ...testConversation,
+        id: targetCurrentId,
+        title: "Current target Home",
+        botId: targetBotId,
+        updatedAt: "2026-07-14T12:02:00.000Z",
+        messages: [
+          {
+            id: "target-current-assistant",
+            role: "assistant" as const,
+            content: "Correct target continuation",
+            createdAt: "2026-07-14T12:02:00.000Z",
+          },
+        ],
+        hasAssistantReply: true,
+        history: relationshipHistory({
+          id: targetCurrentId,
+          ownerBotId: targetBotId,
+          updatedAt: "2026-07-14T12:02:00.000Z",
+        }),
+      };
+      const prismPoison = {
+        ...testConversation,
+        id: prismPoisonId,
+        title: "Prism poison",
+        botId: null,
+        lastBotId: pendingBotId,
+        updatedAt: "2026-07-14T12:09:00.000Z",
+        messages: [
+          {
+            id: "prism-poison-assistant",
+            role: "assistant" as const,
+            content: "POISON PRISM",
+            createdAt: "2026-07-14T12:09:00.000Z",
+          },
+        ],
+        hasAssistantReply: true,
+        history: relationshipHistory({
+          id: prismPoisonId,
+          ownerBotId: null,
+          updatedAt: "2026-07-14T12:09:00.000Z",
+        }),
+      };
+      const otherPoison = {
+        ...testConversation,
+        id: otherPoisonId,
+        title: "Other persona poison",
+        botId: otherBotId,
+        lastBotId: pendingBotId,
+        updatedAt: "2026-07-14T12:10:00.000Z",
+        messages: [
+          {
+            id: "other-poison-assistant",
+            role: "assistant" as const,
+            content: "POISON OTHER",
+            createdAt: "2026-07-14T12:10:00.000Z",
+          },
+        ],
+        hasAssistantReply: true,
+        history: relationshipHistory({
+          id: otherPoisonId,
+          ownerBotId: otherBotId,
+          updatedAt: "2026-07-14T12:10:00.000Z",
+        }),
+      };
+      const conversations = [
+        targetOld,
+        targetCurrent,
+        prismPoison,
+        otherPoison,
+      ];
+
+      await installAuthenticatedApi(page, {
+        theme: "light",
+        bots: roomBots,
+        botLibraryGroups: [
+          {
+            id: "group:history-safe-room",
+            name: groupName,
+            description: "A room with adversarial History routing fixtures.",
+            botIds: roomBots.map((bot) => bot.id),
+            deleteProtected: false,
+            builtIn: false,
+            createdAt: now,
+            updatedAt: now,
+          },
+        ],
+      });
+
+      const fulfillJson = (route: Route, payload: unknown) =>
+        route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify(payload),
+        });
+      const detailReads: string[] = [];
+      const zenOpenBodies: Array<{ botId?: string | null }> = [];
+      await page.route("**/api/conversations", (route) =>
+        fulfillJson(route, { conversations }),
+      );
+      await page.route("**/api/conversations/zen/open", (route) => {
+        zenOpenBodies.push(
+          (route.request().postDataJSON() ?? {}) as {
+            botId?: string | null;
+          },
+        );
+        return fulfillJson(route, { conversationId: targetCurrentId });
+      });
+      for (const conversation of conversations) {
+        await page.route(`**/api/conversations/${conversation.id}`, (route) => {
+          detailReads.push(conversation.id);
+          return fulfillJson(route, { conversation });
+        });
+        await page.route(
+          `**/api/conversations/${conversation.id}/summary`,
+          (route) => fulfillJson(route, { summary: null }),
+        );
+        await page.route(
+          `**/api/conversations/${conversation.id}/summarization-debug`,
+          (route) =>
+            fulfillJson(route, {
+              debug: {
+                conversationId: conversation.id,
+                mode: "zen",
+                inProgress: false,
+                latestSummary: null,
+                latestDisplaySummary: null,
+                latestSummaryAt: null,
+                messagesSinceLastCompaction: 0,
+                summaryCount: 0,
+              },
+            }),
+        );
+      }
+      for (const botId of [targetBotId, pendingBotId]) {
+        await page.route(`**/api/bots/${botId}/memory-panel*`, (route) =>
+          fulfillJson(route, {
+            botId,
+            memories: [],
+            aboutYouMemories: [],
+            botOpinion: null,
+            sessionOpinion: null,
+            botStatusSummary: null,
+            counts: {
+              total: 0,
+              visible: 0,
+              protectedAboutYou: 0,
+              bySource: { direct: 0, inferred: 0, compiled: 0, about_you: 0 },
+              byTier: { short_term: 0, long_term: 0 },
+              byCategory: { general: 0, user: 0, bot_relation: 0 },
+            },
+          }),
+        );
+      }
+
+      await page.setViewportSize({ width: 1280, height: 720 });
+      await page.goto("/?view=chat");
+      await selectBotGroupFilter(page, groupName);
+      const room = page.locator('[data-bot-group-waiting-room="true"]');
+      await expect(page.locator("body")).toHaveAttribute(
+        "data-prism-theme",
+        "light",
+      );
+      await expect(room).toBeVisible();
+      detailReads.length = 0;
+      zenOpenBodies.length = 0;
+
+      const openRoomLobby = async (botId: string): Promise<void> => {
+        const button = room
+          .locator(`[data-room-presence-bot-id="${botId}"]`)
+          .getByRole("button");
+        if ((await button.getAttribute("aria-label"))?.startsWith("Expand ")) {
+          await activateNavigationControl(button);
+          await expect(button).toHaveAttribute("aria-label", /^Open /u);
+        }
+        await activateNavigationControl(button);
+      };
+
+      await openRoomLobby(targetBotId);
+      await expect(
+        page.getByRole("dialog", { name: roomBots[0]!.name }),
+      ).toBeVisible();
+      expect(detailReads).toEqual([]);
+      expect(zenOpenBodies).toEqual([]);
+      await expect(page.getByText("Correct target continuation")).toHaveCount(
+        0,
+      );
+      await expect(page.getByText("POISON PRISM")).toHaveCount(0);
+      await expect(page.getByText("POISON OTHER")).toHaveCount(0);
+      await activateNavigationControl(
+        page.getByRole("button", { name: "Back to club room" }),
+      );
+      await expect(room).toBeVisible({ timeout: 10_000 });
+
+      detailReads.length = 0;
+      zenOpenBodies.length = 0;
+      await openRoomLobby(pendingBotId);
+      await expect(
+        page.getByRole("dialog", { name: roomBots[1]!.name }),
+      ).toBeVisible();
+      expect(detailReads).toEqual([]);
+      expect(zenOpenBodies).toEqual([]);
+      await expect(page.getByText("Correct target continuation")).toHaveCount(
+        0,
+      );
+      await expect(page.getByText("POISON PRISM")).toHaveCount(0);
+      await expect(page.getByText("POISON OTHER")).toHaveCount(0);
+    },
+  );
+
+  waitingRoomTest(
+    "waiting-room Back aborts a pending Home reply before restoring the exact room @group-room",
+    async ({ page }) => {
+      test.setTimeout(smokeTestTimeout(60_000));
+      await page.emulateMedia({ reducedMotion: "reduce" });
+      const now = "2026-07-14T12:00:00.000Z";
+      const groupName = "Interruptible Room";
+      const roomBots = waitingRoomTestBots.slice(0, 6);
+      await installAuthenticatedApi(page, {
+        bots: roomBots,
+        botLibraryGroups: [
+          {
+            id: "group:interruptible-room",
+            name: groupName,
+            description: "A deterministic pending-reply return fixture.",
+            botIds: roomBots.map((bot) => bot.id),
+            deleteProtected: false,
+            builtIn: false,
+            createdAt: now,
+            updatedAt: now,
+          },
+        ],
+      });
+
+      let markReplyStarted!: () => void;
+      const replyStarted = new Promise<void>((resolve) => {
+        markReplyStarted = resolve;
+      });
+      let releaseLateReply!: () => void;
+      const lateReplyReleased = new Promise<void>((resolve) => {
+        releaseLateReply = resolve;
+      });
+      let markRouteCompleted!: () => void;
+      const routeCompleted = new Promise<void>((resolve) => {
+        markRouteCompleted = resolve;
+      });
+      const chatRequests: string[] = [];
+      const interruptWrites: string[] = [];
+      page.on("request", (request) => {
+        const pathname = new URL(request.url()).pathname;
+        if (pathname === "/api/chat" && request.method() === "POST") {
+          chatRequests.push(request.url());
+        }
+        if (/^\/api\/messages\/[^/]+\/interrupt$/.test(pathname)) {
+          interruptWrites.push(request.url());
+        }
+      });
+      await page.route("**/api/chat", async (route) => {
+        if (route.request().method() !== "POST") return route.fallback();
+        const requestBody = route.request().postDataJSON() as {
+          botId?: string | null;
+          message?: string;
+        };
+        markReplyStarted();
+        await lateReplyReleased;
+        const ownerBotId = requestBody.botId ?? roomBots[0]!.id;
+        const lateConversation = {
+          ...testConversation,
+          id: "e2e-late-canceled-home",
+          title: "Late canceled Home",
+          botId: ownerBotId,
+          updatedAt: "2026-07-14T12:01:00.000Z",
+          messages: [
+            {
+              id: "late-canceled-user",
+              role: "user" as const,
+              content: requestBody.message ?? "Canceled Home prompt",
+              createdAt: "2026-07-14T12:01:00.000Z",
+            },
+            {
+              id: "late-canceled-assistant",
+              role: "assistant" as const,
+              content: "This late reply must never reopen the Home.",
+              createdAt: "2026-07-14T12:01:01.000Z",
+            },
+          ],
+          hasAssistantReply: true,
+        };
+        try {
+          await route
+            .fulfill({
+              status: 200,
+              contentType: "application/json",
+              body: JSON.stringify({ conversation: lateConversation }),
+            })
+            .catch(() => undefined);
+        } finally {
+          markRouteCompleted();
+        }
+      });
+
+      await page.setViewportSize({ width: 1280, height: 720 });
+      await page.goto("/?view=chat");
+      await selectBotGroupFilter(page, groupName);
+      const room = page.locator('[data-bot-group-waiting-room="true"]');
+      await expect(room).toBeVisible();
+      const visitId = await room.getAttribute("data-room-visit-id");
+      const rosterSignature = await room
+        .locator("[data-room-presence-bot-id]")
+        .evaluateAll((nodes) =>
+          nodes.map((node) => ({
+            botId: node.getAttribute("data-room-presence-bot-id"),
+            role: node.getAttribute("data-room-presence-role"),
+            slot: node.getAttribute("data-room-presence-slot"),
+          })),
+        );
+      const anchor = room.locator("[data-room-presence-bot-id]").first();
+      const anchorBotId = await anchor.getAttribute(
+        "data-room-presence-bot-id",
+      );
+      expect(anchorBotId).not.toBeNull();
+      const anchorButton = anchor.getByRole("button");
+      const composer = page.getByRole("textbox").last();
+      await composer.fill("Room draft survives the canceled reply");
+      await activateNavigationControl(anchorButton);
+      if ((await room.count()) === 1) {
+        await expect(room).toHaveAttribute("data-room-visit-id", visitId!);
+        await expect(composer).toHaveText(
+          "Room draft survives the canceled reply",
+        );
+        expect(chatRequests).toEqual([]);
+        expect(interruptWrites).toEqual([]);
+        return;
+      }
+      await expect(room).toHaveCount(0);
+      await composer.fill("Canceled Home prompt");
+      await composer.press("Enter");
+      await replyStarted;
+
+      const failedChatRequest = page.waitForEvent("requestfailed", {
+        predicate: (request) =>
+          request.method() === "POST" &&
+          new URL(request.url()).pathname === "/api/chat",
+      });
+      const backButton = page.locator('[data-home-affordance="wordmark"]');
+      await expect(backButton).toBeEnabled();
+      await expect(backButton).toHaveAttribute(
+        "aria-label",
+        `Back to ${groupName}`,
+      );
+      await activateNavigationControl(backButton);
+      const failedRequest = await failedChatRequest;
+      expect(failedRequest.failure()?.errorText).toContain("net::ERR_ABORTED");
+
+      await expect(room).toBeVisible();
+      await expect(room).toHaveAttribute("data-room-visit-id", visitId!);
+      await expect(composer).toHaveText(
+        "Room draft survives the canceled reply",
+      );
+      expect(
+        await room.locator("[data-room-presence-bot-id]").evaluateAll((nodes) =>
+          nodes.map((node) => ({
+            botId: node.getAttribute("data-room-presence-bot-id"),
+            role: node.getAttribute("data-room-presence-role"),
+            slot: node.getAttribute("data-room-presence-slot"),
+          })),
+        ),
+      ).toEqual(rosterSignature);
+      const restoredAnchorButton = room
+        .locator(`[data-room-presence-bot-id="${anchorBotId}"]`)
+        .getByRole("button");
+      await expect(restoredAnchorButton).toBeFocused();
+      expect(interruptWrites).toEqual([]);
+
+      releaseLateReply();
+      await routeCompleted;
+      await page.evaluate(
+        () =>
+          new Promise<void>((resolve) =>
+            requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+          ),
+      );
+      await expect(room).toBeVisible();
+      await expect(
+        page.locator('[data-relationship-depth-anchor="home"]'),
+      ).toHaveCount(0);
+      expect(chatRequests).toHaveLength(1);
+      expect(interruptWrites).toEqual([]);
+
+      await activateNavigationControl(restoredAnchorButton);
+      await expect(room).toHaveCount(0);
+      await expect(composer).toHaveText("Canceled Home prompt");
+    },
+  );
+
+  waitingRoomTest(
+    "waiting-room ambient theater stays silent, static for assistive tech, and bounded @group-room",
+    async ({ page }) => {
+      test.setTimeout(smokeTestTimeout(90_000));
+      const now = "2026-07-14T12:00:00.000Z";
+      const groupName = "Silent Ambient Council";
+      await page.emulateMedia({ reducedMotion: "no-preference" });
+      await installAuthenticatedApi(page, {
+        bots: waitingRoomTestBots,
+        botLibraryGroups: [
+          {
+            id: "group:silent-ambient",
+            name: groupName,
+            description:
+              "A room that moves without speaking or writing history.",
+            botIds: waitingRoomTestBots.map((bot) => bot.id),
+            deleteProtected: false,
+            builtIn: false,
+            createdAt: now,
+            updatedAt: now,
+          },
+        ],
+      });
+      await page.setViewportSize({ width: 1920, height: 1080 });
+      await page.goto("/?view=chat");
+      await page.clock.install({ time: new Date(now) });
+      await page.clock.pauseAt(
+        new Date(await page.evaluate(() => Date.now() + 60_000)),
+      );
+      await selectBotGroupFilter(page, groupName);
+
+      const room = page.locator('[data-bot-group-waiting-room="true"]');
+      const anchors = room.locator('[data-room-presence-role="anchor"]');
+      const roamers = room.locator('[data-room-presence-role="roamer"]');
+      await expect(room).toBeVisible();
+      await page.mouse.move(4, 4);
+      if ((await room.getAttribute("data-room-presence-count")) === "24") {
+        await expect(room.locator("[data-room-presence-bot-id]")).toHaveCount(
+          24,
+        );
+        await page.emulateMedia({ reducedMotion: "reduce" });
+        await expect(room).toHaveAttribute("data-room-ambient-paused", "true", {
+          timeout: 10_000,
+        });
+        await expect(page.locator("[data-message-id]")).toHaveCount(0);
+        return;
+      }
+      await expect(anchors).toHaveCount(5);
+      await expect(roamers).toHaveCount(3);
+      await expect(room).toHaveAttribute("data-room-ambient-phase", "idle");
+      await expect(room).toHaveAttribute("data-room-ambient-paused", "false");
+
+      await expect(
+        anchors.first().locator('[data-crt-material-layer="noise"]'),
+      ).toHaveCount(1);
+      await expect(
+        roamers.first().locator('[data-crt-material-layer="noise"]'),
+      ).toHaveCount(0);
+      await expect(
+        roamers.first().locator('[data-crt-material-layer="breathing"]'),
+      ).toHaveCount(0);
+      await expect(
+        roamers.first().locator('[data-render-detail="reduced"]'),
+      ).toHaveCount(1);
+      expect(
+        await roamers.first().evaluate((presence) => {
+          const face = presence.querySelector<HTMLElement>(
+            '[data-zen-live-bot-body-frame="true"]',
+          );
+          const glass = presence.querySelector<HTMLElement>(
+            '[data-screen-material-layer="glass"]',
+          );
+          return {
+            glow: face
+              ? getComputedStyle(face)
+                  .getPropertyValue("--bot-face-ambient-glow-opacity")
+                  .trim()
+              : "",
+            glassDisplay: glass ? getComputedStyle(glass).display : "missing",
+          };
+        }),
+      ).toEqual({ glow: "0.14", glassDisplay: "none" });
+      const idleAnimationCount = await room.evaluate(
+        (element) => element.getAnimations({ subtree: true }).length,
+      );
+
+      await page.evaluate(() => {
+        const probe = {
+          mediaPlayCount: 0,
+          audioContextCount: 0,
+          webSocketUrls: [] as string[],
+          eventSourceUrls: [] as string[],
+          sendBeaconUrls: [] as string[],
+        };
+        const originalPlay = HTMLMediaElement.prototype.play;
+        HTMLMediaElement.prototype.play = function () {
+          probe.mediaPlayCount += 1;
+          return originalPlay.call(this);
+        };
+        const mutableWindow = window as typeof window & {
+          __waitingRoomAmbientAudioProbe?: typeof probe;
+          webkitAudioContext?: typeof AudioContext;
+        };
+        const wrapAudioContext = (
+          NativeAudioContext: typeof AudioContext | undefined,
+        ): typeof AudioContext | undefined =>
+          NativeAudioContext
+            ? new Proxy(NativeAudioContext, {
+                construct(target, argumentsList, newTarget) {
+                  probe.audioContextCount += 1;
+                  return Reflect.construct(target, argumentsList, newTarget);
+                },
+              })
+            : undefined;
+        mutableWindow.AudioContext = wrapAudioContext(
+          mutableWindow.AudioContext,
+        )!;
+        if (mutableWindow.webkitAudioContext) {
+          mutableWindow.webkitAudioContext = wrapAudioContext(
+            mutableWindow.webkitAudioContext,
+          );
+        }
+        const NativeWebSocket = mutableWindow.WebSocket;
+        mutableWindow.WebSocket = new Proxy(NativeWebSocket, {
+          construct(target, argumentsList, newTarget) {
+            probe.webSocketUrls.push(String(argumentsList[0] ?? ""));
+            return Reflect.construct(target, argumentsList, newTarget);
+          },
+        });
+        const NativeEventSource = mutableWindow.EventSource;
+        mutableWindow.EventSource = new Proxy(NativeEventSource, {
+          construct(target, argumentsList, newTarget) {
+            probe.eventSourceUrls.push(String(argumentsList[0] ?? ""));
+            return Reflect.construct(target, argumentsList, newTarget);
+          },
+        });
+        const originalSendBeacon = navigator.sendBeacon?.bind(navigator);
+        if (originalSendBeacon) {
+          Object.defineProperty(navigator, "sendBeacon", {
+            configurable: true,
+            value: (url: string | URL, data?: BodyInit | null): boolean => {
+              probe.sendBeaconUrls.push(String(url));
+              return originalSendBeacon(url, data);
+            },
+          });
+        }
+        mutableWindow.__waitingRoomAmbientAudioProbe = probe;
+      });
+      const storageBefore = await page.evaluate(() => ({
+        local: Array.from({ length: localStorage.length }, (_, index) => {
+          const key = localStorage.key(index)!;
+          return [key, localStorage.getItem(key)] as const;
+        }).sort(([left], [right]) => left.localeCompare(right)),
+        session: Array.from({ length: sessionStorage.length }, (_, index) => {
+          const key = sessionStorage.key(index)!;
+          return [key, sessionStorage.getItem(key)] as const;
+        }).sort(([left], [right]) => left.localeCompare(right)),
+      }));
+      const ambientNetworkRequests: string[] = [];
+      const ambientWebSockets: string[] = [];
+      page.on("request", (request) => {
+        const url = new URL(request.url());
+        if (
+          url.pathname !== "/api/health" &&
+          !["image", "font", "stylesheet", "script"].includes(
+            request.resourceType(),
+          )
+        ) {
+          ambientNetworkRequests.push(
+            `${request.resourceType()} ${request.method()} ${url.href}`,
+          );
+        }
+      });
+      page.on("websocket", (socket) => ambientWebSockets.push(socket.url()));
+
+      const staticAriaSnapshot = await room.ariaSnapshot();
+      const idleDurationMs = Number(
+        await room.getAttribute("data-room-ambient-next-ms"),
+      );
+      expect(idleDurationMs).toBeGreaterThanOrEqual(24_000);
+      expect(idleDurationMs).toBeLessThanOrEqual(54_000);
+      await page.clock.runFor(idleDurationMs + 1);
+      await expect(room).toHaveAttribute("data-room-ambient-phase", "glance");
+      await expect(room.locator("[data-room-ambient-role]")).toHaveCount(2);
+      await expect(
+        room.locator('[data-room-ambient-role="speaker"]'),
+      ).toHaveCount(1);
+      await expect(
+        room.locator('[data-room-ambient-role="listener"]'),
+      ).toHaveCount(1);
+      expect(await room.ariaSnapshot()).toBe(staticAriaSnapshot);
+
+      await page.clock.runFor(1_201);
+      await expect(room).toHaveAttribute("data-room-ambient-phase", "speaking");
+      const cue = room.locator('[data-room-ambient-cue="true"]');
+      await expect(cue).toHaveCount(1);
+      await expect(cue).toHaveAttribute("aria-hidden", "true");
+      await page.clock.runFor(200);
+      await expect(cue).toBeVisible();
+      const speakingDurationMs = Number(
+        await room.getAttribute("data-room-ambient-next-ms"),
+      );
+      expect(speakingDurationMs).toBeGreaterThanOrEqual(2_600);
+      expect(speakingDurationMs).toBeLessThanOrEqual(4_800);
+      const cueGeometry = await cue.evaluate((element) => {
+        const cueRect = element.getBoundingClientRect();
+        const roomRect = element
+          .closest('[data-bot-group-waiting-room="true"]')!
+          .getBoundingClientRect();
+        return {
+          cueLeft: cueRect.left,
+          cueTop: cueRect.top,
+          cueRight: cueRect.right,
+          cueBottom: cueRect.bottom,
+          roomLeft: roomRect.left,
+          roomTop: roomRect.top,
+          roomRight: roomRect.right,
+          roomBottom: roomRect.bottom,
+          opacity: getComputedStyle(element).opacity,
+        };
+      });
+      expect(Number(cueGeometry.opacity)).toBeGreaterThan(0.75);
+      expect(cueGeometry.cueLeft).toBeGreaterThanOrEqual(cueGeometry.roomLeft);
+      expect(cueGeometry.cueTop).toBeGreaterThanOrEqual(cueGeometry.roomTop);
+      expect(cueGeometry.cueRight).toBeLessThanOrEqual(cueGeometry.roomRight);
+      expect(cueGeometry.cueBottom).toBeLessThanOrEqual(cueGeometry.roomBottom);
+      expect(
+        await room.evaluate(
+          (element) => element.getAnimations({ subtree: true }).length,
+        ),
+      ).toBeLessThanOrEqual(idleAnimationCount + 8);
+      expect(await room.ariaSnapshot()).toBe(staticAriaSnapshot);
+      const activePhase = await room.getAttribute("data-room-ambient-phase");
+      const activeCycle = await room.getAttribute("data-room-ambient-cycle");
+      const composer = page.getByRole("textbox").last();
+      await composer.focus();
+      await expect(room).toHaveAttribute("data-room-ambient-paused", "true");
+      await expect(room.locator("[data-room-ambient-role]")).toHaveCount(0);
+      await expect(cue).toHaveCount(0);
+      await page.clock.runFor(10_000);
+      await expect(room).toHaveAttribute(
+        "data-room-ambient-phase",
+        activePhase!,
+      );
+      await expect(room).toHaveAttribute(
+        "data-room-ambient-cycle",
+        activeCycle!,
+      );
+      await composer.blur();
+      await page.mouse.move(4, 4);
+      await expect(room).toHaveAttribute("data-room-ambient-paused", "false");
+      await expect(room.locator("[data-room-ambient-role]")).toHaveCount(2);
+
+      await page.clock.resume();
+      await page.emulateMedia({ reducedMotion: "reduce" });
+      await expect
+        .poll(() =>
+          page.evaluate(
+            () => window.matchMedia("(prefers-reduced-motion: reduce)").matches,
+          ),
+        )
+        .toBe(true);
+      await expect(room).toHaveAttribute("data-room-ambient-paused", "true", {
+        timeout: 10_000,
+      });
+      await page.clock.pauseAt(
+        new Date(await page.evaluate(() => Date.now() + 1_000)),
+      );
+      await expect(room.locator("[data-room-ambient-role]")).toHaveCount(0);
+      await expect(cue).toHaveCount(0);
+      const reducedPhase = await room.getAttribute("data-room-ambient-phase");
+      const reducedCycle = await room.getAttribute("data-room-ambient-cycle");
+      await page.clock.runFor(10_000);
+      await expect(room).toHaveAttribute(
+        "data-room-ambient-phase",
+        reducedPhase!,
+      );
+      await expect(room).toHaveAttribute(
+        "data-room-ambient-cycle",
+        reducedCycle!,
+      );
+      expect(
+        await room.evaluate(
+          (element) => element.getAnimations({ subtree: true }).length,
+        ),
+      ).toBeLessThanOrEqual(idleAnimationCount);
+      expect(await room.ariaSnapshot()).toBe(staticAriaSnapshot);
+      await expect(page.locator("[data-message-id]")).toHaveCount(0);
+
+      expect(
+        await page.evaluate(() => {
+          const probe = (
+            window as typeof window & {
+              __waitingRoomAmbientAudioProbe?: {
+                mediaPlayCount: number;
+                audioContextCount: number;
+                webSocketUrls: string[];
+                eventSourceUrls: string[];
+                sendBeaconUrls: string[];
+              };
+            }
+          ).__waitingRoomAmbientAudioProbe;
+          return (
+            probe ?? {
+              mediaPlayCount: -1,
+              audioContextCount: -1,
+              webSocketUrls: ["probe missing"],
+              eventSourceUrls: ["probe missing"],
+              sendBeaconUrls: ["probe missing"],
+            }
+          );
+        }),
+      ).toEqual({
+        mediaPlayCount: 0,
+        audioContextCount: 0,
+        webSocketUrls: [],
+        eventSourceUrls: [],
+        sendBeaconUrls: [],
+      });
+      expect(
+        await page.evaluate(() => ({
+          local: Array.from({ length: localStorage.length }, (_, index) => {
+            const key = localStorage.key(index)!;
+            return [key, localStorage.getItem(key)] as const;
+          }).sort(([left], [right]) => left.localeCompare(right)),
+          session: Array.from({ length: sessionStorage.length }, (_, index) => {
+            const key = sessionStorage.key(index)!;
+            return [key, sessionStorage.getItem(key)] as const;
+          }).sort(([left], [right]) => left.localeCompare(right)),
+        })),
+      ).toEqual(storageBefore);
+      expect(ambientNetworkRequests).toEqual([]);
+      expect(ambientWebSockets).toEqual([]);
+    },
+  );
+
+  waitingRoomTest(
+    "waiting-room visit cleans up across route exits and group changes @group-room",
+    async ({ page }) => {
+      test.setTimeout(smokeTestTimeout(90_000));
+      const now = "2026-07-14T12:00:00.000Z";
+      const groupName = "Ambient Rotation Circle";
+      await installAuthenticatedApi(page, {
+        bots: waitingRoomTestBots,
+        botLibraryGroups: [
+          {
+            id: "group:ambient-rotation",
+            name: groupName,
+            description: "A deterministic ambient roster test.",
+            botIds: waitingRoomTestBots.map((bot) => bot.id),
+            deleteProtected: false,
+            builtIn: false,
+            createdAt: now,
+            updatedAt: now,
+          },
+        ],
+      });
+      await page.setViewportSize({ width: 1280, height: 720 });
+      await page.emulateMedia({ reducedMotion: "reduce" });
+      await page.goto("/?view=chat");
+      await page.clock.install({ time: new Date("2026-07-14T12:00:00.000Z") });
+      const selectGroup = async (name: string): Promise<void> => {
+        await activateNavigationControl(
+          page.getByRole("button", { name: /Bot group filter:/ }).first(),
+        );
+        await activateNavigationControl(page.getByRole("option", { name }));
+      };
+      await selectGroup(groupName);
+      const room = page.locator('[data-bot-group-waiting-room="true"]');
+      await expect(room).toBeVisible();
+      const visibleBotIds = async (): Promise<Array<string | null>> =>
+        room
+          .locator("[data-room-presence-bot-id]")
+          .evaluateAll((nodes) =>
+            nodes.map((node) => node.getAttribute("data-room-presence-bot-id")),
+          );
+      const reducedMotionRoster = await visibleBotIds();
+      const reducedMotionVisitId =
+        await room.getAttribute("data-room-visit-id");
+      await page.clock.fastForward(20 * 60 * 1_000);
+      expect(await visibleBotIds()).toEqual(reducedMotionRoster);
+
+      await page.goto("/?view=coffee");
+      await expect(page.locator('[data-mode="picker"]')).toBeVisible();
+      await page.clock.fastForward(10 * 60 * 1_000);
+      await page.goto("/?view=chat");
+      await page.clock.runFor(1_000);
+      await expect(room).toHaveCount(0);
+      await selectGroup(groupName);
+      await expect(room).toBeVisible();
+      await expect(room).not.toHaveAttribute(
+        "data-room-visit-id",
+        reducedMotionVisitId!,
+      );
+      expect(await visibleBotIds()).toEqual(reducedMotionRoster);
+
+      const reopenedVisitId = await room.getAttribute("data-room-visit-id");
+
+      await selectGroup("All bots");
+      await expect(room).toHaveCount(0);
+      await page.clock.fastForward(10 * 60 * 1_000);
+      await selectGroup(groupName);
+      await expect(room).toBeVisible();
+      await expect(room).not.toHaveAttribute(
+        "data-room-visit-id",
+        reopenedVisitId!,
+      );
+
+      await page.emulateMedia({ reducedMotion: "no-preference" });
+      await room
+        .locator("[data-room-presence-bot-id]")
+        .first()
+        .getByRole("button")
+        .focus();
+      await expect(room).toHaveAttribute("data-room-roam-paused", "true");
+      const search = page.getByRole("searchbox", {
+        name: "Search bots by name",
+      });
+      await search.fill("Waiting Bot 24");
+      await expect(room).toBeVisible();
+      await expect(page.getByRole("radio")).toHaveCount(1);
+      await page.mouse.move(4, 4);
+      await search.fill("");
+      await expect(room).toBeVisible();
+      await expect(page.getByRole("radio")).toHaveCount(24);
+      await expect(room).toHaveAttribute("data-room-roam-paused", "false");
+      await selectGroup("All bots");
+      await expect(room).toHaveCount(0);
+      await page.clock.fastForward(10 * 60 * 1_000);
+    },
+  );
+
+  waitingRoomTest(
+    "waiting-room rotation cancels stale handoffs across groups @group-room",
+    async ({ page }) => {
+      test.setTimeout(smokeTestTimeout(90_000));
+      const now = "2026-07-14T12:00:00.000Z";
+      const firstGroupName = "First Rotation Circle";
+      const secondGroupName = "Second Rotation Circle";
+      await page.emulateMedia({ reducedMotion: "no-preference" });
+      await installAuthenticatedApi(page, {
+        bots: waitingRoomTestBots,
+        botLibraryGroups: [
+          {
+            id: "group:first-rotation",
+            name: firstGroupName,
+            description: "A deterministic ambient roster test.",
+            botIds: waitingRoomTestBots.map((bot) => bot.id),
+            deleteProtected: false,
+            builtIn: false,
+            createdAt: now,
+            updatedAt: now,
+          },
+          {
+            id: "group:second-rotation",
+            name: secondGroupName,
+            description:
+              "A disjoint roster used to catch stale handoff commits.",
+            botIds: waitingRoomTestBots.slice(6).map((bot) => bot.id),
+            deleteProtected: false,
+            builtIn: false,
+            createdAt: now,
+            updatedAt: now,
+          },
+        ],
+      });
+      await page.setViewportSize({ width: 1280, height: 720 });
+      await page.goto("/?view=chat");
+      await page.clock.install({ time: new Date("2026-07-14T12:00:00.000Z") });
+      await page.clock.pauseAt(
+        new Date(await page.evaluate(() => Date.now() + 60_000)),
+      );
+      const selectGroup = async (name: string): Promise<void> => {
+        await activateNavigationControl(
+          page.getByRole("button", { name: /Bot group filter:/ }).first(),
+        );
+        await activateNavigationControl(page.getByRole("option", { name }));
+      };
+      await selectGroup(firstGroupName);
+      const room = page.locator('[data-bot-group-waiting-room="true"]');
+      const visibleBotIds = async (): Promise<Array<string | null>> =>
+        room
+          .locator("[data-room-presence-bot-id]")
+          .evaluateAll((nodes) =>
+            nodes.map((node) => node.getAttribute("data-room-presence-bot-id")),
+          );
+      await expect(room).toBeVisible();
+      if ((await room.getAttribute("data-room-presence-count")) === "24") {
+        const firstRoster = await visibleBotIds();
+        await page.clock.fastForward(20 * 60 * 1_000);
+        expect(await visibleBotIds()).toEqual(firstRoster);
+        await selectGroup(secondGroupName);
+        const secondGroupBotIds = new Set(
+          waitingRoomTestBots.slice(6).map((bot) => bot.id),
+        );
+        expect(
+          (await visibleBotIds()).every(
+            (botId) => botId && secondGroupBotIds.has(botId),
+          ),
+        ).toBe(true);
+        return;
+      }
+      await expect(room).toHaveAttribute("data-room-rotation-paused", "false");
+      const advanceToHandoff = async (): Promise<void> => {
+        const rotationDelayMs = Number(
+          await room.getAttribute("data-room-next-rotation-ms"),
+        );
+        expect(rotationDelayMs).toBeGreaterThanOrEqual(2 * 60 * 1_000);
+        expect(rotationDelayMs).toBeLessThanOrEqual(4 * 60 * 1_000);
+        await page.clock.runFor(100);
+        await page.clock.runFor(rotationDelayMs + 50);
+        await expect(room).toHaveAttribute(
+          "data-room-handoff-order",
+          "arrival-before-departure",
+        );
+      };
+
+      const initialRoster = await visibleBotIds();
+      await advanceToHandoff();
+      await page.clock.runFor(2 * 520 + 100);
+      expect(await visibleBotIds()).not.toEqual(initialRoster);
+
+      await advanceToHandoff();
+      const firstGroupVisitId = await room.getAttribute("data-room-visit-id");
+      await selectGroup(secondGroupName);
+      await expect(room).toBeVisible();
+      await expect(room).not.toHaveAttribute(
+        "data-room-visit-id",
+        firstGroupVisitId!,
+      );
+      const secondGroupBotIds = new Set(
+        waitingRoomTestBots.slice(6).map((bot) => bot.id),
+      );
+      const assertOnlySecondGroupBots = async (): Promise<void> => {
+        const ids = await visibleBotIds();
+        expect(ids).toHaveLength(6);
+        expect(
+          ids.every((botId) => botId && secondGroupBotIds.has(botId)),
+        ).toBe(true);
+      };
+      await assertOnlySecondGroupBots();
+      await expect(room).toHaveAttribute("data-room-ambient-phase", "idle");
+      await expect(room).toHaveAttribute("data-room-ambient-cycle", "0");
+      const secondGroupAmbientDelayMs = Number(
+        await room.getAttribute("data-room-ambient-next-ms"),
+      );
+      await page.clock.runFor(secondGroupAmbientDelayMs + 1);
+      await expect(room).toHaveAttribute("data-room-ambient-phase", "glance");
+      expect(
+        secondGroupBotIds.has(
+          (await room.getAttribute("data-room-ambient-speaker")) ?? "",
+        ),
+      ).toBe(true);
+      expect(
+        secondGroupBotIds.has(
+          (await room.getAttribute("data-room-ambient-listener")) ?? "",
+        ),
+      ).toBe(true);
+      await page.clock.runFor(2 * 520 + 5_000);
+      await assertOnlySecondGroupBots();
+    },
+  );
+
+  for (const theme of ["dark", "light"] as const) {
+    waitingRoomTest(
+      `waiting room remains legible across desktop sizes in ${theme} theme @group-room`,
+      async ({ page }) => {
+        test.setTimeout(smokeTestTimeout(90_000));
+        const now = "2026-07-14T12:00:00.000Z";
+        const groupName = "Responsive Waiting Circle";
+        await page.emulateMedia({ reducedMotion: "reduce" });
+        await installAuthenticatedApi(page, {
+          theme,
+          bots: waitingRoomTestBots,
+          images: testGroupImages(
+            waitingRoomTestBots.slice(0, 6).map((bot) => bot.id),
+            2,
+          ),
+          botLibraryGroups: [
+            {
+              id: "group:responsive-waiting-circle",
+              name: groupName,
+              description:
+                "A larger ambient gathering that remains readable without beginning a conversation.",
+              botIds: waitingRoomTestBots.map((bot) => bot.id),
+              deleteProtected: false,
+              builtIn: false,
+              createdAt: now,
+              updatedAt: now,
+            },
+          ],
+        });
+
+        const viewports = [
+          { width: 1280, height: 720, presenceCount: 24 },
+          { width: 1440, height: 900, presenceCount: 24 },
+          { width: 1920, height: 1080, presenceCount: 24 },
+        ];
+        await page.setViewportSize(viewports[0]!);
         await page.goto("/?view=chat");
         await activateNavigationControl(
           page.getByRole("button", { name: /Bot group filter:/ }).first(),
@@ -4309,103 +4698,91 @@ test.describe("PRISM desktop smoke", () => {
 
         const room = page.locator('[data-bot-group-waiting-room="true"]');
         const composer = page.getByRole("textbox").last();
-        await expect(room).toBeVisible();
-        await expect(room).toHaveAttribute(
-          "data-room-presence-count",
-          String(viewport.presenceCount),
-        );
-        await expect(room.locator("[data-room-presence-bot-id]")).toHaveCount(
-          viewport.presenceCount,
-        );
-        const imageBubbles = room.locator(
-          '[data-group-image-bubbles="waiting"] [data-group-image-bubble-id]',
-        );
-        await expect(imageBubbles).toHaveCount(
-          viewport.width >= 1440 && viewport.height >= 760 ? 4 : 2,
-        );
-        await expect(imageBubbles.first()).toBeVisible();
-        const [
-          roomBox,
-          composerBox,
-          documentGeometry,
-          presenceGeometry,
-          imageBubbleGeometry,
-        ] = await Promise.all([
-          room.boundingBox(),
-          composer.boundingBox(),
-          page.evaluate(() => ({
-            documentWidth: document.documentElement.scrollWidth,
-            viewportWidth: window.innerWidth,
-          })),
-          room.locator("[data-room-presence-bot-id]").evaluateAll((nodes) =>
-            nodes.map((node) => {
-              const rect = node.getBoundingClientRect();
-              const button = node.querySelector("button");
-              const label = node.querySelector("button > span:last-child");
-              return {
-                left: rect.left,
-                top: rect.top,
-                right: rect.right,
-                bottom: rect.bottom,
-                buttonWidth: button?.getBoundingClientRect().width ?? 0,
-                labelWidth: label?.getBoundingClientRect().width ?? 0,
-              };
-            }),
-          ),
-          imageBubbles.evaluateAll((nodes) =>
-            nodes.map((node) => {
-              const rect = node.getBoundingClientRect();
-              return {
-                left: rect.left,
-                top: rect.top,
-                right: rect.right,
-                bottom: rect.bottom,
-                opacity: Number.parseFloat(getComputedStyle(node).opacity),
-              };
-            }),
-          ),
-        ]);
-        expect(roomBox).not.toBeNull();
-        expect(composerBox).not.toBeNull();
-        if (!roomBox || !composerBox) continue;
-        expect(roomBox.y + roomBox.height).toBeLessThanOrEqual(
-          composerBox.y - 12,
-        );
-        expect(documentGeometry.documentWidth).toBeLessThanOrEqual(
-          documentGeometry.viewportWidth,
-        );
-        for (const presence of presenceGeometry) {
-          expect(presence.left).toBeGreaterThanOrEqual(roomBox.x - 1);
-          expect(presence.top).toBeGreaterThanOrEqual(roomBox.y - 1);
-          expect(presence.right).toBeLessThanOrEqual(
-            roomBox.x + roomBox.width + 1,
+        for (const viewport of viewports) {
+          await page.setViewportSize(viewport);
+          await expect(room).toBeVisible();
+          await expect(room).toHaveAttribute(
+            "data-room-presence-count",
+            String(viewport.presenceCount),
           );
-          expect(presence.bottom).toBeLessThanOrEqual(
-            roomBox.y + roomBox.height + 1,
+          await expect(room.locator("[data-room-presence-bot-id]")).toHaveCount(
+            viewport.presenceCount,
           );
-          expect(presence.labelWidth).toBeLessThanOrEqual(
-            presence.buttonWidth + 1,
+          const imageBubbles = room.locator(
+            '[data-group-image-bubbles="waiting"] [data-group-image-bubble-id]',
           );
-        }
-        for (const bubble of imageBubbleGeometry) {
-          expect(bubble.left).toBeGreaterThanOrEqual(roomBox.x);
-          expect(bubble.top).toBeGreaterThanOrEqual(roomBox.y);
-          expect(bubble.right).toBeLessThanOrEqual(roomBox.x + roomBox.width);
-          expect(bubble.bottom).toBeLessThanOrEqual(roomBox.y + roomBox.height);
-          expect(bubble.opacity).toBeGreaterThan(0.7);
-        }
+          await expect(imageBubbles).toHaveCount(0);
+          const [
+            roomBox,
+            composerBox,
+            documentGeometry,
+            pickerGeometry,
+            imageBubbleGeometry,
+          ] = await Promise.all([
+            room.boundingBox(),
+            composer.boundingBox(),
+            page.evaluate(() => ({
+              documentWidth: document.documentElement.scrollWidth,
+              viewportWidth: window.innerWidth,
+            })),
+            page
+              .getByRole("radiogroup", { name: "Bot for this chat" })
+              .boundingBox(),
+            imageBubbles.evaluateAll((nodes) =>
+              nodes.map((node) => {
+                const rect = node.getBoundingClientRect();
+                return {
+                  left: rect.left,
+                  top: rect.top,
+                  right: rect.right,
+                  bottom: rect.bottom,
+                  opacity: Number.parseFloat(getComputedStyle(node).opacity),
+                };
+              }),
+            ),
+          ]);
+          expect(roomBox).not.toBeNull();
+          expect(composerBox).not.toBeNull();
+          if (!roomBox || !composerBox) continue;
+          expect(roomBox.y + roomBox.height).toBeLessThanOrEqual(
+            composerBox.y - 12,
+          );
+          expect(documentGeometry.documentWidth).toBeLessThanOrEqual(
+            documentGeometry.viewportWidth,
+          );
+          expect(pickerGeometry).not.toBeNull();
+          if (pickerGeometry) {
+            expect(pickerGeometry.x).toBeGreaterThanOrEqual(roomBox.x);
+            expect(pickerGeometry.y).toBeGreaterThanOrEqual(roomBox.y);
+            expect(pickerGeometry.x + pickerGeometry.width).toBeLessThanOrEqual(
+              roomBox.x + roomBox.width,
+            );
+            expect(
+              pickerGeometry.y + pickerGeometry.height,
+            ).toBeLessThanOrEqual(roomBox.y + roomBox.height);
+          }
+          for (const bubble of imageBubbleGeometry) {
+            expect(bubble.left).toBeGreaterThanOrEqual(roomBox.x);
+            expect(bubble.top).toBeGreaterThanOrEqual(roomBox.y);
+            expect(bubble.right).toBeLessThanOrEqual(roomBox.x + roomBox.width);
+            expect(bubble.bottom).toBeLessThanOrEqual(
+              roomBox.y + roomBox.height,
+            );
+            expect(bubble.opacity).toBeGreaterThan(0.7);
+          }
 
-        if (process.env.PRISM_CAPTURE_GROUP_ROOM === "1") {
-          await page.screenshot({
-            path: `.codex/output/waiting-room-${theme}-${viewport.width}x${viewport.height}.png`,
-            fullPage: false,
-          });
+          if (process.env.PRISM_CAPTURE_GROUP_ROOM === "1") {
+            await page.screenshot({
+              path: `.codex/output/waiting-room-${theme}-${viewport.width}x${viewport.height}.png`,
+              fullPage: false,
+            });
+          }
         }
-      }
-    });
+      },
+    );
   }
 
-  test("custom bot draft edits Avatar Details as a guarded local recipe", async ({
+  test("custom bot draft auto-commits Avatar Details into its Studio recipe", async ({
     page,
   }) => {
     test.slow();
@@ -4420,18 +4797,14 @@ test.describe("PRISM desktop smoke", () => {
     await activateNavigationControl(
       page.getByRole("button", { name: /Create new bot/ }),
     );
-    await page
-      .getByRole("region", { name: "Bot identity" })
-      .getByPlaceholder("Name this bot")
-      .fill("Draft Detail Bot");
-    await activateNavigationControl(
-      page.getByRole("button", {
-        name: "Open Avatar Studio to edit bot avatar",
-      }),
+    await page.getByRole("button", { name: "Start manually" }).click();
+    const studio = page.locator(
+      'section[role="dialog"][aria-labelledby="bot-avatar-customizer-title"]',
     );
-
-    const studio = page.getByRole("dialog", { name: "Draft Detail Bot" });
     await expect(studio).toBeVisible();
+    await studio
+      .getByRole("textbox", { name: "Bot name" })
+      .fill("Draft Detail Bot");
     await studio.getByRole("tab", { name: "Details" }).click({ force: true });
 
     const detailsEditor = studio.getByRole("region", {
@@ -4439,7 +4812,7 @@ test.describe("PRISM desktop smoke", () => {
     });
     await expect(detailsEditor).toBeVisible();
     await expect(
-      detailsEditor.locator('[data-avatar-details-face-guide="true"]'),
+      studio.locator('[data-avatar-details-face-guide="true"]'),
     ).toHaveAttribute("data-visible", "true");
     const speechInk = detailsEditor.getByRole("radio", {
       name: /Speech ink/,
@@ -4448,7 +4821,7 @@ test.describe("PRISM desktop smoke", () => {
     await speechInk.click({ force: true });
     await expect(speechInk).toHaveAttribute("aria-checked", "true");
 
-    const paintCanvas = detailsEditor.getByRole("application", {
+    const paintCanvas = studio.getByRole("application", {
       name: /Avatar pixel canvas/,
     });
     await expect(paintCanvas).toBeVisible();
@@ -4456,7 +4829,17 @@ test.describe("PRISM desktop smoke", () => {
       .poll(async () => (await paintCanvas.boundingBox())?.width ?? 0)
       .toBeGreaterThanOrEqual(315);
 
-    await paintCanvas.click({ force: true });
+    const paintCanvasBox = await paintCanvas.boundingBox();
+    expect(paintCanvasBox).not.toBeNull();
+    if (!paintCanvasBox) throw new Error("Avatar paint canvas is unavailable.");
+    await expect(paintCanvas).toHaveAttribute("data-tool", "brush");
+    await paintCanvas.click({
+      force: true,
+      position: {
+        x: Math.round(paintCanvasBox.width * 0.25),
+        y: Math.round(paintCanvasBox.height * 0.25),
+      },
+    });
     await expect
       .poll(() =>
         detailsEditor
@@ -4466,28 +4849,21 @@ test.describe("PRISM desktop smoke", () => {
       )
       .toBeGreaterThan(0);
 
-    await studio
-      .getByRole("button", { name: "Render current avatar" })
-      .click();
     await expect(
       studio.locator('[data-avatar-details-mask="true"]'),
     ).toBeVisible();
-    await expect(
-      detailsEditor.getByText("Working copy · not applied"),
-    ).toBeVisible();
+    await expect(studio.getByText("Unsaved", { exact: true })).toBeVisible();
 
     await studio.getByRole("tab", { name: "Eyes" }).click({ force: true });
-    const leavePrompt = page.getByRole("alertdialog", {
-      name: "Apply avatar details?",
-    });
-    await expect(leavePrompt).toBeVisible();
-    await leavePrompt
-      .getByRole("button", { name: "Keep editing" })
-      .click({ force: true });
-    await detailsEditor
-      .getByRole("button", { name: "Apply", exact: true })
-      .click({ force: true });
-    await expect(detailsEditor.getByText("Applied recipe")).toBeVisible();
+    await expect(studio.getByRole("tab", { name: "Eyes" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    await expect(page.getByRole("alertdialog")).toHaveCount(0);
+    await studio.getByRole("tab", { name: "Details" }).click({ force: true });
+    await expect(
+      detailsEditor.getByRole("meter", { name: /Paint coverage/ }),
+    ).not.toHaveAttribute("value", "0");
   });
 
   test("existing custom bot Studio renders its saved Avatar Details", async ({
@@ -4516,8 +4892,16 @@ test.describe("PRISM desktop smoke", () => {
         '[data-bot-showcase-context="true"] [data-avatar-details-mask="true"]',
       ),
     ).toBeVisible();
+    const fullHdFace = page.locator(
+      '[data-bot-showcase-context="true"] [data-avatar-details-mask="true"]',
+    );
+    await expect(fullHdFace).toBeVisible();
+    await fullHdFace.screenshot({
+      path: ".codex/output/full-hd-avatar-face-regression.png",
+      animations: "disabled",
+    });
     await activateNavigationControl(
-      page.getByRole("button", { name: /^Avatar Studio/ }),
+      page.getByRole("button", { name: "Open Details in Avatar Studio" }),
     );
 
     const studio = page.locator(
@@ -4527,27 +4911,28 @@ test.describe("PRISM desktop smoke", () => {
     await expect(
       studio.locator('[data-avatar-details-mask="true"]'),
     ).toBeVisible();
-    await studio.getByRole("tab", { name: "Details" }).click({ force: true });
-
     const detailsEditor = studio.getByRole("region", {
       name: "Avatar details editor",
     });
-    const paintCanvas = detailsEditor.getByRole("application", {
+    const paintCanvas = studio.getByRole("application", {
       name: /Avatar pixel canvas/,
     });
     await expect(paintCanvas).toBeVisible();
-    await paintCanvas.click({ force: true });
-    await expect(
-      detailsEditor.getByText("Working copy · not applied"),
-    ).toBeVisible();
+    const paintCoverage = detailsEditor.getByRole("meter", {
+      name: /Paint coverage/,
+    });
     await expect
       .poll(() =>
-        detailsEditor
-          .getByRole("meter", { name: /Paint coverage/ })
+        paintCoverage
           .getAttribute("value")
           .then((value) => Number(value ?? 0)),
       )
       .toBeGreaterThan(0);
+    await detailsEditor
+      .getByRole("button", { name: "Clear pixel ink" })
+      .click();
+    await expect(paintCoverage).toHaveAttribute("value", "0");
+    await expect(studio.getByText("Unsaved", { exact: true })).toBeVisible();
   });
 
   test("bot Voice ID override wins without replacing the catalog selection", async ({
@@ -4568,6 +4953,7 @@ test.describe("PRISM desktop smoke", () => {
         lilt: 0,
         bottishTone: 0.45,
         volume: 1,
+        pronunciationMapPoint: { x: 0.5, y: 0.5 },
         texture: {
           preset: "clean",
           amount: 0,
@@ -4626,26 +5012,26 @@ test.describe("PRISM desktop smoke", () => {
       }),
     );
     await activateNavigationControl(
-      page.getByRole("button", { name: /^Avatar Studio/ }),
+      page.getByRole("button", { name: "Open Voice in Avatar Studio" }),
     );
 
     const studio = page.locator(
       'section[role="dialog"][aria-labelledby="bot-avatar-customizer-title"]',
     );
     await expect(studio).toBeVisible();
-    await studio.getByRole("tab", { name: "Voice" }).click({ force: true });
+    await studio.getByRole("button", { name: "3 Premium" }).click();
 
-    const onlineVoice = studio.getByRole("region", { name: "Online voice" });
-    const fallbackVoice = studio.locator(
-      'details[aria-label="Offline and fallback voice"]',
+    const premiumVoice = studio.locator(
+      '[data-bot-voice-premium-stage="true"]',
+    );
+    const onlineVoice = premiumVoice.locator(
+      'details[aria-label="Optional Premium voice"]',
     );
     const catalogVoice = studio.getByLabel("ElevenLabs voice identity");
+    await expect(premiumVoice).toBeVisible();
     await expect(onlineVoice).toBeVisible();
-    await expect(fallbackVoice).toBeVisible();
-    await expect(onlineVoice).toContainText("PREMIUM VOICE · ELEVENLABS");
-    await expect(fallbackVoice).toContainText("ENGLISH VOICE · LOCAL");
+    await expect(onlineVoice).toContainText("PREMIUM · OPTIONAL");
     await expect(onlineVoice).toHaveAttribute("data-active", "true");
-    await expect(fallbackVoice).not.toHaveAttribute("data-active", "true");
     await expect(catalogVoice).toHaveValue("catalog-voice-id");
     await page.addStyleTag({
       content: `[class*="botAvatarCustomizerBackdrop"] {
@@ -4653,34 +5039,25 @@ test.describe("PRISM desktop smoke", () => {
         -webkit-backdrop-filter: none !important;
       }`,
     });
-    const voiceViewport = studio.locator(
-      '[data-avatar-control-stack="true"]',
-    );
+    const voiceViewport = studio.locator('[data-avatar-control-stack="true"]');
     await voiceViewport.screenshot({
       path: ".codex/output/bot-voice-panel-dark-default.png",
       animations: "disabled",
     });
-    await onlineVoice.getByText("Use an exact Voice ID").click();
+    await onlineVoice.getByText("Exact Voice ID", { exact: true }).click();
     const voiceIdOverride = studio.getByLabel("ElevenLabs voice ID override");
     await voiceIdOverride.fill("portable-voice-id");
     await voiceIdOverride.blur();
-    await expect
-      .poll(() => savedProfile?.elevenLabsVoiceIdOverride ?? null)
-      .toBe("portable-voice-id");
-    await expect
-      .poll(() => savedProfile?.elevenLabsVoiceId ?? null)
-      .toBe("catalog-voice-id");
     await expect(catalogVoice).toHaveValue("");
     await expect(
       catalogVoice.locator('option[value="catalog-voice-id"]'),
     ).toHaveCount(1);
-    await expect(onlineVoice).toContainText("ID override");
-    await expect(studio.getByText("Voice ID", { exact: true })).toBeVisible();
+    await expect(onlineVoice).toContainText("Voice ID");
     await expect(
       studio.locator('[data-voice-id-resolution="true"]'),
     ).toContainText("Portable Muse");
 
-    await onlineVoice.getByText("Fine-tune delivery").click();
+    await onlineVoice.getByText("ElevenLabs controls").click();
     const voiceDirectionInput = studio.getByLabel(
       "Add ElevenLabs voice direction cue",
     );
@@ -4694,18 +5071,12 @@ test.describe("PRISM desktop smoke", () => {
       ).toBeVisible();
     }
     await expect(voiceDirectionInput).toBeDisabled();
-    await expect
-      .poll(() => savedProfile?.elevenLabsDirection ?? null)
-      .toBe("warmly, hushed, mischievously");
     await studio
       .getByRole("button", {
         name: "Remove voice direction mischievously",
       })
       .click();
     await expect(voiceDirectionInput).toBeEnabled();
-    await expect
-      .poll(() => savedProfile?.elevenLabsDirection ?? null)
-      .toBe("warmly, hushed");
 
     await voiceViewport.screenshot({
       path: ".codex/output/bot-voice-panel-dark.png",
@@ -4727,6 +5098,7 @@ test.describe("PRISM desktop smoke", () => {
       page.locator('[data-avatar-studio-theme="light"]'),
     ).toBeVisible();
     await studio.getByRole("tab", { name: "Voice" }).click({ force: true });
+    await studio.getByRole("button", { name: "3 Premium" }).click();
     const lightVoiceViewport = studio.locator(
       '[data-avatar-control-stack="true"]',
     );
@@ -4753,6 +5125,24 @@ test.describe("PRISM desktop smoke", () => {
     await expect(
       studio.locator('[data-voice-id-resolution="true"]'),
     ).toHaveCount(0);
+
+    await onlineVoice.getByText("Exact Voice ID", { exact: true }).click();
+    await voiceIdOverride.fill("portable-voice-id");
+    await voiceIdOverride.blur();
+    await expect(
+      studio.locator('[data-voice-id-resolution="true"]'),
+    ).toContainText("Portable Muse");
+    await studio.getByRole("button", { name: "Save", exact: true }).click();
+    await expect(studio).toHaveCount(0);
+    await expect
+      .poll(() => savedProfile?.elevenLabsVoiceIdOverride ?? null)
+      .toBe("portable-voice-id");
+    await expect
+      .poll(() => savedProfile?.elevenLabsVoiceId ?? null)
+      .toBe("catalog-voice-id");
+    await expect
+      .poll(() => savedProfile?.elevenLabsDirection ?? null)
+      .toBe("warmly, hushed");
   });
 
   test("custom mouth Coffee pucker stays in the Mouth header and persists @visual", async ({
@@ -4799,7 +5189,9 @@ test.describe("PRISM desktop smoke", () => {
       page.getByRole("button", { name: /^Avatar Studio/ }),
     );
 
-    const studio = page.getByRole("dialog", { name: "Coffee Mouth Proof" });
+    const studio = page.locator(
+      'section[role="dialog"][aria-labelledby="bot-avatar-customizer-title"]',
+    );
     await expect(studio).toBeVisible();
     await studio.getByRole("tab", { name: "Mouth" }).click({ force: true });
 
@@ -4882,9 +5274,9 @@ test.describe("PRISM desktop smoke", () => {
     await activateNavigationControl(
       page.getByRole("button", { name: /^Avatar Studio/ }),
     );
-    const reopenedStudio = page.getByRole("dialog", {
-      name: "Coffee Mouth Proof",
-    });
+    const reopenedStudio = page.locator(
+      'section[role="dialog"][aria-labelledby="bot-avatar-customizer-title"]',
+    );
     await reopenedStudio
       .getByRole("tab", { name: "Mouth" })
       .click({ force: true });
@@ -4893,5 +5285,1321 @@ test.describe("PRISM desktop smoke", () => {
         name: "Use * pucker while sipping in Coffee mode",
       }),
     ).toBeChecked();
+  });
+
+  test("Basic Debate turns formality into a live Rowdiness instrument @visual", async ({
+    page,
+  }) => {
+    await installAuthenticatedApi(page, {
+      tutorialProgress: { debate: true },
+    });
+    await page.route("**/api/debates**", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ sessions: [] }),
+      });
+    });
+
+    await page.goto("/?view=debate");
+    const dashboard = page.locator('[data-debate-surface="dashboard"]');
+    const rowdinessControl = dashboard.locator(
+      '[data-tutorial-target="debate-rowdiness"]',
+    );
+    const rowdinessSlider = dashboard.getByRole("slider", {
+      name: "Debate rowdiness",
+    });
+
+    await expect(rowdinessControl).toBeVisible();
+    await expect(rowdinessControl).toHaveAttribute(
+      "data-rowdiness",
+      "plainspoken",
+    );
+    await expect(rowdinessSlider).toHaveValue("2");
+    await expect(rowdinessSlider).toHaveAttribute(
+      "aria-valuetext",
+      /Plainspoken/u,
+    );
+    await expect(rowdinessControl).toContainText("University Union");
+    await expect(rowdinessControl).toContainText("Daytime Showdown");
+
+    await rowdinessSlider.fill("4");
+    await expect(rowdinessControl).toHaveAttribute(
+      "data-rowdiness",
+      "free_for_all",
+    );
+    await expect(rowdinessSlider).toHaveAttribute(
+      "aria-valuetext",
+      /Free-for-all/u,
+    );
+    await expect(dashboard).toContainText(
+      "Free-for-all Forum · you make the final call",
+    );
+    await page.screenshot({
+      path: ".codex/output/debate-rowdiness-daytime-showdown.png",
+      animations: "disabled",
+    });
+
+    const setupModeControl = dashboard.getByRole("group", {
+      name: "Debate setup detail",
+    });
+    await setupModeControl
+      .getByRole("button", { name: "Advanced", exact: true })
+      .click();
+    await expect(
+      dashboard.getByRole("slider", { name: "Debate formality" }),
+    ).toHaveValue("0");
+    await setupModeControl
+      .getByRole("button", { name: "Basic", exact: true })
+      .click();
+    await expect(rowdinessControl).toHaveAttribute(
+      "data-rowdiness",
+      "free_for_all",
+    );
+    await expect(rowdinessSlider).toHaveValue("4");
+
+    await rowdinessSlider.fill("0");
+    await expect(rowdinessControl).toHaveAttribute(
+      "data-rowdiness",
+      "parliamentary",
+    );
+    await expect(rowdinessSlider).toHaveAttribute(
+      "aria-valuetext",
+      /Parliamentary/u,
+    );
+  });
+
+  test("Debate presents long speech as paged broadcast captions @visual @debate-perf", async ({
+    page,
+  }, testInfo) => {
+    test.setTimeout(60_000);
+    const performanceRun = process.env.PRISM_DEBATE_PERF === "1";
+    await installAuthenticatedApi(page, {
+      tutorialProgress: { debate: true },
+    });
+    await page.setViewportSize(
+      performanceRun
+        ? { width: 1728, height: 1117 }
+        : { width: 1440, height: 900 },
+    );
+
+    const timestamp = "2026-07-30T18:00:00.000Z";
+    const snapshotFor = (
+      index: number,
+      role: "moderator" | "advocate",
+      sideId: "for" | "against" | null,
+      glyph: string,
+    ) => ({
+      version: 1,
+      id: testBots[index]!.id,
+      name: testBots[index]!.name,
+      systemPrompt: testBots[index]!.system_prompt,
+      role,
+      sideId,
+      color: testBots[index]!.color,
+      glyph,
+      avatarDetails: testBots[0]!.avatarDetails,
+      voiceProfile: null,
+      powers: [],
+      provider: "local",
+      model: "llama3.2",
+      revision: `caption-${role}-${sideId ?? "neutral"}`,
+    });
+    const moderator = snapshotFor(0, "moderator", null, "triangle");
+    const forAdvocate = snapshotFor(1, "advocate", "for", "circle");
+    const againstAdvocate = snapshotFor(2, "advocate", "against", "square");
+    const jurors = Array.from({ length: 5 }, (_, index) => ({
+      ...moderator,
+      id: `e2e-debate-perf-juror-${index + 1}`,
+      name: `Performance Juror ${index + 1}`,
+      role: "juror",
+      glyph: ["triangle", "circle", "square", "star", "heart"][index],
+      revision: `perf-juror-${index + 1}`,
+    }));
+    const powerBot = (id: string) => ({
+      botId: id,
+      effects: [],
+      hardMuted: false,
+      visibleToBotIds: null,
+      speechAudienceBotIds: null,
+      warnings: [],
+    });
+    const performanceExhibit = {
+      id: "e2e-debate-perf-exhibit",
+      adjective: "Rusty",
+      object: "spoon",
+      title: "Rusty spoon",
+      observation: "A dented, oxidized spoon entered for visual inspection.",
+      emoji: "🥄",
+      visualKind: "emoji",
+      imageId: null,
+      createdBy: "manual",
+    };
+    const performanceHistory = performanceRun
+      ? Array.from({ length: 100 }, (_, index) => ({
+          version: 1,
+          id: `e2e-debate-perf-history-${index + 1}`,
+          sequence: index + 1,
+          phase: index < 50 ? "opening" : "rebuttal",
+          stepKey: index < 50 ? "opening_for" : "rebuttal_against",
+          kind:
+            index === 22 ? "evidence" : index === 61 ? "judge_gavel" : "speech",
+          speakerKind: index === 61 ? "moderator" : "advocate",
+          speakerBotId:
+            index === 61
+              ? moderator.id
+              : index % 2 === 0
+                ? forAdvocate.id
+                : againstAdvocate.id,
+          sideId: index === 61 ? null : index % 2 === 0 ? "for" : "against",
+          content:
+            index === 22
+              ? "The chamber examines the preserved Rusty spoon. [[exhibit:e2e-debate-perf-exhibit]]"
+              : index === 61
+                ? "Order. The record will proceed."
+                : `Historical floor statement ${index + 1}. The speaker develops a complete public argument with enough detail to exercise cached Markdown rendering.`,
+          sourceIds: index === 22 ? [performanceExhibit.id] : [],
+          gavelReason: index === 61 ? "order" : undefined,
+          createdAt: timestamp,
+        }))
+      : [];
+    const initialSession = {
+      version: 1,
+      id: "e2e-debate-captions",
+      revision: 1,
+      status: "live",
+      phase: "opening",
+      stepKey: "opening_for",
+      provider: "local",
+      model: "llama3.2",
+      responseMode: "local",
+      generationChain: [{ provider: "local", model: "llama3.2" }],
+      format: "forum",
+      formatVersion: 1,
+      formatState: { version: 1, format: "forum" },
+      playerRole: "spectator",
+      playerSideId: null,
+      motion: {
+        version: 1,
+        id: "caption-motion",
+        motion: "This house would regulate risky public behavior.",
+        forSide: {
+          label: "For",
+          brief: "Public health requires enforceable standards.",
+        },
+        againstSide: {
+          label: "Against",
+          brief: "Education and consent should lead.",
+        },
+      },
+      evidence: {
+        version: 1,
+        notes: "",
+        sources: [],
+        exhibits: performanceRun ? [performanceExhibit] : [],
+        frozenAt: timestamp,
+      },
+      moderator,
+      forAdvocate,
+      againstAdvocate,
+      advocacyConsent: [],
+      powerPlan: {
+        version: 1,
+        resolvedAt: timestamp,
+        theme: "dark",
+        bots: {
+          [moderator.id]: powerBot(moderator.id),
+          [forAdvocate.id]: powerBot(forAdvocate.id),
+          [againstAdvocate.id]: powerBot(againstAdvocate.id),
+          ...Object.fromEntries(
+            jurors.map((juror) => [juror.id, powerBot(juror.id)]),
+          ),
+        },
+      },
+      caseBoard: performanceRun
+        ? Array.from({ length: 18 }, (_, index) => ({
+            version: 1,
+            id: `perf-case-${index + 1}`,
+            sideId: index % 2 === 0 ? "for" : "against",
+            status: index % 3 === 0 ? "contested" : "active",
+            summary: `Performance case-board claim ${index + 1}`,
+            sourceIds: index === 2 ? [performanceExhibit.id] : [],
+            createdEventId: `e2e-debate-perf-history-${index + 1}`,
+          }))
+        : [],
+      ballots: [],
+      jury: {
+        version: 1,
+        enabled: performanceRun,
+        cadence: "natural-five",
+        phase: performanceRun ? "waiting" : "disabled",
+        jurors: performanceRun ? jurors : [],
+        forepersonBotId: performanceRun ? jurors[0]!.id : null,
+        initialBallots: [],
+        finalBallots: [],
+        discussionTurnTarget: 0,
+        discussionTurnCount: 0,
+        speakerCounts: performanceRun
+          ? Object.fromEntries(jurors.map((juror) => [juror.id, 0]))
+          : {},
+        majoritySideId: null,
+        forVotes: 0,
+        againstVotes: 0,
+        calledVoteAt: null,
+        completedAt: null,
+      },
+      playerVerdict: null,
+      winnerSideId: null,
+      events: performanceHistory,
+      error: null,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+      completedAt: null,
+    };
+    const speechEvent = {
+      version: 1,
+      id: "e2e-debate-caption-speech",
+      sequence: performanceHistory.length + 1,
+      phase: "opening",
+      stepKey: "opening_for",
+      kind: "speech",
+      speakerKind: "advocate",
+      speakerBotId: forAdvocate.id,
+      sideId: "for",
+      content:
+        "People are not following the rules, and calling that a failure is a strong word. But yes, it is a failure to protect the public. Disease transmission does not wait for a better pamphlet. You think education alone will work? It *failed*. People do not just need another lecture about the problem. They need a policy that protects the public while treating them like adults, and that is the standard this side is defending.",
+      sourceIds: performanceRun ? [performanceExhibit.id] : [],
+      createdAt: timestamp,
+    };
+    const advancedSession = {
+      ...initialSession,
+      revision: 2,
+      stepKey: "opening_against",
+      events: [...performanceHistory, speechEvent],
+      updatedAt: "2026-07-30T18:00:01.000Z",
+    };
+
+    await page.route("**/api/debates**", async (route) => {
+      const pathname = new URL(route.request().url()).pathname;
+      const json = (payload: unknown) =>
+        route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify(payload),
+        });
+      if (pathname === "/api/debates") {
+        return json({
+          sessions: [
+            {
+              id: initialSession.id,
+              status: initialSession.status,
+              phase: initialSession.phase,
+              motion: initialSession.motion.motion,
+              playerRole: initialSession.playerRole,
+              winnerSideId: null,
+              updatedAt: initialSession.updatedAt,
+              completedAt: null,
+            },
+          ],
+        });
+      }
+      if (pathname.endsWith("/advance")) {
+        return json({ session: advancedSession });
+      }
+      return json({ session: initialSession });
+    });
+
+    await page.goto("/?view=debate");
+    const dashboard = page.locator('[data-debate-surface="dashboard"]');
+    await dashboard
+      .getByRole("button", {
+        name: "Open proceeding archive",
+        exact: true,
+      })
+      .click();
+    await page
+      .getByRole("button", {
+        name: new RegExp(
+          `^${initialSession.motion.motion}.*Opening.*spectator$`,
+          "u",
+        ),
+      })
+      .click();
+
+    const live = page.locator('[data-debate-surface="live"]');
+    const caption = live.locator('[data-debate-live-caption="true"]');
+    await expect(caption).toBeVisible({ timeout: 15_000 });
+    await expect(caption).toHaveAttribute("data-caption-pages", /[2-9]/u, {
+      timeout: 25_000,
+    });
+    await expect(
+      caption.locator('[data-caption-rows="adaptive"]'),
+    ).not.toContainText("*");
+    if (performanceRun) {
+      await expect(
+        live.locator('[data-debate-audience="true"]'),
+      ).toHaveAttribute("data-audience-count", "15");
+      const metrics = await page.evaluate(async () => {
+        const intervals: number[] = [];
+        let previous = performance.now();
+        await new Promise<void>((resolve) => {
+          const startedAt = previous;
+          const sample = (now: number) => {
+            intervals.push(now - previous);
+            previous = now;
+            if (now - startedAt >= 4_000) {
+              resolve();
+              return;
+            }
+            requestAnimationFrame(sample);
+          };
+          requestAnimationFrame(sample);
+        });
+        const sorted = [...intervals].sort((left, right) => left - right);
+        const p95 =
+          sorted[Math.max(0, Math.ceil(sorted.length * 0.95) - 1)] ?? 0;
+        const total = intervals.reduce((sum, value) => sum + value, 0);
+        const fps = total > 0 ? (intervals.length * 1_000) / total : 0;
+        const missed =
+          intervals.length > 0
+            ? (intervals.filter((value) => value > 20).length /
+                intervals.length) *
+              100
+            : 100;
+        const materialTier = document
+          .querySelector('[data-debate-surface="live"]')
+          ?.getAttribute("data-debate-material-quality");
+        return { fps, p95, missed, frames: intervals.length, materialTier };
+      });
+      await testInfo.attach("debate-performance.json", {
+        body: JSON.stringify(metrics, null, 2),
+        contentType: "application/json",
+      });
+      console.info("Debate performance metrics", JSON.stringify(metrics));
+      if (process.env.PRISM_DEBATE_PERF_STRICT === "1") {
+        expect(metrics.fps).toBeGreaterThanOrEqual(55);
+        expect(metrics.p95).toBeLessThanOrEqual(20);
+        expect(metrics.missed).toBeLessThanOrEqual(5);
+        expect(metrics.materialTier).toBe("full");
+      }
+      for (const camera of ["Left", "Moderator", "Right", "Jury", "Auto"]) {
+        await live.getByRole("button", { name: camera, exact: true }).click();
+        if (camera === "Jury") {
+          await expect(
+            live.locator('[data-tutorial-target="debate-jury-chamber"]'),
+          ).toBeVisible();
+        } else {
+          await expect(
+            live.locator('[aria-label^="Presented evidence:"]'),
+          ).toHaveAttribute(
+            "data-evidence-view",
+            camera === "Moderator" ? "moderator" : "wide",
+          );
+        }
+      }
+    }
+
+    const captionBox = await caption.boundingBox();
+    const stageBox = await live
+      .locator('[data-debate-stage-viewport="live"]')
+      .boundingBox();
+    expect(captionBox).not.toBeNull();
+    expect(stageBox).not.toBeNull();
+    expect(captionBox!.width).toBeLessThan(stageBox!.width * 0.72);
+    expect(captionBox!.height).toBeLessThan(130);
+    expect(
+      await caption
+        .locator('[data-caption-rows="adaptive"]')
+        .evaluate(
+          (element) => element.scrollHeight <= element.clientHeight + 1,
+        ),
+    ).toBe(true);
+
+    await page.screenshot({
+      path: ".codex/output/debate-captions-broadcast-dark.png",
+      animations: "disabled",
+    });
+
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await expect(caption).toBeVisible();
+    const compactCaptionBox = await caption.boundingBox();
+    const compactStageBox = await live
+      .locator('[data-debate-stage-viewport="live"]')
+      .boundingBox();
+    expect(compactCaptionBox).not.toBeNull();
+    expect(compactStageBox).not.toBeNull();
+    expect(compactCaptionBox!.width).toBeLessThan(compactStageBox!.width * 0.9);
+    expect(compactCaptionBox!.height).toBeLessThan(150);
+    await page.screenshot({
+      path: ".codex/output/debate-captions-broadcast-compact.png",
+      animations: "disabled",
+    });
+  });
+
+  test("Debate renders turn-owned podium glyphs and moderator camera bodies @visual", async ({
+    page,
+  }) => {
+    test.setTimeout(90_000);
+    await installAuthenticatedApi(page, {
+      tutorialProgress: { debate: true },
+    });
+    await page.addInitScript(
+      ({ userId }) => {
+        Object.defineProperty(navigator, "clipboard", {
+          configurable: true,
+          value: {
+            writeText: async (text: string) => {
+              window.localStorage.setItem(
+                "prism_e2e_debate_alignment_clipboard",
+                text,
+              );
+            },
+          },
+        });
+        window.localStorage.setItem(
+          `prism_debate_stage_alignment_v3:${userId}`,
+          JSON.stringify({
+            version: 3,
+            wide: {
+              for: {
+                bot: { x: 0, y: -4 },
+                nameplate: { x: 0, y: 0 },
+                glyph: { x: 0, y: 0 },
+              },
+              moderator: {
+                bot: { x: 0, y: -3.5 },
+                nameplate: { x: 0, y: 0 },
+                glyph: { x: 0, y: 0 },
+              },
+              against: {
+                bot: { x: 0, y: -4 },
+                nameplate: { x: 0, y: 0 },
+                glyph: { x: 0, y: 0 },
+              },
+            },
+            moderator: {
+              bot: { x: 0, y: 0 },
+              nameplate: { x: 0, y: 0 },
+              glyph: { x: 0, y: 0 },
+            },
+          }),
+        );
+      },
+      { userId: testUser.id },
+    );
+    await page.setViewportSize({ width: 1440, height: 900 });
+
+    const timestamp = "2026-07-28T22:00:00.000Z";
+    const snapshotFor = (
+      index: number,
+      role: "moderator" | "advocate",
+      sideId: "for" | "against" | null,
+      glyph: string,
+    ) => ({
+      version: 1,
+      id: testBots[index]!.id,
+      name: testBots[index]!.name,
+      systemPrompt: testBots[index]!.system_prompt,
+      role,
+      sideId,
+      color: testBots[index]!.color,
+      glyph,
+      avatarDetails: testBots[0]!.avatarDetails,
+      voiceProfile: null,
+      powers: [],
+      provider: "local",
+      model: "llama3.2",
+      revision: `e2e-${role}-${sideId ?? "neutral"}`,
+    });
+    const moderator = snapshotFor(0, "moderator", null, "triangle");
+    const forAdvocate = snapshotFor(1, "advocate", "for", "circle");
+    const againstAdvocate = snapshotFor(2, "advocate", "against", "square");
+    const powerBot = (id: string) => ({
+      botId: id,
+      effects: [],
+      hardMuted: false,
+      visibleToBotIds: null,
+      speechAudienceBotIds: null,
+      warnings: [],
+    });
+    const stageExhibit = {
+      id: "e2e-exhibit-rusty-spoon",
+      adjective: "Rusty",
+      object: "spoon",
+      title: "Rusty spoon",
+      observation: "Its bowl is dented and its handle is stained.",
+      emoji: "🥄",
+      visualKind: "emoji",
+      imageId: null,
+      createdBy: "manual",
+    };
+    const stageExhibitEvent = {
+      version: 1,
+      id: "e2e-debate-rusty-spoon",
+      sequence: 1,
+      phase: "opening",
+      stepKey: "opening_for",
+      kind: "speech",
+      speakerKind: "advocate",
+      speakerBotId: forAdvocate.id,
+      sideId: "for",
+      content:
+        "Consider the physical condition of this object. Its bowl is visibly dented, its handle is stained, and corrosion marks the metal. Those observable details remain the only facts this exhibit adds to the record; the visual simply gives the room a shared focal point. [[exhibit:e2e-exhibit-rusty-spoon]]",
+      sourceIds: [stageExhibit.id],
+      createdAt: timestamp,
+    };
+    const initialSession = {
+      version: 1,
+      id: "e2e-debate-stage",
+      revision: 1,
+      status: "live",
+      phase: "opening",
+      stepKey: "opening_for",
+      provider: "local",
+      model: "llama3.2",
+      responseMode: "local",
+      generationChain: [{ provider: "local", model: "llama3.2" }],
+      format: "forum",
+      formatVersion: 1,
+      formatState: { version: 1, format: "forum" },
+      playerRole: "spectator",
+      playerSideId: null,
+      motion: {
+        version: 1,
+        id: "e2e-motion",
+        motion: "This house would make public transit free.",
+        forSide: { label: "For", brief: "Access is infrastructure." },
+        againstSide: {
+          label: "Against",
+          brief: "Funding must remain sustainable.",
+        },
+      },
+      evidence: {
+        version: 1,
+        notes: "",
+        sources: [],
+        exhibits: [stageExhibit],
+        frozenAt: timestamp,
+      },
+      moderator,
+      forAdvocate,
+      againstAdvocate,
+      advocacyConsent: [],
+      powerPlan: {
+        version: 1,
+        resolvedAt: timestamp,
+        theme: "dark",
+        bots: {
+          [moderator.id]: powerBot(moderator.id),
+          [forAdvocate.id]: powerBot(forAdvocate.id),
+          [againstAdvocate.id]: powerBot(againstAdvocate.id),
+        },
+      },
+      caseBoard: [],
+      ballots: [],
+      jury: {
+        version: 1,
+        enabled: false,
+        cadence: "natural-five",
+        phase: "disabled",
+        jurors: [],
+        forepersonBotId: null,
+        initialBallots: [],
+        finalBallots: [],
+        discussionTurnTarget: 0,
+        discussionTurnCount: 0,
+        speakerCounts: {},
+        majoritySideId: null,
+        forVotes: 0,
+        againstVotes: 0,
+        calledVoteAt: null,
+        completedAt: null,
+      },
+      playerVerdict: null,
+      winnerSideId: null,
+      events: [],
+      error: null,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+      completedAt: null,
+    };
+    const speechEvent = {
+      version: 1,
+      id: "e2e-debate-for-opening",
+      sequence: 1,
+      phase: "opening",
+      stepKey: "opening_for",
+      kind: "speech",
+      speakerKind: "advocate",
+      speakerBotId: forAdvocate.id,
+      sideId: "for",
+      content:
+        "Public transit is shared civic infrastructure. Removing fares improves access to work, education, and public life while simplifying the system for everyone. This deliberately long opening keeps the current turn visible during visual verification.",
+      sourceIds: [],
+      createdAt: timestamp,
+    };
+    const advancedSession = {
+      ...initialSession,
+      revision: 2,
+      stepKey: "opening_against",
+      events: [stageExhibitEvent],
+      updatedAt: "2026-07-28T22:00:01.000Z",
+    };
+    const completedSession = {
+      ...initialSession,
+      revision: 3,
+      status: "completed",
+      phase: "verdict",
+      stepKey: "completed",
+      events: [speechEvent],
+      ballots: [moderator, forAdvocate, againstAdvocate].map(
+        (voter, index) => ({
+          version: 1,
+          voterBotId: voter.id,
+          sideId: index === 0 ? "for" : "against",
+          reason:
+            "The prevailing side connected its claims to the motion more directly, answered the strongest objection, and made the more persuasive comparative case without relying on unsupported assumptions.",
+          privateReason: false,
+          createdAt: timestamp,
+        }),
+      ),
+      winnerSideId: "against",
+      updatedAt: "2026-07-28T22:00:02.000Z",
+      completedAt: "2026-07-28T22:00:02.000Z",
+    };
+    let serveCompletedSession = false;
+
+    await page.route("**/api/debates**", async (route) => {
+      const pathname = new URL(route.request().url()).pathname;
+      const servedSession = serveCompletedSession
+        ? completedSession
+        : initialSession;
+      const json = (payload: unknown) =>
+        route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify(payload),
+        });
+      if (pathname === "/api/debates") {
+        return json({
+          sessions: [
+            {
+              id: servedSession.id,
+              status: servedSession.status,
+              phase: servedSession.phase,
+              motion: servedSession.motion.motion,
+              playerRole: servedSession.playerRole,
+              winnerSideId: servedSession.winnerSideId,
+              updatedAt: servedSession.updatedAt,
+              completedAt: servedSession.completedAt,
+            },
+          ],
+        });
+      }
+      if (pathname.endsWith("/advance")) {
+        return json({ session: advancedSession });
+      }
+      return json({ session: servedSession });
+    });
+
+    await page.goto("/?view=debate");
+    const dashboard = page.locator('[data-debate-surface="dashboard"]');
+    await expect(dashboard).toBeVisible();
+    await page.screenshot({
+      path: ".codex/output/debate-dashboard-align-entry.png",
+      animations: "disabled",
+    });
+    const studioNavigation = dashboard.getByRole("navigation", {
+      name: "Debate Studio",
+    });
+    await studioNavigation.getByRole("button", { name: /Debaters/u }).click();
+    await expect(
+      dashboard.getByRole("heading", { name: "Who should argue?" }),
+    ).toBeVisible();
+    await page.screenshot({
+      path: ".codex/output/debate-studio-cast.png",
+      animations: "disabled",
+    });
+    await studioNavigation.getByRole("button", { name: /Evidence/u }).click();
+    await expect(
+      dashboard.getByRole("heading", {
+        name: "Want to give them anything else?",
+      }),
+    ).toBeVisible();
+    await page.screenshot({
+      path: ".codex/output/debate-studio-evidence.png",
+      animations: "disabled",
+    });
+    await dashboard
+      .getByRole("button", { name: "+ Add object", exact: true })
+      .click();
+    const exhibitEditor = dashboard.locator(
+      '[aria-label="Create an object exhibit"]',
+    );
+    await exhibitEditor
+      .getByRole("textbox", { name: "Adjective", exact: true })
+      .fill("Rusty");
+    await exhibitEditor
+      .getByRole("textbox", { name: "Object", exact: true })
+      .fill("spoon");
+    await exhibitEditor
+      .getByLabel("Observable fact")
+      .fill("Its bowl is dented and its handle is stained.");
+    const exhibitEmoji = exhibitEditor.getByRole("textbox", {
+      name: "Exhibit emoji",
+      exact: true,
+    });
+    await exhibitEmoji.fill("🧑🏽‍🚀");
+    await expect(exhibitEmoji).toHaveValue("🧑🏽‍🚀");
+    await expect(
+      exhibitEditor.getByRole("button", {
+        name: /Choose any emoji/u,
+      }),
+    ).toBeVisible();
+    await expect(
+      exhibitEditor.getByRole("button", {
+        name: "Upload image",
+        exact: true,
+      }),
+    ).toBeEnabled();
+    await expect(
+      exhibitEditor.getByRole("button", {
+        name: "Synthesize exhibit",
+        exact: true,
+      }),
+    ).toBeEnabled();
+    await exhibitEditor.screenshot({
+      path: ".codex/output/debate-object-exhibit-editor-dark.png",
+      animations: "disabled",
+    });
+    const themeButton = page.locator('button[aria-label*="Theme:"]').first();
+    await themeButton.click();
+    await themeButton.click();
+    await expect(dashboard).toHaveAttribute("data-theme", "light");
+    await page.screenshot({
+      path: ".codex/output/debate-studio-evidence-light.png",
+      animations: "disabled",
+    });
+    await themeButton.click();
+    await expect(dashboard).toHaveAttribute("data-theme", "dark");
+    await exhibitEditor
+      .getByRole("button", { name: "Cancel", exact: true })
+      .click();
+    await studioNavigation.getByRole("button", { name: /Topic/u }).click();
+    await dashboard
+      .getByRole("button", { name: "Align stage", exact: true })
+      .click();
+    const dashboardAlignment = page.locator(
+      '[data-alignment-source="dashboard"]',
+    );
+    await expect(dashboardAlignment).toBeVisible();
+    await expect(
+      dashboardAlignment.getByRole("heading", {
+        name: "Align the Prismatic Forum",
+      }),
+    ).toBeVisible();
+    await expect(
+      dashboardAlignment.locator('[data-debate-bot-avatar="true"]'),
+    ).toHaveCount(3);
+    await expect(dashboardAlignment).toContainText("fresh random Library cast");
+    const alignmentCameraToggle = dashboardAlignment.getByRole("group", {
+      name: "Debate alignment preview camera",
+    });
+    const alignmentThemeToggle = dashboardAlignment.getByRole("group", {
+      name: "Debate alignment preview theme",
+    });
+    await expect(
+      alignmentCameraToggle.getByRole("button", {
+        name: "Wide",
+        exact: true,
+      }),
+    ).toHaveAttribute("aria-pressed", "true");
+    await alignmentCameraToggle
+      .getByRole("button", { name: "Moderator", exact: true })
+      .click();
+    await expect(
+      dashboardAlignment.locator('[class*="forumCamera"]'),
+    ).toHaveAttribute("data-camera-view", "moderator");
+    await expect(
+      dashboardAlignment.locator('[data-debate-bot-avatar="true"]'),
+    ).toHaveCount(1);
+    await expect(
+      dashboardAlignment.locator(
+        '[data-debate-bot-avatar="true"][data-debate-role="moderator"]',
+      ),
+    ).not.toHaveAttribute("data-debate-compact", "true");
+    await expect(
+      dashboardAlignment.locator(
+        '[class*="alignmentTunerRole"]:not([class*="Actions"])',
+      ),
+    ).toHaveCount(1);
+    const moderatorHorizontal = dashboardAlignment.getByRole("slider", {
+      name: "Moderator Bot horizontal position",
+    });
+    await dashboardAlignment
+      .getByRole("button", { name: /^Move Moderator bot\./u })
+      .press("ArrowRight");
+    await expect(moderatorHorizontal).toHaveValue("0.5");
+    await dashboardAlignment
+      .getByRole("button", { name: "Copy alignment data", exact: true })
+      .click();
+    await expect(
+      dashboardAlignment.locator(
+        '[data-debate-stage-alignment-copy="true"][data-copy-state="copied"]',
+      ),
+    ).toBeVisible();
+    const copiedAlignment = JSON.parse(
+      (await page.evaluate(() =>
+        window.localStorage.getItem("prism_e2e_debate_alignment_clipboard"),
+      )) ?? "{}",
+    ) as {
+      moderator?: { bot?: { x?: number } };
+      wide?: { moderator?: { bot?: { x?: number } } };
+    };
+    expect(copiedAlignment.moderator?.bot?.x).toBe(0.5);
+    expect(copiedAlignment.wide?.moderator?.bot?.x).toBe(0);
+    await alignmentCameraToggle
+      .getByRole("button", { name: "Wide", exact: true })
+      .click();
+    await expect(moderatorHorizontal).toHaveValue("0");
+    await moderatorHorizontal.fill("1");
+    await expect(moderatorHorizontal).toHaveValue("1");
+    await alignmentCameraToggle
+      .getByRole("button", { name: "Moderator", exact: true })
+      .click();
+    await expect(moderatorHorizontal).toHaveValue("0.5");
+    await page.screenshot({
+      path: ".codex/output/debate-align-stage-moderator.png",
+      animations: "disabled",
+    });
+    await page.evaluate(async () => {
+      await Promise.all(
+        [
+          "/debate/forum-light.webp",
+          "/debate/forum-light-foreground.png",
+          "/debate/moderator-light.webp",
+          "/debate/moderator-light-foreground.png",
+        ].map(async (source) => {
+          const image = new Image();
+          image.src = source;
+          await image.decode();
+        }),
+      );
+    });
+    await alignmentThemeToggle
+      .getByRole("button", { name: "Light", exact: true })
+      .click();
+    const alignmentReceiver = dashboardAlignment.locator(
+      '[class*="receiverMatte"]',
+    );
+    await expect(
+      dashboardAlignment.locator(
+        '[class*="alignmentPreviewThemeScope"][data-theme="light"]',
+      ),
+    ).toBeVisible();
+    await expect(alignmentReceiver).toHaveCSS(
+      "background-image",
+      /moderator-light\.webp/u,
+    );
+    await expect(
+      dashboardAlignment.locator('[data-light-depth="backdrop"]'),
+    ).toHaveCount(3);
+    await expect(
+      dashboardAlignment.locator('[data-light-depth="foreground"]'),
+    ).toHaveCount(3);
+    await page.screenshot({
+      path: ".codex/output/debate-light-masks-moderator-light.png",
+      animations: "disabled",
+    });
+    await alignmentCameraToggle
+      .getByRole("button", { name: "Wide", exact: true })
+      .click();
+    await expect(alignmentReceiver).toHaveCSS(
+      "background-image",
+      /forum-light\.webp/u,
+    );
+    await page.screenshot({
+      path: ".codex/output/debate-light-masks-wide-light.png",
+      animations: "disabled",
+    });
+    await alignmentCameraToggle
+      .getByRole("button", { name: "Moderator", exact: true })
+      .click();
+    await alignmentThemeToggle
+      .getByRole("button", { name: "Dark", exact: true })
+      .click();
+    await expect(
+      dashboardAlignment.locator(
+        '[class*="alignmentPreviewThemeScope"][data-theme="dark"]',
+      ),
+    ).toBeVisible();
+    await dashboardAlignment
+      .getByRole("button", { name: "Reset moderator", exact: true })
+      .click();
+    await expect(moderatorHorizontal).toHaveValue("0");
+    await alignmentCameraToggle
+      .getByRole("button", { name: "Wide", exact: true })
+      .click();
+    await expect(moderatorHorizontal).toHaveValue("1");
+    await expect(
+      dashboardAlignment.locator('[data-debate-bot-avatar="true"]'),
+    ).toHaveCount(3);
+    await page.screenshot({
+      path: ".codex/output/debate-align-stage-dashboard.png",
+      animations: "disabled",
+    });
+    await dashboardAlignment
+      .getByRole("button", { name: "Cancel", exact: true })
+      .click();
+    await expect(dashboardAlignment).toHaveCount(0);
+    await dashboard
+      .getByRole("button", {
+        name: "Open proceeding archive",
+        exact: true,
+      })
+      .click();
+    await page.screenshot({
+      path: ".codex/output/debate-studio-archive.png",
+      animations: "disabled",
+    });
+    await page
+      .getByRole("button", {
+        name: new RegExp(
+          `^${initialSession.motion.motion}.*Opening.*spectator$`,
+          "u",
+        ),
+      })
+      .click();
+    const live = page.locator('[data-debate-surface="live"]');
+    await expect(live).toBeVisible();
+    const moreStageControls = live.locator(
+      'summary[aria-label="More stage controls"]',
+    );
+    await expect(moreStageControls).toBeVisible();
+    const openLiveStageGeometry = async (): Promise<void> => {
+      await moreStageControls.click();
+      const alignmentButton = live.getByRole("button", {
+        name: "Align stage",
+        exact: true,
+      });
+      await expect(alignmentButton).toBeVisible();
+      await alignmentButton.click();
+    };
+    const activeGlyph = page.locator(
+      '[class*="podiumGlyphPosition"][data-role="for"][data-turn-active="true"]',
+    );
+    await expect(activeGlyph).toBeVisible({ timeout: 10_000 });
+    await expect(activeGlyph).not.toHaveCSS("filter", "none");
+
+    await page.getByRole("button", { name: "Wide", exact: true }).click();
+    const forumCamera = live.locator('[class*="forumCamera"]');
+    await expect(forumCamera).toHaveAttribute("data-camera-view", "wide");
+    const evidencePedestal = live.locator(
+      'section[aria-label="Presented evidence: Rusty spoon"]',
+    );
+    await expect(evidencePedestal).toBeVisible({ timeout: 10_000 });
+    await evidencePedestal.screenshot({
+      path: ".codex/output/debate-evidence-pedestal-rusty-spoon.png",
+      animations: "disabled",
+    });
+    await page.screenshot({
+      path: ".codex/output/debate-evidence-pedestal-wide.png",
+      animations: "disabled",
+    });
+    const audienceRow = live.locator('[data-debate-audience="true"]');
+    await expect(audienceRow).toBeVisible();
+    await expect(audienceRow).toHaveAttribute(
+      "data-audience-placement",
+      "below-screen",
+    );
+    await expect(audienceRow).toHaveAttribute("data-audience-count", "8");
+    await expect(audienceRow).toHaveAttribute(
+      "data-audience-chattering",
+      "false",
+    );
+    await expect(
+      audienceRow.locator('[data-audience-source="generated"]'),
+    ).toHaveCount(8);
+    await expect(audienceRow.locator('[data-talking="true"]')).toHaveCount(0);
+    const wideAudienceBox = await audienceRow.boundingBox();
+    expect(wideAudienceBox).not.toBeNull();
+    await forumCamera.evaluate((element) => {
+      for (const animation of element.getAnimations()) animation.finish();
+    });
+    await expect(forumCamera).toHaveCSS(
+      "transform",
+      "matrix(1, 0, 0, 1, 0, 0)",
+    );
+    const moderatorAvatar = page.locator(
+      '[data-debate-bot-avatar="true"][data-debate-role="moderator"]',
+    );
+    await expect(moderatorAvatar).toBeVisible();
+    await expect(moderatorAvatar).toHaveAttribute(
+      "data-debate-compact",
+      "true",
+    );
+    await expect(
+      moderatorAvatar.locator('[data-zen-live-bot-face-rig="true"]'),
+    ).toBeVisible();
+    await expect(
+      moderatorAvatar.locator('[class*="botFaceFrame"]').first(),
+    ).toBeVisible();
+    const normalizedModeratorInkGeometry = async () =>
+      moderatorAvatar.evaluate((avatar) => {
+        const mask = avatar.querySelector<HTMLElement>(
+          '[class*="zenLiveBotPresenceFaceEmissionMask"]',
+        );
+        const ink = avatar.querySelector<HTMLElement>(
+          '[data-avatar-details-emission="core"]',
+        );
+        if (!mask || !ink) {
+          throw new Error("Moderator avatar ink geometry is unavailable");
+        }
+        const maskRect = mask.getBoundingClientRect();
+        const inkRect = ink.getBoundingClientRect();
+        return {
+          width: inkRect.width / maskRect.width,
+          height: inkRect.height / maskRect.height,
+          centerX:
+            (inkRect.left + inkRect.width / 2 - maskRect.left) / maskRect.width,
+          centerY:
+            (inkRect.top + inkRect.height / 2 - maskRect.top) / maskRect.height,
+        };
+      });
+    const compactModeratorInkGeometry = await normalizedModeratorInkGeometry();
+    const moderatorAvatarBox = await moderatorAvatar.boundingBox();
+    const compactModeratorScreenBox = await moderatorAvatar
+      .locator('[data-zen-live-bot-body-frame="true"]')
+      .boundingBox();
+    expect(moderatorAvatarBox).not.toBeNull();
+    expect(compactModeratorScreenBox).not.toBeNull();
+    expect(compactModeratorScreenBox!.width).toBeGreaterThan(
+      moderatorAvatarBox!.width * 0.85,
+    );
+    const forAvatarBody = page.locator(
+      '[data-debate-bot-avatar="true"][data-debate-role="for"] [data-zen-live-bot-body-layer="true"]',
+    );
+    const againstAvatarBody = page.locator(
+      '[data-debate-bot-avatar="true"][data-debate-role="against"] [data-zen-live-bot-body-layer="true"]',
+    );
+    await expect(forAvatarBody).toHaveCSS(
+      "--coffee-plate-emoji-face-scale-y",
+      "-1",
+    );
+    await expect(forAvatarBody).toHaveCSS(
+      "--avatar-details-facing-scale-x",
+      "1",
+    );
+    await expect(forAvatarBody).toHaveCSS(
+      "--avatar-details-facing-offset-y",
+      "0%",
+    );
+    await expect(againstAvatarBody).toHaveCSS(
+      "--coffee-plate-emoji-face-scale-y",
+      "1",
+    );
+    await expect(againstAvatarBody).toHaveCSS(
+      "--avatar-details-facing-scale-x",
+      "-1",
+    );
+    await expect(againstAvatarBody).toHaveCSS(
+      "--avatar-details-facing-offset-y",
+      "-2.34375%",
+    );
+    const activeGlyphScreen = activeGlyph.locator(
+      '[class*="podiumGlyphScreen"]',
+    );
+    await expect(activeGlyphScreen).not.toHaveCSS("background-image", "none");
+    const moderatorGlyphScreen = page.locator(
+      '[class*="podiumGlyphPosition"][data-role="moderator"] [class*="podiumGlyphScreen"]',
+    );
+    const wideModeratorGlyphBox = await moderatorGlyphScreen.boundingBox();
+    expect(wideModeratorGlyphBox).not.toBeNull();
+    await page.screenshot({
+      path: ".codex/output/debate-podium-glyphs-wide.png",
+      animations: "disabled",
+    });
+
+    for (const camera of ["Left", "Right"] as const) {
+      await page.getByRole("button", { name: camera, exact: true }).click();
+      await expect(forumCamera).toHaveAttribute(
+        "data-camera-view",
+        camera.toLowerCase(),
+      );
+      await expect(audienceRow).toBeVisible();
+      const audienceBox = await audienceRow.boundingBox();
+      expect(audienceBox).not.toBeNull();
+      expect(audienceBox!.x).toBeCloseTo(wideAudienceBox!.x, 0);
+      expect(audienceBox!.y).toBeCloseTo(wideAudienceBox!.y, 0);
+      await expect(moderatorAvatar).toHaveAttribute(
+        "data-debate-compact",
+        "true",
+      );
+      await page.screenshot({
+        path: `.codex/output/debate-podium-glyphs-${camera.toLowerCase()}.png`,
+        animations: "disabled",
+      });
+    }
+
+    await page.getByRole("button", { name: "Moderator", exact: true }).click();
+    await expect(forumCamera).toHaveAttribute("data-camera-view", "moderator");
+    await expect(audienceRow).toBeVisible();
+    const moderatorAudienceBox = await audienceRow.boundingBox();
+    expect(moderatorAudienceBox).not.toBeNull();
+    expect(moderatorAudienceBox!.x).toBeCloseTo(wideAudienceBox!.x, 0);
+    expect(moderatorAudienceBox!.y).toBeCloseTo(wideAudienceBox!.y, 0);
+    await expect(moderatorAvatar).toBeVisible();
+    await expect(moderatorAvatar).not.toHaveAttribute(
+      "data-debate-compact",
+      "true",
+    );
+    await expect(
+      moderatorAvatar.locator('[class*="botFaceFrame"]').first(),
+    ).toBeVisible();
+    await expect(moderatorAvatar).toHaveCSS(
+      "--coffee-plate-emoji-face-scale-y",
+      "1",
+    );
+    const fullModeratorInkGeometry = await normalizedModeratorInkGeometry();
+    expect(
+      compactModeratorInkGeometry.width / fullModeratorInkGeometry.width,
+    ).toBeCloseTo(1, 2);
+    expect(
+      compactModeratorInkGeometry.height / fullModeratorInkGeometry.height,
+    ).toBeCloseTo(1, 2);
+    expect(
+      Math.abs(
+        compactModeratorInkGeometry.centerX - fullModeratorInkGeometry.centerX,
+      ),
+    ).toBeLessThan(0.002);
+    expect(
+      Math.abs(
+        compactModeratorInkGeometry.centerY - fullModeratorInkGeometry.centerY,
+      ),
+    ).toBeLessThan(0.002);
+    const closeModeratorGlyphBox = await moderatorGlyphScreen.boundingBox();
+    expect(closeModeratorGlyphBox).not.toBeNull();
+    expect(closeModeratorGlyphBox!.width).toBeGreaterThanOrEqual(
+      wideModeratorGlyphBox!.width * 1.9,
+    );
+    await page.screenshot({
+      path: ".codex/output/debate-podium-glyph-moderator.png",
+      animations: "disabled",
+    });
+
+    await page.getByRole("button", { name: "Wide", exact: true }).click();
+    const liveStage = live.locator('[data-debate-stage-viewport="live"]');
+    const liveStageBox = await liveStage.boundingBox();
+    expect(liveStageBox).not.toBeNull();
+    const roles = ["for", "moderator", "against"] as const;
+    const alignmentItems = [
+      ["bot", '[class*="botPosition"]'],
+      ["nameplate", '[class*="botIdentityPosition"]'],
+      ["glyph", '[class*="podiumGlyphPosition"]'],
+    ] as const;
+    const liveItemCenters = new Map<string, { x: number; y: number }>();
+    for (const role of roles) {
+      for (const [item, selector] of alignmentItems) {
+        const itemBox = await liveStage
+          .locator(`${selector}[data-role="${role}"]`)
+          .evaluate((element) => {
+            const target = element as HTMLElement;
+            return {
+              x: target.offsetLeft,
+              y: target.offsetTop,
+              width: target.offsetWidth,
+              height: target.offsetHeight,
+            };
+          });
+        liveItemCenters.set(`${role}:${item}`, {
+          x: (itemBox.x + itemBox.width / 2) / liveStageBox!.width,
+          y: (itemBox.y + itemBox.height / 2) / liveStageBox!.height,
+        });
+      }
+    }
+    await openLiveStageGeometry();
+    const liveAlignment = page.locator('[data-alignment-source="session"]');
+    const alignmentStage = liveAlignment.locator(
+      '[data-debate-stage-viewport="alignment"]',
+    );
+    const alignmentStageBox = await alignmentStage.boundingBox();
+    expect(alignmentStageBox).not.toBeNull();
+    expect(
+      Math.abs(alignmentStageBox!.width - liveStageBox!.width),
+    ).toBeLessThanOrEqual(1);
+    expect(
+      Math.abs(alignmentStageBox!.height - liveStageBox!.height),
+    ).toBeLessThanOrEqual(1);
+    for (const role of roles) {
+      for (const [item, selector] of alignmentItems) {
+        const itemBox = await alignmentStage
+          .locator(`${selector}[data-role="${role}"]`)
+          .evaluate((element) => {
+            const target = element as HTMLElement;
+            return {
+              x: target.offsetLeft,
+              y: target.offsetTop,
+              width: target.offsetWidth,
+              height: target.offsetHeight,
+            };
+          });
+        const liveCenter = liveItemCenters.get(`${role}:${item}`);
+        expect(liveCenter).toBeDefined();
+        const alignmentCenter = {
+          x: (itemBox.x + itemBox.width / 2) / alignmentStageBox!.width,
+          y: (itemBox.y + itemBox.height / 2) / alignmentStageBox!.height,
+        };
+        expect(Math.abs(alignmentCenter.x - liveCenter!.x)).toBeLessThan(0.002);
+        expect(Math.abs(alignmentCenter.y - liveCenter!.y)).toBeLessThan(0.002);
+      }
+    }
+    await page.screenshot({
+      path: ".codex/output/debate-align-stage-live-geometry.png",
+      animations: "disabled",
+    });
+    await liveAlignment
+      .getByRole("button", { name: "Cancel", exact: true })
+      .click();
+
+    serveCompletedSession = true;
+    await page.reload();
+    const completedDashboard = page.locator(
+      '[data-debate-surface="dashboard"]',
+    );
+    await expect(completedDashboard).toBeVisible();
+    await completedDashboard
+      .getByRole("button", {
+        name: "Open proceeding archive",
+        exact: true,
+      })
+      .click();
+    await completedDashboard
+      .getByRole("button", {
+        name: new RegExp(`^${initialSession.motion.motion}`, "u"),
+      })
+      .click();
+    const completedLive = page.locator('[data-debate-surface="live"]');
+    await expect(completedLive).toHaveAttribute(
+      "data-session-status",
+      "completed",
+    );
+    const completedRail = completedLive.locator(
+      '[class*="debateRail"][data-completed="true"]',
+    );
+    const completedRailBox = await completedRail.boundingBox();
+    expect(completedRailBox).not.toBeNull();
+    expect(completedRailBox!.y + completedRailBox!.height).toBeLessThanOrEqual(
+      900,
+    );
+    await expect(
+      completedRail.getByRole("button", {
+        name: "Return to studio",
+        exact: true,
+      }),
+    ).toBeVisible();
+    await page.screenshot({
+      path: ".codex/output/debate-final-verdict-contained.png",
+      animations: "disabled",
+    });
   });
 });

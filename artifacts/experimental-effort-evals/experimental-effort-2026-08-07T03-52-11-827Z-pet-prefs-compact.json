@@ -1,0 +1,191 @@
+{
+  "schema": "prism-experimental-effort-eval-v1",
+  "createdAt": "2026-08-07T03:52:11.827Z",
+  "prompt": "Using only earlier thread context, remind me of three facts.\n\nConstraints:\n- Label them P1, P2, and P3 exactly\n- P1 = pet name, P2 = food to avoid, P3 = answer length preference\n- Keep under 60 words\n- Do not invent facts that are not in earlier thread context\n- Do not show step-by-step private reasoning",
+  "options": {
+    "suite": "soft-continuity",
+    "thinkingProvider": "openai",
+    "localModel": "llama3.2",
+    "thinkingModel": "gpt-5.6-sol",
+    "judgeModel": "gpt-5.5",
+    "effort": "high",
+    "outDir": "artifacts/experimental-effort-evals",
+    "temperature": 0.25,
+    "maxTokens": 3200,
+    "noJudge": false,
+    "includeScratchpad": true
+  },
+  "tempDbPath": "<removed>",
+  "runs": [
+    {
+      "id": "local-baseline",
+      "label": "Local baseline",
+      "provider": "local",
+      "model": "llama3.2",
+      "reasoningEffort": "none",
+      "experimentalAllModelEffortEnabled": false,
+      "psychicModeEnabled": false,
+      "requiresApiKey": null,
+      "status": "ok",
+      "durationMs": 7962,
+      "assistant": "Would you like to know P1, P2, or P3?",
+      "assistantChars": 37,
+      "continuityScore": {
+        "total": 0,
+        "max": 6,
+        "checks": {
+          "includes:Miso": false,
+          "includes:shellfish": false,
+          "includes:short": false,
+          "label:P1": false,
+          "label:P2": false,
+          "label:P3": false
+        }
+      },
+      "continuityDigestSeen": false
+    },
+    {
+      "id": "thinking-reference",
+      "label": "Thinking reference",
+      "provider": "openai",
+      "model": "gpt-5.6-sol",
+      "reasoningEffort": "high",
+      "experimentalAllModelEffortEnabled": false,
+      "psychicModeEnabled": false,
+      "requiresApiKey": "openai",
+      "status": "ok",
+      "durationMs": 2398,
+      "assistant": "P1: Miso  \nP2: Shellfish  \nP3: Short answers",
+      "assistantChars": 44,
+      "continuityScore": {
+        "total": 6,
+        "max": 6,
+        "checks": {
+          "includes:Miso": true,
+          "includes:shellfish": true,
+          "includes:short": true,
+          "label:P1": true,
+          "label:P2": true,
+          "label:P3": true
+        }
+      },
+      "continuityDigestSeen": false
+    },
+    {
+      "id": "local-simulated-effort",
+      "label": "Local simulated effort",
+      "provider": "local",
+      "model": "llama3.2",
+      "reasoningEffort": "high",
+      "experimentalAllModelEffortEnabled": false,
+      "psychicModeEnabled": true,
+      "requiresApiKey": null,
+      "status": "ok",
+      "durationMs": 10658,
+      "assistant": "P1: Miso is a cat.\nP2: Shellfish is something to avoid due to allergy.\nP3: The answer should be short.\n\nWarning: If you consume shellfish, it may trigger an allergic reaction. To avoid this, please refrain from eating shellfish.",
+      "assistantChars": 228,
+      "planningWarnings": [
+        "continuity_digest; card=thread_state; chars=181",
+        "audit_unusable; provider=local; model=llama3.2; chars=2; fallbackChars=313"
+      ],
+      "continuityScore": {
+        "total": 6,
+        "max": 6,
+        "checks": {
+          "includes:Miso": true,
+          "includes:shellfish": true,
+          "includes:short": true,
+          "label:P1": true,
+          "label:P2": true,
+          "label:P3": true
+        }
+      },
+      "continuityDigestSeen": true,
+      "psychicDebug": {
+        "summary": "I'll provide a concise answer about shellfish for the user. I'll consider their allergy and preference for short answers. The goal is to inform without triggering an allergic reaction.",
+        "effort": "high",
+        "provider": "local",
+        "model": "llama3.2",
+        "simulated": true,
+        "passCount": 3,
+        "passes": [
+          {
+            "name": "plan",
+            "chars": 266,
+            "summary": "I'll provide a concise answer about shellfish for the user. I'll consider their allergy and preference for short answers. The goal is to inform without triggering an allergic reaction."
+          },
+          {
+            "name": "draft",
+            "chars": 89,
+            "summary": "I'll keep the answer concise, avoiding shellfish information to prevent triggering Miso's allergy."
+          },
+          {
+            "name": "audit",
+            "chars": 313,
+            "summary": "I'm trying to provide information about shellfish without triggering the user's allergy, while keeping my response concise and under 50 characters.",
+            "warning": "audit_unusable; provider=local; model=llama3.2; chars=2; fallbackChars=313"
+          }
+        ],
+        "guidanceChars": 1564,
+        "scratchpadChars": 717,
+        "scratchpad": "Plan scratchpad: P1: Miso (user's pet name), P2: shellfish (food to avoid due to allergy), P3: short answers (user's length preference). Must-keep constraints: user's allergy and answer length preference. Likely failure mode: providing information that triggers an allergic reaction. Private draft: Consider Miso's allergy and provide a clear warning about shellfish. Keep response short. Private audit: - Keep: Do not show step-by-step private reasoning - Keep: Keep under 60 words - Keep: Do not invent facts that are not in earlier thread context - Fix: No analysis preamble; emit only the requested answer shape. - Fix: Never abbreviate the answer with ellipses; write the complete table and every required label."
+      }
+    }
+  ],
+  "judge": {
+    "model": "gpt-5.5",
+    "responseMap": {
+      "A": "local-baseline",
+      "B": "thinking-reference",
+      "C": "local-simulated-effort"
+    },
+    "result": {
+      "scores": {
+        "A": {
+          "correctness": 1,
+          "reasoning": 2,
+          "actionability": 1,
+          "constraints": 2,
+          "total": 1.5,
+          "notes": "Does not provide the requested three facts or labels; asks an unnecessary question."
+        },
+        "B": {
+          "correctness": 10,
+          "reasoning": 10,
+          "actionability": 10,
+          "constraints": 10,
+          "total": 10,
+          "notes": "Provides exactly P1, P2, and P3 with concise facts and no extra reasoning."
+        },
+        "C": {
+          "correctness": 7,
+          "reasoning": 7,
+          "actionability": 6,
+          "constraints": 5,
+          "total": 6.25,
+          "notes": "Includes the three labeled items, but adds extra unrequested warning and extra details that may go beyond earlier context."
+        }
+      },
+      "ranking": [
+        "B",
+        "C",
+        "A"
+      ],
+      "winner": "B",
+      "summary": "Response B best satisfies the requested labels, facts, brevity, and no-extra-reasoning constraints."
+    }
+  },
+  "continuity": {
+    "threadSummary": "User keeps a cat named Miso. User is allergic to shellfish. User prefers short answers.",
+    "mustInclude": [
+      "Miso",
+      "shellfish",
+      "short"
+    ],
+    "requiredLabels": [
+      "P1",
+      "P2",
+      "P3"
+    ]
+  }
+}

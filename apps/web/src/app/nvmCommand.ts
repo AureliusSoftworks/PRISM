@@ -1,7 +1,7 @@
 export const NVM_COMMAND_NAME = "nvm";
-export const NVM_SLASH_COMMAND = `/${NVM_COMMAND_NAME}`;
+export const NVM_SLASH_COMMAND = `$${NVM_COMMAND_NAME}`;
 export const NVM_COMMAND_EXTRA_TEXT_ERROR =
-  "/nvm does not take extra text. Use it by itself.";
+  "$nvm does not take extra text. Use it by itself.";
 
 export type NvmSlashCommandParseResult =
   | { kind: "none" }

@@ -1,0 +1,1753 @@
+{
+  "mode": "apply",
+  "databasePath": "/Users/jared/Library/Application Support/com.localai.prism-desktop/localai.db",
+  "userId": "c91a96cb674b1727d944d79f",
+  "totals": {
+    "originsListed": 67,
+    "marketplaceMatched": 67,
+    "marketplaceChanging": 67,
+    "libraryMatched": 63,
+    "libraryChanging": 63,
+    "librarySkipped": 0
+  },
+  "unmatchedOrigins": [],
+  "librarySkips": [],
+  "marketplaceChanges": [
+    {
+      "id": "george-washington",
+      "name": "George Washington",
+      "place": "Westmoreland County, Virginia",
+      "accentBefore": null,
+      "accentAfter": "american-english",
+      "pinBefore": null,
+      "pinAfter": {
+        "x": 0.2868888889,
+        "y": 0.2878333333
+      }
+    },
+    {
+      "id": "benjamin-franklin",
+      "name": "Benjamin Franklin",
+      "place": "Boston, Massachusetts",
+      "accentBefore": null,
+      "accentAfter": "eastern-new-england-english",
+      "pinBefore": null,
+      "pinAfter": {
+        "x": 0.3026111111,
+        "y": 0.2646666667
+      }
+    },
+    {
+      "id": "john-adams",
+      "name": "John Adams",
+      "place": "Braintree, Massachusetts",
+      "accentBefore": null,
+      "accentAfter": "eastern-new-england-english",
+      "pinBefore": null,
+      "pinAfter": {
+        "x": 0.3027777778,
+        "y": 0.2652222222
+      }
+    },
+    {
+      "id": "thomas-jefferson",
+      "name": "Thomas Jefferson",
+      "place": "Shadwell, Virginia",
+      "accentBefore": null,
+      "accentAfter": "american-english",
+      "pinBefore": null,
+      "pinAfter": {
+        "x": 0.2820555556,
+        "y": 0.2888333333
+      }
+    },
+    {
+      "id": "james-madison",
+      "name": "James Madison",
+      "place": "Port Conway, Virginia",
+      "accentBefore": null,
+      "accentAfter": "american-english",
+      "pinBefore": null,
+      "pinAfter": {
+        "x": 0.2859444444,
+        "y": 0.2879444444
+      }
+    },
+    {
+      "id": "socrates",
+      "name": "Socrates",
+      "place": "Athens, Greece",
+      "accentBefore": null,
+      "accentAfter": "greek-influenced-english",
+      "pinBefore": null,
+      "pinAfter": {
+        "x": 0.5659166667,
+        "y": 0.289
+      }
+    },
+    {
+      "id": "plato",
+      "name": "Plato",
+      "place": "Athens, Greece",
+      "accentBefore": null,
+      "accentAfter": "greek-influenced-english",
+      "pinBefore": null,
+      "pinAfter": {
+        "x": 0.5659166667,
+        "y": 0.289
+      }
+    },
+    {
+      "id": "aristotle",
+      "name": "Aristotle",
+      "place": "Stagira, Greece",
+      "accentBefore": null,
+      "accentAfter": "greek-influenced-english",
+      "pinBefore": null,
+      "pinAfter": {
+        "x": 0.5659722222,
+        "y": 0.2748333333
+      }
+    },
+    {
+      "id": "confucius",
+      "name": "Confucius",
+      "place": "Qufu, Shandong",
+      "accentBefore": null,
+      "accentAfter": "mandarin-influenced-english",
+      "pinBefore": null,
+      "pinAfter": {
+        "x": 0.8249722222,
+        "y": 0.3022222222
+      }
+    },
+    {
+      "id": "marcus-aurelius",
+      "name": "Marcus Aurelius",
+      "place": "Rome, Italy",
+      "accentBefore": null,
+      "accentAfter": "italian-influenced-english",
+      "pinBefore": null,
+      "pinAfter": {
+        "x": 0.5347222222,
+        "y": 0.2672222222
+      }
+    },
+    {
+      "id": "the-buddha",
+      "name": "The Buddha",
+      "place": "Lumbini, Nepal",
+      "accentBefore": null,
+      "accentAfter": "indian-english",
+      "pinBefore": null,
+      "pinAfter": {
+        "x": 0.7313333333,
+        "y": 0.3473888889
+      }
+    },
+    {
+      "id": "jesus-christ",
+      "name": "Jesus Christ",
+      "place": "Nazareth",
+      "accentBefore": null,
+      "accentAfter": "middle-eastern-arabic-influenced-english",
+      "pinBefore": null,
+      "pinAfter": {
+        "x": 0.5980555556,
+        "y": 0.3183333333
+      }
+    },
+    {
+      "id": "laozi",
+      "name": "Laozi",
+      "place": "Luyi, Henan",
+      "accentBefore": null,
+      "accentAfter": "mandarin-influenced-english",
+      "pinBefore": null,
+      "pinAfter": {
+        "x": 0.8208055556,
+        "y": 0.3118888889
+      }
+    },
+    {
+      "id": "rumi",
+      "name": "Rumi",
+      "place": "Balkh, Khorasan",
+      "accentBefore": null,
+      "accentAfter": "persian-influenced-english",
+      "pinBefore": null,
+      "pinAfter": {
+        "x": 0.6858333333,
+        "y": 0.2957777778
+      }
+    },
+    {
+      "id": "guru-nanak",
+      "name": "Guru Nanak",
+      "place": "Nankana Sahib, Punjab",
+      "accentBefore": null,
+      "accentAfter": "pakistani-english",
+      "pinBefore": null,
+      "pinAfter": {
+        "x": 0.70475,
+        "y": 0.3252777778
+      }
+    },
+    {
+      "id": "leonardo-da-vinci",
+      "name": "Leonardo da Vinci",
+      "place": "Vinci, Tuscany",
+      "accentBefore": null,
+      "accentAfter": "northern-italian-influenced-english",
+      "pinBefore": null,
+      "pinAfter": {
+        "x": 0.5303333333,
+        "y": 0.2567222222
+      }
+    },
+    {
+      "id": "salvador-dali",
+      "name": "Salvador Dalí",
+      "place": "Figueres, Catalonia",
+      "accentBefore": null,
+      "accentAfter": "spanish-influenced-english",
+      "pinBefore": null,
+      "pinAfter": {
+        "x": 0.5082222222,
+        "y": 0.2651666667
+      }
+    },
+    {
+      "id": "vincent-van-gogh",
+      "name": "Vincent van Gogh",
+      "place": "Zundert, Netherlands",
+      "accentBefore": null,
+      "accentAfter": "dutch-influenced-english",
+      "pinBefore": null,
+      "pinAfter": {
+        "x": 0.5129444444,
+        "y": 0.2140555556
+      }
+    },
+    {
+      "id": "claude-monet",
+      "name": "Claude Monet",
+      "place": "Paris, France",
+      "accentBefore": null,
+      "accentAfter": "parisian-french-influenced-english",
+      "pinBefore": null,
+      "pinAfter": {
+        "x": 0.5065277778,
+        "y": 0.2285555556
+      }
+    },
+    {
+      "id": "georgia-okeeffe",
+      "name": "Georgia O'Keeffe",
+      "place": "Sun Prairie, Wisconsin",
+      "accentBefore": null,
+      "accentAfter": "inland-north-english",
+      "pinBefore": null,
+      "pinAfter": {
+        "x": 0.2521944444,
+        "y": 0.2601111111
+      }
+    },
+    {
+      "id": "machiavelli",
+      "name": "Machiavelli",
+      "place": "Florence, Italy",
+      "accentBefore": null,
+      "accentAfter": "northern-italian-influenced-english",
+      "pinBefore": null,
+      "pinAfter": {
+        "x": 0.5312777778,
+        "y": 0.2568333333
+      }
+    },
+    {
+      "id": "sun-tzu",
+      "name": "Sun Tzu",
+      "place": "Linzi, Qi (Shandong)",
+      "accentBefore": null,
+      "accentAfter": "mandarin-influenced-english",
+      "pinBefore": null,
+      "pinAfter": {
+        "x": 0.8285555556,
+        "y": 0.2953888889
+      }
+    },
+    {
+      "id": "carl-von-clausewitz",
+      "name": "Carl von Clausewitz",
+      "place": "Burg bei Magdeburg, Prussia",
+      "accentBefore": null,
+      "accentAfter": "german-influenced-english",
+      "pinBefore": null,
+      "pinAfter": {
+        "x": 0.5329166667,
+        "y": 0.2096111111
+      }
+    },
+    {
+      "id": "chanakya",
+      "name": "Chanakya",
+      "place": "Pataliputra (Patna), India",
+      "accentBefore": null,
+      "accentAfter": "indian-english",
+      "pinBefore": null,
+      "pinAfter": {
+        "x": 0.7365,
+        "y": 0.3578333333
+      }
+    },
+    {
+      "id": "thomas-hobbes",
+      "name": "Thomas Hobbes",
+      "place": "Malmesbury, Wiltshire",
+      "accentBefore": null,
+      "accentAfter": "british-english",
+      "pinBefore": null,
+      "pinAfter": {
+        "x": 0.4941666667,
+        "y": 0.2134444444
+      }
+    },
+    {
+      "id": "alan-watts",
+      "name": "Alan Watts",
+      "place": "Chislehurst, England",
+      "accentBefore": null,
+      "accentAfter": "modern-rp-english",
+      "pinBefore": null,
+      "pinAfter": {
+        "x": 0.5001944444,
+        "y": 0.2143333333
+      }
+    },
+    {
+      "id": "sigmund-freud",
+      "name": "Sigmund Freud",
+      "place": "Vienna, Austria",
+      "accentBefore": null,
+      "accentAfter": "bavarian-german-influenced-english",
+      "pinBefore": null,
+      "pinAfter": {
+        "x": 0.5454722222,
+        "y": 0.2321666667
+      }
+    },
+    {
+      "id": "carl-jung",
+      "name": "Carl Jung",
+      "place": "Kesswil, Switzerland",
+      "accentBefore": null,
+      "accentAfter": "german-influenced-english",
+      "pinBefore": null,
+      "pinAfter": {
+        "x": 0.5258888889,
+        "y": 0.2355555556
+      }
+    },
+    {
+      "id": "friedrich-nietzsche",
+      "name": "Friedrich Nietzsche",
+      "place": "Röcken, Germany",
+      "accentBefore": null,
+      "accentAfter": "german-influenced-english",
+      "pinBefore": null,
+      "pinAfter": {
+        "x": 0.5336944444,
+        "y": 0.2152777778
+      }
+    },
+    {
+      "id": "joseph-campbell",
+      "name": "Joseph Campbell",
+      "place": "White Plains, New York",
+      "accentBefore": null,
+      "accentAfter": "new-york-english",
+      "pinBefore": null,
+      "pinAfter": {
+        "x": 0.2951111111,
+        "y": 0.2720555556
+      }
+    },
+    {
+      "id": "nikola-tesla",
+      "name": "Nikola Tesla",
+      "place": "Smiljan, Croatia (Serbian)",
+      "accentBefore": null,
+      "accentAfter": "russian-influenced-english",
+      "pinBefore": null,
+      "pinAfter": {
+        "x": 0.5425277778,
+        "y": 0.2523888889
+      }
+    },
+    {
+      "id": "albert-einstein",
+      "name": "Albert Einstein",
+      "place": "Ulm, Germany",
+      "accentBefore": null,
+      "accentAfter": "german-influenced-english",
+      "pinBefore": null,
+      "pinAfter": {
+        "x": 0.52775,
+        "y": 0.2311111111
+      }
+    },
+    {
+      "id": "isaac-newton",
+      "name": "Isaac Newton",
+      "place": "Woolsthorpe, Lincolnshire",
+      "accentBefore": null,
+      "accentAfter": "british-english",
+      "pinBefore": null,
+      "pinAfter": {
+        "x": 0.4982777778,
+        "y": 0.2066111111
+      }
+    },
+    {
+      "id": "marie-curie",
+      "name": "Marie Curie",
+      "place": "Warsaw, Poland",
+      "accentBefore": null,
+      "accentAfter": "polish-influenced-english",
+      "pinBefore": null,
+      "pinAfter": {
+        "x": 0.5583611111,
+        "y": 0.2098333333
+      }
+    },
+    {
+      "id": "charles-darwin",
+      "name": "Charles Darwin",
+      "place": "Shrewsbury, England",
+      "accentBefore": null,
+      "accentAfter": "british-english",
+      "pinBefore": null,
+      "pinAfter": {
+        "x": 0.4923611111,
+        "y": 0.2071666667
+      }
+    },
+    {
+      "id": "martin-luther-king-jr",
+      "name": "Martin Luther King Jr.",
+      "place": "Atlanta, Georgia",
+      "accentBefore": null,
+      "accentAfter": "southern-us-english",
+      "pinBefore": null,
+      "pinAfter": {
+        "x": 0.2655833333,
+        "y": 0.3125
+      }
+    },
+    {
+      "id": "mahatma-gandhi",
+      "name": "Mahatma Gandhi",
+      "place": "Porbandar, Gujarat",
+      "accentBefore": null,
+      "accentAfter": "indian-english",
+      "pinBefore": null,
+      "pinAfter": {
+        "x": 0.6933611111,
+        "y": 0.3797777778
+      }
+    },
+    {
+      "id": "nelson-mandela",
+      "name": "Nelson Mandela",
+      "place": "Mvezo, Eastern Cape",
+      "accentBefore": null,
+      "accentAfter": "south-african-english",
+      "pinBefore": null,
+      "pinAfter": {
+        "x": 0.5791388889,
+        "y": 0.6775555556
+      }
+    },
+    {
+      "id": "frederick-douglass",
+      "name": "Frederick Douglass",
+      "place": "Talbot County, Maryland",
+      "accentBefore": null,
+      "accentAfter": "southern-us-english",
+      "pinBefore": null,
+      "pinAfter": {
+        "x": 0.2886944444,
+        "y": 0.2847222222
+      }
+    },
+    {
+      "id": "harriet-tubman",
+      "name": "Harriet Tubman",
+      "place": "Dorchester County, Maryland",
+      "accentBefore": null,
+      "accentAfter": "southern-us-english",
+      "pinBefore": null,
+      "pinAfter": {
+        "x": 0.2890277778,
+        "y": 0.2865555556
+      }
+    },
+    {
+      "id": "william-shakespeare",
+      "name": "William Shakespeare",
+      "place": "Stratford-upon-Avon",
+      "accentBefore": null,
+      "accentAfter": "british-english",
+      "pinBefore": null,
+      "pinAfter": {
+        "x": 0.49525,
+        "y": 0.2100555556
+      }
+    },
+    {
+      "id": "mary-shelley",
+      "name": "Mary Shelley",
+      "place": "Somers Town, London",
+      "accentBefore": null,
+      "accentAfter": "modern-rp-english",
+      "pinBefore": null,
+      "pinAfter": {
+        "x": 0.4996388889,
+        "y": 0.2138333333
+      }
+    },
+    {
+      "id": "edgar-allan-poe",
+      "name": "Edgar Allan Poe",
+      "place": "Richmond, Virginia",
+      "accentBefore": null,
+      "accentAfter": "southern-us-english",
+      "pinBefore": null,
+      "pinAfter": {
+        "x": 0.2848888889,
+        "y": 0.2914444444
+      }
+    },
+    {
+      "id": "jane-austen",
+      "name": "Jane Austen",
+      "place": "Steventon, Hampshire",
+      "accentBefore": null,
+      "accentAfter": "modern-rp-english",
+      "pinBefore": null,
+      "pinAfter": {
+        "x": 0.4965277778,
+        "y": 0.2153888889
+      }
+    },
+    {
+      "id": "homer",
+      "name": "Homer",
+      "place": "Smyrna (İzmir)",
+      "accentBefore": null,
+      "accentAfter": "greek-influenced-english",
+      "pinBefore": null,
+      "pinAfter": {
+        "x": 0.5753888889,
+        "y": 0.2865555556
+      }
+    },
+    {
+      "id": "elizabeth-bennet",
+      "name": "Elizabeth Bennet",
+      "place": "Longbourn, Hertfordshire",
+      "accentBefore": "british-english",
+      "accentAfter": "british-english",
+      "pinBefore": {
+        "x": 0.4994444444,
+        "y": 0.2122222222
+      },
+      "pinAfter": {
+        "x": 0.4993611111,
+        "y": 0.2116666667
+      }
+    },
+    {
+      "id": "abraham-lincoln",
+      "name": "Abraham Lincoln",
+      "place": "Hodgenville, Kentucky",
+      "accentBefore": "inland-north-english",
+      "accentAfter": "appalachian-english",
+      "pinBefore": {
+        "x": 0.2509722222222222,
+        "y": 0.27899999999999997
+      },
+      "pinAfter": {
+        "x": 0.2618333333,
+        "y": 0.2912777778
+      }
+    },
+    {
+      "id": "adolf-hitler",
+      "name": "Adolf Hitler",
+      "place": "Braunau am Inn, Austria",
+      "accentBefore": "bavarian-german-influenced-english",
+      "accentAfter": "bavarian-german-influenced-english",
+      "pinBefore": {
+        "x": 0.5454722222222222,
+        "y": 0.23216666666666666
+      },
+      "pinAfter": {
+        "x": 0.5362222222,
+        "y": 0.2318888889
+      }
+    },
+    {
+      "id": "bernie-sanders",
+      "name": "Bernie Sanders",
+      "place": "Brooklyn, New York",
+      "accentBefore": "new-york-english",
+      "accentAfter": "new-york-english",
+      "pinBefore": {
+        "x": 0.29441666666666666,
+        "y": 0.2738333333333333
+      },
+      "pinAfter": {
+        "x": 0.2946111111,
+        "y": 0.274
+      }
+    },
+    {
+      "id": "bob-ross",
+      "name": "Bob Ross",
+      "place": "Daytona Beach, Florida",
+      "accentBefore": "north-florida-english",
+      "accentAfter": "north-florida-english",
+      "pinBefore": {
+        "x": 0.27494444444444444,
+        "y": 0.3377222222222222
+      },
+      "pinAfter": {
+        "x": 0.2749444444,
+        "y": 0.3377222222
+      }
+    },
+    {
+      "id": "dante-alighieri",
+      "name": "Dante Alighieri",
+      "place": "Florence, Italy",
+      "accentBefore": "northern-italian-influenced-english",
+      "accentAfter": "northern-italian-influenced-english",
+      "pinBefore": {
+        "x": 0.5312777777777777,
+        "y": 0.2568333333333333
+      },
+      "pinAfter": {
+        "x": 0.5312777778,
+        "y": 0.2568333333
+      }
+    },
+    {
+      "id": "donald-trump",
+      "name": "Donald Trump",
+      "place": "Queens, New York",
+      "accentBefore": "new-york-english",
+      "accentAfter": "new-york-english",
+      "pinBefore": {
+        "x": 0.29441666666666666,
+        "y": 0.2738333333333333
+      },
+      "pinAfter": {
+        "x": 0.2950277778,
+        "y": 0.2737222222
+      }
+    },
+    {
+      "id": "elon-musk",
+      "name": "Elon Musk",
+      "place": "Pretoria, South Africa",
+      "accentBefore": "south-african-english",
+      "accentAfter": "south-african-english",
+      "pinBefore": {
+        "x": 0.5779166666666667,
+        "y": 0.6455555555555555
+      },
+      "pinAfter": {
+        "x": 0.5783055556,
+        "y": 0.6430555556
+      }
+    },
+    {
+      "id": "eratosthenes",
+      "name": "Eratosthenes",
+      "place": "Cyrene, Libya",
+      "accentBefore": "greek-influenced-english",
+      "accentAfter": "greek-influenced-english",
+      "pinBefore": {
+        "x": 0.5659166666666666,
+        "y": 0.28900000000000003
+      },
+      "pinAfter": {
+        "x": 0.5607222222,
+        "y": 0.3176666667
+      }
+    },
+    {
+      "id": "gavin-newsom",
+      "name": "Gavin Newsom",
+      "place": "San Francisco, California",
+      "accentBefore": "bay-area-english",
+      "accentAfter": "bay-area-english",
+      "pinBefore": {
+        "x": 0.15994444444444444,
+        "y": 0.29016666666666663
+      },
+      "pinAfter": {
+        "x": 0.1599444444,
+        "y": 0.2901666667
+      }
+    },
+    {
+      "id": "hagrid",
+      "name": "Hagrid",
+      "place": "Forest of Dean, West Country",
+      "accentBefore": "british-english",
+      "accentAfter": "british-english",
+      "pinBefore": {
+        "x": 0.49377777777777776,
+        "y": 0.2118888888888889
+      },
+      "pinAfter": {
+        "x": 0.4929166667,
+        "y": 0.2122222222
+      }
+    },
+    {
+      "id": "harry-potter",
+      "name": "Harry Potter",
+      "place": "Little Whinging, Surrey",
+      "accentBefore": "modern-rp-english",
+      "accentAfter": "modern-rp-english",
+      "pinBefore": {
+        "x": 0.4996388888888889,
+        "y": 0.21383333333333335
+      },
+      "pinAfter": {
+        "x": 0.4988333333,
+        "y": 0.2148888889
+      }
+    },
+    {
+      "id": "hermione-granger",
+      "name": "Hermione Granger",
+      "place": "London, England",
+      "accentBefore": "cockney-english",
+      "accentAfter": "modern-rp-english",
+      "pinBefore": {
+        "x": 0.4996388888888889,
+        "y": 0.21383333333333335
+      },
+      "pinAfter": {
+        "x": 0.4996388889,
+        "y": 0.2138333333
+      }
+    },
+    {
+      "id": "jordan-peterson",
+      "name": "Jordan Peterson",
+      "place": "Edmonton, Alberta",
+      "accentBefore": "canadian-english",
+      "accentAfter": "canadian-english",
+      "pinBefore": {
+        "x": 0.2897222222222222,
+        "y": 0.24766666666666665
+      },
+      "pinAfter": {
+        "x": 0.18475,
+        "y": 0.2025
+      }
+    },
+    {
+      "id": "joseph-smith-jr",
+      "name": "Joseph Smith Jr.",
+      "place": "Sharon, Vermont",
+      "accentBefore": "american-english",
+      "accentAfter": "eastern-new-england-english",
+      "pinBefore": {
+        "x": 0.28547222222222224,
+        "y": 0.2607777777777778
+      },
+      "pinAfter": {
+        "x": 0.2988333333,
+        "y": 0.2571666667
+      }
+    },
+    {
+      "id": "joseph-stalin",
+      "name": "Joseph Stalin",
+      "place": "Gori, Georgia",
+      "accentBefore": "russian-influenced-english",
+      "accentAfter": "russian-influenced-english",
+      "pinBefore": {
+        "x": 0.6045,
+        "y": 0.19027777777777777
+      },
+      "pinAfter": {
+        "x": 0.6225277778,
+        "y": 0.2667777778
+      }
+    },
+    {
+      "id": "kris-jenner",
+      "name": "Kris Jenner",
+      "place": "San Diego, California",
+      "accentBefore": "southern-california-english",
+      "accentAfter": "southern-california-english",
+      "pinBefore": {
+        "x": 0.17155555555555557,
+        "y": 0.31083333333333335
+      },
+      "pinAfter": {
+        "x": 0.1745555556,
+        "y": 0.3182222222
+      }
+    },
+    {
+      "id": "marie-antoinette",
+      "name": "Marie Antoinette",
+      "place": "Vienna, Austria",
+      "accentBefore": "french-influenced-english",
+      "accentAfter": "french-influenced-english",
+      "pinBefore": {
+        "x": 0.5059166666666667,
+        "y": 0.2288888888888889
+      },
+      "pinAfter": {
+        "x": 0.5454722222,
+        "y": 0.2321666667
+      }
+    },
+    {
+      "id": "maximilien-robespierre",
+      "name": "Maximilien Robespierre",
+      "place": "Arras, France",
+      "accentBefore": "parisian-french-influenced-english",
+      "accentAfter": "parisian-french-influenced-english",
+      "pinBefore": {
+        "x": 0.5065277777777778,
+        "y": 0.22855555555555557
+      },
+      "pinAfter": {
+        "x": 0.5077222222,
+        "y": 0.2206111111
+      }
+    },
+    {
+      "id": "mr-rogers",
+      "name": "Mr. Rogers",
+      "place": "Latrobe, Pennsylvania",
+      "accentBefore": "american-english",
+      "accentAfter": "american-english",
+      "pinBefore": {
+        "x": 0.2778055555555556,
+        "y": 0.2753333333333333
+      },
+      "pinAfter": {
+        "x": 0.2795,
+        "y": 0.276
+      }
+    },
+    {
+      "id": "professor-mcgonagall",
+      "name": "Professor McGonagall",
+      "place": "Caithness, Scotland",
+      "accentBefore": "scottish-english",
+      "accentAfter": "scottish-english",
+      "pinBefore": {
+        "x": 0.4911388888888889,
+        "y": 0.18916666666666665
+      },
+      "pinAfter": {
+        "x": 0.4904166667,
+        "y": 0.1753333333
+      }
+    },
+    {
+      "id": "ron-weasley",
+      "name": "Ron Weasley",
+      "place": "Ottery St Mary, Devon",
+      "accentBefore": "cockney-english",
+      "accentAfter": "estuary-english",
+      "pinBefore": {
+        "x": 0.4996388888888889,
+        "y": 0.21383333333333335
+      },
+      "pinAfter": {
+        "x": 0.4908888889,
+        "y": 0.2180555556
+      }
+    }
+  ],
+  "libraryChanges": [
+    {
+      "id": "4184d8412965ca2353098708",
+      "name": "Abraham Lincoln",
+      "place": "Hodgenville, Kentucky",
+      "accentBefore": "inland-north-english",
+      "accentAfter": "appalachian-english",
+      "pinBefore": {
+        "x": 0.2509722222222222,
+        "y": 0.27899999999999997
+      },
+      "pinAfter": {
+        "x": 0.2618333333,
+        "y": 0.2912777778
+      }
+    },
+    {
+      "id": "db55e02fed44740f636a9544",
+      "name": "Adolf Hitler",
+      "place": "Braunau am Inn, Austria",
+      "accentBefore": null,
+      "accentAfter": "bavarian-german-influenced-english",
+      "pinBefore": null,
+      "pinAfter": {
+        "x": 0.5362222222,
+        "y": 0.2318888889
+      }
+    },
+    {
+      "id": "7a550356e8002af76bcb39d1",
+      "name": "Alan Watts",
+      "place": "Chislehurst, England",
+      "accentBefore": "modern-rp-english",
+      "accentAfter": "modern-rp-english",
+      "pinBefore": {
+        "x": 0.4996388888888889,
+        "y": 0.21383333333333335
+      },
+      "pinAfter": {
+        "x": 0.5001944444,
+        "y": 0.2143333333
+      }
+    },
+    {
+      "id": "103ae259ed0cf0eea10dced8",
+      "name": "Albert Einstein",
+      "place": "Ulm, Germany",
+      "accentBefore": null,
+      "accentAfter": "german-influenced-english",
+      "pinBefore": null,
+      "pinAfter": {
+        "x": 0.52775,
+        "y": 0.2311111111
+      }
+    },
+    {
+      "id": "92e85a73bd03dd32267fe508",
+      "name": "Aristotle",
+      "place": "Stagira, Greece",
+      "accentBefore": "greek-influenced-english",
+      "accentAfter": "greek-influenced-english",
+      "pinBefore": {
+        "x": 0.5659166666666666,
+        "y": 0.28900000000000003
+      },
+      "pinAfter": {
+        "x": 0.5659722222,
+        "y": 0.2748333333
+      }
+    },
+    {
+      "id": "11713409fbff512a3f37b852",
+      "name": "Benjamin Franklin",
+      "place": "Boston, Massachusetts",
+      "accentBefore": "american-english",
+      "accentAfter": "eastern-new-england-english",
+      "pinBefore": {
+        "x": 0.2263888888888889,
+        "y": 0.2788888888888889
+      },
+      "pinAfter": {
+        "x": 0.3026111111,
+        "y": 0.2646666667
+      }
+    },
+    {
+      "id": "4285bf1824010b0f7907793a",
+      "name": "Bernie Sanders",
+      "place": "Brooklyn, New York",
+      "accentBefore": null,
+      "accentAfter": "new-york-english",
+      "pinBefore": null,
+      "pinAfter": {
+        "x": 0.2946111111,
+        "y": 0.274
+      }
+    },
+    {
+      "id": "cab2832741cbe60c8a437998",
+      "name": "Bob Ross",
+      "place": "Daytona Beach, Florida",
+      "accentBefore": "north-florida-english",
+      "accentAfter": "north-florida-english",
+      "pinBefore": {
+        "x": 0.27494444444444444,
+        "y": 0.3377222222222222
+      },
+      "pinAfter": {
+        "x": 0.2749444444,
+        "y": 0.3377222222
+      }
+    },
+    {
+      "id": "3c53b30b159f0a10d566724f",
+      "name": "Carl Jung",
+      "place": "Kesswil, Switzerland",
+      "accentBefore": null,
+      "accentAfter": "german-influenced-english",
+      "pinBefore": null,
+      "pinAfter": {
+        "x": 0.5258888889,
+        "y": 0.2355555556
+      }
+    },
+    {
+      "id": "45479e8f35dcbd8301f34089",
+      "name": "Carl von Clausewitz",
+      "place": "Burg bei Magdeburg, Prussia",
+      "accentBefore": "northern-german-influenced-english",
+      "accentAfter": "german-influenced-english",
+      "pinBefore": {
+        "x": 0.5323055555555556,
+        "y": 0.21044444444444446
+      },
+      "pinAfter": {
+        "x": 0.5329166667,
+        "y": 0.2096111111
+      }
+    },
+    {
+      "id": "27089fe8d715c76cb8f5f21a",
+      "name": "Chanakya",
+      "place": "Pataliputra (Patna), India",
+      "accentBefore": "indian-english",
+      "accentAfter": "indian-english",
+      "pinBefore": {
+        "x": 0.7144444444444444,
+        "y": 0.3411111111111111
+      },
+      "pinAfter": {
+        "x": 0.7365,
+        "y": 0.3578333333
+      }
+    },
+    {
+      "id": "1378aa927ad1100977883f26",
+      "name": "Charles Darwin",
+      "place": "Shrewsbury, England",
+      "accentBefore": "modern-rp-english",
+      "accentAfter": "british-english",
+      "pinBefore": {
+        "x": 0.5003333333333333,
+        "y": 0.20994444444444443
+      },
+      "pinAfter": {
+        "x": 0.4923611111,
+        "y": 0.2071666667
+      }
+    },
+    {
+      "id": "dcf8d2e169b1bc3362874d7c",
+      "name": "Claude Monet",
+      "place": "Paris, France",
+      "accentBefore": "parisian-french-influenced-english",
+      "accentAfter": "parisian-french-influenced-english",
+      "pinBefore": {
+        "x": 0.5065277777777778,
+        "y": 0.22855555555555557
+      },
+      "pinAfter": {
+        "x": 0.5065277778,
+        "y": 0.2285555556
+      }
+    },
+    {
+      "id": "ffaac63e8c36fcce28335664",
+      "name": "Confucius",
+      "place": "Qufu, Shandong",
+      "accentBefore": "mandarin-influenced-english",
+      "accentAfter": "mandarin-influenced-english",
+      "pinBefore": {
+        "x": 0.8233333333333333,
+        "y": 0.2783333333333333
+      },
+      "pinAfter": {
+        "x": 0.8249722222,
+        "y": 0.3022222222
+      }
+    },
+    {
+      "id": "85937896439e73fa179d780c",
+      "name": "Dante Alighieri",
+      "place": "Florence, Italy",
+      "accentBefore": null,
+      "accentAfter": "northern-italian-influenced-english",
+      "pinBefore": null,
+      "pinAfter": {
+        "x": 0.5312777778,
+        "y": 0.2568333333
+      }
+    },
+    {
+      "id": "8e4d6c53b5b765f757160bc0",
+      "name": "Donald Trump",
+      "place": "Queens, New York",
+      "accentBefore": null,
+      "accentAfter": "new-york-english",
+      "pinBefore": null,
+      "pinAfter": {
+        "x": 0.2950277778,
+        "y": 0.2737222222
+      }
+    },
+    {
+      "id": "4b3f161e85c9fe77c2ab7b19",
+      "name": "Edgar Allan Poe",
+      "place": "Richmond, Virginia",
+      "accentBefore": "american-english",
+      "accentAfter": "southern-us-english",
+      "pinBefore": {
+        "x": 0.2871944444444444,
+        "y": 0.2817222222222222
+      },
+      "pinAfter": {
+        "x": 0.2848888889,
+        "y": 0.2914444444
+      }
+    },
+    {
+      "id": "fc1d8f6c7d00ea80d6c4ef9a",
+      "name": "Elizabeth Bennet",
+      "place": "Longbourn, Hertfordshire",
+      "accentBefore": null,
+      "accentAfter": "british-english",
+      "pinBefore": null,
+      "pinAfter": {
+        "x": 0.4993611111,
+        "y": 0.2116666667
+      }
+    },
+    {
+      "id": "506a4bffa166b1be43ba07dd",
+      "name": "Elon Musk",
+      "place": "Pretoria, South Africa",
+      "accentBefore": null,
+      "accentAfter": "south-african-english",
+      "pinBefore": null,
+      "pinAfter": {
+        "x": 0.5783055556,
+        "y": 0.6430555556
+      }
+    },
+    {
+      "id": "9720b3ea89ab5b282defbd75",
+      "name": "Eratosthenes",
+      "place": "Cyrene, Libya",
+      "accentBefore": null,
+      "accentAfter": "greek-influenced-english",
+      "pinBefore": null,
+      "pinAfter": {
+        "x": 0.5607222222,
+        "y": 0.3176666667
+      }
+    },
+    {
+      "id": "be38b3161bec825ecc411487",
+      "name": "Frederick Douglass",
+      "place": "Talbot County, Maryland",
+      "accentBefore": "southern-us-english",
+      "accentAfter": "southern-us-english",
+      "pinBefore": {
+        "x": 0.2886944444444445,
+        "y": 0.2846111111111111
+      },
+      "pinAfter": {
+        "x": 0.2886944444,
+        "y": 0.2847222222
+      }
+    },
+    {
+      "id": "01b7076e131098833d2e1397",
+      "name": "Friedrich Nietzsche",
+      "place": "Röcken, Germany",
+      "accentBefore": null,
+      "accentAfter": "german-influenced-english",
+      "pinBefore": null,
+      "pinAfter": {
+        "x": 0.5336944444,
+        "y": 0.2152777778
+      }
+    },
+    {
+      "id": "5895bb181de4aecb26f73d9a",
+      "name": "Gavin Newsom",
+      "place": "San Francisco, California",
+      "accentBefore": null,
+      "accentAfter": "bay-area-english",
+      "pinBefore": null,
+      "pinAfter": {
+        "x": 0.1599444444,
+        "y": 0.2901666667
+      }
+    },
+    {
+      "id": "ef65e06aa9fcef026e6003dd",
+      "name": "George Washington",
+      "place": "Westmoreland County, Virginia",
+      "accentBefore": "southern-us-english",
+      "accentAfter": "american-english",
+      "pinBefore": {
+        "x": 0.2858611111111111,
+        "y": 0.28494444444444444
+      },
+      "pinAfter": {
+        "x": 0.2868888889,
+        "y": 0.2878333333
+      }
+    },
+    {
+      "id": "5607a8affabe9f33bf68f613",
+      "name": "Georgia O'Keeffe",
+      "place": "Sun Prairie, Wisconsin",
+      "accentBefore": "american-english",
+      "accentAfter": "inland-north-english",
+      "pinBefore": {
+        "x": 0.20572222222222222,
+        "y": 0.3017222222222222
+      },
+      "pinAfter": {
+        "x": 0.2521944444,
+        "y": 0.2601111111
+      }
+    },
+    {
+      "id": "9baea2804073c054b8fb1743",
+      "name": "Hagrid",
+      "place": "Forest of Dean, West Country",
+      "accentBefore": null,
+      "accentAfter": "british-english",
+      "pinBefore": null,
+      "pinAfter": {
+        "x": 0.4929166667,
+        "y": 0.2122222222
+      }
+    },
+    {
+      "id": "5b9e6381a347cc25af613fdd",
+      "name": "Harriet Tubman",
+      "place": "Dorchester County, Maryland",
+      "accentBefore": "southern-us-english",
+      "accentAfter": "southern-us-english",
+      "pinBefore": {
+        "x": 0.2886666666666667,
+        "y": 0.2861111111111111
+      },
+      "pinAfter": {
+        "x": 0.2890277778,
+        "y": 0.2865555556
+      }
+    },
+    {
+      "id": "9f72232bcfb694678589f927",
+      "name": "Harry Potter",
+      "place": "Little Whinging, Surrey",
+      "accentBefore": null,
+      "accentAfter": "modern-rp-english",
+      "pinBefore": null,
+      "pinAfter": {
+        "x": 0.4988333333,
+        "y": 0.2148888889
+      }
+    },
+    {
+      "id": "4e46af4467a8deccf3f100e0",
+      "name": "Hermione Granger",
+      "place": "London, England",
+      "accentBefore": null,
+      "accentAfter": "modern-rp-english",
+      "pinBefore": null,
+      "pinAfter": {
+        "x": 0.4996388889,
+        "y": 0.2138333333
+      }
+    },
+    {
+      "id": "ecbcfd94cf0edc45b5686e97",
+      "name": "Homer",
+      "place": "Smyrna (İzmir)",
+      "accentBefore": "greek-influenced-english",
+      "accentAfter": "greek-influenced-english",
+      "pinBefore": {
+        "x": 0.5659166666666666,
+        "y": 0.28900000000000003
+      },
+      "pinAfter": {
+        "x": 0.5753888889,
+        "y": 0.2865555556
+      }
+    },
+    {
+      "id": "02d1e88fd30a128144b17cbf",
+      "name": "Isaac Newton",
+      "place": "Woolsthorpe, Lincolnshire",
+      "accentBefore": "modern-rp-english",
+      "accentAfter": "british-english",
+      "pinBefore": {
+        "x": 0.5003333333333333,
+        "y": 0.20994444444444443
+      },
+      "pinAfter": {
+        "x": 0.4982777778,
+        "y": 0.2066111111
+      }
+    },
+    {
+      "id": "72ea193ff225b50b848f23c2",
+      "name": "James Madison",
+      "place": "Port Conway, Virginia",
+      "accentBefore": "southern-us-english",
+      "accentAfter": "american-english",
+      "pinBefore": {
+        "x": 0.2828888888888889,
+        "y": 0.2876666666666667
+      },
+      "pinAfter": {
+        "x": 0.2859444444,
+        "y": 0.2879444444
+      }
+    },
+    {
+      "id": "dfe0ab62c8831588570e9a8c",
+      "name": "Jane Austen",
+      "place": "Steventon, Hampshire",
+      "accentBefore": "modern-rp-english",
+      "accentAfter": "modern-rp-english",
+      "pinBefore": {
+        "x": 0.4961111111111111,
+        "y": 0.21666666666666667
+      },
+      "pinAfter": {
+        "x": 0.4965277778,
+        "y": 0.2153888889
+      }
+    },
+    {
+      "id": "346e9ae02a20acb49668bcf4",
+      "name": "Jesus Christ",
+      "place": "Nazareth",
+      "accentBefore": null,
+      "accentAfter": "middle-eastern-arabic-influenced-english",
+      "pinBefore": null,
+      "pinAfter": {
+        "x": 0.5980555556,
+        "y": 0.3183333333
+      }
+    },
+    {
+      "id": "af884ca36603660205e2de50",
+      "name": "John Adams",
+      "place": "Braintree, Massachusetts",
+      "accentBefore": "eastern-new-england-english",
+      "accentAfter": "eastern-new-england-english",
+      "pinBefore": {
+        "x": 0.30277777777777776,
+        "y": 0.2655
+      },
+      "pinAfter": {
+        "x": 0.3027777778,
+        "y": 0.2652222222
+      }
+    },
+    {
+      "id": "9c157c63b96ce829aee0751c",
+      "name": "Jordan Peterson",
+      "place": "Edmonton, Alberta",
+      "accentBefore": "canadian-english",
+      "accentAfter": "canadian-english",
+      "pinBefore": {
+        "x": 0.2897222222222222,
+        "y": 0.24766666666666665
+      },
+      "pinAfter": {
+        "x": 0.18475,
+        "y": 0.2025
+      }
+    },
+    {
+      "id": "8eb601bf97bdfb5db929155f",
+      "name": "Joseph Campbell",
+      "place": "White Plains, New York",
+      "accentBefore": "new-york-english",
+      "accentAfter": "new-york-english",
+      "pinBefore": {
+        "x": 0.29441666666666666,
+        "y": 0.2738333333333333
+      },
+      "pinAfter": {
+        "x": 0.2951111111,
+        "y": 0.2720555556
+      }
+    },
+    {
+      "id": "2e28b0fcf3d5c2bf3b93c70b",
+      "name": "Joseph Smith Jr.",
+      "place": "Sharon, Vermont",
+      "accentBefore": "american-english",
+      "accentAfter": "eastern-new-england-english",
+      "pinBefore": {
+        "x": 0.28547222222222224,
+        "y": 0.2607777777777778
+      },
+      "pinAfter": {
+        "x": 0.2988333333,
+        "y": 0.2571666667
+      }
+    },
+    {
+      "id": "6b53fdaa66f5e5e62ef78fc1",
+      "name": "Joseph Stalin",
+      "place": "Gori, Georgia",
+      "accentBefore": null,
+      "accentAfter": "russian-influenced-english",
+      "pinBefore": null,
+      "pinAfter": {
+        "x": 0.6225277778,
+        "y": 0.2667777778
+      }
+    },
+    {
+      "id": "9d11efc03a2b537c5e92e14e",
+      "name": "Kris Jenner",
+      "place": "San Diego, California",
+      "accentBefore": "southern-california-english",
+      "accentAfter": "southern-california-english",
+      "pinBefore": {
+        "x": 0.17155555555555557,
+        "y": 0.31083333333333335
+      },
+      "pinAfter": {
+        "x": 0.1745555556,
+        "y": 0.3182222222
+      }
+    },
+    {
+      "id": "001ddb70f18b6a51c6a68164",
+      "name": "Leonardo da Vinci",
+      "place": "Vinci, Tuscany",
+      "accentBefore": null,
+      "accentAfter": "northern-italian-influenced-english",
+      "pinBefore": null,
+      "pinAfter": {
+        "x": 0.5303333333,
+        "y": 0.2567222222
+      }
+    },
+    {
+      "id": "5b4d2e662f7184f009a5e803",
+      "name": "Mahatma Gandhi",
+      "place": "Porbandar, Gujarat",
+      "accentBefore": null,
+      "accentAfter": "indian-english",
+      "pinBefore": null,
+      "pinAfter": {
+        "x": 0.6933611111,
+        "y": 0.3797777778
+      }
+    },
+    {
+      "id": "ec2ffe343bdb8f71e2e69d9a",
+      "name": "Marcus Aurelius",
+      "place": "Rome, Italy",
+      "accentBefore": "southern-italian-influenced-english",
+      "accentAfter": "italian-influenced-english",
+      "pinBefore": {
+        "x": 0.5347222222222222,
+        "y": 0.26722222222222225
+      },
+      "pinAfter": {
+        "x": 0.5347222222,
+        "y": 0.2672222222
+      }
+    },
+    {
+      "id": "2b69e5c14d7e1fe66cd6e552",
+      "name": "Marie Antoinette",
+      "place": "Vienna, Austria",
+      "accentBefore": null,
+      "accentAfter": "french-influenced-english",
+      "pinBefore": null,
+      "pinAfter": {
+        "x": 0.5454722222,
+        "y": 0.2321666667
+      }
+    },
+    {
+      "id": "ff3f10d47b4d49468a4d3b96",
+      "name": "Marie Curie",
+      "place": "Warsaw, Poland",
+      "accentBefore": "polish-influenced-english",
+      "accentAfter": "polish-influenced-english",
+      "pinBefore": {
+        "x": 0.5583611111111111,
+        "y": 0.20983333333333334
+      },
+      "pinAfter": {
+        "x": 0.5583611111,
+        "y": 0.2098333333
+      }
+    },
+    {
+      "id": "0507860bff3232935870038d",
+      "name": "Martin Luther King Jr.",
+      "place": "Atlanta, Georgia",
+      "accentBefore": "southern-us-english",
+      "accentAfter": "southern-us-english",
+      "pinBefore": {
+        "x": 0.26558333333333334,
+        "y": 0.3125
+      },
+      "pinAfter": {
+        "x": 0.2655833333,
+        "y": 0.3125
+      }
+    },
+    {
+      "id": "480fc95f379833ef0c8ec344",
+      "name": "Mary Shelley",
+      "place": "Somers Town, London",
+      "accentBefore": null,
+      "accentAfter": "modern-rp-english",
+      "pinBefore": null,
+      "pinAfter": {
+        "x": 0.4996388889,
+        "y": 0.2138333333
+      }
+    },
+    {
+      "id": "4687afb1e5f4558e8e8d471b",
+      "name": "Maximilien Robespierre",
+      "place": "Arras, France",
+      "accentBefore": null,
+      "accentAfter": "parisian-french-influenced-english",
+      "pinBefore": null,
+      "pinAfter": {
+        "x": 0.5077222222,
+        "y": 0.2206111111
+      }
+    },
+    {
+      "id": "05d25216a007518cb1484667",
+      "name": "Mr. Rogers",
+      "place": "Latrobe, Pennsylvania",
+      "accentBefore": "american-english",
+      "accentAfter": "american-english",
+      "pinBefore": {
+        "x": 0.2778055555555556,
+        "y": 0.2753333333333333
+      },
+      "pinAfter": {
+        "x": 0.2795,
+        "y": 0.276
+      }
+    },
+    {
+      "id": "737dd5de6e5a2948200cb027",
+      "name": "Nelson Mandela",
+      "place": "Mvezo, Eastern Cape",
+      "accentBefore": "south-african-english",
+      "accentAfter": "south-african-english",
+      "pinBefore": {
+        "x": 0.5779166666666667,
+        "y": 0.6455555555555555
+      },
+      "pinAfter": {
+        "x": 0.5791388889,
+        "y": 0.6775555556
+      }
+    },
+    {
+      "id": "b3b8631e801b63608a1b5311",
+      "name": "Nikola Tesla",
+      "place": "Smiljan, Croatia (Serbian)",
+      "accentBefore": "russian-influenced-english",
+      "accentAfter": "russian-influenced-english",
+      "pinBefore": {
+        "x": 0.6045,
+        "y": 0.19027777777777777
+      },
+      "pinAfter": {
+        "x": 0.5425277778,
+        "y": 0.2523888889
+      }
+    },
+    {
+      "id": "cec5e50d1fea9f107cb335eb",
+      "name": "Plato",
+      "place": "Athens, Greece",
+      "accentBefore": null,
+      "accentAfter": "greek-influenced-english",
+      "pinBefore": null,
+      "pinAfter": {
+        "x": 0.5659166667,
+        "y": 0.289
+      }
+    },
+    {
+      "id": "295797ff140dcf2751eda3da",
+      "name": "Professor McGonagall",
+      "place": "Caithness, Scotland",
+      "accentBefore": "scottish-english",
+      "accentAfter": "scottish-english",
+      "pinBefore": {
+        "x": 0.4911388888888889,
+        "y": 0.18916666666666665
+      },
+      "pinAfter": {
+        "x": 0.4904166667,
+        "y": 0.1753333333
+      }
+    },
+    {
+      "id": "f66c361a509355f3f0c8bf5e",
+      "name": "Ron Weasley",
+      "place": "Ottery St Mary, Devon",
+      "accentBefore": null,
+      "accentAfter": "estuary-english",
+      "pinBefore": null,
+      "pinAfter": {
+        "x": 0.4908888889,
+        "y": 0.2180555556
+      }
+    },
+    {
+      "id": "3b673dbf3f8c9ec1cedfdf9b",
+      "name": "Salvador Dalí",
+      "place": "Figueres, Catalonia",
+      "accentBefore": null,
+      "accentAfter": "spanish-influenced-english",
+      "pinBefore": null,
+      "pinAfter": {
+        "x": 0.5082222222,
+        "y": 0.2651666667
+      }
+    },
+    {
+      "id": "ffbd076d099a34c78a2ecbca",
+      "name": "Sigmund Freud",
+      "place": "Vienna, Austria",
+      "accentBefore": "bavarian-german-influenced-english",
+      "accentAfter": "bavarian-german-influenced-english",
+      "pinBefore": {
+        "x": 0.5454722222222222,
+        "y": 0.23216666666666666
+      },
+      "pinAfter": {
+        "x": 0.5454722222,
+        "y": 0.2321666667
+      }
+    },
+    {
+      "id": "05ba673cff06388467ad0ddf",
+      "name": "Socrates",
+      "place": "Athens, Greece",
+      "accentBefore": null,
+      "accentAfter": "greek-influenced-english",
+      "pinBefore": null,
+      "pinAfter": {
+        "x": 0.5659166667,
+        "y": 0.289
+      }
+    },
+    {
+      "id": "2af9a5e7684a95791f334d51",
+      "name": "Sun Tzu",
+      "place": "Linzi, Qi (Shandong)",
+      "accentBefore": null,
+      "accentAfter": "mandarin-influenced-english",
+      "pinBefore": null,
+      "pinAfter": {
+        "x": 0.8285555556,
+        "y": 0.2953888889
+      }
+    },
+    {
+      "id": "ed9daf6a4067fc88bd89063a",
+      "name": "The Buddha",
+      "place": "Lumbini, Nepal",
+      "accentBefore": "indian-english",
+      "accentAfter": "indian-english",
+      "pinBefore": {
+        "x": 0.7144444444444444,
+        "y": 0.3411111111111111
+      },
+      "pinAfter": {
+        "x": 0.7313333333,
+        "y": 0.3473888889
+      }
+    },
+    {
+      "id": "1d67a141fa03499b1be3d19b",
+      "name": "Thomas Hobbes",
+      "place": "Malmesbury, Wiltshire",
+      "accentBefore": "modern-rp-english",
+      "accentAfter": "british-english",
+      "pinBefore": {
+        "x": 0.49650000000000005,
+        "y": 0.2125
+      },
+      "pinAfter": {
+        "x": 0.4941666667,
+        "y": 0.2134444444
+      }
+    },
+    {
+      "id": "bf0eb470960b320a08bd61ae",
+      "name": "Thomas Jefferson",
+      "place": "Shadwell, Virginia",
+      "accentBefore": "southern-us-english",
+      "accentAfter": "american-english",
+      "pinBefore": {
+        "x": 0.282,
+        "y": 0.2887222222222222
+      },
+      "pinAfter": {
+        "x": 0.2820555556,
+        "y": 0.2888333333
+      }
+    },
+    {
+      "id": "28426134bed74c045f05a9fd",
+      "name": "Vincent van Gogh",
+      "place": "Zundert, Netherlands",
+      "accentBefore": null,
+      "accentAfter": "dutch-influenced-english",
+      "pinBefore": null,
+      "pinAfter": {
+        "x": 0.5129444444,
+        "y": 0.2140555556
+      }
+    },
+    {
+      "id": "6b04d246dca60b755361f4ee",
+      "name": "William Shakespeare",
+      "place": "Stratford-upon-Avon",
+      "accentBefore": "british-english",
+      "accentAfter": "british-english",
+      "pinBefore": {
+        "x": 0.49524999999999997,
+        "y": 0.21005555555555558
+      },
+      "pinAfter": {
+        "x": 0.49525,
+        "y": 0.2100555556
+      }
+    }
+  ]
+}

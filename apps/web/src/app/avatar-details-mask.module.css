@@ -1,13 +1,11 @@
 .layer {
   --avatar-details-phosphor-glow-color: var(
-    --crt-face-edge-color,
-    currentColor
+    --zen-live-bot-shared-phosphor-glow-color,
+    var(--crt-face-edge-color, currentColor)
   );
   position: absolute;
   inset: 0;
-  /* Keep every ink emission canvas in the CRT root stacking context. A
-     positioned wrapper would flatten them before screen-blending with the
-     face, making connected ink look pasted on as a separate layer. */
+  /* Audience/static ink stays a single full-screen raster. */
   display: block;
   width: 100%;
   height: 100%;
@@ -15,9 +13,125 @@
   image-rendering: pixelated;
   image-rendering: crisp-edges;
   transform:
-    scaleX(var(--avatar-details-scale-x, 1))
-    scaleX(var(--avatar-details-facing-scale-x, 1));
+    /* Authored Ink is immutable screen space. Runtime may only mirror it. */
+    scaleX(var(--avatar-details-facing-scale-x, 1))
+    translateX(calc(var(--avatar-details-speech-origin-x, 50%) - 50%))
+    translateY(calc(var(--avatar-details-speech-origin-y, 50%) - 50%))
+    rotate(
+      calc(
+        var(--avatar-details-speech-rotation, 0deg) +
+          var(--avatar-details-speech-spin-angle, 0turn)
+      )
+    )
+    scaleX(var(--avatar-details-speech-scale-x, 1))
+    scaleY(var(--avatar-details-speech-scale-y, 1))
+    translateY(calc(50% - var(--avatar-details-speech-origin-y, 50%)))
+    translateX(calc(50% - var(--avatar-details-speech-origin-x, 50%)));
   transform-origin: center;
+}
+
+.motionPlane {
+  --avatar-details-phosphor-glow-color: var(
+    --zen-live-bot-shared-phosphor-glow-color,
+    var(--crt-face-edge-color, currentColor)
+  );
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  transform:
+    /* One full-screen wrapper moves the retained glow and core together. The
+       children may crop tightly without changing mirror or Speech origins. */
+    scaleX(var(--avatar-details-facing-scale-x, 1))
+    translateX(calc(var(--avatar-details-speech-origin-x, 50%) - 50%))
+    translateY(calc(var(--avatar-details-speech-origin-y, 50%) - 50%))
+    rotate(
+      calc(
+        var(--avatar-details-speech-rotation, 0deg) +
+          var(--avatar-details-speech-spin-angle, 0turn)
+      )
+    )
+    scaleX(var(--avatar-details-speech-scale-x, 1))
+    scaleY(var(--avatar-details-speech-scale-y, 1))
+    translateY(calc(50% - var(--avatar-details-speech-origin-y, 50%)))
+    translateX(calc(50% - var(--avatar-details-speech-origin-x, 50%)));
+  transform-origin: center;
+}
+
+.raster {
+  position: absolute;
+  display: block;
+  pointer-events: none;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+}
+
+.emissionPlane {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.croppedRaster {
+  right: auto;
+  bottom: auto;
+}
+
+.layer[data-avatar-details-render-detail="reduced"],
+.motionPlane[data-avatar-details-render-detail="reduced"] {
+  animation: none !important;
+}
+
+.layer[data-avatar-details-render-detail="audience"] {
+  animation: none !important;
+  filter: none;
+  mix-blend-mode: normal;
+}
+
+.speechMotion {
+  /* Match the live mouth's frame-by-frame CRT cadence. The wrapper still owns
+     the complete Speech-ink pivot, but it never interpolates between poses. */
+  transition: none;
+  will-change: transform, opacity;
+}
+
+.speechMotion[data-avatar-details-ink-motion="pulsate"] {
+  --avatar-details-speech-scale-x: var(--bot-face-mouth-pulse-scale-x, 1);
+  --avatar-details-speech-scale-y: var(--bot-face-mouth-pulse-scale-y, 1);
+}
+
+.speechMotion[data-avatar-details-ink-role="speech"][data-avatar-details-ink-motion="flicker"] {
+  /* Flicker belongs to the temporary Speech-ink plane only. The live eyes and
+     mouth are sibling layers in the shared face rig, so a fully transparent
+     beat reveals their current viseme instead of dimming or freezing them. */
+  animation: avatarDetailsSpeechInkFlicker 520ms steps(1, end) infinite;
+}
+
+@keyframes avatarDetailsSpeechInkFlicker {
+  0%,
+  30%,
+  44%,
+  70%,
+  89%,
+  100% {
+    opacity: 1;
+  }
+
+  31%,
+  43%,
+  71%,
+  88% {
+    opacity: 0;
+  }
+}
+
+.speechMotion[data-avatar-details-ink-motion="wobble"] {
+  --avatar-details-speech-rotation: var(--bot-face-mouth-speech-wobble, 0deg);
 }
 
 .behindFace {
@@ -28,79 +142,134 @@
   z-index: 7;
 }
 
-.halo {
-  opacity: 1;
+.lightPlane {
+  /* Light is shared by every white phosphor core. Keep it below authored
+     behind-face Ink, the live face, and above-face Ink so intersecting marks
+     cannot expose a colored contour inside one continuous white stroke. */
+  z-index: 4;
+}
+
+.glowPlane {
+  /* The exterior contour is retained as one static filtered surface. Runtime
+     CRT flicker changes only opacity, so WebKit can reuse the filtered result
+     instead of recomputing brightness/contrast and two separate glow planes. */
+  --avatar-details-glow-opacity: 1;
+  opacity: calc(
+    var(--avatar-details-glow-opacity) *
+      var(--zen-live-bot-crt-shared-flicker-opacity, 1)
+  );
   mix-blend-mode: screen;
-  filter: blur(1.35px) saturate(1.28)
+}
+
+.glow {
+  /* Use the same six-stop physical beam as the live face glyph. The raster is
+     already only the exterior contour, so this can restore the full glass
+     wash without thickening the authored Ink silhouette. */
+  filter: brightness(
+      calc(
+        var(--zen-live-bot-crt-flicker-base-brightness, 1.07) *
+          var(--zen-live-bot-crt-shared-flicker-brightness-scale, 1)
+      )
+    )
+    contrast(
+      calc(
+        var(--zen-live-bot-crt-flicker-base-contrast, 1.02) *
+          var(--zen-live-bot-crt-shared-flicker-contrast-scale, 1)
+      )
+    )
+    blur(
+      var(--bot-phosphor-beam-softness, 0.45px)
+    )
+    saturate(1.08)
+    var(
+      --zen-live-bot-shared-phosphor-glow-filter,
+      drop-shadow(
+          0 0 var(--bot-phosphor-halo-contact-radius, 0.72px)
+            var(--avatar-details-phosphor-glow-color)
+        )
+        drop-shadow(
+          0 0 var(--bot-phosphor-halo-tight-radius, 1.5px)
+            var(--avatar-details-phosphor-glow-color)
+        )
+        drop-shadow(
+          0 0 var(--bot-phosphor-halo-near-radius, 3px)
+            color-mix(
+              in srgb,
+              var(--avatar-details-phosphor-glow-color) 82%,
+              transparent
+            )
+        )
+        drop-shadow(
+          0 0 var(--bot-phosphor-halo-mid-radius, 6px)
+            color-mix(
+              in srgb,
+              var(--avatar-details-phosphor-glow-color) 58%,
+              transparent
+            )
+        )
+        drop-shadow(
+          0 0 var(--bot-phosphor-halo-far-radius, 12px)
+            color-mix(
+              in srgb,
+              var(--avatar-details-phosphor-glow-color) 36%,
+              transparent
+            )
+        )
+        drop-shadow(
+          0 0 var(--bot-phosphor-halo-ambient-radius, 21px)
+            color-mix(
+              in srgb,
+              var(--avatar-details-phosphor-glow-color) 22%,
+              transparent
+            )
+        )
+    );
+}
+
+.glowPlane[data-avatar-details-render-detail="reduced"] {
+  --avatar-details-glow-opacity: 0.28;
+}
+
+.glowPlane[data-avatar-details-render-detail="reduced"] .glow {
+  filter: blur(0.16px)
     drop-shadow(
-      0 0 6px
+      0 0 0.45px
         color-mix(
           in srgb,
-          var(--avatar-details-phosphor-glow-color) 58%,
+          var(--avatar-details-phosphor-glow-color) 54%,
           transparent
         )
     )
     drop-shadow(
-      0 0 12px
+      0 0 1.2px
         color-mix(
           in srgb,
-          var(--avatar-details-phosphor-glow-color) 36%,
-          transparent
-        )
-    )
-    drop-shadow(
-      0 0 21px
-        color-mix(
-          in srgb,
-          var(--avatar-details-phosphor-glow-color) 22%,
+          var(--avatar-details-phosphor-glow-color) 18%,
           transparent
         )
     );
 }
 
-.bloom {
-  opacity: 1;
-  mix-blend-mode: screen;
-  filter: blur(0.32px) saturate(1.18)
-    drop-shadow(0 0 0.72px var(--avatar-details-phosphor-glow-color))
-    drop-shadow(0 0 1.5px var(--avatar-details-phosphor-glow-color))
-    drop-shadow(
-      0 0 3px
-        color-mix(
-          in srgb,
-          var(--avatar-details-phosphor-glow-color) 82%,
-          transparent
-        )
-    )
-    drop-shadow(
-      0 0 6px
-        color-mix(
-          in srgb,
-          var(--avatar-details-phosphor-glow-color) 58%,
-          transparent
-        )
-    )
-    drop-shadow(
-      0 0 12px
-        color-mix(
-          in srgb,
-          var(--avatar-details-phosphor-glow-color) 36%,
-          transparent
-        )
-    )
-    drop-shadow(
-      0 0 21px
-        color-mix(
-          in srgb,
-          var(--avatar-details-phosphor-glow-color) 22%,
-          transparent
-        )
-    );
+.corePlane {
+  opacity: var(--zen-live-bot-crt-shared-flicker-opacity, 1);
+  /* The solid phosphor core is coverage, not additive light. Normal blending
+     makes coincident face and Ink pixels read as one stroke; the retained
+     glow remains screen-blended around that shared silhouette. */
+  mix-blend-mode: normal;
 }
 
 .core {
-  opacity: 1;
-  mix-blend-mode: screen;
-  filter: brightness(1.07) contrast(1.02)
-    drop-shadow(0 0 0.45px rgba(255, 255, 255, 0.82));
+  /* Ink and text/SVG features already share the same coverage-aware 256-cell
+     silhouette. Keep the solid core neutral and crisp, then let the shared
+     glow plane supply the physical beam. Blurring this core a second time
+     was the final source of resource-to-resource edge drift. */
+  filter: none;
+}
+
+.layer[data-avatar-details-pixel-perfect="true"],
+.motionPlane[data-avatar-details-pixel-perfect="true"],
+.motionPlane[data-avatar-details-pixel-perfect="true"] .emissionPlane,
+.motionPlane[data-avatar-details-pixel-perfect="true"] .raster {
+  filter: none;
+  mix-blend-mode: normal;
 }

@@ -2,14 +2,91 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
 import {
+  GROUP_ROOM_WALLPAPER_IMAGE_PURPOSE,
+  HUB_ATMOSPHERE_IMAGE_PURPOSE,
+} from "@localai/shared";
+import {
   botBelongsToUser,
   conversationHasAssistantWithBotId,
   imageContextIncludesOfflineOnlyBot,
   resolveConversationForSandboxImageGenerate,
+  resolveImageGenerateModelPreferences,
   resolveImageGeneratePersistence,
   resolveSandboxImageBotAttribution,
   resolveStandaloneBotImageForGenerate,
 } from "../image-generate-resolve.ts";
+
+describe("resolveImageGenerateModelPreferences", () => {
+  const source = {
+    preferredLocalImageModel: "local-general",
+    preferredOpenAiImageModel: "gpt-image-1",
+    preferredZenWallpaperLocalImageModel: "local-zen",
+    preferredZenWallpaperOpenAiImageModel: "gpt-image-1-mini",
+    preferredHomeAtmosphereImageModel: "",
+    preferredHomeAtmosphereImageProvider: "",
+  };
+
+  it("keeps group-room generation on the Zen wallpaper model lane", () => {
+    assert.deepEqual(
+      resolveImageGenerateModelPreferences(
+        GROUP_ROOM_WALLPAPER_IMAGE_PURPOSE,
+        source,
+      ),
+      {
+        preferredLocalImageModel: "local-zen",
+        preferredOpenAiImageModel: "gpt-image-1-mini",
+      },
+    );
+  });
+
+  it("uses the Home atmosphere lane when provider and model are set", () => {
+    assert.deepEqual(
+      resolveImageGenerateModelPreferences(HUB_ATMOSPHERE_IMAGE_PURPOSE, {
+        ...source,
+        preferredHomeAtmosphereImageModel: "home-local",
+        preferredHomeAtmosphereImageProvider: "local",
+      }),
+      {
+        preferredLocalImageModel: "home-local",
+        preferredOpenAiImageModel: "gpt-image-1",
+      },
+    );
+    assert.deepEqual(
+      resolveImageGenerateModelPreferences(HUB_ATMOSPHERE_IMAGE_PURPOSE, {
+        ...source,
+        preferredHomeAtmosphereImageModel: "gpt-image-1-mini",
+        preferredHomeAtmosphereImageProvider: "openai",
+      }),
+      {
+        preferredLocalImageModel: "local-general",
+        preferredOpenAiImageModel: "gpt-image-1-mini",
+      },
+    );
+  });
+
+  it("falls Home atmosphere back to the account image lane when unset", () => {
+    assert.deepEqual(
+      resolveImageGenerateModelPreferences(HUB_ATMOSPHERE_IMAGE_PURPOSE, {
+        ...source,
+        preferredZenWallpaperLocalImageModel: "disabled",
+        preferredZenWallpaperOpenAiImageModel: "disabled",
+      }),
+      {
+        preferredLocalImageModel: "local-general",
+        preferredOpenAiImageModel: "gpt-image-1",
+      },
+    );
+    assert.equal(
+      resolveImageGenerateModelPreferences(HUB_ATMOSPHERE_IMAGE_PURPOSE, {
+        ...source,
+        preferredHomeAtmosphereImageModel: "home-only-model",
+        preferredHomeAtmosphereImageProvider: "",
+        preferredOpenAiImageModel: "disabled",
+      }).preferredOpenAiImageModel,
+      "disabled",
+    );
+  });
+});
 
 function makeConversationDb(): DatabaseSync {
   const db = new DatabaseSync(":memory:");
@@ -392,11 +469,15 @@ describe("helpers", () => {
   it("conversationHasAssistantWithBotId detects assistant rows", () => {
     const db = makeDb();
     assert.equal(
-      conversationHasAssistantWithBotId(db, "conv1", "bot-b"),
+      conversationHasAssistantWithBotId(db, "u1", "conv1", "bot-b"),
       true
     );
     assert.equal(
-      conversationHasAssistantWithBotId(db, "conv1", "bot-a"),
+      conversationHasAssistantWithBotId(db, "u1", "conv1", "bot-a"),
+      false
+    );
+    assert.equal(
+      conversationHasAssistantWithBotId(db, "other", "conv1", "bot-b"),
       false
     );
   });

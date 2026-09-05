@@ -81,6 +81,19 @@ describe("bot semantic facets", () => {
     ]);
   });
 
+  it("does not turn a raw role label into a canned starter seed", () => {
+    const facets = deriveDeterministicBotSemanticFacets({
+      name: "Interjecting Tom",
+      systemPrompt: "You are an interjecting conversational corrector.",
+    });
+
+    assert.ok(
+      facets.starterSeeds.every(
+        (seed) => !/^A harder question about\b/iu.test(seed),
+      ),
+    );
+  });
+
   it("merges LLM facets with deterministic fallback facets", async () => {
     const provider: Pick<LlmProvider, "generateResponse"> = {
       async generateResponse(): Promise<string> {

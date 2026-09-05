@@ -22,6 +22,12 @@ final class SessionStoreTests: XCTestCase {
 
         try store.save(session)
         XCTAssertEqual(store.loadSession(), session)
+        let metadata = try String(
+            contentsOf: directory.appendingPathComponent("paired-server.json"),
+            encoding: .utf8
+        )
+        XCTAssertFalse(metadata.contains("session-token"))
+        XCTAssertFalse(metadata.contains("client-access-token"))
 
         try store.clearSession()
         XCTAssertNil(store.loadSession())
@@ -45,5 +51,21 @@ final class SessionStoreTests: XCTestCase {
         )
 
         XCTAssertEqual(server.webAppURL?.absoluteString, "http://127.0.0.1:3000/")
+    }
+
+    func testBuildsHttpOnlyWebKitCookiesForBothNativeCredentials() throws {
+        let origin = try XCTUnwrap(URL(string: "https://prism.local:18788/"))
+        for name in ["localai_session", "prism_client_access"] {
+            let cookie = try XCTUnwrap(prismClientCookie(
+                name: name,
+                value: "account-bound-secret",
+                originURL: origin,
+                expiresAt: Date(timeIntervalSince1970: 1_967_225_900)
+            ))
+            XCTAssertTrue(cookie.isHTTPOnly)
+            XCTAssertTrue(cookie.isSecure)
+            XCTAssertEqual(cookie.name, name)
+            XCTAssertEqual(cookie.sameSitePolicy, .sameSiteLax)
+        }
     }
 }

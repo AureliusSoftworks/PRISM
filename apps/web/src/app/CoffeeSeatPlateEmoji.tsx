@@ -10,20 +10,31 @@ import {
 } from "react";
 import {
   BOT_FACE_BLINK_BAR_VALUES,
+  botFaceCustomSpeechGlyphForMouthShape,
   DEFAULT_BOT_FACE_BLINK_BAR,
+  DEFAULT_BOT_FACE_EYE_SPACING,
+  DEFAULT_BOT_FACE_GLYPH_ANIMATION,
   DEFAULT_BOT_FACE_THINKING_FRAMES,
   botFaceThinkingSpinnerDisabled,
   botFaceThinkingFramesEqual,
   normalizeBotFaceBlinkBar,
   normalizeBotFaceBlinkOffsetX,
   normalizeBotFaceBlinkOffsetY,
+  normalizeBotFaceBlinkRotationDeg,
   normalizeBotFaceBlinkScale,
   normalizeBotFaceEyeCharacter,
   normalizeBotFaceEyeCount,
+  normalizeBotFaceEyeSpacing,
+  normalizeBotFaceEyeMovement,
+  botFaceEyeMovementIsActive,
   normalizeBotFaceEyeOffsetX,
   normalizeBotFaceEyeOffsetY,
   normalizeBotFaceEyeRotationDeg,
   normalizeBotFaceEyeScale,
+  normalizeBotFaceFontWeight,
+  normalizeBotFaceThinkingOffsetX,
+  normalizeBotFaceThinkingOffsetY,
+  normalizeBotFaceThinkingScale,
   normalizeBotFaceGlyphAnimation,
   normalizeBotFaceMouthCharacter,
   normalizeBotFaceMouthOffsetX,
@@ -33,23 +44,44 @@ import {
   normalizeBotFaceThinkingFrames,
   type BotFaceBlinkBar,
   type BotFaceEyeCount,
+  type BotFaceEyeMovement,
   type BotFaceFontId,
   type BotFaceGlyphAnimation,
+  type BotFaceCustomSpeechPoses,
   type BotFaceThinkingFrames,
   type BotVoicePreset,
 } from "@localai/shared";
 import {
   applyCoffeeSeatBlink,
+  coffeeSeatBlinkKeepsFaceStill,
   type CoffeeSeatBlinkPhase,
 } from "./coffee-seat-plate-blink.ts";
 import {
-  ZEN_LIVE_MOUTH_PHASE_MS,
+  ZEN_LIVE_CUSTOM_MOUTH_SPIN_TURN_MS,
   type ZenLiveBotMouthShape,
 } from "./zenLiveMouth.ts";
 import { coffeeSeatGlyphOpticalOffset } from "./coffee-seat-glyph-optical-offset.ts";
+import {
+  coffeeSeatMouthRotationCssDeg,
+  coffeeSeatScreenRelativeFeatureRotationDeg,
+} from "./coffee-seat-plate.ts";
+import {
+  botFaceEyeMovementLiveIntervalMs,
+  resolveBotFaceGazeFrame,
+  type BotFaceAttentionState,
+  type BotFaceGazeDirection,
+  type BotFaceGazeFrame,
+} from "./botFaceEyeMovement.ts";
+import { coffeeSeatThinkingPresentationActive } from "./coffee-seat-thinking-presentation.ts";
+import { coffeeSeatRenderedMouthGlyph } from "./coffee-seat-rendered-mouth.ts";
+import { CrtPixelTextGlyph } from "./PhosphorPixelGlyph";
 
 function randomBetween(lo: number, hi: number): number {
   return lo + Math.random() * (hi - lo);
+}
+
+function coffeeSeatEyeTimelineNowMs(): number {
+  return performance.now();
 }
 
 function scheduleKeyDigest(key: string): number {
@@ -58,53 +90,6 @@ function scheduleKeyDigest(key: string): number {
     n += key.charCodeAt(i);
   }
   return n;
-}
-
-function normalizeFaceFontWeight(
-  weight: number | null | undefined,
-): number | undefined {
-  if (typeof weight !== "number" || !Number.isFinite(weight)) return undefined;
-  return Math.max(300, Math.min(800, weight));
-}
-
-function faceWeightStrokeForWeight(
-  weight: number | undefined,
-): string | undefined {
-  if (weight === undefined) return undefined;
-  const t = Math.max(0, Math.min(1, (weight - 300) / 500));
-  return `${(t * 0.032).toFixed(3)}em`;
-}
-
-function faceWeightGlowRadiusScaleForWeight(
-  weight: number | undefined,
-): string | undefined {
-  if (weight === undefined) return undefined;
-  if (weight <= 500) {
-    const t = Math.max(0, Math.min(1, (weight - 300) / 200));
-    return (0.56 + t * 0.44).toFixed(3);
-  }
-  const t = Math.max(0, Math.min(1, (weight - 500) / 300));
-  return (1 + t * 0.36).toFixed(3);
-}
-
-function faceWeightGlowStrengthScaleForWeight(
-  weight: number | undefined,
-): string | undefined {
-  if (weight === undefined) return undefined;
-  if (weight <= 500) {
-    const t = Math.max(0, Math.min(1, (weight - 300) / 200));
-    return (0.36 + t * 0.64).toFixed(3);
-  }
-  const t = Math.max(0, Math.min(1, (weight - 500) / 300));
-  return (1 + t * 0.34).toFixed(3);
-}
-
-function faceWeightGlowStrokeForWeight(
-  weight: number | undefined,
-): string | undefined {
-  if (weight === undefined) return undefined;
-  const t = Math.max(0, Math.min(1, (weight - 300) / 500));
-  return `${(0.004 + t * 0.026).toFixed(3)}em`;
 }
 
 function rotatedFaceOffset(
@@ -128,14 +113,6 @@ function rotatedFaceOffset(
       ),
     ),
   };
-}
-
-function screenRelativeFacePartRotationDeg(
-  valueDeg: number,
-  rotateDeg: number,
-): number {
-  const wrapped = ((((valueDeg - rotateDeg + 180) % 360) + 360) % 360) - 180;
-  return Object.is(wrapped, -0) ? 0 : Number(wrapped.toFixed(3));
 }
 
 function coffeeSeatEmojiPartForGlyph(args: {
@@ -166,7 +143,7 @@ function coffeeSeatFaceTextWithEyeCharacter(
   return `${eyeCharacter}${baseText.slice(baseEye.length)}`;
 }
 
-function updateCustomMouthSpinOrigin(
+function updateCustomMouthMotionOrigins(
   element: HTMLElement,
   glyph: string,
 ): void {
@@ -185,17 +162,53 @@ function updateCustomMouthSpinOrigin(
   const resolvedLineHeight = Number.isFinite(lineHeight)
     ? lineHeight
     : fontSize;
+  const paddingInlineStart =
+    Number.parseFloat(computed.paddingInlineStart) || 0;
+  const paddingInlineEnd = Number.parseFloat(computed.paddingInlineEnd) || 0;
+  const paddingBlockStart = Number.parseFloat(computed.paddingBlockStart) || 0;
+  const paddingBlockEnd = Number.parseFloat(computed.paddingBlockEnd) || 0;
   const fontAscent =
     metrics.fontBoundingBoxAscent || metrics.actualBoundingBoxAscent;
   const fontDescent =
     metrics.fontBoundingBoxDescent || metrics.actualBoundingBoxDescent;
+  const contentWidth = Math.max(
+    0,
+    element.clientWidth - paddingInlineStart - paddingInlineEnd,
+  );
+  const contentHeight = Math.max(
+    0,
+    element.clientHeight - paddingBlockStart - paddingBlockEnd,
+  );
+  const textStartX =
+    paddingInlineStart + Math.max(0, (contentWidth - metrics.width) / 2);
+  const lineBoxTop =
+    paddingBlockStart + Math.max(0, (contentHeight - resolvedLineHeight) / 2);
   const baselineY =
-    (resolvedLineHeight - fontAscent - fontDescent) / 2 + fontAscent;
+    lineBoxTop +
+    (resolvedLineHeight - fontAscent - fontDescent) / 2 +
+    fontAscent;
   const inkCenterX =
+    textStartX +
     (-metrics.actualBoundingBoxLeft + metrics.actualBoundingBoxRight) / 2;
   const inkCenterY =
     baselineY +
     (metrics.actualBoundingBoxDescent - metrics.actualBoundingBoxAscent) / 2;
+  element.style.setProperty(
+    "--bot-face-mouth-origin-x",
+    `${inkCenterX}px`,
+  );
+  element.style.setProperty(
+    "--bot-face-mouth-origin-y",
+    `${inkCenterY}px`,
+  );
+  element.style.setProperty(
+    "--bot-face-mouth-wobble-origin-x",
+    `${inkCenterX}px`,
+  );
+  element.style.setProperty(
+    "--bot-face-mouth-wobble-origin-y",
+    `${inkCenterY}px`,
+  );
   element.style.setProperty(
     "--bot-face-mouth-spin-origin-x",
     `${inkCenterX}px`,
@@ -209,11 +222,21 @@ function updateCustomMouthSpinOrigin(
 export type CoffeeSeatPlateEmojiProps = {
   /** When false, eyes stay open and timers are cleared (preview / not joined). */
   enabled: boolean;
-  /** While this seat is doing table typewriter speech, no blink timers run. */
+  /** Quantizes the rendered font silhouette to the full-avatar phosphor grid. */
+  pixelated?: boolean;
+  /** Uses binary cell alpha for a hard-edged authoring guide. */
+  hardPixels?: boolean;
+  /**
+   * Speech keeps aligned visemes with bounded autonomous eyes and ordinary
+   * blinking. Mini keeps stationary eyes with ordinary blinking; static is an
+   * explicit frozen face.
+   */
+  motionMode?: "full" | "mini-led" | "speech" | "static";
+  /** Active speaking state for speech-driven mouth sync and blink eligibility. */
   isTalking: boolean;
   /** Full streamed-text viseme used to animate authored custom mouth glyphs. */
   mouthShape?: ZenLiveBotMouthShape | null;
-  /** Allows editor/previews to keep eye blinks independent of mouth motion. */
+  /** Keeps eye blinks independent of speech mouth motion by default. */
   blinkWhileTalking?: boolean;
   /** Used only to de-sync blink timers between seats. */
   scheduleKey: string;
@@ -226,24 +249,40 @@ export type CoffeeSeatPlateEmojiProps = {
   voicePreset: BotVoicePreset;
   faceEyesFont?: BotFaceFontId | null;
   faceEyeCharacter?: string | null;
+  faceEyeMovement?: BotFaceEyeMovement | null;
+  eyeAttentionState?: BotFaceAttentionState;
+  eyeTargetDirection?: BotFaceGazeDirection;
+  eyeTimelineMs?: number | null;
+  eyeStateStartedAtMs?: number | null;
+  /** Temporary live override used by opted-in full-size cursor attention. */
+  eyeGazeOverride?: BotFaceGazeFrame | null;
   faceMouthFont?: BotFaceFontId | null;
   faceMouthCharacter?: string | null;
   faceMouthAnimation?: BotFaceGlyphAnimation | null;
+  /** Four semantic Custom Speech poses, resolved from the portable face data. */
+  faceMouthSpeechPoses?: BotFaceCustomSpeechPoses | null;
+  /** Studio-authored face weight, normalized at the shared renderer seam. */
   faceFontWeight?: number | null;
   faceEyeScale?: number | null;
   faceEyeOffsetX?: number | null;
   faceEyeOffsetY?: number | null;
   faceEyeRotationDeg?: number | null;
   faceEyeCount?: BotFaceEyeCount | number | null;
+  faceEyeSpacing?: number | null;
   faceMouthScale?: number | null;
   faceMouthOffsetX?: number | null;
   faceMouthOffsetY?: number | null;
   faceMouthRotationDeg?: number | null;
   faceBlinkBar?: BotFaceBlinkBar | null;
+  faceBlinkCount?: BotFaceEyeCount | number | null;
   faceBlinkScale?: number | null;
   faceBlinkOffsetX?: number | null;
   faceBlinkOffsetY?: number | null;
+  faceBlinkRotationDeg?: number | null;
   faceThinkingFrames?: BotFaceThinkingFrames | string[] | null;
+  faceThinkingScale?: number | null;
+  faceThinkingOffsetX?: number | null;
+  faceThinkingOffsetY?: number | null;
   forceBlinkPhase?: CoffeeSeatBlinkPhase | null;
   /** Reports the final displayed phase so adjacent persistent ink can follow it. */
   onBlinkPhaseChange?: (phase: CoffeeSeatBlinkPhase) => void;
@@ -257,33 +296,20 @@ type CoffeeSeatPlateBlinkState = {
 
 const COFFEE_SEAT_THINKING_SPINNER_FRAME_MS = 142;
 const COFFEE_SEAT_SIP_MOUTH_GLYPHS = new Set(["*", "⁎"]);
-const COFFEE_SEAT_TALKING_BLINK_GAP_MULTIPLIER = 1.35;
-const CUSTOM_MOUTH_SPIN_PHASES_PER_TURN = 4;
-const CUSTOM_MOUTH_SPIN_TURN_MS =
-  ZEN_LIVE_MOUTH_PHASE_MS * CUSTOM_MOUTH_SPIN_PHASES_PER_TURN;
-
 function coffeeSeatClosedBlinkHoldMs(): number {
   return randomBetween(112, 178);
 }
 
-function coffeeSeatBlinkGapMs(talking = false): number {
-  const gapMs = randomBetween(1500, 4000);
-  return talking
-    ? gapMs * COFFEE_SEAT_TALKING_BLINK_GAP_MULTIPLIER
-    : gapMs;
+function coffeeSeatBlinkGapMs(): number {
+  return randomBetween(1500, 4000);
 }
 
 function coffeeSeatExtraBlinkGapMs(): number {
   return randomBetween(118, 260);
 }
 
-function coffeeSeatExtraBlinkCount(talking = false): number {
+function coffeeSeatExtraBlinkCount(): number {
   const roll = Math.random();
-  if (talking) {
-    if (roll < 0.03) return 2;
-    if (roll < 0.14) return 1;
-    return 0;
-  }
   if (roll < 0.05) return 2;
   if (roll < 0.22) return 1;
   return 0;
@@ -295,9 +321,12 @@ function coffeeSeatExtraBlinkCount(talking = false): number {
  */
 export function CoffeeSeatPlateEmoji({
   enabled,
+  pixelated = false,
+  hardPixels = false,
+  motionMode = "full",
   isTalking,
   mouthShape,
-  blinkWhileTalking = false,
+  blinkWhileTalking = true,
   scheduleKey,
   showThinkingSpinner = false,
   showQuestionMark = false,
@@ -306,37 +335,63 @@ export function CoffeeSeatPlateEmoji({
   voicePreset,
   faceEyesFont,
   faceEyeCharacter,
+  faceEyeMovement,
+  eyeAttentionState = "idle",
+  eyeTargetDirection = 0,
+  eyeTimelineMs,
+  eyeStateStartedAtMs,
+  eyeGazeOverride,
   faceMouthFont,
   faceMouthCharacter,
   faceMouthAnimation,
+  faceMouthSpeechPoses,
   faceFontWeight,
   faceEyeScale,
   faceEyeOffsetX,
   faceEyeOffsetY,
   faceEyeRotationDeg,
   faceEyeCount,
+  faceEyeSpacing,
   faceMouthScale,
   faceMouthOffsetX,
   faceMouthOffsetY,
   faceMouthRotationDeg,
   faceBlinkBar,
+  faceBlinkCount,
   faceBlinkScale,
   faceBlinkOffsetX,
   faceBlinkOffsetY,
+  faceBlinkRotationDeg,
   faceThinkingFrames,
+  faceThinkingScale,
+  faceThinkingOffsetX,
+  faceThinkingOffsetY,
   forceBlinkPhase,
   onBlinkPhaseChange,
   className,
 }: CoffeeSeatPlateEmojiProps): JSX.Element {
+  const fullMotion = motionMode === "full";
+  const staticFace = motionMode === "static";
+  const mouthMotionEnabled = !staticFace;
+  const blinkEnabled = enabled && !staticFace;
+  const effectiveTalking = staticFace ? false : isTalking;
   const normalizedThinkingFrames =
     normalizeBotFaceThinkingFrames(faceThinkingFrames) ??
     DEFAULT_BOT_FACE_THINKING_FRAMES;
-  const thinkingSpinnerActive =
-    enabled &&
-    showThinkingSpinner &&
-    !isTalking &&
-    !botFaceThinkingSpinnerDisabled(normalizedThinkingFrames);
-  const questionGlyphActive = !thinkingSpinnerActive && showQuestionMark;
+  // Thinking is semantic screen content, not optional blink decoration. A
+  // compact or reduced-motion seat still replaces the normal face with the
+  // authored frame; only frame-to-frame animation is allowed to stop.
+  const thinkingSpinnerActive = coffeeSeatThinkingPresentationActive({
+    showThinkingSpinner,
+    isTalking: effectiveTalking,
+    thinkingSpinnerDisabled: botFaceThinkingSpinnerDisabled(
+      normalizedThinkingFrames,
+    ),
+  });
+  const thinkingSpinnerMotionActive =
+    thinkingSpinnerActive && fullMotion && blinkEnabled;
+  const questionGlyphActive =
+    fullMotion && !thinkingSpinnerActive && showQuestionMark;
   const faceMode = thinkingSpinnerActive
     ? "thinking"
     : questionGlyphActive
@@ -347,22 +402,38 @@ export function CoffeeSeatPlateEmoji({
   const normalizedFaceEyeCount = normalizedFaceEyeCharacter
     ? (normalizeBotFaceEyeCount(faceEyeCount) ?? 1)
     : 1;
+  const normalizedFaceEyeSpacing =
+    normalizeBotFaceEyeSpacing(faceEyeSpacing) ?? DEFAULT_BOT_FACE_EYE_SPACING;
   const normalizedFaceMouthCharacter =
     normalizeBotFaceMouthCharacter(faceMouthCharacter);
-  const normalizedFaceMouthAnimation =
-    normalizeBotFaceGlyphAnimation(faceMouthAnimation) ?? "none";
-  // Default means the authored glyph is the resting mouth while speech uses
-  // the same |/∙/@/o/0/O viseme sequence as every standard bot mouth. Alternate
-  // effects keep the custom glyph visible and reinterpret those speech beats.
+  const transientSipPucker =
+    normalizedFaceMouthCharacter !== null &&
+    COFFEE_SEAT_SIP_MOUTH_GLYPHS.has(normalizedFaceMouthCharacter) &&
+    !Array.from(baseText).some((glyph) =>
+      COFFEE_SEAT_SIP_MOUTH_GLYPHS.has(glyph),
+    );
+  const configuredFaceMouthAnimation =
+    normalizeBotFaceGlyphAnimation(faceMouthAnimation) ??
+    DEFAULT_BOT_FACE_GLYPH_ANIMATION;
+  const normalizedFaceMouthAnimation = mouthMotionEnabled
+    ? configuredFaceMouthAnimation
+    : DEFAULT_BOT_FACE_GLYPH_ANIMATION;
+  // Default mouths clear the authored glyph while talking so the streamed
+  // plate viseme can drive the mouth at both Full HD and Mini sizes.
+  // "static" keeps the authored custom glyph visible and unanimated while
+  // talking for a stable presentation.
+  const hasCustomMouth = normalizedFaceMouthCharacter !== null;
   const renderedFaceMouthCharacter =
-    isTalking && normalizedFaceMouthAnimation === "none"
+    mouthMotionEnabled &&
+    hasCustomMouth &&
+    effectiveTalking &&
+    normalizedFaceMouthAnimation === "none"
       ? null
       : normalizedFaceMouthCharacter;
   const normalizedFaceBlinkBar =
     normalizeBotFaceBlinkBar(faceBlinkBar) ?? DEFAULT_BOT_FACE_BLINK_BAR;
-  const customBlinkBarActive = !BOT_FACE_BLINK_BAR_VALUES.some(
-    (blinkBar) => blinkBar === normalizedFaceBlinkBar,
-  );
+  const normalizedFaceBlinkCount =
+    normalizeBotFaceEyeCount(faceBlinkCount) ?? normalizedFaceEyeCount;
   const forcedBlinkPhase =
     forceBlinkPhase === "open" || forceBlinkPhase === "closed"
       ? forceBlinkPhase
@@ -371,35 +442,93 @@ export function CoffeeSeatPlateEmoji({
     baseText,
     normalizedFaceEyeCharacter,
   );
-  const faceBlinkDisabled = normalizedFaceBlinkBar === "none";
-  const talkingPausesBlink = isTalking && !blinkWhileTalking;
-  const blinkKey = `${enabled ? "enabled" : "disabled"}:${talkingPausesBlink ? "talking" : "idle"}:${faceMode}:${normalizedFaceBlinkBar}:${faceText}:${scheduleKey}`;
+  const blinkEyeCharacter =
+    normalizedFaceEyeCharacter ??
+    (fullMotion ? Array.from(faceText)[0] ?? null : null);
+  const baseTextGlyphs = Array.from(baseText);
+  const renderedMouthGlyphForMotion =
+    renderedFaceMouthCharacter ??
+    Array.from(faceText).find(
+      (_glyph, index) =>
+        coffeeSeatEmojiPartForGlyph({
+          baseText,
+          baseGlyph: baseTextGlyphs[index],
+          index,
+        }) === "mouth",
+    ) ??
+    null;
+  const faceBlinkDisabled = coffeeSeatBlinkKeepsFaceStill(
+    normalizedFaceBlinkBar,
+    { eyeCharacter: blinkEyeCharacter },
+  );
+  const talkingPausesBlink = effectiveTalking && !blinkWhileTalking;
+  const blinkKey = `${blinkEnabled ? "enabled" : "disabled"}:${talkingPausesBlink ? "talking" : "idle"}:${faceMode}:${normalizedFaceBlinkBar}:${faceText}:${scheduleKey}`;
   const [blinkState, setBlinkState] = useState<CoffeeSeatPlateBlinkState>({
     phase: "open",
     key: blinkKey,
   });
   const [thinkingSpinnerFrameIndex, setThinkingSpinnerFrameIndex] = useState(0);
+  const [liveEyeTimelineMs, setLiveEyeTimelineMs] = useState(0);
+  const [displayGaze, setDisplayGaze] = useState({
+    xPx: 0,
+    yPx: 0,
+    transitionMs: 0,
+  });
+  const [gazeSnapsOpen, setGazeSnapsOpen] = useState(false);
   const customMouthGlyphRef = useRef<HTMLSpanElement | null>(null);
-  const isTalkingRef = useRef(isTalking);
+  const previousBlinkPhaseRef = useRef<CoffeeSeatBlinkPhase>("open");
   const blinkPhase = blinkState.key === blinkKey ? blinkState.phase : "open";
 
+  const normalizedEyeMovement =
+    staticFace || motionMode === "mini-led"
+      ? "still"
+      : (normalizeBotFaceEyeMovement(faceEyeMovement) ?? "still");
+  const eyeMovementActive = botFaceEyeMovementIsActive(normalizedEyeMovement);
   useEffect(() => {
-    isTalkingRef.current = isTalking;
-  }, [isTalking]);
+    if (
+      !eyeMovementActive ||
+      (eyeTimelineMs !== undefined && eyeTimelineMs !== null) ||
+      !blinkEnabled ||
+      thinkingSpinnerActive ||
+      questionGlyphActive
+    ) {
+      setLiveEyeTimelineMs(0);
+      return;
+    }
+    const startedAt = coffeeSeatEyeTimelineNowMs();
+    setLiveEyeTimelineMs(0);
+    const intervalMs = botFaceEyeMovementLiveIntervalMs(normalizedEyeMovement);
+    const id = window.setInterval(() => {
+      setLiveEyeTimelineMs(coffeeSeatEyeTimelineNowMs() - startedAt);
+    }, intervalMs);
+    return () => window.clearInterval(id);
+  }, [
+    blinkEnabled,
+    eyeAttentionState,
+    eyeMovementActive,
+    eyeTargetDirection,
+    eyeTimelineMs,
+    normalizedEyeMovement,
+    questionGlyphActive,
+    scheduleKey,
+    thinkingSpinnerActive,
+  ]);
 
   useLayoutEffect(() => {
     const element = customMouthGlyphRef.current;
     if (
       !element ||
-      !renderedFaceMouthCharacter ||
-      normalizedFaceMouthAnimation !== "spin"
+      !mouthMotionEnabled ||
+      !renderedMouthGlyphForMotion ||
+      thinkingSpinnerActive ||
+      questionGlyphActive
     ) {
       return;
     }
     let cancelled = false;
     const measure = () => {
       if (cancelled) return;
-      updateCustomMouthSpinOrigin(element, renderedFaceMouthCharacter);
+      updateCustomMouthMotionOrigins(element, renderedMouthGlyphForMotion);
     };
     const frameId = window.requestAnimationFrame(measure);
     void document.fonts?.ready.then(measure);
@@ -408,17 +537,18 @@ export function CoffeeSeatPlateEmoji({
       window.cancelAnimationFrame(frameId);
     };
   }, [
-    faceFontWeight,
     faceMouthFont,
-    normalizedFaceMouthAnimation,
-    renderedFaceMouthCharacter,
+    mouthMotionEnabled,
+    questionGlyphActive,
+    renderedMouthGlyphForMotion,
+    thinkingSpinnerActive,
   ]);
 
   useEffect(() => {
     setBlinkState({ phase: "open", key: blinkKey });
 
     if (
-      !enabled ||
+      !blinkEnabled ||
       faceBlinkDisabled ||
       talkingPausesBlink ||
       forcedBlinkPhase !== null ||
@@ -464,11 +594,7 @@ export function CoffeeSeatPlateEmoji({
     };
 
     const armNextBlink = () => {
-      const talking = blinkWhileTalking && isTalkingRef.current;
-      armBlink(
-        coffeeSeatBlinkGapMs(talking),
-        coffeeSeatExtraBlinkCount(talking),
-      );
+      armBlink(coffeeSeatBlinkGapMs(), coffeeSeatExtraBlinkCount());
     };
 
     arm(armNextBlink, startJitter);
@@ -480,7 +606,7 @@ export function CoffeeSeatPlateEmoji({
   }, [
     blinkWhileTalking,
     blinkKey,
-    enabled,
+    blinkEnabled,
     faceBlinkDisabled,
     forcedBlinkPhase,
     questionGlyphActive,
@@ -490,7 +616,8 @@ export function CoffeeSeatPlateEmoji({
   ]);
 
   useEffect(() => {
-    if (!thinkingSpinnerActive) {
+    if (!thinkingSpinnerMotionActive) {
+      setThinkingSpinnerFrameIndex(0);
       return;
     }
 
@@ -503,21 +630,69 @@ export function CoffeeSeatPlateEmoji({
     return () => {
       clearInterval(id);
     };
-  }, [normalizedThinkingFrames.length, thinkingSpinnerActive]);
+  }, [normalizedThinkingFrames.length, thinkingSpinnerMotionActive]);
 
   const displayBlinkPhase: CoffeeSeatBlinkPhase =
-    !enabled ||
+    !blinkEnabled ||
     faceBlinkDisabled ||
     talkingPausesBlink ||
     thinkingSpinnerActive ||
     questionGlyphActive
       ? "open"
       : (forcedBlinkPhase ?? blinkPhase);
+  const eyeTimeline =
+    typeof eyeTimelineMs === "number" && Number.isFinite(eyeTimelineMs)
+      ? Math.max(0, eyeTimelineMs)
+      : liveEyeTimelineMs;
+  const resolvedGaze =
+    eyeMovementActive &&
+    blinkEnabled &&
+    !thinkingSpinnerActive &&
+    !questionGlyphActive
+      ? (eyeGazeOverride ??
+        resolveBotFaceGazeFrame({
+          seed: scheduleKey,
+          timelineMs: eyeTimeline,
+          stateStartedAtMs:
+            typeof eyeStateStartedAtMs === "number" ? eyeStateStartedAtMs : 0,
+          state: eyeAttentionState,
+          targetDirection: eyeTargetDirection,
+          movement: normalizedEyeMovement,
+          eyeScale: faceEyeScale,
+        }))
+      : { xPx: 0, yPx: 0, transitionMs: 0 };
+  const resolvedGazeXPx = resolvedGaze.xPx;
+  const resolvedGazeYPx = resolvedGaze.yPx;
+  const resolvedGazeTransitionMs = resolvedGaze.transitionMs;
   useLayoutEffect(() => {
     onBlinkPhaseChange?.(displayBlinkPhase);
   }, [displayBlinkPhase, onBlinkPhaseChange]);
+  useLayoutEffect(() => {
+    if (displayBlinkPhase === "closed") {
+      previousBlinkPhaseRef.current = "closed";
+      return;
+    }
+    const reopened = previousBlinkPhaseRef.current === "closed";
+    previousBlinkPhaseRef.current = "open";
+    setDisplayGaze({
+      xPx: resolvedGazeXPx,
+      yPx: resolvedGazeYPx,
+      transitionMs: resolvedGazeTransitionMs,
+    });
+    if (!reopened) return;
+    setGazeSnapsOpen(true);
+    const frameId = window.requestAnimationFrame(() => {
+      setGazeSnapsOpen(false);
+    });
+    return () => window.cancelAnimationFrame(frameId);
+  }, [
+    displayBlinkPhase,
+    resolvedGazeTransitionMs,
+    resolvedGazeXPx,
+    resolvedGazeYPx,
+  ]);
   const displayText = applyCoffeeSeatBlink(faceText, displayBlinkPhase, {
-    eyeCharacter: normalizedFaceEyeCharacter,
+    eyeCharacter: blinkEyeCharacter,
     blinkBar: normalizedFaceBlinkBar,
   });
   const glyphParts = Array.from(displayText);
@@ -538,9 +713,6 @@ export function CoffeeSeatPlateEmoji({
             }).length + 1,
           )
         : glyphParts.length;
-  const normalizedFaceWeight = thinkingSpinnerActive
-    ? undefined
-    : normalizeFaceFontWeight(faceFontWeight);
   const normalizedFaceEyeScale =
     thinkingSpinnerActive || questionGlyphActive
       ? undefined
@@ -554,21 +726,25 @@ export function CoffeeSeatPlateEmoji({
       ? undefined
       : (normalizeBotFaceEyeOffsetY(faceEyeOffsetY) ?? undefined);
   const normalizedFaceEyeRotationDeg =
-    thinkingSpinnerActive || questionGlyphActive || !normalizedFaceEyeCharacter
+    thinkingSpinnerActive || questionGlyphActive
       ? undefined
       : (normalizeBotFaceEyeRotationDeg(faceEyeRotationDeg) ?? undefined);
   const normalizedFaceBlinkScale =
-    thinkingSpinnerActive || questionGlyphActive || !customBlinkBarActive
+    thinkingSpinnerActive || questionGlyphActive || faceBlinkDisabled
       ? undefined
       : (normalizeBotFaceBlinkScale(faceBlinkScale) ?? undefined);
   const normalizedFaceBlinkOffsetX =
-    thinkingSpinnerActive || questionGlyphActive || !customBlinkBarActive
+    thinkingSpinnerActive || questionGlyphActive || faceBlinkDisabled
       ? undefined
       : (normalizeBotFaceBlinkOffsetX(faceBlinkOffsetX) ?? undefined);
   const normalizedFaceBlinkOffsetY =
-    thinkingSpinnerActive || questionGlyphActive || !customBlinkBarActive
+    thinkingSpinnerActive || questionGlyphActive || faceBlinkDisabled
       ? undefined
       : (normalizeBotFaceBlinkOffsetY(faceBlinkOffsetY) ?? undefined);
+  const normalizedFaceBlinkRotationDeg =
+    thinkingSpinnerActive || questionGlyphActive || faceBlinkDisabled
+      ? undefined
+      : (normalizeBotFaceBlinkRotationDeg(faceBlinkRotationDeg) ?? 0);
   const normalizedFaceMouthScale =
     thinkingSpinnerActive || questionGlyphActive
       ? undefined
@@ -582,20 +758,34 @@ export function CoffeeSeatPlateEmoji({
       ? undefined
       : (normalizeBotFaceMouthOffsetY(faceMouthOffsetY) ?? undefined);
   const normalizedFaceMouthRotationDeg =
-    thinkingSpinnerActive || questionGlyphActive || !renderedFaceMouthCharacter
+    thinkingSpinnerActive || questionGlyphActive
       ? undefined
       : (normalizeBotFaceMouthRotationDeg(faceMouthRotationDeg) ?? undefined);
-  const faceMouthRotationCssDeg =
-    normalizedFaceMouthRotationDeg === undefined
-      ? undefined
-      : screenRelativeFacePartRotationDeg(
-          normalizedFaceMouthRotationDeg,
-          rotateDeg,
-        );
+  const normalizedFaceFontWeight =
+    normalizeBotFaceFontWeight(faceFontWeight) ?? undefined;
+  const normalizedFaceThinkingScale =
+    normalizeBotFaceThinkingScale(faceThinkingScale) ?? undefined;
+  const normalizedFaceThinkingOffsetX =
+    normalizeBotFaceThinkingOffsetX(faceThinkingOffsetX) ?? undefined;
+  const normalizedFaceThinkingOffsetY =
+    normalizeBotFaceThinkingOffsetY(faceThinkingOffsetY) ?? undefined;
+  const faceMouthRotationCssDeg = coffeeSeatMouthRotationCssDeg({
+    authoredRotationDeg: normalizedFaceMouthRotationDeg ?? 0,
+    faceRotationDeg: rotateDeg,
+    configuredCustomMouth: normalizedFaceMouthCharacter !== null,
+    renderedCustomMouth: renderedFaceMouthCharacter !== null,
+    transientSipPucker,
+  });
   const faceEyeRotationCssDeg =
     normalizedFaceEyeRotationDeg === undefined
       ? undefined
-      : normalizedFaceEyeRotationDeg;
+      : normalizedFaceEyeCharacter
+        ? coffeeSeatScreenRelativeFeatureRotationDeg(
+            normalizedFaceEyeRotationDeg,
+            rotateDeg,
+          )
+        : normalizedFaceEyeRotationDeg;
+  const faceBlinkRotationCssDeg = normalizedFaceBlinkRotationDeg ?? 0;
   const faceEyeOffset = rotatedFaceOffset(
     normalizedFaceEyeOffsetX,
     normalizedFaceEyeOffsetY,
@@ -620,8 +810,27 @@ export function CoffeeSeatPlateEmoji({
       ));
   const streamedMouthShape =
     mouthShape ?? (inferredMouthOpen ? "open-wide" : "closed");
+  const customSpeechGlyph =
+    configuredFaceMouthAnimation === DEFAULT_BOT_FACE_GLYPH_ANIMATION &&
+    effectiveTalking &&
+    faceMouthSpeechPoses !== null &&
+    faceMouthSpeechPoses !== undefined
+      ? botFaceCustomSpeechGlyphForMouthShape(
+          faceMouthSpeechPoses,
+          streamedMouthShape,
+        )
+      : null;
+  // A live viseme can change several times inside one painted frame. Running
+  // each shape through the synchronous canvas-to-PNG phosphor raster blocks
+  // that frame (and can leave the previous mask visible indefinitely under
+  // load). Keep authored/static custom mouths pixel-masked, but render mouths
+  // that actively swap speech glyphs through the native phosphor text layer.
+  const liveMouthGlyphSwapActive =
+    effectiveTalking &&
+    (renderedFaceMouthCharacter === null || customSpeechGlyph !== null);
   const mouthOpen =
-    isTalking &&
+    !hasCustomMouth &&
+    effectiveTalking &&
     streamedMouthShape !== "closed" &&
     streamedMouthShape !== "speech-closed" &&
     streamedMouthShape !== "narrow" &&
@@ -630,11 +839,17 @@ export function CoffeeSeatPlateEmoji({
     normalizedThinkingFrames[
       thinkingSpinnerFrameIndex % normalizedThinkingFrames.length
     ];
-
+  // Raster masks do not observe a font-weight change that leaves the glyph
+  // box alone. Include the Studio-authored face shape in the key so every
+  // renderer (especially binary Mini pixels) refreshes from its selected font
+  // instead of retaining a previous family/weight silhouette.
+  const faceGlyphRasterKey = (font: BotFaceFontId | null | undefined): string =>
+    `${font ?? "default"}:weight-${normalizedFaceFontWeight ?? "default"}`;
   return (
     <span
       className={className}
       data-coffee-plate-emoji-glyphs={displayGlyphCount}
+      data-face-motion-mode={motionMode}
       data-coffee-plate-thinking-spinner={
         thinkingSpinnerActive ? "true" : undefined
       }
@@ -645,13 +860,16 @@ export function CoffeeSeatPlateEmoji({
         displayBlinkPhase === "closed" ? "false" : "true"
       }
       data-coffee-plate-emoji-blink-phase={displayBlinkPhase}
+      data-face-eye-movement={
+        eyeMovementActive ? normalizedEyeMovement : undefined
+      }
+      data-face-eye-gaze-snap={gazeSnapsOpen ? "true" : undefined}
       data-voice-preset={voicePreset}
       data-face-custom={
         faceEyesFont ||
         normalizedFaceEyeCharacter ||
         faceMouthFont ||
         normalizedFaceMouthCharacter ||
-        faceFontWeight ||
         normalizedFaceEyeScale ||
         normalizedFaceEyeOffsetX ||
         normalizedFaceEyeOffsetY ||
@@ -659,6 +877,7 @@ export function CoffeeSeatPlateEmoji({
         normalizedFaceBlinkScale ||
         normalizedFaceBlinkOffsetX ||
         normalizedFaceBlinkOffsetY ||
+        normalizedFaceBlinkRotationDeg ||
         normalizedFaceMouthScale ||
         normalizedFaceMouthOffsetX ||
         normalizedFaceMouthOffsetY ||
@@ -675,26 +894,37 @@ export function CoffeeSeatPlateEmoji({
       data-face-eye-count={
         normalizedFaceEyeCharacter ? normalizedFaceEyeCount : undefined
       }
+      data-face-eye-spacing={
+        normalizedFaceEyeCharacter && normalizedFaceEyeCount === 2
+          ? normalizedFaceEyeSpacing
+          : undefined
+      }
       data-face-mouth-character={renderedFaceMouthCharacter ?? undefined}
+      data-face-transient-pucker={transientSipPucker ? "true" : undefined}
       data-face-mouth-animation={
         renderedFaceMouthCharacter ? normalizedFaceMouthAnimation : undefined
       }
-      data-talking={isTalking ? "true" : undefined}
+      data-face-mouth-speech-rest={faceMouthSpeechPoses?.[0]}
+      data-face-mouth-speech-closure={faceMouthSpeechPoses?.[1]}
+      data-face-mouth-speech-open={faceMouthSpeechPoses?.[2]}
+      data-face-mouth-speech-round={faceMouthSpeechPoses?.[3]}
+      data-talking={effectiveTalking ? "true" : undefined}
       data-face-blink-bar={normalizedFaceBlinkBar}
+      data-face-blink-count={normalizedFaceBlinkCount}
       data-coffee-plate-mouth-open={mouthOpen ? "true" : undefined}
-      data-coffee-plate-mouth-shape={isTalking ? streamedMouthShape : undefined}
+      data-prism-mouth-sync-target="true"
+      data-coffee-plate-mouth-shape={
+        effectiveTalking ? streamedMouthShape : undefined
+      }
       style={
         {
-          ["--bot-face-font-weight" as string]: normalizedFaceWeight,
-          ["--bot-face-weight-stroke" as string]:
-            faceWeightStrokeForWeight(normalizedFaceWeight),
-          ["--bot-face-weight-glow-radius-scale" as string]:
-            faceWeightGlowRadiusScaleForWeight(normalizedFaceWeight),
-          ["--bot-face-weight-glow-strength-scale" as string]:
-            faceWeightGlowStrengthScaleForWeight(normalizedFaceWeight),
-          ["--bot-face-weight-glow-stroke" as string]:
-            faceWeightGlowStrokeForWeight(normalizedFaceWeight),
           ["--bot-face-eye-scale" as string]: normalizedFaceEyeScale,
+          ["--bot-face-font-weight" as string]: normalizedFaceFontWeight,
+          ["--bot-face-eye-spacing" as string]: `${normalizedFaceEyeSpacing}em`,
+          ["--bot-face-gaze-x" as string]: `${displayGaze.xPx}px`,
+          ["--bot-face-gaze-y" as string]: `${displayGaze.yPx}px`,
+          ["--bot-face-gaze-transition-ms" as string]:
+            `${displayGaze.transitionMs}ms`,
           ["--bot-face-eye-offset-x" as string]:
             faceEyeOffset === null ? undefined : `${faceEyeOffset.x}em`,
           ["--bot-face-eye-offset-y" as string]:
@@ -704,6 +934,10 @@ export function CoffeeSeatPlateEmoji({
               ? undefined
               : `${faceEyeRotationCssDeg}deg`,
           ["--bot-face-blink-scale" as string]: normalizedFaceBlinkScale,
+          ["--bot-face-blink-rotation" as string]:
+            normalizedFaceBlinkRotationDeg === undefined
+              ? undefined
+              : `${faceBlinkRotationCssDeg}deg`,
           ["--bot-face-blink-offset-x" as string]:
             faceBlinkOffset === null ? undefined : `${faceBlinkOffset.x}em`,
           ["--bot-face-blink-offset-y" as string]:
@@ -717,8 +951,17 @@ export function CoffeeSeatPlateEmoji({
             faceMouthRotationCssDeg === undefined
               ? undefined
               : `${faceMouthRotationCssDeg}deg`,
-          ["--bot-face-mouth-spin-turn-duration" as string]: `${CUSTOM_MOUTH_SPIN_TURN_MS}ms`,
-          transform: `translateX(${thinkingSpinnerActive || questionGlyphActive ? "0px" : "var(--coffee-plate-emoji-flip-anchor-x, 0px)"}) translateY(var(--coffee-plate-emoji-nudge-y)) rotate(${thinkingSpinnerActive || questionGlyphActive ? 0 : rotateDeg}deg) scale(var(--coffee-seat-emotion-face-scale, 1)) scaleY(${thinkingSpinnerActive || questionGlyphActive ? 1 : "var(--coffee-plate-emoji-face-scale-y, 1)"})`,
+          ["--bot-face-mouth-spin-turn-duration" as string]: `${ZEN_LIVE_CUSTOM_MOUTH_SPIN_TURN_MS}ms`,
+          ["--bot-face-thinking-scale" as string]: normalizedFaceThinkingScale,
+          ["--bot-face-thinking-offset-x" as string]:
+            normalizedFaceThinkingOffsetX === undefined
+              ? undefined
+              : `${normalizedFaceThinkingOffsetX}em`,
+          ["--bot-face-thinking-offset-y" as string]:
+            normalizedFaceThinkingOffsetY === undefined
+              ? undefined
+              : `${normalizedFaceThinkingOffsetY}em`,
+          transform: `translateX(${thinkingSpinnerActive || questionGlyphActive ? "0px" : "var(--coffee-plate-emoji-flip-anchor-x, 0px)"}) translateY(var(--coffee-plate-emoji-nudge-y, 0px)) rotate(${thinkingSpinnerActive || questionGlyphActive ? 0 : rotateDeg}deg) scale(var(--coffee-seat-emotion-face-scale, 1)) scaleY(${thinkingSpinnerActive || questionGlyphActive ? 1 : "var(--coffee-plate-emoji-face-scale-y, 1)"})`,
         } as CSSProperties
       }
       aria-hidden="true"
@@ -730,12 +973,13 @@ export function CoffeeSeatPlateEmoji({
           data-coffee-plate-thinking-glyph={thinkingSpinnerGlyph}
           data-face-font={faceMouthFont ?? undefined}
         >
-          <span
-            data-crt-glyph-layer="true"
-            data-crt-glyph-content={thinkingSpinnerGlyph}
-          >
-            {thinkingSpinnerGlyph}
-          </span>
+          <CrtPixelTextGlyph
+            content={thinkingSpinnerGlyph}
+            enabled={pixelated}
+            binaryAlpha={hardPixels}
+            rasterKey={faceGlyphRasterKey(faceMouthFont)}
+            data-face-font={faceMouthFont ?? undefined}
+          />
         </span>
       ) : questionGlyphActive ? (
         <span
@@ -743,9 +987,13 @@ export function CoffeeSeatPlateEmoji({
           data-coffee-plate-question-glyph="?"
           data-face-font={faceMouthFont ?? faceEyesFont ?? undefined}
         >
-          <span data-crt-glyph-layer="true" data-crt-glyph-content="?">
-            ?
-          </span>
+          <CrtPixelTextGlyph
+            content="?"
+            enabled={pixelated}
+            binaryAlpha={hardPixels}
+            rasterKey={faceGlyphRasterKey(faceMouthFont ?? faceEyesFont)}
+            data-face-font={faceMouthFont ?? faceEyesFont ?? undefined}
+          />
         </span>
       ) : (
         (() => {
@@ -761,21 +1009,37 @@ export function CoffeeSeatPlateEmoji({
               customMouthRendered = true;
             }
             const renderedGlyph =
-              part === "mouth" && renderedFaceMouthCharacter
-                ? renderedFaceMouthCharacter
+              part === "mouth"
+                ? coffeeSeatRenderedMouthGlyph({
+                    baseGlyph: glyph,
+                    customSpeechGlyph,
+                    renderedFaceMouthCharacter,
+                    effectiveTalking,
+                    mouthShape: streamedMouthShape,
+                  })
                 : glyph;
             const renderCustomEyePair =
               part === "eyes" &&
               normalizedFaceEyeCharacter !== null &&
               normalizedFaceEyeCount === 2 &&
               displayBlinkPhase !== "closed";
+            const renderCustomBlinkPair =
+              part === "eyes" &&
+              normalizedFaceBlinkCount === 2 &&
+              displayBlinkPhase === "closed";
             const partFaceFont = part === "eyes" ? faceEyesFont : faceMouthFont;
             const opticalOffset = coffeeSeatGlyphOpticalOffset({
               part,
               glyph: renderedGlyph,
               voicePreset,
               rotateDeg,
-              pairedEye: renderCustomEyePair,
+              pairedEye: renderCustomEyePair || renderCustomBlinkPair,
+              blinkGlyph:
+                displayBlinkPhase === "closed" && part === "eyes"
+                  ? normalizedFaceBlinkBar
+                  : null,
+              customGlyph:
+                part === "mouth" && renderedFaceMouthCharacter !== null,
             });
             return (
               <span
@@ -798,35 +1062,42 @@ export function CoffeeSeatPlateEmoji({
                     : undefined
                 }
               >
-                {renderCustomEyePair ? (
+                {renderCustomEyePair || renderCustomBlinkPair ? (
                   <span data-custom-eye-pair="true">
-                    <span
+                    <CrtPixelTextGlyph
                       data-custom-eye-pair-side="left"
-                      data-crt-glyph-layer="true"
-                      data-crt-glyph-content={renderedGlyph}
-                    >
-                      {renderedGlyph}
-                    </span>
-                    <span
+                      content={renderedGlyph}
+                      enabled={pixelated}
+                      binaryAlpha={hardPixels}
+                      alphaSafeMaskEmission
+                      rasterKey={faceGlyphRasterKey(partFaceFont)}
+                      data-face-font={partFaceFont ?? undefined}
+                    />
+                    <CrtPixelTextGlyph
                       data-custom-eye-pair-side="right"
-                      data-crt-glyph-layer="true"
-                      data-crt-glyph-content={renderedGlyph}
-                    >
-                      {renderedGlyph}
-                    </span>
+                      content={renderedGlyph}
+                      enabled={pixelated}
+                      binaryAlpha={hardPixels}
+                      alphaSafeMaskEmission
+                      rasterKey={faceGlyphRasterKey(partFaceFont)}
+                      data-face-font={partFaceFont ?? undefined}
+                    />
                   </span>
                 ) : (
-                  <span
-                    ref={
-                      part === "mouth" && renderedFaceMouthCharacter
-                        ? customMouthGlyphRef
-                        : undefined
+                  <CrtPixelTextGlyph
+                    ref={part === "mouth" ? customMouthGlyphRef : undefined}
+                    content={renderedGlyph}
+                    enabled={
+                      pixelated &&
+                      !(part === "mouth" && liveMouthGlyphSwapActive)
                     }
-                    data-crt-glyph-layer="true"
-                    data-crt-glyph-content={renderedGlyph}
-                  >
-                    {renderedGlyph}
-                  </span>
+                    binaryAlpha={hardPixels}
+                    alphaSafeMaskEmission={
+                      part === "eyes" && normalizedFaceEyeCharacter !== null
+                    }
+                    rasterKey={faceGlyphRasterKey(partFaceFont)}
+                    data-face-font={partFaceFont ?? undefined}
+                  />
                 )}
               </span>
             );

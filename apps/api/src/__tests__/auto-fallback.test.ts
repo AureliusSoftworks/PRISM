@@ -2,7 +2,11 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import {
+  AUTO_FALLBACK_EXHAUSTED_MESSAGE_MAX_CHARS,
+  AUTO_FALLBACK_TOTAL_TIMEOUT_MAX_MS,
+  AUTO_FALLBACK_VALIDATION_CLAUSE_MAX_CHARS,
   AutoFallbackExhaustedError,
+  autoFallbackReasoningEffort,
   runAutoFallbackChain,
   validateAutoFallbackText,
 } from "../auto-fallback.ts";
@@ -17,6 +21,100 @@ function attempt(
 }
 
 describe("Auto fallback runner", () => {
+  it("keeps the whole-route budget bounded", () => {
+    assert.equal(AUTO_FALLBACK_TOTAL_TIMEOUT_MAX_MS, 600_000);
+  });
+
+  it("preserves legacy fixed effort while honoring dynamic Auto route effort", () => {
+    assert.equal(autoFallbackReasoningEffort(0, "high"), "high");
+    assert.equal(autoFallbackReasoningEffort(1, "high"), "none");
+    assert.equal(autoFallbackReasoningEffort(5, "xhigh"), "none");
+    assert.equal(autoFallbackReasoningEffort(1, "high", "xhigh"), "xhigh");
+  });
+
+  it("retains every distinct validation clause after later invalid JSON and timeout failures", () => {
+    const error = new AutoFallbackExhaustedError([
+      {
+        provider: "openai",
+        model: "gpt-4.1",
+        durationMs: 12,
+        outcome: "failed",
+        reason: "invalid_output",
+        clause: "Witness chapter omitted required dialogue.",
+      },
+      {
+        provider: "anthropic",
+        model: "claude-haiku-4-5",
+        durationMs: 18,
+        outcome: "failed",
+        reason: "invalid_output",
+        clause: "Temporal recall must remain approximate.",
+      },
+      {
+        provider: "anthropic",
+        model: "claude-haiku-4-5",
+        durationMs: 19,
+        outcome: "failed",
+        reason: "invalid_output",
+        clause: "  Witness chapter omitted   required dialogue. ",
+      },
+      {
+        provider: "anthropic",
+        model: "claude-opus-5",
+        durationMs: 20,
+        outcome: "failed",
+        reason: "invalid_output",
+        clause: "The result was not valid JSON.",
+      },
+      {
+        provider: "anthropic",
+        model: "last-recovery",
+        durationMs: 60_000,
+        outcome: "failed",
+        reason: "timeout",
+      },
+    ]);
+
+    assert.match(
+      error.message,
+      /\[openai\/gpt-4\.1\] Witness chapter omitted required dialogue\./u,
+    );
+    assert.match(
+      error.message,
+      /\[anthropic\/claude-haiku-4-5\] Temporal recall must remain approximate\./u,
+    );
+    assert.match(
+      error.message,
+      /\[anthropic\/claude-opus-5\] The result was not valid JSON\./u,
+    );
+    assert.equal(
+      error.message.match(/Witness chapter omitted required dialogue\./gu)?.length,
+      1,
+    );
+  });
+
+  it("bounds every validation clause and the complete exhaustion message", () => {
+    const error = new AutoFallbackExhaustedError(
+      Array.from({ length: 64 }, (_, index) => ({
+        provider: "openai" as const,
+        model: `model-${index}`,
+        durationMs: index,
+        outcome: "failed" as const,
+        reason: "invalid_output" as const,
+        clause: `schema-clause-${index}-${"x".repeat(400)}`,
+      })),
+    );
+
+    assert.ok(
+      error.message.length <= AUTO_FALLBACK_EXHAUSTED_MESSAGE_MAX_CHARS,
+    );
+    assert.doesNotMatch(
+      error.message,
+      new RegExp(`x{${AUTO_FALLBACK_VALIDATION_CLAUSE_MAX_CHARS + 1}}`, "u"),
+    );
+    assert.match(error.message, /\+\d+ more/u);
+  });
+
   it("returns the primary without recovery metadata when it succeeds", async () => {
     const result = await runAutoFallbackChain({
       attempts: [
@@ -105,25 +203,55 @@ describe("Auto fallback runner", () => {
     assert.equal(result.attempts.length, 6);
   });
 
-  it("rejects chains outside the one-to-five fallback range", async () => {
+  it("rejects route plans outside the runtime attempt bound", async () => {
     await assert.rejects(
       runAutoFallbackChain({
         attempts: [attempt("local", "primary", async () => "unused")],
         perAttemptTimeoutMs: 100,
         totalTimeoutMs: 100,
       }),
-      /one primary model and one to five fallback models/,
+      /one primary model and between one and 63 recovery routes/,
     );
     await assert.rejects(
       runAutoFallbackChain({
-        attempts: Array.from({ length: 7 }, (_, index) =>
+        attempts: Array.from({ length: 65 }, (_, index) =>
           attempt("local", `model-${index}`, async () => "unused"),
         ),
         perAttemptTimeoutMs: 100,
         totalTimeoutMs: 100,
       }),
-      /one primary model and one to five fallback models/,
+      /one primary model and between one and 63 recovery routes/,
     );
+  });
+
+  it("reserves time for an explicit final local recovery attempt", async () => {
+    const calls: string[] = [];
+    const result = await runAutoFallbackChain({
+      attempts: [
+        attempt("openai", "primary", async () => {
+          calls.push("primary");
+          throw new Error("next");
+        }),
+        attempt("anthropic", "priority", async () => {
+          calls.push("priority");
+          throw new Error("next");
+        }),
+        attempt("openai", "remainder", async () => {
+          calls.push("remainder");
+          throw new Error("next");
+        }),
+        attempt("local", "llama3.2", async () => {
+          calls.push("local");
+          return "recovered locally";
+        }),
+      ],
+      perAttemptTimeoutMs: 100,
+      totalTimeoutMs: 300,
+    });
+
+    assert.equal(result.value, "recovered locally");
+    assert.equal(result.provider, "local");
+    assert.deepEqual(calls, ["primary", "priority", "remainder", "local"]);
   });
 
   it("skips unavailable attempts and fails after all three", async () => {
@@ -178,6 +306,45 @@ describe("Auto fallback runner", () => {
       }),
       { name: "AbortError" }
     );
+  });
+
+  it("enforces the timeout when a provider ignores AbortSignal", async () => {
+    const result = await runAutoFallbackChain({
+      attempts: [
+        attempt("local", "uncooperative", async () =>
+          new Promise<string>(() => undefined)),
+        attempt("local", "fallback", async () => "recovered"),
+      ],
+      perAttemptTimeoutMs: 5,
+      totalTimeoutMs: 50,
+    });
+
+    assert.equal(result.value, "recovered");
+    assert.equal(result.attempts[0]?.reason, "timeout");
+  });
+
+  it("uses the concrete model's attempt budget within one total ceiling", async () => {
+    const budgets: Array<{ model: string; index: number }> = [];
+    const result = await runAutoFallbackChain({
+      attempts: [
+        attempt("local", "primary", (signal) => new Promise((_, reject) => {
+          signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+        })),
+        attempt("openai", "fallback-1", async () => "recovered"),
+        attempt("anthropic", "fallback-2", async () => "unused"),
+      ],
+      perAttemptTimeoutMs: (model, index) => {
+        budgets.push({ model: model.model, index });
+        return index === 0 ? 5 : 100;
+      },
+      totalTimeoutMs: 200,
+    });
+    assert.equal(result.value, "recovered");
+    assert.deepEqual(budgets, [
+      { model: "primary", index: 0 },
+      { model: "fallback-1", index: 1 },
+    ]);
+    assert.equal(result.attempts[0]?.reason, "timeout");
   });
 
   it("does not start another attempt after the total budget is exhausted", async () => {

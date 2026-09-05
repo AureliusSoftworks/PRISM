@@ -58,7 +58,709 @@ Each answer is scored out of 10 objective checks:
 ### Product Notes
 
 - Simulated effort should be described as a local-model quality booster, not as converting weak models into true reasoning models.
-- Online OpenAI/Anthropic models should not receive Prism simulated-effort private-pass chains.
-- Online native reasoning should remain provider-native.
-- Online non-reasoning effort customization should no-op clearly instead of silently multiplying paid API calls.
-- Psychic mode can still report concise summaries/diagnostics, but private artifacts remain live-only and must not be persisted into docs or transcript rows.
+- Keep Extra High available manually; Auto should stay capped at High unless a later policy explicitly opts in.
+
+## 2026-08-05 - Cafe constraint head-to-head (`llama3.2` vs `gpt-5.6-sol`)
+
+### Scope
+
+- Prompt: default cafe staffing constraint task (schedule table + `R1`–`R3` + feasibility sentence)
+- Local model: `llama3.2`
+- Strong reference: `gpt-5.6-sol` / High native effort
+- Effort for simulated local: `high`
+- Artifacts:
+  - `artifacts/experimental-effort-evals/experimental-effort-2026-08-06T00-41-32-802Z.md`
+  - `artifacts/experimental-effort-evals/experimental-effort-2026-08-06T00-41-32-802Z.json`
+- Prior meta-prompt run (superseded as method, kept for contrast):
+  - `artifacts/experimental-effort-evals/experimental-effort-2026-08-06T00-35-15-806Z.md`
+
+### Why the prompt changed
+
+The previous default brief asked models to design simulated Effort itself. Blind judging became noisy (all answers weak/meta). The cafe task is checkable and domain-neutral.
+
+### Results
+
+| Run | Duration | Blind judge total | Notes |
+| --- | ---: | ---: | --- |
+| local baseline (`llama3.2`, no simulation) | 8.6s | 4 | Produced the format, but invalid schedule (2-hour close; Bob closes) |
+| thinking reference (`gpt-5.6-sol`, High) | 7.9s | 9 | Valid feasible schedule; clear winner |
+| local simulated (`llama3.2`, High simulation) | 60.2s | 1 | Private passes ran (plan/draft/audit), but final visible answer collapsed to the literal token `assistant` |
+
+Judge ranking: Sol ≫ baseline ≫ simulated collapse.
+
+### Interpretation
+
+- Constraint prompt restored a sane ranking: strong native reference beat local baseline.
+- Simulated Effort **machinery** was healthy (`simulated: true`, 3 passes, scratchpad/guidance present, no `invalid_json`).
+- Simulated Effort **final answer** failed this run: 9 chars (`assistant`). Do not treat this as “simulation hurts quality”; treat as a collapse/flake to rerun before the next local model.
+- Baseline still failed hard constraints, so there is room for simulation to help if the final pass stays intact.
+
+### Next
+
+1. Optional: one `llama3.2` simulated rerun to see if the collapse reproduces.
+2. Then move to `qwen3.6` with the same cafe prompt.
+
+## 2026-08-05 - Cafe constraint retry (`llama3.2` collapse check)
+
+### Scope
+
+- Same cafe prompt / High simulated Effort / `gpt-5.6-sol` reference as the prior head-to-head
+- Command:
+
+```bash
+node --env-file-if-exists=.env --experimental-strip-types apps/api/src/evals/experimental-effort.ts --local-model llama3.2 --thinking-provider openai --thinking-model gpt-5.6-sol --effort high --include-scratchpad
+```
+
+- Artifacts:
+  - `artifacts/experimental-effort-evals/experimental-effort-2026-08-06T00-55-20-389Z.md`
+  - `artifacts/experimental-effort-evals/experimental-effort-2026-08-06T00-55-20-389Z.json`
+
+### Results
+
+| Run | Duration | Blind judge total | Notes |
+| --- | ---: | ---: | --- |
+| local baseline (`llama3.2`, no simulation) | 8.1s | 4 | Same failure class as prior: 2-hour close; Bob closes; falsely claims feasible |
+| thinking reference (`gpt-5.6-sol`, High) | 6.2s | 10 | Valid overlapping 4-hour coverage; clear winner |
+| local simulated (`llama3.2`, High simulation) | 16.3s | 2 | Private passes healthy (3 passes, scratchpad/guidance present); final answer **starts with literal `assistant`**, then an invalid schedule (Bob closes; extends past 6pm; only two risk notes) |
+
+Judge ranking: Sol ≫ baseline ≫ simulated.
+
+### Interpretation
+
+- The total “final = only `assistant`” collapse did **not** fully repeat; a softer form did: role-token prefix leak + still-invalid schedule.
+- Simulation machinery remains healthy; final-generation / assembly is the suspect layer for the `assistant` prefix.
+- Simulated answer still lost to baseline on the blind judge (2 vs 4), so this is not yet evidence the ladder helps `llama3.2` on this prompt.
+- Treat the `assistant` prefix as a reproducible red flag for `/effort-review`, not as a one-off flake.
+
+### Root cause (confirmed live)
+
+Trailing Psychic guidance was appended as `system` **after** the last `user` turn. A direct Ollama probe on `llama3.2`:
+
+- `[system, user]` → `"Hello"`
+- `[system, user, system(guidance)]` → `"assistant\n\nhello"`
+- merged leading system → `"hello"`
+
+Fix tracked as `PRISM-n7ijv`: insert guidance before the last user message; strip leading role markers from local replies.
+
+### Next
+
+1. Verify with cafe head-to-head after the message-order fix.
+2. Then continue the local-model series (`qwen3.6` → `gemma4` → `gpt-oss`).
+
+## 2026-08-05 - Cafe constraint verify after role-token fix (`llama3.2`)
+
+### Scope
+
+- Same cafe prompt / High simulated Effort / `gpt-5.6-sol` reference
+- Code: Psychic guidance inserted before last user; local `stripLeadingChatRoleMarker`
+- Bead: `PRISM-n7ijv`
+- Artifacts:
+  - `artifacts/experimental-effort-evals/experimental-effort-2026-08-06T01-15-29-068Z.md`
+  - `artifacts/experimental-effort-evals/experimental-effort-2026-08-06T01-15-29-068Z.json`
+
+### Results
+
+| Run | Duration | Blind judge total | Notes |
+| --- | ---: | ---: | --- |
+| local baseline | 7.1s | 3 | Still invalid (Bob closes; 2-hour shift) |
+| thinking reference (`gpt-5.6-sol`) | 8.0s | 9 | Valid winner |
+| local simulated High | 17.6s | 2 | **No `assistant` prefix.** Schedule still invalid (Bob closes; past 6pm; only two risk notes) |
+
+Judge ranking: Sol ≫ baseline ≫ simulated.
+
+### Interpretation
+
+- Role-token leak is fixed on this prompt/model.
+- Simulated Effort still does not beat baseline for `llama3.2` on the cafe task — next `/effort-review` iteration is quality of guidance → final answer, not presentation collapse.
+
+### Next
+
+1. Continue model series (`qwen3.6` …) and/or tighten final-answer constraint transfer for weak local models.
+
+## 2026-08-05 - Thrifty vs legacy simulated budgets (`llama3.2` ladder QA)
+
+### Scope
+
+- Model: `llama3.2` (local Ollama)
+- Suite: effort ladder `--quick --repeats 2` (rollout-table constraint trap)
+- Profiles: `thrifty` (product default) vs `legacy` (pre-thrifty A/B via `--budget-profile`)
+- Commands:
+
+```bash
+node --env-file-if-exists=.env --experimental-strip-types apps/api/src/evals/effort-ladder.ts --model llama3.2 --quick --repeats 2 --budget-profile thrifty
+node --env-file-if-exists=.env --experimental-strip-types apps/api/src/evals/effort-ladder.ts --model llama3.2 --quick --repeats 2 --budget-profile legacy
+```
+
+- Artifacts:
+  - thrifty: `artifacts/effort-ladder-evals/effort-ladder-2026-08-06T01-58-04-794Z.md`
+  - legacy: `artifacts/effort-ladder-evals/effort-ladder-2026-08-06T02-00-05-762Z.md`
+
+### Integrity QA
+
+- Pass ladder identical for both: `none=0`, `minimal/low=1`, `medium=2`, `high=3`, `xhigh=4`
+- Planning token budgets differ at low/med as designed (`200/280/400` thrifty vs `300/420/560` legacy); `high`/`xhigh` stay `720`/`900`
+- Zero planning warnings; no `assistant` role-token collapses
+- LOCAL-only (Ollama) for every private + visible pass
+
+### Aggregate results
+
+| Effort | Thrifty score | Legacy score | Thrifty median ms | Legacy median ms | Passes |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| none | 7.0 | 7.5 | 7648 | 3222 | 0 |
+| minimal | 9.0 | 9.5 | 8869 | 7048 | 1 |
+| low | 8.5 | 10.0 | 7545 | 6967 | 1 |
+| medium | 9.0 | 7.5 | 11665 | 9113 | 2 |
+| high | 10.0 | 9.0 | 12050 | 7710 | 3 |
+| xhigh | 8.0 | 8.5 | 10103 | 8178 | 4 |
+
+### Interpretation
+
+- **Logic works**: profile switch + thrifty clamps are live (recorded budgets match helpers; guidance at thrifty `minimal`/`low` capped ~905 vs legacy ~952–1041).
+- **Quality**: thrifty `high` was the best arm (10/10 both repeats) and beat thrifty `none`; thrifty `medium` held 9 while legacy `medium` dipped to 7.5. Thrifty `low` was slightly weaker than legacy `low` on this n=2 smoke.
+- **Latency**: thrifty was not faster in this sequential smoke (machine variance + thrifty `high` filled a richer scratchpad ~1055 chars vs legacy ~267). Do not claim a wall-clock win from this run; re-run interleaved or warm-cached if latency is the claim.
+- **xhigh**: still not automatically better than `high` (matches prior calibration).
+
+### Product Notes
+
+- Keep thrifty as the product default for simulated Effort; reserve `--budget-profile legacy` for eval A/B only.
+- ONLINE Fast (`service_tier`) remains a separate future control.
+
+## 2026-08-05 - Standard lean ladder vs Deep experimental (`llama3.2`)
+
+### Scope
+
+- Model: `llama3.2` (local Ollama)
+- Suite: effort ladder `--quick --repeats 2` (rollout-table constraint trap)
+- Budgets: thrifty (product default)
+- Arms: `--ladder-profile standard` (product default) vs `--ladder-profile deep` (Settings experimental)
+- Commands:
+
+```bash
+node --env-file-if-exists=.env --experimental-strip-types apps/api/src/evals/effort-ladder.ts --model llama3.2 --quick --repeats 2 --ladder-profile standard --budget-profile thrifty
+node --env-file-if-exists=.env --experimental-strip-types apps/api/src/evals/effort-ladder.ts --model llama3.2 --quick --repeats 2 --ladder-profile deep --budget-profile thrifty
+```
+
+- Artifacts:
+  - standard: `artifacts/effort-ladder-evals/effort-ladder-2026-08-06T06-24-00-070Z.md`
+  - deep: `artifacts/effort-ladder-evals/effort-ladder-2026-08-06T06-25-49-590Z.md`
+- Harness note: `--ladder-profile` maps to `experimentalAllModelEffortEnabled` (`deep` = on).
+
+### Integrity QA
+
+- Standard passes: `none=0`, `minimal/low=1`, `medium=2`, `high=3`, `xhigh=4` (`plan`→`draft`→`audit`→`synthesis`)
+- Deep passes: `none=0`, `minimal=3`, `low=5`, `medium=7`, `high=8`, `xhigh=9` (full workshop incl. Compliance Sweep on xhigh)
+- Zero planning warnings; no role-token collapses; no CoT/scratchpad leak heuristics
+- LOCAL-only for every private + visible pass
+
+### Aggregate results
+
+| Effort | Standard score | Deep score | Standard median ms | Deep median ms | Std passes | Deep passes |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| none | 8.0 | 8.5 | 5485 | 3407 | 0 | 0 |
+| minimal | 9.5 | 8.5 | 7606 | 9722 | 1 | 3 |
+| low | 9.5 | 9.0 | 6259 | 14006 | 1 | 5 |
+| medium | 9.5 | 9.5 | 11430 | 19312 | 2 | 7 |
+| high | 10.0 | 10.0 | 11001 | 20477 | 3 | 8 |
+| xhigh | 9.0 | 10.0 | 10749 | 20111 | 4 | 9 |
+
+### Interpretation
+
+- **Standard default earns its keep**: beats `none` at every nonzero tier; `high` is the quality peak (10/10 both repeats) at ~11s median.
+- **Deep is a latency tax with mixed low-tier payoff**: ~+2–9s median vs standard; `minimal`/`low` scored *worse* than standard on this n=2 smoke despite 3–5 private passes.
+- **Deep helps Extra High on this prompt**: xhigh 10/10 vs standard 9/10, with Compliance Sweep present — still ~2× the wait of standard high.
+- **Do not promote Deep to default** from this run. Keep lean standard as product default; keep Deep behind Settings experimental for players who want maximum private workshop at High/XHigh.
+
+### Product Notes
+
+- Eval harness now defaults `--ladder-profile standard` so ladder smokes match product, not the experimental deep spine.
+- Cafe-constraint head-to-head still open for Deep vs Standard quality claims beyond the rollout-table trap.
+
+## 2026-08-06 - Thrifty vs legacy hard suite (`gemma3:4b`)
+
+### Scope
+
+- Model: `gemma3:4b` (local Ollama, 4.3B)
+- Suite: hard effort ladder (3 prompts × 2 repeats × 6 efforts = 36 runs/profile)
+- Profiles: `thrifty` vs `legacy`; ladder profile `standard`
+- Commands:
+
+```bash
+node --env-file-if-exists=.env --experimental-strip-types apps/api/src/evals/effort-ladder.ts --model gemma3:4b --repeats 2 --budget-profile thrifty
+node --env-file-if-exists=.env --experimental-strip-types apps/api/src/evals/effort-ladder.ts --model gemma3:4b --repeats 2 --budget-profile legacy
+```
+
+- Artifacts:
+  - thrifty: `artifacts/effort-ladder-evals/effort-ladder-2026-08-06T11-12-05-175Z.md`
+  - legacy: `artifacts/effort-ladder-evals/effort-ladder-2026-08-06T11-28-28-654Z.md`
+- Note: first thrifty attempt stalled on cold/swapped Ollama (medium/high hit wall-clock budgets). After `ollama stop` + warm gemma generate, both suites completed with zero timeouts.
+
+### Integrity QA
+
+- Pass ladder for healthy runs: `none=0`, `low=1`, `medium=2`, `high=3`, `xhigh=4`
+- Thrifty **minimal** is broken on this model: `avgPasses=0`, **6/6** `invalid_json` planning warnings, scratchpad 0
+- Legacy minimal healthier but still flaky (`avgPasses=0.67`, 2 warnings)
+- No `assistant` role-token collapses; all runs `status=ok` after warm load
+- LOCAL-only throughout
+
+### Aggregate results
+
+| Effort | Thrifty score | Legacy score | Thrifty median ms | Legacy median ms | Thrifty passes | Legacy passes | Thrifty warn | Legacy warn |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| none | 5.67 | 6.17 | 14305 | 14676 | 0 | 0 | 0 | 0 |
+| minimal | 5.00 | 7.67 | 19147 | 21844 | 0 | 0.67 | 6 | 2 |
+| low | **9.33** | 8.50 | 22501 | 23843 | 1 | 1 | 0 | 0 |
+| medium | 7.83 | **8.83** | 27204 | 31373 | 2 | 2 | 0 | 0 |
+| high | 8.50 | 8.50 | 33984 | 34320 | 3 | 3 | 0 | 0 |
+| xhigh | 8.67 | 8.67 | 42194 | 39684 | 4 | 4 | 0 | 0 |
+
+### Interpretation
+
+- **Thrifty Low is the gemma sweet spot**: best score in the whole A/B (9.33), beats legacy Low, and slightly faster — lean plan+guidance helps this 4B model.
+- **Thrifty Minimal is too lean**: 200-token planning budget + ultra-short prompt → `invalid_json` every time on gemma. Treat as a product bug for thrifty Minimal, not “gemma can’t simulate Effort.”
+- **Thrifty Medium underperformed legacy Medium** (7.83 vs 8.83) despite healthy 2-pass ladder — lean medium budgets/prompts may strip useful audit room on gemma.
+- **High/XHigh identical** across profiles (same top-tier budgets); Extra High still not clearly better than High on score.
+- Warm Ollama matters: cold model-swap made medium/high look like hard timeouts earlier.
+
+### Next
+
+1. Raise thrifty Minimal planning budget (and/or relax Minimal thrifty prompt) so gemma can emit valid plan JSON — target: nonzero `passCount` and 0 `invalid_json` on a quick gemma recheck.
+2. Consider a small Medium thrifty bump for weak local models if Medium keeps losing to legacy on more models.
+3. Optional: same hard A/B on `mistral` / `smollm:1.7b` once Minimal is fixed.
+
+## 2026-08-06 - Fix: thrifty Minimal planning room (`gemma3:4b` recheck)
+
+### Change
+
+- Thrifty `simulatedPsychicPlanningMaxTokens("minimal")`: `200` → `300`; `low` → `340` to keep ordering
+- Softened Minimal thrifty plan prompt to demand complete valid JSON fields
+- Rebuilt `@localai/shared` dist (runtime imports dist; source-only edits do not apply)
+
+### Recheck (standard ladder, thrifty, `gemma3:4b`, Minimal × 2)
+
+- `simulated: true`, `passCount: 1` (`plan` only), `warnings: []` both repeats
+- Scratchpad ~323 chars (was 0 / `invalid_json` before)
+
+### Note
+
+Eval/scripts that import `@localai/shared` must rebuild `packages/shared` after budget helper edits.
+
+## 2026-08-06 - Hard thrifty ladder (`mistral`)
+
+### Scope
+
+- Model: `mistral` (local Ollama)
+- Suite: hard effort ladder, thrifty + standard, `--repeats 2`
+- Command:
+
+```bash
+node --env-file-if-exists=.env --experimental-strip-types apps/api/src/evals/effort-ladder.ts --model mistral --repeats 2 --budget-profile thrifty --ladder-profile standard
+```
+
+- Artifact: `artifacts/effort-ladder-evals/effort-ladder-2026-08-06T17-54-19-932Z.md`
+
+### Aggregate results
+
+| Effort | Avg score | Median ms | Avg passes | Warnings | Avg scratchpad |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| none | 5.67 | 7832 | 0 | 0 | 0 |
+| minimal | 3.83 | 32175 | 0.33 | 4 | 137 |
+| low | 5.50 | 28637 | 1 | 0 | 175 |
+| medium | 3.83 | 40896 | 1.33 | 2 | 1003 |
+| high | 5.00 | 52577 | 2 | 2 | 1896 |
+| xhigh | 6.00 | 70077 | 2.67 | 2 | 520 |
+
+### Interpretation
+
+- Suite completed with **0 hard errors** (no wall-clock timeouts).
+- **Low is the only reliably healthy sim tier** on mistral here: `avgPasses=1`, 0 warnings.
+- **Minimal still flaky** after the 300-token bump: 4/6 `invalid_json` (works on rollout-table, fails on incident-handoff + qa-gate). Gemma-fixed Minimal is not universal.
+- Medium/High/XHigh also drop plan JSON on some prompts (incident-handoff especially weak overall, scores ~1–3).
+- Simulated Effort does **not** clearly beat `none` on average for this model/suite; XHigh edges `none` (6.0 vs 5.67) but latency ~9×.
+- Next diagnosis: capture mistral Minimal raw plan payloads on failing prompts; consider JSON repair / slightly higher Minimal budget / model-specific plan prompt — do not raise Medium yet until Minimal is stable across small locals.
+
+### Product Notes
+
+- Keep thrifty Low as the practical “lean sim works” tier for weaker Ollama chat models.
+- Treat mistral Minimal JSON failures as a follow-up bug, not a reason to revert the gemma Minimal fix.
+
+## 2026-08-06 - North star locked: guidance → final (Phase A)
+
+### Decision
+
+Win condition: a player may prefer `llama3.2` XHigh over luna XHigh for expansive usefulness, not only to save API tokens.
+
+Locked path (Jared, 2026-08-06):
+
+1. **Phase A (now)** — Strengthen **guidance → final-answer transfer** so private plan/audit/checklist actually reshape the visible reply. Primary measure: cafe staffing head-to-head — local High ≥ local None, closer to Sol on constraint fidelity. Beads: `PRISM-jwe8r` (north star), `PRISM-f5r9j` (Phase A task).
+2. **Phase B** — Memory / retrieval for expansive LOCAL continuity (after A).
+3. **Phase C** — Deep / multi-agent local workshop only after A earns its keep.
+4. **Not next** — ONLINE Fast toggle (orthogonal).
+
+### Why A first
+
+Cafe evals showed healthy private passes with finals that still break hard constraints (e.g. Bob closes, illegal shift lengths). More passes alone will not beat luna; plating must obey the recipe card.
+
+### Next engineering
+
+Inspect `composePsychicFinalGuidance` / `appendPsychicAnswerGuidance` / final generation: stronger must-keep constraint extraction from user + private checklist, final-pass obedience framing for weak locals, then `experimental-effort` cafe recheck vs Sol.
+
+## 2026-08-06 - Cafe Phase A /effort-review (`llama3.2` High vs Sol)
+
+### Scope
+
+- Prompt: default cafe staffing constraint task
+- Arms: local baseline (`llama3.2`, None) · thinking reference (`gpt-5.6-sol`, High) · local simulated (`llama3.2`, High, standard ladder)
+- Command:
+
+```bash
+node --env-file-if-exists=.env --experimental-strip-types apps/api/src/evals/experimental-effort.ts --local-model llama3.2 --thinking-provider openai --thinking-model gpt-5.6-sol --effort high --include-scratchpad
+```
+
+- Artifact: `artifacts/experimental-effort-evals/experimental-effort-2026-08-06T21-43-56-811Z.md`
+
+### Judge totals
+
+| Arm | Duration | Blind total | Rank |
+| --- | ---: | ---: | --- |
+| Sol High | 6.8s | **10** | 1 |
+| local None | 7.1s | 4 | 2 |
+| local High sim | 16.7s | **2** | 3 |
+
+### Integrity
+
+- LOCAL sim: `psychicDebug.simulated=true`, `passCount=3` (plan/draft/audit), guidanceChars=934, no `invalid_json`, no `assistant` role-token collapse
+- Audit pass effectively dead: **chars=2**, public summary `[]`
+- Markdown report still labels “Simulated effort enabled: no” because that field tracks the old experimental flag; simulation is product-default now (reporting stale)
+
+### Guidance → final finding (Phase A)
+
+- Private scratchpad already mentions Bob / close / `20:00` — bad schedule ideas appear **before** the visible final
+- Final is worse than baseline: visible analysis prose, Bob scheduled `16:00-20:00` (closes + past 6pm), only two risk notes, false “feasible”
+- So failure is **two-layer**: (1) private draft invents illegal schedule and audit does not catch it; (2) final generation does not re-anchor on user must-keeps hard enough to override a bad private draft
+
+### Root cause chain
+
+`effort=high → sim on → plan/draft invent illegal hours → audit empty → guidance still injected → final follows/worsens bad draft`
+
+Responsible layers: private-pass audit quality + final-transfer / user-constraint hard override. Not native-vs-sim gate; not LOCAL egress.
+
+### Next fix (Phase A engineering)
+
+1. Treat empty/near-empty audit as a warning and/or force a constraint-checklist pass when audit artifact is unusable
+2. Strengthen final handoff: explicit user must-keeps (4-hour shifts, Bob can’t close, cover 8–6, exactly R1–R3) must outrank private draft content
+3. Ban visible “let’s analyze…” preamble on simulated finals for constraint tasks (format-only output)
+4. Recheck same cafe command; target: High sim ≥ None on judge constraints, no Bob-close / no past-6pm
+
+## 2026-08-06 - Phase A engineering landed (pre-retest)
+
+### Changes
+
+- Empty/`[]` audit → deterministic Fix/Keep checklist from extracted user must-keeps (`audit_unusable` + fallback)
+- Broader constraint extraction: can't/cannot, shift lengths, R1–R3, Use only…, packed prose clauses
+- Final guidance: user must-keeps outrank private draft; ban analysis preambles; R1–R3 called out
+- Unit tests: empty-audit fallback + cafe unusable-audit recovery
+
+### Recheck command
+
+```bash
+node --env-file-if-exists=.env --experimental-strip-types apps/api/src/evals/experimental-effort.ts --local-model llama3.2 --thinking-provider openai --thinking-model gpt-5.6-sol --effort high --include-scratchpad
+```
+
+Target: local High sim judge ≥ local None; no Bob on close / past 6pm; exactly R1–R3.
+## 2026-08-06 - Phase A retests after engineering
+
+### Machinery wins
+
+- Unusable audit gate now catches copied schedule tables (`audit_unusable` + deterministic Fix/Keep fallback)
+- Final guidance carries prioritized user must-keeps + anti-preamble / anti-ellipsis framing
+- Unit tests cover empty/table-audit recovery
+
+### Cafe head-to-head (llama3.2 High sim vs None vs Sol)
+
+| Artifact | None | High sim | Sol | High vs None |
+| --- | ---: | ---: | ---: | --- |
+| pre-fix `21-43-56` | 4 | **2** | 10 | lose |
+| after must-keeps `21-50-22` | 3 | **3** | 10 | tie score, ranks below None |
+| after table-audit reject `21-52-18` | 4 | **1** | 10 | lose (final truncated with `...`) |
+| after prioritize/anti-ellipsis `21-54-12` | 3 | **3** | 10 | tie score, ranks below None |
+
+### Remaining failure mode
+
+Private draft still invents `Bob 16:00–20:00`; final copies it despite must-keeps; often only R1–R2. Guidance transfer alone is not enough for this local on cafe staffing.
+
+### Next engineering options
+
+1. **Final constraint-repair pass** (recommended): after the visible answer, if heuristics catch Bob-close / past-close / missing R3, run one cheap local repair with must-keeps only
+2. Skip draft on High when hard can't/must constraints are present (less anchoring on bad private schedules)
+3. Accept cafe as too hard for llama3.2 High and measure Phase A on a softer transfer suite first
+
+## 2026-08-06 - Final constraint-repair pass
+
+### Shipped
+
+- Heuristic break detection (Bob-close / past-close / missing R1–R3 / short shifts / ellipsis)
+- Up to 2 thrifty repair generations with concrete row-level directives + legal few-shot on retry
+- Accept repair only when **no blocking breaks remain**
+- Unit tests for repair apply path
+
+### Cafe retest (latest `22-10-34`)
+
+| Arm | Judge |
+| --- | ---: |
+| Sol | 10 |
+| local None | 3 |
+| local High sim | 3 |
+
+Repair fired (`breaks=2`) but **both attempts rejected** (`blocking_breaks_remain; after=1`). Final kept Bob `16:00-20:00`. Score tie with None; ranking still prefers None.
+
+### Takeaway
+
+llama3.2 cannot yet self-repair this staffing puzzle even with an explicit legal template. Guidance + repair plumbing works; the local model still fails the schedule rewrite. Next levers: skip-draft to reduce bad anchoring, softer Phase A suite, or accept cafe as stretch until a stronger local/repair model.
+
+## 2026-08-06 - Skip draft on hard can't/must constraints
+
+### Shipped
+
+- `shouldSkipPsychicDraftForHardConstraints` → skip `draft` / `revise_draft` with `draft_skipped_hard_constraints`
+- Unit test covers cafe-style High ladder = plan→audit only
+
+### Cafe retest (`22-12-58`)
+
+| Arm | Judge |
+| --- | ---: |
+| Sol | 10 |
+| local None | 4 |
+| local High sim | **1** |
+
+Draft skip confirmed (`passCount=2`, draft chars=0). Final still Bob `16:00-20:00`, then truncated (`R1: W...`). Repair rejected both attempts. **Worse than None** — skip-draft alone does not unlock cafe for llama3.2.
+
+## 2026-08-06 - Soft-transfer Phase A suite
+
+### Shipped
+
+- `--suite soft-transfer` on `experimental-effort.ts` (3 easier checkable prompts)
+- Suite summary artifact `soft-transfer-suite-*.md`
+- Runbook section for Phase A soft transfer
+- Side fix: `addColumnIfMissing` in `image-asset-library.ts` was called with `db` as table name (`no such table: object Object`) — unblocked fresh eval DBs
+
+### Results (`soft-transfer-suite-2026-08-07T02-59-06-153Z`)
+
+| Case | None | High sim | Sol | High ≥ None |
+| --- | ---: | ---: | ---: | --- |
+| S1–S3 labels | 1* | **9** | 10 | yes |
+| key phrases (local + private planning pass) | **8** | 7 | 9 | no |
+| tiny table whitelist | 6 | 6 | 10 | yes (tie) |
+
+\*First-suite None answer was empty (0 chars); labels recheck alone gave None a real answer (60 chars). Treat the 9-vs-1 as directionally positive but inflated.
+
+**Suite score: 2/3 High ≥ None** (1 strict win, 1 tie, 1 loss). Cafe remains stretch.
+
+### Phase A read
+
+Transfer machinery helps on label/format tasks more than on cafe scheduling. Key-phrase case still slightly worse than None. Next: either close Phase A as “partial transfer win on soft suite; cafe deferred,” or tighten key-phrase transfer specifically.
+
+## 2026-08-06 - Soft polish: key-phrase transfer
+
+### Changes
+
+- Extract/include "include the word" / "exact phrase" / "exactly N sentences" constraints
+- Guidance: mention required phrases without redefining them as storage containers
+- Repair detects missing standalone `local`, missing/misused `private planning pass`, wrong sentence count
+- Standalone `local` must not be satisfied by `local-first` / `locally` alone
+
+### Soft-suite retest (`soft-transfer-suite-2026-08-07T03-08-14-121Z`)
+
+| Case | None | High sim | Sol | High ≥ None |
+| --- | ---: | ---: | ---: | --- |
+| labels | 4 | **8** | 9 | yes |
+| key phrases | 8 | **8** | 10 | yes (tie; was 7<8) |
+| tiny table | 4 | **7** | 10 | yes |
+
+**3/3 High ≥ None** (2 strict wins). Follow-up key-phrase-only run after standalone-local fix: see `experimental-effort-2026-08-07T03-10-00-359Z`.
+
+## 2026-08-06 - Phase A closed → Phase B opened
+
+### Phase A outcome (partial win)
+
+- Soft-transfer suite: **High ≥ None on 3/3** after must-keeps, audit fallback, repair, skip-draft, key-phrase polish
+- Cafe staffing stretch: still unmet on llama3.2 — deferred
+- Bead `PRISM-f5r9j` closed; success metric for A is the soft suite going forward
+
+### Phase B opened
+
+- Bead `PRISM-gz07b` — LOCAL memory/retrieval for expansive continuity
+- Parent north star `PRISM-jwe8r` unchanged
+- Discovery note: Chat Psychic planning strips `system` messages, so retrieved memories / thread compact help the **final** answer only — not plan/draft/audit. Highest-leverage starter is a **continuity digest** that private passes can see, still LOCAL-only.
+
+## 2026-08-06 - Phase B starter: Psychic continuity digest
+
+### Shipped
+
+- `extractPsychicContinuityDigest` packs thread compact, user memory hints, Zen session/Facet/resume continuity, and Coffee continuity system blobs.
+- Plan pass + private text passes (draft/audit/etc.) now re-inject that digest as a kept system message instead of stripping all system context.
+- Diagnostic: `continuity_digest; chars=N` on the Psychic planning warning channel when a digest is present.
+- Tests: digest source filtering + High-effort Zen turn with compacted thread sees digest in plan/private requests.
+
+### Still open on PRISM-gz07b
+
+- Soft continuity eval suite proving High uses remembered facts better than None
+- Denser thread-state card / continuity eval prompts
+- Chat Qdrant revive (if still desired after digest lands)
+
+## 2026-08-06 - Phase B soft-continuity eval harness
+
+### Shipped
+
+- `--suite soft-continuity` in `apps/api/src/evals/experimental-effort.ts`
+- Seeds sandbox thread compact per arm; scores must-include facts + labels
+- Records whether High planning saw `continuity_digest`
+- Runbook section added; suite summary → `soft-continuity-suite-*.md`
+
+### Pending result
+
+- First llama3.2 High vs None run (this session)
+
+## 2026-08-06 - Soft-continuity suite first run (llama3.2)
+
+Artifact: [`soft-continuity-suite-2026-08-07T03-36-42-640Z.md`](../artifacts/experimental-effort-evals/soft-continuity-suite-2026-08-07T03-36-42-640Z.md)
+
+| Case | None | High | Sol | High ≥ None | Digest |
+| --- | ---: | ---: | ---: | --- | --- |
+| pet-prefs-compact | 0/6 | 5/6 | 6/6 | yes | yes |
+| project-codename-compact | 3/3 | 3/3 | 3/3 | yes | yes |
+| meeting-facts-compact | 0/6 | 6/6 | 6/6 | yes | yes |
+
+**Suite: High ≥ None on 3/3** (strict wins 2). Digest present on all High arms.
+
+Caveat: two None arms returned empty assistant text (still “ok” status). That inflates the win margin but is also a real LOCAL failure mode — High+digest produced usable labeled recalls where None blanked. Codename case was a clean tie at 3/3 with both arms answering.
+
+### Still open on PRISM-gz07b
+
+- Decide whether empty-None counts as a Phase B win or needs a re-run filter
+- Denser thread-state card
+- Optional Chat Qdrant revive
+- Optional memory-hint cases (encrypted memories, not only thread compact)
+
+## 2026-08-06 - Denser Psychic thread-state card
+
+### Shipped
+
+- `extractPsychicContinuityDigest` now builds a sectioned **Thread state card** (`[Thread]`, `[Memory]`, `[Zen…]`, `[Coffee]`)
+- Strips instructional fluff from continuity blobs; priority-packs under 1400 chars so thread/memory facts beat long Coffee filler
+- Planning warning: `continuity_digest; card=thread_state; chars=N`
+- Unit tests cover packing, boilerplate strip, budget priority, and live plan injection
+
+### Still open on PRISM-gz07b
+
+- Optional soft-continuity re-run after card densification
+- Optional Chat Qdrant revive
+- Optional encrypted memory-hint eval cases
+- Decide empty-None scoring policy
+
+## 2026-08-06 - Soft-continuity re-run after thread-state card
+
+Artifact: [`soft-continuity-suite-2026-08-07T03-52-11-827Z.md`](../artifacts/experimental-effort-evals/soft-continuity-suite-2026-08-07T03-52-11-827Z.md)
+
+| Case | None | High | Sol | High ≥ None | Digest |
+| --- | ---: | ---: | ---: | --- | --- |
+| pet-prefs-compact | 0/6 | **6/6** | 6/6 | yes | yes (`card=thread_state`) |
+| project-codename-compact | 3/3 | 3/3 | 3/3 | yes | yes |
+| meeting-facts-compact | 0/6 | 6/6 | 6/6 | yes | yes |
+
+**Suite: High ≥ None on 3/3** (strict wins 2). Pet High improved 5/6 → 6/6 vs prior digest-only run.
+
+None still fails labeled recall on pet/meeting (asks a follow-up or writes meta notes instead of facts) while seeing the same seeded compact in the final prompt — High+card recovers full fact sets. Codename remains a clean all-arms tie.
+
+### Still open on PRISM-gz07b
+
+- Optional encrypted memory-hint eval cases
+- Optional Chat Qdrant revive
+- Decide whether Phase B bead can close after memory-hint path, or keep open for Qdrant
+
+## 2026-08-06 - Soft-continuity-memory suite (encrypted memories)
+
+### Harness
+
+- `--suite soft-continuity-memory` seeds Zen conversations + encrypted memories only
+- Wipes `memories` for the eval user before each arm seed (prevents cross-case bleed)
+- Runbook section added
+
+### First clean run (after isolation fix)
+
+Artifact: [`soft-continuity-memory-suite-2026-08-07T04-00-46-430Z.md`](../artifacts/experimental-effort-evals/soft-continuity-memory-suite-2026-08-07T04-00-46-430Z.md)
+
+| Case | None | High | Sol | High ≥ None | Digest |
+| --- | ---: | ---: | ---: | --- | --- |
+| drink-prefs-memory | 5/6 | 6/6 | 6/6 | yes | yes |
+| travel-plan-memory | 2/3 | 3/3 | 3/3 | yes | yes |
+| format-prefs-memory | 5/6 | 6/6 | 6/6 | yes | yes |
+
+**Suite: High ≥ None on 3/3** (strict wins 3). Digest `card=thread_state` present on High arms.
+
+Prior polluted run (before wipe): High 2/3 — travel mixed leftover drink memories. Lesson recorded.
+
+### Still open on PRISM-gz07b
+
+- Optional Chat Qdrant revive
+- Decide Phase B close vs keep open for Qdrant / denser product polish
+
+## 2026-08-06 - Chat Qdrant memory summaries revived
+
+### Shipped
+
+- Chat lane now reads Qdrant cross-thread summaries alongside Zen (`companionLaneUsesQdrantMemorySummaries`)
+- Milestone fact extraction + Qdrant upsert runs for Chat when `autoMemory` is on (still LOCAL; Qdrant is local)
+- Sandbox remains thread-compact only (no Qdrant read/write)
+- `summarizeAndStoreMemories` records `mode: chat|zen` + payload `lane`
+- Tests: gate helper, Chat inject into prompt/Psychic, Sandbox does not search Qdrant
+
+### Phase B stack (complete starter set)
+
+1. Psychic continuity digest  
+2. Denser thread-state card  
+3. Soft-continuity (thread compact) suite — green  
+4. Soft-continuity-memory suite — green  
+5. Chat Qdrant revive  
+
+### Still open (optional follow-ups)
+
+- Product playtest of Chat long-thread recall with Qdrant up  
+- Decide whether to close `PRISM-gz07b` vs leave for polish
+
+## 2026-08-06 - Phase B closed
+
+Bead `PRISM-gz07b` closed. Starter continuity stack is shipped and measured:
+
+1. Psychic continuity digest → denser thread-state card  
+2. Soft-continuity (thread compact) suite: High ≥ None 3/3  
+3. Soft-continuity-memory suite: High ≥ None 3/3 (after memory isolation fix)  
+4. Chat Qdrant summary read/write revived; Sandbox stays thread-only  
+
+Parent north star `PRISM-jwe8r` remains open. Optional next: playtest Chat/Zen expansive LOCAL recall, or Phase C Deep/multi-agent workshop.
+
+## 2026-08-11 - GPT-3.5 Turbo cafe benchmark
+
+Artifact: [`experimental-effort-2026-08-11T19-07-32-375Z.md`](../artifacts/experimental-effort-evals/experimental-effort-2026-08-11T19-07-32-375Z.md)
+
+| Arm | Judge total | Duration | Result |
+| --- | ---: | ---: | --- |
+| llama3.2 None | 3.5/5 | 9.9s | Invalid schedule; omitted feasibility sentence |
+| GPT-3.5 Turbo reference | 3.5/5 | 18.7s | Invalid schedule; best-ranked on format |
+| llama3.2 High simulated | 2.75/5 | 18.0s | Invalid schedule; weakest risk notes |
+
+High simulation did not beat either comparator on this cafe run. All arms assigned Bob to close and used a two-hour final shift; none found a valid staggered-overlap solution such as Bob 8–12, Cara 10–2, and Alice 2–6.
+
+Clarification: the GPT-3.5 Turbo reference requested High, and this non-native-effort model therefore entered PRISM's standard simulated ladder even though the deeper experimental ladder and Psychic presentation were disabled. It recorded two private passes, 1600 guidance characters, and repair attempts. The provider rejected structured-output schema requests before compatibility fallback recovery. This was a paid simulated-Effort arm, not a clean default GPT-3.5 Turbo reference.
+
+## 2026-08-11 - GPT-3.5 Turbo None vs simulated High
+
+Artifact: [`experimental-effort-2026-08-11T19-20-00-341Z.md`](../artifacts/experimental-effort-evals/experimental-effort-2026-08-11T19-20-00-341Z.md)
+
+| Arm | Judge total | Duration | Provenance |
+| --- | ---: | ---: | --- |
+| GPT-3.5 Turbo None | 3.0/5 | 3.2s | `simulated=false`, 0 passes, verified |
+| GPT-3.5 Turbo simulated High | 3.0/5 | 20.0s | `simulated=true`, 2 passes, verified |
+
+The judge ranked simulated High first because it covered exactly 8am-6pm, while None extended the last shift to 8pm. Both still assigned Bob to close, claimed feasibility incorrectly, and missed a valid staggered-overlap solution. High cost about 6.2x the latency without improving the numeric quality score.
+
+The private ladder did not transfer its own constraint warnings into a valid final. Draft was skipped for hard constraints, audit fell back after GPT-3.5 rejected structured output, and both repair candidates were rejected with blocking violations remaining. This run supports stronger constraint-solving/repair enforcement rather than adding more passes.

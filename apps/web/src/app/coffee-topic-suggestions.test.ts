@@ -132,17 +132,31 @@ describe("coffee topic suggestions", () => {
     );
   });
 
-  it("reuses canonical group topics without a session regeneration action", () => {
+  it("refreshes visible Coffee topics without starting the table", () => {
     const pageSource = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
-    assert.doesNotMatch(pageSource, /topics\/regenerate/);
-    assert.doesNotMatch(pageSource, /Regenerate ideas/);
-    assert.match(pageSource, /data-tutorial-target="coffee-topic-picker"/);
-    assert.match(
-      pageSource,
-      /if \(!trimmed \|\| coffeeTopicRequestInFlightRef\.current\) return false;/,
+    const serverSource = readFileSync(
+      new URL("../../../api/src/server.ts", import.meta.url),
+      "utf8",
     );
+    const coffeeSource = readFileSync(
+      new URL("../../../api/src/coffee.ts", import.meta.url),
+      "utf8",
+    );
+
+    assert.match(pageSource, /topics\/refresh/);
+    assert.match(pageSource, /Generate new Coffee topics/);
+    assert.match(pageSource, /"New topics"/);
+    assert.match(pageSource, /coffeeTopicRefreshInFlightRef\.current/);
+    assert.match(pageSource, /data-tutorial-target="coffee-topic-picker"/);
     assert.match(pageSource, /coffeeTopicRequestInFlightRef\.current = true;/);
     assert.match(pageSource, /coffeeTopicRequestInFlightRef\.current = false;/);
+    assert.match(serverSource, /\/api\/coffee\/sessions\/:id\/topics\/refresh/);
+    assert.match(serverSource, /refreshCoffeeConversationStarterTopics/);
+    assert.match(coffeeSource, /excludedTopics: normalizeCoffeeTopicSelectionCandidates/);
+    assert.match(coffeeSource, /personaRelevantOnly: true/);
+    assert.match(coffeeSource, /requireCompleteGeneratedSet: true/);
+    assert.match(coffeeSource, /buildPersonaRelevantCoffeeStarterTopicCandidates/);
+    assert.match(coffeeSource, /This Coffee session already has a topic/);
     assert.match(pageSource, /\.\.\.\(args\.group\.starterTopics \?\? \[\]\)/);
     assert.match(pageSource, /pool\.slice\(0, COFFEE_STARTER_TOPIC_OPTION_COUNT\)/);
   });

@@ -14,5 +14,6 @@ export interface RouteDefinition {
   method: string;
   pattern: RegExp;
   keys: string[];
+  maintenanceAccess: "maintenance-safe" | "account-content";
   handler: (ctx: RequestContext) => Promise<void>;
 }

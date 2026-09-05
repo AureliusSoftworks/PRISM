@@ -40,6 +40,9 @@ vault/02-apps/**/build/
 vault/02-apps/server-windows/**/bin/
 vault/02-apps/server-windows/**/obj/
 
+# Local trailer / marketing captures (large binaries)
+captures/
+
 # Apple signing and distribution secrets
 *.p12
 *.mobileprovision

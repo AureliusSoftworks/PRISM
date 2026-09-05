@@ -153,6 +153,7 @@ describe("bot avatar details API persistence", () => {
             ],
             paintMaskBase64: null,
             paintColorMapBase64,
+            speechInkAnimation: "wobble",
           },
         },
       },
@@ -169,6 +170,10 @@ describe("bot avatar details API persistence", () => {
     assert.equal(
       created.payload.bot.avatarDetails.screen.paintColorMapBase64,
       paintColorMapBase64
+    );
+    assert.equal(
+      created.payload.bot.avatarDetails.screen.speechInkAnimation,
+      "wobble"
     );
     assert.equal("avatar_details_json" in created.payload.bot, false);
     assert.equal(

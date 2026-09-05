@@ -1,6 +1,15 @@
 import type { LlmProviderName } from "./index.js";
-import type { ReasoningEffort } from "./reasoningEffort.js";
+import type { AutoFallbackModelRef } from "./autoFallback.js";
+import type { AutoRouteDecisionV1 } from "./modelRouting.js";
 import type { StoryItemGlyphCategory, StorySpritePose } from "./storyThemes.js";
+import {
+  normalizeBotPowerMutePerformanceV1,
+  type BotPowerMutePerformanceV1,
+} from "./botPower.ts";
+import {
+  normalizeBotPowerTrollPresentationV1,
+  type BotPowerTrollPresentationV1,
+} from "./trollPower.ts";
 
 export type StorySessionStatus = "generating" | "playing" | "complete" | "failed";
 export type StoryProgressStatus = "playing" | "complete";
@@ -68,7 +77,17 @@ export interface StoryScene {
   title: string;
   locationId: string;
   narration: string;
+  /** Text-free proof that this committed bot narration has a private reveal. */
+  speechIntentRevealAvailable?: true;
   speakerBotId?: string | null;
+  /** Bot characters that actually received this spoken line; the player always does. */
+  audienceBotIds?: string[];
+  /** Replay-stable Loud outcome; this is mild irritation, never anger by itself. */
+  annoyanceTargetBotId?: string;
+  /** Public replay-stable timed Mute presentation; contains no intended speech. */
+  mutePerformance?: BotPowerMutePerformanceV1;
+  /** Public Troll delivery state frozen into the scene for replay. */
+  botPowerTrollPresentation?: BotPowerTrollPresentationV1;
   speakerName?: string;
   spritePose?: StorySpritePose;
   backgroundAssetId?: string;
@@ -117,12 +136,23 @@ export interface StorySessionSummary {
   status: StorySessionStatus;
   provider: LlmProviderName;
   model: string | null;
+  routing?: StoryRoutingSnapshotV1 | null;
   botIds: string[];
   premise: string | null;
   currentSceneId?: string | null;
   error?: string | null;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface StoryRoutingSnapshotV1 {
+  v: 1;
+  lane: "local" | "online";
+  modelSelectionKind: "auto" | "fixed";
+  candidateAllowlist: AutoFallbackModelRef[];
+  fallbackChain: AutoFallbackModelRef[];
+  policyVersion: number;
+  autoRoute?: AutoRouteDecisionV1;
 }
 
 export interface StorySessionDetail extends StorySessionSummary {
@@ -138,7 +168,6 @@ export interface StorySessionCreateRequest {
   premise?: string | null;
   preferredProvider?: LlmProviderName;
   modelOverride?: string | null;
-  reasoningEffort?: ReasoningEffort;
 }
 
 export interface StorySessionCreateResponse {
@@ -314,6 +343,19 @@ function parseScenes(raw: unknown): StoryScene[] {
     const field = `scenes[${index}]`;
     const spritePose = readOptionalString(row.spritePose);
     const itemIds = readOptionalStringArray(row.itemIds, `${field}.itemIds`);
+    const audienceBotIds = readOptionalStringArray(
+      row.audienceBotIds,
+      `${field}.audienceBotIds`,
+    );
+    const annoyanceTargetBotId = readOptionalString(row.annoyanceTargetBotId);
+    const mutePerformance =
+      normalizeBotPowerMutePerformanceV1(row.mutePerformance) ?? undefined;
+    const botPowerTrollPresentation =
+      normalizeBotPowerTrollPresentationV1(
+        row.botPowerTrollPresentation,
+      ) ?? undefined;
+    const speechIntentRevealAvailable =
+      row.speechIntentRevealAvailable === true ? true : undefined;
     if (spritePose && !STORY_SPRITE_POSE_SET.has(spritePose)) {
       throw new Error(`Unknown story sprite pose "${spritePose}".`);
     }
@@ -322,10 +364,15 @@ function parseScenes(raw: unknown): StoryScene[] {
       title: readString(row.title, `${field}.title`),
       locationId: readString(row.locationId, `${field}.locationId`),
       narration: readString(row.narration, `${field}.narration`),
+      ...(speechIntentRevealAvailable ? { speechIntentRevealAvailable } : {}),
       speakerBotId:
         typeof row.speakerBotId === "string" && row.speakerBotId.trim().length > 0
           ? row.speakerBotId.trim()
           : null,
+      ...(audienceBotIds ? { audienceBotIds } : {}),
+      ...(annoyanceTargetBotId ? { annoyanceTargetBotId } : {}),
+      ...(mutePerformance ? { mutePerformance } : {}),
+      ...(botPowerTrollPresentation ? { botPowerTrollPresentation } : {}),
       ...(readOptionalString(row.speakerName) ? { speakerName: readOptionalString(row.speakerName) } : {}),
       ...(spritePose ? { spritePose: spritePose as StorySpritePose } : {}),
       ...(readOptionalString(row.backgroundAssetId)
